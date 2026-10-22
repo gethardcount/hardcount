@@ -1,7 +1,6 @@
 package usage
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,25 +10,15 @@ import (
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
-// PlanReader reads a plan by id. Implemented by *pricing.Service.
-type PlanReader interface {
-	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
-}
-
 // SetHeldDeps wires what the held-usage routes read besides the usage
-// store: a customer by id (to check a release target), the customer's
-// subscriptions and their plans (to say which released rows an open billing
-// period's invoice charges). Wired in router.go with the customer and
-// subscription stores and the pricing service.
-func (h *Handler) SetHeldDeps(customers CustomerLookup, subs SubscriptionLister, plans PlanReader) {
+// store: a customer by id, to check a release target. Wired in router.go
+// with the customer store. Which released rows an invoice counts is read by
+// the service (Service.Release).
+func (h *Handler) SetHeldDeps(customers CustomerLookup) {
 	h.heldCustomers = customers
-	h.heldSubs = subs
-	h.heldPlans = plans
 }
 
 // listHeld serves GET /v1/usage-events/held: the rows still held, grouped
@@ -154,35 +143,6 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 		meterIDs[k] = m.ID
 	}
 
-	var subs []domain.Subscription
-	plans := map[string]domain.Plan{}
-	if h.heldSubs != nil {
-		subs, _, err = h.heldSubs.List(r.Context(), subscription.ListFilter{TenantID: tenantID, CustomerID: customerID, Limit: 100})
-		if err != nil {
-			respond.InternalError(w, r)
-			slog.ErrorContext(r.Context(), "release held usage: list subscriptions", "error", err)
-			return
-		}
-	}
-	// The plans say which meters each subscription prices: a released row
-	// whose meter its subscription does not price is not invoiced.
-	if h.heldPlans != nil {
-		for _, sub := range subs {
-			for _, it := range sub.Items {
-				if _, ok := plans[it.PlanID]; ok || it.PlanID == "" {
-					continue
-				}
-				p, err := h.heldPlans.GetPlan(r.Context(), tenantID, it.PlanID)
-				if err != nil {
-					respond.InternalError(w, r)
-					slog.ErrorContext(r.Context(), "release held usage: get plan", "error", err)
-					return
-				}
-				plans[it.PlanID] = p
-			}
-		}
-	}
-
 	// Nothing held, or every held meter still missing: nothing to release.
 	res := ReleaseResult{CustomerID: customerID, StillHeld: heldRows}
 	if len(meterIDs) > 0 {
@@ -190,7 +150,7 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 			ExternalCustomerID: ext,
 			CustomerID:         customerID,
 			MeterIDs:           meterIDs,
-		}, subs, plans)
+		})
 		if err != nil {
 			respond.FromError(w, r, err, "usage_event")
 			return

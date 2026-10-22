@@ -10,6 +10,8 @@ All AI token usage is metered on one `tokens` meter (aggregation `sum`), with th
 
 **Amendment (2026-10-22).** An earlier version of this summary said LiteLLM does not report the 5-minute and 1-hour split, so cache writes billed as `input` (1.0x instead of 1.25x or 2x). That was false for LiteLLM 1.83.9, whose usage object carries the split. The mapper now emits both write roles. A call first stored the old way (its `input` quantity includes the writes) is stored the old way again when LiteLLM resends it, decided per call from the stored `input` row, and a held cache-write row of such a call is not billed by a resend or a release. The exception is a release run by the code before this change (a rollback, or the rolling deploy), which does not know the split and can bill those writes twice.
 
+**Amendment (2026-10-22, model families).** A Claude name maps to a family only as the family's exact id, or that id plus a date or version ending (`-20250929`, `-v1`, `-v1:0`, `@20250805`, `@default`, `-v2@20241022`, `-latest`). An unknown version, such as `claude-opus-4-9`, keeps its raw name on `model` and is unpriced, loudly; it is never priced as an older family. Provider and cross-region prefixes are stripped repeatedly. A family priced by prompt length (Claude Haiku 5.5) also gets a `context_tier` dimension (`prompt_up_to_100k` or `prompt_over_100k`) on every event of the call, set by the mapper; other families' events never carry it. The cache-read multiple in the table below is 0.1x for most models; Opus 5.5 and Sonnet 5.5 read at 0.05x, Fable 5.1 and Mythos 5.1 at 0.025x.
+
 ## Context
 
 Velox has two incompatible shapes for LLM token usage today, and they don't connect:

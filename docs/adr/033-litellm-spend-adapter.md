@@ -92,6 +92,17 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > dedups on `(tenant_id, livemode, idempotency_key)`. Pair it with
 > `max_retries: 4` in the callback config (`docs/integrations/litellm.md`).
 
+> **Amendment (2026-10-22): a replay that misses the deadline is counted.**
+> The 2026-07-06 correction's "hard deadline at period finalize" stands:
+> a row replayed after its period's invoice is built (the grace,
+> ADR-120) is stored and billed on no invoice. It is no longer silent.
+> The 200 counts such rows in `after_close`, and
+> `velox_usage_after_close_total` counts them with a WARN line each
+> (ADR-120 amendment 2026-10-22). A row that comes back as
+> `deduplicated` is never counted. A call first saved before the
+> cache-write split is written the old way, and only the old-way rows
+> that call writes are counted.
+
 > **Amendment (2026-10-22): bill on token counts, not call type.** The
 > adapter billed only eight call types (chat, text completion, embedding)
 > and answered 200 for the rest, so `/v1/messages` (Claude Code),
@@ -108,7 +119,7 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > than 240 characters is replaced by its SHA-256. LiteLLM gives a streamed
 > `/v1/messages` record the client's `x-litellm-call-id` as its id, so two
 > calls that send the same header bill once, as LiteLLM's spend log
-> records them (open decision D6).
+> records them (decision D6, 2026-10-23: never bill twice).
 
 ### What's NOT in scope (deferred)
 

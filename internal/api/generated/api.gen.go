@@ -1931,6 +1931,21 @@ func (e TestClockStatus) Valid() bool {
 	}
 }
 
+// Defines values for UsageEventBillingStatus.
+const (
+	AfterClose UsageEventBillingStatus = "after_close"
+)
+
+// Valid indicates whether the value is a known member of the UsageEventBillingStatus enum.
+func (e UsageEventBillingStatus) Valid() bool {
+	switch e {
+	case AfterClose:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UsageEventOrigin.
 const (
 	Api      UsageEventOrigin = "api"
@@ -4658,7 +4673,12 @@ type HeldUsageReleaseResult struct {
 
 	// InOpenPeriod Released rows inside an active subscription's current billing
 	// period whose meter the subscription's plan prices. That period's
-	// invoice counts them.
+	// invoice counts them. A row after the period end, released before
+	// that period's invoice is built, counts here when the subscription
+	// continues and its plan from then on prices the meter. Rows of a
+	// sum or count meter stamped before the end of this period's
+	// spend-threshold invoice are not counted here: see
+	// `pending_threshold_invoice` and `outside_open_period`.
 	InOpenPeriod int `json:"in_open_period"`
 
 	// MoreToRelease Rows for this external ID still held only because one release
@@ -4671,11 +4691,19 @@ type HeldUsageReleaseResult struct {
 	NotOnPlan int `json:"not_on_plan"`
 
 	// OutsideOpenPeriod Released rows outside every current billing period: before the
-	// subscription started, or in an earlier period. A subscription
-	// invoice does not count them unless that period's invoice has not
-	// been built yet. Bill them with a one-off invoice if they should
-	// be charged.
+	// subscription started, or in an earlier period. Also rows of a
+	// sum or count meter stamped before the end of this period's paid
+	// spend-threshold invoice. A subscription invoice does not count
+	// them unless that period's invoice has not been built yet. Bill
+	// them with a one-off invoice if they should be charged.
 	OutsideOpenPeriod int `json:"outside_open_period"`
+
+	// PendingThresholdInvoice Released rows of a sum or count meter stamped before the end of
+	// this period's spend-threshold invoice, while that invoice is not
+	// paid. If it is paid, no invoice counts them. If it is voided or
+	// written off before the period closes, the period's invoice
+	// counts them.
+	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 
 	// Released Rows newly written as usage events.
 	Released int `json:"released"`
@@ -5424,6 +5452,11 @@ type LitellmSpendLog struct {
 type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
+
+	// AfterClose Of `accepted`, the events whose period a subscription already
+	// invoiced: stored, billed on no invoice. A replay never counts
+	// here.
+	AfterClose int `json:"after_close"`
 
 	// CacheHits The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0.
 	CacheHits int `json:"cache_hits"`
@@ -6542,7 +6575,17 @@ type UsageAggregate struct {
 
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
-	CustomerId string `json:"customer_id"`
+	// BillingStatus Sent only on the 201 that wrote the event. `after_close`: a
+	// subscription that prices this meter already invoiced the
+	// event's time, so the event is stored but billed on no invoice,
+	// now or later. Bill it with a one-off invoice if it should be
+	// charged. A spend-threshold invoice counts only once it is paid:
+	// until then it can be voided or written off, and then the
+	// period's invoice bills the event. Absent otherwise, which is not
+	// a promise that the event will be billed. Never sent on a replay
+	// or a read.
+	BillingStatus UsageEventBillingStatus `json:"billing_status,omitempty"`
+	CustomerId    string                  `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
 	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
@@ -6570,6 +6613,17 @@ type UsageEvent struct {
 	TenantId  string    `json:"tenant_id,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
+
+// UsageEventBillingStatus Sent only on the 201 that wrote the event. `after_close`: a
+// subscription that prices this meter already invoiced the
+// event's time, so the event is stored but billed on no invoice,
+// now or later. Bill it with a one-off invoice if it should be
+// charged. A spend-threshold invoice counts only once it is paid:
+// until then it can be voided or written off, and then the
+// period's invoice bills the event. Absent otherwise, which is not
+// a promise that the event will be billed. Never sent on a replay
+// or a read.
+type UsageEventBillingStatus string
 
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 type UsageEventOrigin string

@@ -3066,7 +3066,11 @@ export interface paths {
                         "application/json": components["schemas"]["UsageEvent"];
                     };
                 };
-                /** @description Event ingested */
+                /**
+                 * @description Event ingested. `billing_status: after_close` means its period
+                 *     was already invoiced: the event is stored but billed on no
+                 *     invoice.
+                 */
                 201: {
                     headers: {
                         [name: string]: unknown;
@@ -3086,6 +3090,19 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /**
+                 * @description `ingest_unavailable`: a customer or meter lookup, or the read of
+                 *     the customer's billing periods, could not be answered. Nothing
+                 *     was recorded; retry.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -3181,6 +3198,12 @@ export interface paths {
                             ingested?: number;
                             /** @description Idempotency replays — already ingested, counted as success. */
                             deduplicated?: number;
+                            /**
+                             * @description Of `ingested`, the events whose period a subscription
+                             *     already invoiced: stored, billed on no invoice. A
+                             *     replayed event never counts here.
+                             */
+                            after_close?: number;
                             total?: number;
                         };
                     };
@@ -3202,6 +3225,19 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /**
+                 * @description `ingest_unavailable`: a customer or meter lookup, or the read of
+                 *     the customer's billing periods, could not be answered. Nothing
+                 *     was recorded; retry the whole batch.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -3230,8 +3266,9 @@ export interface paths {
          *
          *     The event counts toward the billing period its timestamp falls in
          *     only if that period's invoice has not been built yet. An event for
-         *     an already-invoiced period is stored but never billed; bill it with
-         *     a one-off invoice.
+         *     an already-invoiced period is stored but never billed, and its 201
+         *     says so with `billing_status: after_close`; bill it with a one-off
+         *     invoice.
          *
          *     Shares idempotency keys with live ingest: a repeated
          *     `idempotency_key` returns 200 with the original event and an
@@ -7254,6 +7291,19 @@ export interface components {
              * @enum {string}
              */
             provider_cost_source?: "table" | "not_applicable" | "observed";
+            /**
+             * @description Sent only on the 201 that wrote the event. `after_close`: a
+             *     subscription that prices this meter already invoiced the
+             *     event's time, so the event is stored but billed on no invoice,
+             *     now or later. Bill it with a one-off invoice if it should be
+             *     charged. A spend-threshold invoice counts only once it is paid:
+             *     until then it can be voided or written off, and then the
+             *     period's invoice bills the event. Absent otherwise, which is not
+             *     a promise that the event will be billed. Never sent on a replay
+             *     or a read.
+             * @enum {string}
+             */
+            billing_status?: "after_close";
         };
         /**
          * @description What an issued invoice or credit note prints about its buyer, copied
@@ -9567,7 +9617,12 @@ export interface components {
             /**
              * @description Released rows inside an active subscription's current billing
              *     period whose meter the subscription's plan prices. That period's
-             *     invoice counts them.
+             *     invoice counts them. A row after the period end, released before
+             *     that period's invoice is built, counts here when the subscription
+             *     continues and its plan from then on prices the meter. Rows of a
+             *     sum or count meter stamped before the end of this period's
+             *     spend-threshold invoice are not counted here: see
+             *     `pending_threshold_invoice` and `outside_open_period`.
              */
             in_open_period: number;
             /**
@@ -9577,11 +9632,20 @@ export interface components {
              */
             not_on_plan: number;
             /**
+             * @description Released rows of a sum or count meter stamped before the end of
+             *     this period's spend-threshold invoice, while that invoice is not
+             *     paid. If it is paid, no invoice counts them. If it is voided or
+             *     written off before the period closes, the period's invoice
+             *     counts them.
+             */
+            pending_threshold_invoice: number;
+            /**
              * @description Released rows outside every current billing period: before the
-             *     subscription started, or in an earlier period. A subscription
-             *     invoice does not count them unless that period's invoice has not
-             *     been built yet. Bill them with a one-off invoice if they should
-             *     be charged.
+             *     subscription started, or in an earlier period. Also rows of a
+             *     sum or count meter stamped before the end of this period's paid
+             *     spend-threshold invoice. A subscription invoice does not count
+             *     them unless that period's invoice has not been built yet. Bill
+             *     them with a one-off invoice if they should be charged.
              */
             outside_open_period: number;
         };
@@ -9600,6 +9664,12 @@ export interface components {
             skipped: number;
             /** @description The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
             cache_hits: number;
+            /**
+             * @description Of `accepted`, the events whose period a subscription already
+             *     invoiced: stored, billed on no invoice. A replay never counts
+             *     here.
+             */
+            after_close: number;
             /** @description One entry per record that was not recorded. A record's events are recorded together or not at all. */
             errors?: {
                 /** @description The LiteLLM record id. */
@@ -13518,7 +13588,11 @@ export interface operations {
                     "application/json": components["schemas"]["UsageEvent"];
                 };
             };
-            /** @description Event recorded */
+            /**
+             * @description Event recorded. `billing_status: after_close` means its period
+             *     was already invoiced: the event is stored but billed on no
+             *     invoice.
+             */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -13553,8 +13627,9 @@ export interface operations {
                 };
             };
             /**
-             * @description `ingest_unavailable`: the customer or meter lookup could not be
-             *     answered. Nothing was recorded; retry.
+             * @description `ingest_unavailable`: the customer or meter lookup, or the read
+             *     of the customer's billing periods, could not be answered.
+             *     Nothing was recorded; retry.
              */
             503: {
                 headers: {

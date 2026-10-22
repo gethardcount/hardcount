@@ -281,7 +281,7 @@ func TestSpend_PostFixHeldCall_RealStore(t *testing.T) {
 		cus, mtr := f.customerAndMeter("cus_pf2")
 		res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 			ExternalCustomerID: "cus_pf2", CustomerID: cus, MeterIDs: map[string]string{MeterKeyTokens: mtr},
-		}, nil, nil)
+		})
 		if err != nil || res.Released != 4 {
 			t.Fatalf("release = %+v (%v), want 4 released", res, err)
 		}
@@ -463,7 +463,7 @@ func TestSpend_HeldSplitThenOldBinaryIngest_RealStore(t *testing.T) {
 		f, cus, mtr := setup(t, "LiteLLM split then old release", "mix-1", "cus_mix1")
 		res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 			ExternalCustomerID: "cus_mix1", CustomerID: cus, MeterIDs: map[string]string{MeterKeyTokens: mtr},
-		}, nil, nil)
+		})
 		if err != nil {
 			t.Fatalf("release: %v", err)
 		}
@@ -507,7 +507,7 @@ func TestSpend_PreFixCallHeldOnLookupMiss_RealStore(t *testing.T) {
 	cus2, _ := f.customerAndMeter("cus_after")
 	res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 		ExternalCustomerID: "cus_after", CustomerID: cus2, MeterIDs: map[string]string{MeterKeyTokens: mtr},
-	}, nil, nil)
+	})
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}

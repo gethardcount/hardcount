@@ -95,7 +95,7 @@ func (f heldFixture) release(t *testing.T, ext, customerID, meterID string) usag
 		ExternalCustomerID: ext,
 		CustomerID:         customerID,
 		MeterIDs:           map[string]string{"tokens": meterID},
-	}, nil, nil)
+	})
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestHeld_ConcurrentReleasesWriteOnce(t *testing.T) {
 			results[i], errsOut[i] = f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 				ExternalCustomerID: "cus_conc", CustomerID: customerID,
 				MeterIDs: map[string]string{"tokens": meterID},
-			}, nil, nil)
+			})
 		}(i)
 	}
 	close(start)
@@ -316,7 +316,7 @@ func TestHeld_MissingMeterStaysHeld(t *testing.T) {
 	res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 		ExternalCustomerID: "cus_meter", CustomerID: customerID,
 		MeterIDs: map[string]string{"other_key": other},
-	}, nil, nil)
+	})
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestHeld_ReleaseIsAudited(t *testing.T) {
 	if _, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
 		ExternalCustomerID: "cus_audit", CustomerID: customerID,
 		MeterIDs: map[string]string{"tokens": meterID},
-	}, nil, nil); err == nil {
+	}); err == nil {
 		t.Fatal("release with a failing audit emitter succeeded")
 	}
 	if status, _ := f.heldStatus(t, "audit-1:input"); status != "held" {

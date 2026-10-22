@@ -190,6 +190,12 @@ type Mapping struct {
 // (decision of 2026-10-22). So every Claude model with a price needs its
 // own entry here, and order does not matter for Claude.
 var modelFamilies = []modelFamily{
+	// Current Anthropic lineup (pricing page checked 2026-10-22).
+	{"claude-fable-5-1", "claude-fable-5.1"},
+	{"claude-mythos-5-1", "claude-mythos-5.1"},
+	{"claude-opus-5-5", "claude-opus-5.5"},
+	{"claude-sonnet-5-5", "claude-sonnet-5.5"},
+	{"claude-haiku-5-5", "claude-haiku-5.5"},
 	// The 5 generation and the Opus 4.x line.
 	{"claude-fable-5", "claude-fable-5"},
 	{"claude-mythos-5", "claude-mythos-5"},
@@ -266,6 +272,32 @@ var modelFamilies = []modelFamily{
 type modelFamily struct {
 	id, recipeToken string
 }
+
+// promptTiers lists, by recipe token, the models whose price depends on the
+// prompt's length. Their events carry context_tier; other models' events
+// never do, so no existing rule's match changes.
+var promptTiers = map[string]promptTier{
+	// Claude Haiku 5.5: prompts up to 100,000 tokens, and over.
+	"claude-haiku-5.5": {over: 100_000, upTo: ContextTierUpTo100k, above: ContextTierOver100k},
+}
+
+// promptTier is a model's two prices by prompt length. A prompt counts
+// input, cache reads and cache writes (Anthropic's pricing page, "Long
+// context pricing").
+type promptTier struct {
+	// over: a prompt of more tokens than this takes the higher price.
+	over int64
+	// upTo and above are the context_tier values of the two tiers.
+	upTo, above string
+}
+
+// The context_tier dimension: set on the events of a model whose price
+// depends on the prompt's length.
+const (
+	DimContextTier      = "context_tier"
+	ContextTierUpTo100k = "prompt_up_to_100k"
+	ContextTierOver100k = "prompt_over_100k"
+)
 
 // providerPrefixes are stripped before family matching, repeatedly and in
 // any order, until none is left. A LiteLLM spend log carries the routing
@@ -432,19 +464,24 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 
 	// Canonical model family on `model` (what recipe rules match), raw string
 	// preserved on `model_raw` for audit/reconciliation (ADR-044 model
-	// normalization in the mapper). An unrecognized model keeps its raw string
-	// on `model` and is logged loudly — we never invent a family, which would
-	// mis-price; it simply won't match a recipe rule (rates $0, loud by absence).
-	modelDim := canonicalModel(p.Model)
-	if modelDim == "" {
+	// normalization in the mapper). An unknown model keeps its raw string on
+	// `model` and is logged loudly — we never invent a family, which would
+	// mis-price; it has no price until a rule for that name exists, and shows
+	// as unpriced usage meanwhile.
+	fam, known := lookupFamily(p.Model)
+	modelDim := fam.recipeToken
+	if !known {
 		modelDim = p.Model
-		slog.Warn("litellm: unrecognized model — usage won't match recipe pricing rules until an alias is added (see modelFamilies)",
+		slog.Warn("litellm: unknown model, kept under its raw name; its usage has no price until a pricing rule for that name exists (an unknown version is never priced as an older model)",
 			"model", p.Model, "litellm_id", p.ID)
 	}
 	dims := map[string]any{
 		"model":     modelDim,
 		"model_raw": p.Model,
 		"provider":  p.CustomLLMProvider,
+	}
+	if tier, ok := promptTiers[fam.recipeToken]; known && ok {
+		dims[DimContextTier] = tier.of(u)
 	}
 	// Forward useful operator-set metadata into dimensions for
 	// pricing-rule dispatch. We promote `team_id` and `tags`
@@ -574,7 +611,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 // On a streamed /v1/messages or Gemini stream record LiteLLM 1.83.9 sets the
 // id to the client's x-litellm-call-id header, so two calls that send the
 // same header share an id. The second deduplicates, as it does in LiteLLM's
-// own spend log (open decision D6).
+// own spend log (decision D6, 2026-10-23: never bill twice).
 //
 // For the call types first billed on 2026-10-22, an id that would push a key
 // past 255 characters (a non-streamed /v1/responses id is 400+) is replaced
@@ -589,6 +626,25 @@ func (p *StandardLoggingPayload) keyPrefix() string {
 		return "sha256-" + hex.EncodeToString(sum[:])
 	}
 	return p.ID
+}
+
+// of is the context_tier value of a call with these token counts. The prompt
+// is the larger of prompt_tokens and the cache reads plus writes: LiteLLM
+// 1.83.9 counts the cache in prompt_tokens, and on a record that does not
+// (see cacheWriteSplit), the cache alone still sets a floor. Either way the
+// value is the smallest prompt the record allows, so a call is never put in
+// the higher tier on a guess, and a long prompt is never billed at the lower
+// price because of how the record counted it. Exactly `over` tokens is the
+// lower tier ("up to 100,000").
+func (t promptTier) of(u *Usage) string {
+	prompt := u.PromptTokens
+	if c := u.cachedReadTokens() + u.cacheWriteTokens(); c > prompt {
+		prompt = c
+	}
+	if prompt > t.over {
+		return t.above
+	}
+	return t.upTo
 }
 
 // dimsWithTokenType returns a copy of base with token_type set, so the two

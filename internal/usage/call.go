@@ -68,6 +68,14 @@ type CallResult struct {
 	Deduplicated int
 	// Legacy is true when the call was written the pre-split way.
 	Legacy bool
+	// Written lists, for IngestCallResolvingHeld, the indices of the rows it
+	// newly wrote to usage_events, into the mapping it wrote (the events,
+	// or the legacy events when Legacy is true). IngestCall counts
+	// after_close from it.
+	Written []int
+	// AfterClose counts, for IngestCall, the rows written whose period was
+	// already invoiced: stored, billed on no invoice (open_period.go).
+	AfterClose int
 }
 
 // CallInputKey is the key of the call's input row for a cache-write row's
@@ -86,7 +94,10 @@ func CallInputKey(key string) (string, bool) {
 // IngestCall writes one call's events in one transaction. Each event gets
 // Ingest's checks and timestamp rules; a key held and then discarded is not
 // written, and a key still held is written and its held row released (see
-// PostgresStore.IngestCallResolvingHeld).
+// PostgresStore.IngestCallResolvingHeld). Every event of both mappings is
+// classified against the open periods before the write (open_period.go);
+// only the rows the store newly wrote, in the mapping it wrote, count as
+// after_close.
 func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput) (CallResult, error) {
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable
@@ -129,19 +140,48 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	if err != nil {
 		return CallResult{}, err
 	}
+	// The open periods are read BEFORE the write: see open_period.go.
+	cache := periodCacheFrom(ctx)
+	classes := func(evs []domain.UsageEvent) ([]Class, error) {
+		out := make([]Class, len(evs))
+		for i, ev := range evs {
+			c, err := s.classifyEvent(ctx, tenantID, ev, cache)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = c
+		}
+		return out, nil
+	}
+	eventsClass, err := classes(events)
+	if err != nil {
+		return CallResult{}, err
+	}
+	legacyClass, err := classes(legacy)
+	if err != nil {
+		return CallResult{}, err
+	}
 	res, err := s.held.IngestCallResolvingHeld(ctx, tenantID, StoreCall{Events: events, Legacy: legacy, LegacyKey: in.LegacyKey})
 	if err != nil {
 		return res, err
 	}
-	written := eventsLate
+	written, writtenLate, writtenClass := events, eventsLate, eventsClass
 	if res.Legacy {
-		written = legacyLate
+		written, writtenLate, writtenClass = legacy, legacyLate, legacyClass
 	}
-	for _, ev := range written {
+	for _, ev := range writtenLate {
 		recordLate(ctx, ev)
 	}
 	if res.Inserted > 0 {
 		mw.RecordUsageIngested(res.Inserted)
+	}
+	// Only rows this call wrote: a row deduplicated against an earlier write
+	// was flagged, or not, when that write happened.
+	for _, i := range res.Written {
+		if writtenClass[i] == AfterClose {
+			res.AfterClose++
+			recordAfterClose(ctx, written[i])
+		}
 	}
 	return res, nil
 }

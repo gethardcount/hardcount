@@ -34,7 +34,12 @@ export interface HeldUsageReleaseResult {
   /**
      * Released rows inside an active subscription's current billing
      * period whose meter the subscription's plan prices. That period's
-     * invoice counts them.
+     * invoice counts them. A row after the period end, released before
+     * that period's invoice is built, counts here when the subscription
+     * continues and its plan from then on prices the meter. Rows of a
+     * sum or count meter stamped before the end of this period's
+     * spend-threshold invoice are not counted here: see
+     * `pending_threshold_invoice` and `outside_open_period`.
      */
   in_open_period: number;
   /**
@@ -44,11 +49,20 @@ export interface HeldUsageReleaseResult {
      */
   not_on_plan: number;
   /**
+     * Released rows of a sum or count meter stamped before the end of
+     * this period's spend-threshold invoice, while that invoice is not
+     * paid. If it is paid, no invoice counts them. If it is voided or
+     * written off before the period closes, the period's invoice
+     * counts them.
+     */
+  pending_threshold_invoice: number;
+  /**
      * Released rows outside every current billing period: before the
-     * subscription started, or in an earlier period. A subscription
-     * invoice does not count them unless that period's invoice has not
-     * been built yet. Bill them with a one-off invoice if they should
-     * be charged.
+     * subscription started, or in an earlier period. Also rows of a
+     * sum or count meter stamped before the end of this period's paid
+     * spend-threshold invoice. A subscription invoice does not count
+     * them unless that period's invoice has not been built yet. Bill
+     * them with a one-off invoice if they should be charged.
      */
   outside_open_period: number;
 }

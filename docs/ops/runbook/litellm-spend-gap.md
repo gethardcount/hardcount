@@ -44,8 +44,13 @@ Replay LiteLLM's spend logs for the window to
   ends, plus up to one billing tick. A replay after that is stored but not
   billed; bill it with a one-off invoice (see
   [Invoice timing and late usage](invoice-timing-late-usage.md)).
-- `velox_usage_late_event_total` counts only events more than 24 hours old
-  on arrival, so it does not show which rows missed an invoice.
+- A replayed row that missed its period's invoice is counted in the
+  answer's `after_close` and in `velox_usage_after_close_total`, with a
+  WARN line naming it. Rows on a canceled subscription, and rows before a
+  spend-threshold invoice that is not paid yet, are not counted (see
+  [Invoice timing and late usage](invoice-timing-late-usage.md)). `velox_usage_late_event_total` counts only events more than
+  24 hours old on arrival, so it does not show which rows missed an
+  invoice.
 
 ## Verify
 

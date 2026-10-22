@@ -44,7 +44,8 @@ var noCachePublished = map[string]bool{
 // cache_creation split, so the mapper never emits them for OpenAI traffic.
 func TestModelFamilies_EveryTokenPricedByARecipe(t *testing.T) {
 	// recipeRoles parses a recipe YAML into model → set of priced
-	// token_types, with the empty string standing for a wildcard rule.
+	// "context_tier|token_type" pairs, with an empty part standing for a
+	// rule that does not name it (a wildcard on that dimension).
 	recipeRoles := func(path string) map[string]map[string]bool {
 		t.Helper()
 		raw, err := os.ReadFile(path)
@@ -68,7 +69,7 @@ func TestModelFamilies_EveryTokenPricedByARecipe(t *testing.T) {
 			if roles[m] == nil {
 				roles[m] = map[string]bool{}
 			}
-			roles[m][r.DimensionMatch["token_type"]] = true
+			roles[m][r.DimensionMatch[DimContextTier]+"|"+r.DimensionMatch["token_type"]] = true
 		}
 		return roles
 	}
@@ -104,15 +105,34 @@ func TestModelFamilies_EveryTokenPricedByARecipe(t *testing.T) {
 			t.Errorf("mapper emits model=%q (id %q) but %s has NO pricing rule for it — that traffic ingests and then silently doesn't bill at cycle close", f.recipeToken, f.id, where)
 			continue
 		}
-		if priced[""] {
-			continue // wildcard rule (no token_type) covers every role
+		// A model priced by prompt length needs a rule for every (tier,
+		// role), and no rule without context_tier: such a rule would price
+		// both tiers at one rate. Every other model's rules name no tier.
+		tier, tiered := promptTiers[f.recipeToken]
+		tiers := []string{""}
+		if tiered {
+			tiers = []string{tier.upTo, tier.above}
 		}
-		for _, role := range familyRoles {
-			if role == TokenTypeCacheRead && noCachePublished[f.recipeToken] {
-				continue
+		for key := range priced {
+			tier := strings.SplitN(key, "|", 2)[0]
+			if tiered && tier == "" {
+				t.Errorf("%s prices model=%q with a rule that names no %s (%q): it would price both prompt tiers at one rate", where, f.recipeToken, DimContextTier, key)
 			}
-			if !priced[role] {
-				t.Errorf("mapper can emit (model=%q, token_type=%q) but %s has no rule for that pair — that role's traffic silently doesn't bill at cycle close", f.recipeToken, role, where)
+			if !tiered && tier != "" {
+				t.Errorf("%s prices model=%q by %s=%q, but the mapper never sets %s for it, so that rule never matches", where, f.recipeToken, DimContextTier, tier, DimContextTier)
+			}
+		}
+		for _, tier := range tiers {
+			if priced[tier+"|"] {
+				continue // wildcard rule (no token_type) covers every role
+			}
+			for _, role := range familyRoles {
+				if role == TokenTypeCacheRead && noCachePublished[f.recipeToken] {
+					continue
+				}
+				if !priced[tier+"|"+role] {
+					t.Errorf("mapper can emit (model=%q, %s=%q, token_type=%q) but %s has no rule for it — that role's traffic silently doesn't bill at cycle close", f.recipeToken, DimContextTier, tier, role, where)
+				}
 			}
 		}
 	}

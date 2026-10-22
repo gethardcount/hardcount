@@ -24,6 +24,12 @@ export interface LitellmSpendResult {
   skipped: number;
   /** The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
   cache_hits: number;
+  /**
+     * Of `accepted`, the events whose period a subscription already
+     * invoiced: stored, billed on no invoice. A replay never counts
+     * here.
+     */
+  after_close: number;
   /** One entry per record that was not recorded. A record's events are recorded together or not at all. */
   errors?: LitellmSpendResultErrorsItem[];
 }

@@ -291,7 +291,7 @@ func TestMapPayload_KeyShape(t *testing.T) {
 			}
 		}
 	})
-	t.Run("two streamed calls with the same client-chosen id share keys (open decision D6)", func(t *testing.T) {
+	t.Run("two streamed calls with the same client-chosen id share keys (decision D6: never bill twice)", func(t *testing.T) {
 		// LiteLLM 1.83.9 gives both records the client's x-litellm-call-id.
 		// Its own spend log keeps only the first (request_id is its primary
 		// key). Velox does the same: the second deduplicates.

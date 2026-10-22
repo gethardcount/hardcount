@@ -127,7 +127,7 @@ func TestSpend_NewCallTypes_RealStore(t *testing.T) {
 		}
 	})
 
-	t.Run("two calls sharing a client-chosen id store one (open decision D6)", func(t *testing.T) {
+	t.Run("two calls sharing a client-chosen id store one (decision D6: never bill twice)", func(t *testing.T) {
 		// The same as LiteLLM's own spend log, whose primary key is the id.
 		recs := proxyRecords(t, "messages-same-call-id")
 		a, b := newCustomer(t, recs[0].EndUser), newCustomer(t, recs[1].EndUser)
@@ -159,7 +159,7 @@ func TestSpend_NewCallTypes_RealStore(t *testing.T) {
 		res, err := svc.Release(ctx, tenantID, usage.ReleaseInput{
 			ExternalCustomerID: rec.EndUser, CustomerID: cus,
 			MeterIDs: map[string]string{MeterKeyTokens: meterID},
-		}, nil, nil)
+		})
 		if err != nil || res.Released != 3 {
 			t.Fatalf("release %+v err %v, want 3 released", res, err)
 		}

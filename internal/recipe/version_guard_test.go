@@ -23,8 +23,11 @@ import (
 // `final_invoice_action`, and parseRecipe REJECTS the old key by name. A
 // recipe pinned at the previous version no longer parses, which is a
 // breaking DSL change, not an edit.
+// anthropic_style 6.0.0 on 2026-10-22: the new lineup's prices, Haiku 5.5's
+// two prompt tiers (rules on context_tier), and Sonnet 5 at $2 / $10. A
+// MAJOR bump because an install of 5.0.0 does not get these on re-apply.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@5.0.0": "dc1d147c8ace6fcbeb31d7a232b2d214ed0dee1c8492a329b7de586dff08f5b2",
+	"anthropic_style@6.0.0": "ccb1e014a9d574b159ddbd52863fba54b63448f007a7df5d1707ca10b705a984",
 	"openai_style@5.0.0":    "9e340351b37677c8e79215e9bd8fcd90d198756ecdf4b5a34bd5a706af28af58",
 	"replicate_style@3.0.0": "8abd33097c29909d3bc53c51b0aacab9b9f8c27b984c94724030247b05b8796a",
 }
