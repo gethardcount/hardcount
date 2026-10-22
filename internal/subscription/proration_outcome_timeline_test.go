@@ -36,7 +36,7 @@ func TestAddProrationMeta_StampsOutcome(t *testing.T) {
 	})
 	t.Run("adjustment names the open invoice it reduced", func(t *testing.T) {
 		p := map[string]any{}
-		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 5444, ClawbackInvoiceID: "inv_src"}, "USD")
+		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 5444, ClawbackPieces: []domain.CreditShare{{InvoiceID: "inv_src", GrossCents: 5444}}}, "USD")
 		if p["adjusted_invoice_id"] != "inv_src" {
 			t.Errorf("adjustment must stamp adjusted_invoice_id: %+v", p)
 		}
@@ -94,6 +94,32 @@ func TestDescribeSubscriptionAction_RendersProrationOutcome(t *testing.T) {
 				"proration_type": "credit", "proration_amount_cents": float64(5444), "currency": "USD",
 			},
 			wantDesc: "Item removed", wantContains: "Credit $54.44",
+		},
+		{
+			name:   "a credit limited by the invoices' room says so (ADR-118)",
+			action: "subscription.item_updated",
+			meta: map[string]any{
+				"action": "item_quantity_changed", "immediate": true, "quantity": float64(3),
+				"proration_type": "credit", "proration_amount_cents": float64(1000), "uncredited_cents": float64(1500), "currency": "USD",
+			},
+			wantDesc: "Quantity changed", wantContains: "Credit $10.00 (limited to what the invoices had left)",
+		},
+		{
+			name:   "no room at all: no credit, and why",
+			action: string(domain.AuditActionUpdate),
+			meta: map[string]any{
+				"action": "item_removed", "plan_id": "pln_pro",
+				"proration_type": "credit", "proration_amount_cents": float64(0), "uncredited_cents": float64(667), "currency": "USD",
+			},
+			wantDesc: "Item removed", wantContains: "No credit: the invoices had nothing left to credit",
+		},
+		{
+			name:   "a cancel's limited credit says so",
+			action: string(domain.AuditActionCancel),
+			meta: map[string]any{
+				"prorated_credit_cents": float64(1000), "uncredited_cents": float64(1500), "currency": "USD",
+			},
+			wantDesc: "Subscription canceled", wantContains: "Prorated credit $10.00 (limited to what the invoices had left)",
 		},
 		{
 			name:   "non-USD currency renders the right symbol, not $",

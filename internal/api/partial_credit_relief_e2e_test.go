@@ -10,7 +10,8 @@ import (
 
 // A funding invoice that earlier credit notes have partly credited can take
 // only what is left of its total. When a cancel, an immediate plan swap or an
-// item change owes more than that, Velox places what fits and logs the rest.
+// item change owes more than that, Velox places what fits and records the rest
+// on the change as uncredited_cents (ADR-118 amendment 2026-10-22).
 // Before, a cancel or swap gave nothing and an item change answered 500.
 //
 // Two real ways to get there, both driven over the real server and Postgres:
@@ -22,17 +23,11 @@ import (
 // Fixture (lagRig): plan A 3000c plus add-on C 1000c, monthly, in advance,
 // period [Apr 1, May 1). The first invoice is 4000c, with no tax.
 //
-// Mutation seams:
-//   - restore `return nil, errHeadroomExhausted` for an all-paid set in
-//     billing.allocateUnusedAcrossFunding → the cancel and swap tests get no
-//     relief note;
-//   - restore the remainder error in subscription.resolveClawbackPieces →
-//     the item removal answers 500;
-//   - drop the per-invoice cap (netCaps = totalUnused) AND the net→gross
-//     clamp to grossCaps → the cancel arm credits more than the invoice
-//     total. Dropping the cap alone survives here: with one funding invoice
-//     the clamp still holds the credit to its room
-//     (TestSettleUnusedAcrossFunding_HeadroomSpill catches that one).
+// Mutation seams (domain.AllocateUnusedCredit, shared by every path):
+//   - return no shares when anything is unplaced → the cancel, swap and
+//     removal tests get no relief note;
+//   - drop the per-invoice room (grossCap = total) AND the net→gross clamp →
+//     the cancel arm credits more than the invoice total.
 
 var reliefCancelAt = lagP0.AddDate(0, 0, 15) // Apr 16: 15 of 30 days unused
 

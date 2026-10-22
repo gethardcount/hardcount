@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/http"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,7 +23,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/platform/timeline"
 	"github.com/sagarsuperuser/velox/internal/tax"
@@ -135,17 +133,16 @@ type ProrationTaxApplier interface {
 	CommitTax(ctx context.Context, tenantID, invoiceID, calculationID string) error
 }
 
-// CreditNoteIssuer issues a tax-reversing adjustment credit note against a
-// PAID source invoice for a downgrade clawback (ADR-048). On a paid invoice the
-// credit-note primitive credits the GROSS the customer paid for the unused
-// slice (net + the proportional tax) to their balance AND reverses the
-// proportional output tax against the invoice's committed tax transaction —
-// neither of which the bare net ledger grant did. *creditnote.Service
-// satisfies it directly (same method as billing.CreditNoteAdjuster).
+// CreditNoteIssuer issues the tax-reversing adjustment credit notes that
+// credit unused prepaid time on a downgrade, quantity decrease or item
+// removal (ADR-048, ADR-118). On a paid invoice the note credits the GROSS the
+// customer paid for the unused slice (net + the proportional tax) to their
+// balance AND reverses the proportional output tax; on an unpaid one it
+// reduces what the invoice asks for. *creditnote.Service satisfies it
+// directly (same method as billing.CreditNoteAdjuster).
 //
-// Optional: when unwired (narrow unit tests; production always wires it via
-// SetCreditNoteIssuer) or when no paid source invoice was resolved, the
-// downgrade path falls back to the legacy net ledger grant.
+// Required for a credit: production always wires it (SetCreditNoteIssuer).
+// Unwired, a change that owes a credit fails rather than dropping it.
 type CreditNoteIssuer interface {
 	CreateAndIssueAdjustment(ctx context.Context, tenantID, invoiceID string, grossCents int64, reason, description string) (domain.CreditNote, error)
 	// CreateAdjustmentDraftTx creates the clawback adjustment credit note as a
@@ -392,9 +389,8 @@ func (h *Handler) respondSub(w http.ResponseWriter, r *http.Request, status int,
 	respond.JSON(w, r, status, sub)
 }
 
-// SetCreditNoteIssuer wires the tax-reversing credit-note primitive used by the
-// downgrade clawback path (ADR-048). When unset, downgrade credits fall back to
-// the legacy net ledger grant (no tax reversal). Implemented by
+// SetCreditNoteIssuer wires the tax-reversing credit-note primitive that
+// credits unused prepaid time (ADR-048, ADR-118). Implemented by
 // *creditnote.Service; wired from router.go.
 func (h *Handler) SetCreditNoteIssuer(i CreditNoteIssuer) {
 	h.creditNotes = i
@@ -1400,6 +1396,11 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			"immediate": input.Immediate,
 		}
 		addProrationMeta(payload, result.Proration, h.planCurrency(ctx, tenantID, result.Item.PlanID))
+		// A cross-interval swap's credit for the old period's unused time
+		// that its invoices had no room left for (ADR-118).
+		if c := result.swapRelief.UncreditedCents; c > 0 {
+			payload["uncredited_cents"] = c
+		}
 		// The item as the change found it under the subscription row lock
 		// (#1270): the plan and quantity it moved from. Every path sets it,
 		// a scheduled change included, which keeps the item on this plan
@@ -2056,163 +2057,12 @@ func (h *Handler) enrollAutoChargeTx(ctx context.Context, tx *sql.Tx, tenantID s
 	return h.invoices.SetAutoChargePendingTx(ctx, tx, tenantID, detail.AutoChargeInvoiceID, true)
 }
 
-// resolveClawbackPieces fans a downgrade/qty-decrease/item-removal clawback of
-// netCredit (net, the unconsumed removed value) across EVERY invoice that funded
-// the current period, each piece capped at that invoice's remaining headroom
-// (creditable for a paid invoice / amount_due for an unpaid one):
-//   - PLAN downgrade → LIFO: reverse the most-recent funding invoice (the
-//     upgrade) first, so the latest price level is undone against its own tax
-//     and the still-active base plan is left untouched; spill to older invoices
-//     only when the slice exceeds the newest invoice's headroom.
-//   - QUANTITY decrease / item REMOVAL → proportional: the removed units are
-//     fungible (no principled "newest seat"), so split across funding invoices
-//     in subtotal proportion.
-//
-// Read-only (it issues nothing) — called inside the atomic item-change tx, so a
-// returned error (a lookup failure) rolls the change back BEFORE it commits
-// rather than leaving a post-commit "reconcile manually" gap. The credit notes
-// themselves are issued post-commit by issueClawbackCreditNote.
-//
-// A clawback larger than the room left is placed as far as it fits, and the
-// rest is logged (2026-10-20). The real triggers are an operator note on a
-// card-paid invoice, and a partial waive: customer credits paid part of the
-// invoice and a credit note waived the rest, which marks it paid with room
-// equal to the credits (ADR-061 amendment 2026-10-19). Before, the change
-// answered 500. No room left on any funding invoice returns no pieces and no
-// error: the period is already fully credited, so nothing more is owed and
-// the change proceeds. That is ADR-118's rule for a cancel or plan swap.
-func (h *Handler) resolveClawbackPieces(ctx context.Context, tenantID string, sub domain.Subscription, changeType domain.ItemChangeType, netCredit int64) ([]ClawbackPiece, error) {
-	if netCredit <= 0 || sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return nil, nil
-	}
-	funding, err := h.invoices.FindFundingInvoicesForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
-	if err != nil {
-		return nil, err
-	}
-
-	type fundingCap struct {
-		inv      domain.Invoice
-		grossCap int64
-		netCap   int64
-	}
-	caps := make([]fundingCap, 0, len(funding))
-	hasUnpaid := false
-	for _, f := range funding {
-		var grossCap int64
-		// An IN-FLIGHT funding invoice is capped like a PAID one, not like an
-		// unpaid one (2026-07-30): a paid-then-in-flight source has amount_due=0,
-		// so the unpaid arm would cap the piece at 0 and the draft would be worth
-		// nothing — the same silent-drop this fix exists to remove. The headroom
-		// that matters is what the source could still be credited for
-		// (total − already credited); whether the in-flight charge ultimately
-		// succeeds is decided later, by creditnote.Issue's paid/unpaid branch.
-		if f.PaymentStatus == domain.PaymentSucceeded || f.PaymentInFlight() {
-			credited, cerr := h.creditNotes.CreditedCents(ctx, tenantID, f.ID)
-			if cerr != nil {
-				return nil, fmt.Errorf("read creditable headroom for %s: %w", f.ID, cerr)
-			}
-			grossCap = f.TotalAmountCents - credited
-		} else {
-			// Unpaid: what is still due plus the customer credits applied to
-			// it — the note returns the credits it displaces (ADR-061).
-			grossCap = f.UnpaidRelievableCents()
-			hasUnpaid = true
-		}
-		if grossCap <= 0 {
-			continue // no room left on this invoice
-		}
-		netCap := grossCap
-		if f.SubtotalCents > 0 && f.TotalAmountCents > 0 {
-			netCap = money.RoundHalfToEven(grossCap*f.SubtotalCents, f.TotalAmountCents)
-		}
-		caps = append(caps, fundingCap{inv: f, grossCap: grossCap, netCap: netCap})
-	}
-	if len(caps) == 0 {
-		return nil, nil // already fully credited: nothing more is owed
-	}
-
-	netCaps := make([]int64, len(caps))
-	var nets []int64
-	var remainder int64
-	if changeType == domain.ItemChangeTypePlan {
-		// LIFO — newest funding invoice first (undo the latest price level).
-		// Equal timestamps are REAL, not theoretical: a clock catchup stamps
-		// every invoice it generates with the same simulated instant, and a
-		// same-second subscribe+upgrade does it on wall time. On a tie the
-		// subscription_update invoice IS the later price level (the funding
-		// query encodes the same tiebreak, ASC) — without this clause the
-		// stable sort kept the query's oldest-first order and the clawback
-		// landed on the day-1 invoice, the exact opposite of LIFO (found
-		// live, FLOW B17c walk 2026-07-21).
-		sort.SliceStable(caps, func(a, b int) bool {
-			if caps[a].inv.CreatedAt.Equal(caps[b].inv.CreatedAt) {
-				return caps[a].inv.BillingReason == domain.BillingReasonSubscriptionUpdate &&
-					caps[b].inv.BillingReason != domain.BillingReasonSubscriptionUpdate
-			}
-			return caps[a].inv.CreatedAt.After(caps[b].inv.CreatedAt)
-		})
-		for i := range caps {
-			netCaps[i] = caps[i].netCap
-		}
-		nets, remainder = money.AllocateLIFO(netCredit, netCaps)
-	} else {
-		// Fungible qty/item change → proportional by what each invoice charged.
-		weights := make([]int64, len(caps))
-		for i := range caps {
-			weights[i] = caps[i].inv.SubtotalCents
-			netCaps[i] = caps[i].netCap
-		}
-		nets, remainder = money.AllocateByWeightCapped(netCredit, weights, netCaps)
-	}
-	if remainder > 0 {
-		// Less room left than the change owes. Place what fits and log the
-		// rest, at the same levels as allocateUnusedAcrossFunding. With an
-		// unpaid invoice in the set, the residual is value it can't relieve
-		// beyond what is due plus its applied credits: nothing else was paid
-		// for it, so WARN. All paid: earlier credit notes used the room, and
-		// the caps keep each invoice's credit within its total. ERROR,
-		// because it can also mean drift.
-		ids := make([]string, len(caps))
-		for i := range caps {
-			ids[i] = caps[i].inv.ID
-		}
-		level := slog.LevelError
-		if hasUnpaid {
-			level = slog.LevelWarn
-		}
-		slog.Log(ctx, level, "downgrade clawback: funding invoices' remaining room is smaller than the credit; placed what fits",
-			"subscription_id", sub.ID,
-			"net_cents", netCredit,
-			"residual_cents", remainder,
-			"invoices", ids,
-		)
-	}
-
-	pieces := make([]ClawbackPiece, 0, len(caps))
-	for i := range caps {
-		net := nets[i]
-		if net <= 0 {
-			continue
-		}
-		gross := grossUpByInvoiceRatio(net, caps[i].inv.SubtotalCents, caps[i].inv.TotalAmountCents)
-		if gross > caps[i].grossCap {
-			gross = caps[i].grossCap // clamp net→gross rounding to headroom
-		}
-		if gross <= 0 {
-			continue
-		}
-		pieces = append(pieces, ClawbackPiece{InvoiceID: caps[i].inv.ID, GrossCents: gross})
-	}
-	return pieces, nil
-}
-
 // issueClawbackCreditNote issues the tax-reversing adjustment credit note for a
 // downgrade clawback recorded on the detail (ADR-048). Issued AFTER the atomic
 // tx is durable — the credit-note service is not tx-aware and its tax reversal
 // is an external Stripe call, so it must not ride the DB tx (a rollback would
 // orphan a committed CN + balance grant). The downgrade branch calls it inline
-// on the non-atomic path. No-op unless that branch recorded a clawback (CN
-// issuer wired + PAID source invoice resolved).
+// on the non-atomic path. No-op unless that branch recorded credit shares.
 //
 // On error the item change is already durable but the customer was not
 // credited — log at error level so it surfaces for reconciliation. The
@@ -2226,14 +2076,7 @@ func (h *Handler) issueClawbackCreditNote(ctx context.Context, tenantID string, 
 		return
 	}
 	pieces := detail.ClawbackPieces
-	if len(pieces) == 0 && detail.ClawbackInvoiceID != "" && detail.ClawbackGrossCents > 0 {
-		// Single-piece carrier (the unpaid-source amount_due relief path).
-		pieces = []ClawbackPiece{{InvoiceID: detail.ClawbackInvoiceID, GrossCents: detail.ClawbackGrossCents}}
-	}
 	for i, p := range pieces {
-		if p.InvoiceID == "" || p.GrossCents <= 0 {
-			continue
-		}
 		if _, err := h.creditNotes.CreateAndIssueAdjustment(ctx, tenantID, p.InvoiceID, p.GrossCents, detail.ClawbackReason, detail.ClawbackMemo); err != nil {
 			slog.ErrorContext(ctx, "downgrade clawback credit note failed after item change committed; customer not yet credited, reconcile manually",
 				"error", err,
@@ -2245,23 +2088,6 @@ func (h *Handler) issueClawbackCreditNote(ctx context.Context, tenantID string, 
 				"reason", detail.ClawbackReason)
 		}
 	}
-}
-
-// clawbackPieces resolves the clawback fan-out pieces for a detail, including
-// the single-piece carrier (the unpaid-source amount_due relief path), and
-// drops empty/zero pieces. Shared by the in-tx create and the inline path.
-func clawbackPieces(detail *ProrationDetail) []ClawbackPiece {
-	pieces := detail.ClawbackPieces
-	if len(pieces) == 0 && detail.ClawbackInvoiceID != "" && detail.ClawbackGrossCents > 0 {
-		pieces = []ClawbackPiece{{InvoiceID: detail.ClawbackInvoiceID, GrossCents: detail.ClawbackGrossCents}}
-	}
-	out := make([]ClawbackPiece, 0, len(pieces))
-	for _, p := range pieces {
-		if p.InvoiceID != "" && p.GrossCents > 0 {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // createClawbackDraftsTx creates the downgrade/removal clawback credit note(s)
@@ -2276,7 +2102,7 @@ func (h *Handler) createClawbackDraftsTx(ctx context.Context, tx *sql.Tx, tenant
 	if h.creditNotes == nil || detail == nil {
 		return nil
 	}
-	pieces := clawbackPieces(detail)
+	pieces := detail.ClawbackPieces
 	pieceIDs := make([]string, 0, len(pieces))
 	for _, p := range pieces {
 		pieceIDs = append(pieceIDs, p.InvoiceID)
@@ -2391,10 +2217,10 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// Integer day-ratio proration per ADR-042 — pure-integer banker's
 	// rounding, no float64 in the cents path. See prorationCents.
 	//
-	// Computed BEFORE resolving the source invoice so the unpaid-source branch
-	// (ADR-050) can route by sign: a net charge (upgrade / add / qty-increase)
-	// is blocked, a net credit (downgrade / removal / qty-decrease) settles as
-	// an adjustment against the open invoice.
+	// Computed first because the sign routes the change: a net credit
+	// (downgrade / removal / qty-decrease) goes to creditUnusedTime, and only a
+	// net charge (upgrade / add / qty-increase) reads the base invoice, whose
+	// unpaid state blocks it (ADR-050).
 	//
 	// Denominator is the FULL billing cycle, NOT spec.totalDays (the current
 	// period). On a stub/partial period (mid-cycle signup) spec.totalDays is
@@ -2422,67 +2248,6 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		return nil, nil
 	}
 
-	// Resolve the current-period in_advance source invoice and branch on its
-	// payment status. src/haveSrc carry a PAID source into the happy path
-	// below — the downgrade-credit branch grosses the clawback up against this
-	// invoice's tax ratio and anchors the tax-reversing credit note to it
-	// (ADR-048). In production h.invoices is always wired and this gate runs.
-	var haveSrc bool
-	if h.invoices != nil && sub.CurrentBillingPeriodStart != nil {
-		// A single-row lookup is right here: it only routes paid vs unpaid. The
-		// per-invoice credit MATH fans across FindFundingInvoicesForPeriod (resolveClawbackPieces).
-		// Audit 2026-06-15 cleared the gate (0/3); base-paid implies the period was funded.
-		resolved, lookupErr := h.invoices.FindBaseInvoiceForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart) //nolint:forbidigo // single-invoice-ok: paid/unpaid routing gate only
-		if lookupErr != nil {
-			// No source invoice for the period (e.g. a freshly created sub whose
-			// first prebill hasn't been generated). Nothing to anchor an
-			// adjustment or clawback to — defer to cycle close.
-			slog.InfoContext(ctx, "item proration deferred: in_advance source invoice not found for current period",
-				"subscription_id", sub.ID,
-				"item_id", spec.itemID,
-				"change_type", spec.changeType,
-				"period_start", *sub.CurrentBillingPeriodStart,
-				"error", lookupErr,
-			)
-			return nil, nil
-		}
-		// THREE-way split, not two (fixed 2026-07-30, found walking FLOW C2).
-		// `!= PaymentSucceeded` used to lump IN-FLIGHT sources in with genuinely
-		// unpaid ones and send them down the amount_due-reduction branch. On a
-		// source that is already PAID but has a charge in flight (amount_due=0,
-		// payment_status=processing/unknown), that branch computes
-		// min(grossCredit, amount_due) == 0 and returns nil SILENTLY — the item
-		// change committed, the customer kept the cheaper plan, and the credit
-		// they were owed existed nowhere. Proven with a control: the identical
-		// downgrade on a `succeeded` source credited $32.18; on a `processing`
-		// source it produced no row at all.
-		//
-		// domain.IsInFlight's own contract says such a mutation must "refuse or
-		// defer", and DEFER is already built end to end: creditnote.Issue is the
-		// single chokepoint for every issue trigger and leaves the note
-		// draft+issue_pending while the source is in flight, after which the
-		// ADR-059 reconciler re-drives it and picks the paid/unpaid channel from
-		// how the source actually resolved. All of that needs one thing from us:
-		// a DRAFT must exist. So an in-flight source falls through to the
-		// draft-creating path below instead of being settled inline.
-		if resolved.PaymentInFlight() {
-			slog.InfoContext(ctx, "item proration: source payment in flight — clawback will be drafted and issued once it settles (ADR-059)",
-				"subscription_id", sub.ID,
-				"item_id", spec.itemID,
-				"source_invoice_id", resolved.ID,
-				"payment_status", string(resolved.PaymentStatus),
-			)
-		} else if resolved.PaymentStatus != domain.PaymentSucceeded {
-			// UNPAID source. Industry-convergent rule (Chargebee Adjustment
-			// Credit / Lago credit-note wallet / Orb adjustment / Stripe
-			// proration_behavior=none on unpaid / Recurly block-on-past-due):
-			// never mint a refundable credit or stack a second charge against
-			// money the customer hasn't paid (ADR-050).
-			return h.settleUnpaidSourceProration(ctx, tenantID, sub, spec, oldPlan, newPlan, resolved, proratedCents, tx)
-		}
-		haveSrc = true
-	}
-
 	// Display-only factor for the ProrationDetail payload (operator-visible
 	// event metadata). Source of truth for the cents math is the integer
 	// remainingDays / fullCycle denominator above.
@@ -2498,6 +2263,36 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	}
 
 	memo := prorationMemo(spec, oldPlan, newPlan)
+
+	// A net credit (downgrade / removal / qty-decrease) credits the invoices
+	// that charged the unused time, whatever their payment state: one rule
+	// for every change (ADR-118 amendment 2026-10-22).
+	if proratedCents < 0 {
+		return h.creditUnusedTime(ctx, tenantID, sub, spec, detail, -proratedCents, memo, tx)
+	}
+
+	// A net charge needs the period's base invoice: none yet (a fresh
+	// subscription whose first prebill has not been generated) defers to cycle
+	// close, and an UNPAID one blocks the change (ADR-050). An in-flight base
+	// is not unpaid: the charge goes ahead, and a later decrease's credit is
+	// drafted and held until that charge settles (ADR-059).
+	if h.invoices != nil && sub.CurrentBillingPeriodStart != nil {
+		// A single-row lookup is right here: it only routes paid vs unpaid.
+		resolved, lookupErr := h.invoices.FindBaseInvoiceForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart) //nolint:forbidigo // single-invoice-ok: paid/unpaid routing gate only
+		if lookupErr != nil {
+			slog.InfoContext(ctx, "item proration deferred: in_advance source invoice not found for current period",
+				"subscription_id", sub.ID,
+				"item_id", spec.itemID,
+				"change_type", spec.changeType,
+				"period_start", *sub.CurrentBillingPeriodStart,
+				"error", lookupErr,
+			)
+			return nil, nil
+		}
+		if !resolved.PaymentInFlight() && resolved.PaymentStatus != domain.PaymentSucceeded {
+			return nil, unpaidSourceBlocksCharge(ctx, sub, spec, resolved)
+		}
+	}
 
 	if proratedCents > 0 {
 		// Honors ctx-bound effective-now (PR-12) so proration invoice
@@ -2825,223 +2620,116 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			"change_type", spec.changeType,
 			"amount_cents", proratedCents,
 		)
-	} else {
-		creditAmount := -proratedCents
-
-		// ADR-048: on a PAID, taxed in_advance source invoice with the CN
-		// issuer wired, credit the GROSS the customer paid for the unused
-		// slice (net + the proportional tax) via the tax-reversing credit-note
-		// primitive — which also reverses the proportional output tax against
-		// the original invoice's committed tax transaction — rather than the
-		// bare net ledger grant that dropped the tax. The CN service's tax
-		// reversal is an external Stripe call, so it can't ride this tx; this
-		// stashes the clawback pieces on the detail and the caller routes them:
-		//   - atomic path (tx != nil): the atomic wrapper calls
-		//     createClawbackDraftsTx (drafts committed WITH the item change, so a
-		//     create failure rolls the change back) then issueClawbackDrafts
-		//     post-commit; ADR-057.
-		//   - non-atomic fallback (tx == nil): issueClawbackCreditNote inline
-		//     below (create+issue, fire-and-forget — used only when h.db is
-		//     unwired, e.g. narrow unit tests).
-		if h.creditNotes != nil && haveSrc {
-			// Fan the clawback across EVERY funding invoice of the period (LIFO
-			// for a plan downgrade, proportional for fungible qty/item changes),
-			// each capped at its own remaining headroom — so a clawback that
-			// exceeds the single resolved invoice (e.g. after a prior upgrade
-			// split the period across two invoices) is placed in full instead of
-			// overrunning one invoice's credit-note cap.
-			pieces, perr := h.resolveClawbackPieces(ctx, tenantID, sub, spec.changeType, creditAmount)
-			if perr != nil {
-				// Resolve runs read-only inside the atomic item-change tx, so a
-				// returned error rolls the change back BEFORE it commits — nothing
-				// half-applies. Cleaner than the old post-commit reconcile gap.
-				return nil, fmt.Errorf("downgrade clawback: %w", perr)
-			}
-			if len(pieces) == 0 {
-				// Every funding invoice is already fully credited (a waiver,
-				// or earlier notes), so nothing more is owed. Loud, as for a
-				// cancel or plan swap (ADR-118), because it can also mean drift.
-				slog.ErrorContext(ctx, "downgrade clawback: funding invoices already fully credited; no further credit",
-					"subscription_id", sub.ID,
-					"item_id", spec.itemID,
-					"change_type", spec.changeType,
-					"net_cents", creditAmount,
-				)
-				return nil, nil
-			}
-			var grossCredit int64
-			for _, p := range pieces {
-				grossCredit += p.GrossCents
-			}
-			detail.Type = "credit"
-			detail.AmountCents = grossCredit
-			detail.ClawbackPieces = pieces
-			detail.ClawbackReason = clawbackReason(spec.changeType)
-			detail.ClawbackMemo = memo
-			if tx == nil {
-				h.issueClawbackCreditNote(ctx, tenantID, detail)
-			}
-			slog.InfoContext(ctx, "downgrade clawback routed to tax-reversing credit note(s)",
-				"subscription_id", sub.ID,
-				"item_id", spec.itemID,
-				"change_type", spec.changeType,
-				"funding_invoices", len(pieces),
-				"net_cents", creditAmount,
-				"gross_cents", grossCredit,
-			)
-			return detail, nil
-		}
-
-		// Fallback: CN issuer unwired (narrow unit tests) or no paid source
-		// invoice resolved — grant the bare net amount to the credit ledger as
-		// before (no tax reversal).
-		if h.credits != nil {
-			grantInput := ProrationGrantInput{
-				CustomerID:               sub.CustomerID,
-				AmountCents:              creditAmount,
-				Description:              memo,
-				SourceSubscriptionID:     sub.ID,
-				SourceSubscriptionItemID: spec.itemID,
-				SourcePlanChangedAt:      spec.changeAt,
-				SourceChangeType:         spec.changeType,
-			}
-			var err error
-			if tx != nil {
-				err = h.credits.GrantProrationTx(ctx, tx, tenantID, grantInput)
-			} else {
-				err = h.credits.GrantProration(ctx, tenantID, grantInput)
-			}
-			// Same pattern as the invoice path above: only the
-			// proration-source code maps to an idempotent replay. Other
-			// AlreadyExists (e.g. credit_note_source) are distinct bugs
-			// and must propagate up. ADR-030 cross-flow audit 2026-05-28.
-			if errs.Code(err) == "credit_proration_source_taken" {
-				// Credit-ledger proration-dedup replay — same
-				// idempotency lookup as the invoice path, not a funding decision.
-				existing, lookupErr := h.credits.GetByProrationSource(ctx, tenantID, sub.ID, spec.itemID, spec.changeType, spec.changeAt) //nolint:forbidigo // single-invoice-ok: credit-ledger proration-dedup replay
-				if lookupErr != nil {
-					return nil, fmt.Errorf("proration credit dedup lookup: %w", lookupErr)
-				}
-				slog.InfoContext(ctx, "proration credit already granted; retry dedup",
-					"entry_id", existing.ID,
-					"subscription_id", sub.ID,
-					"item_id", spec.itemID,
-					"change_type", spec.changeType,
-					"change_at", spec.changeAt,
-				)
-				detail.AmountCents = existing.AmountCents
-				detail.Type = "credit"
-				return detail, nil
-			}
-			if err != nil {
-				return nil, fmt.Errorf("grant proration credit: %w", err)
-			}
-
-			detail.AmountCents = creditAmount
-			detail.Type = "credit"
-
-			slog.InfoContext(ctx, "proration credit granted",
-				"subscription_id", sub.ID,
-				"item_id", spec.itemID,
-				"change_type", spec.changeType,
-				"credit_cents", creditAmount,
-			)
-		}
 	}
 
 	return detail, nil
 }
 
-// settleUnpaidSourceProration applies the ADR-050 unpaid-source policy when a
-// mid-period item change lands on an in_advance period whose source invoice is
-// finalized but NOT paid. Industry-convergent across Stripe / Chargebee /
-// Recurly / Lago / Orb: never mint a refundable credit, and never stack a
-// second charge, against money the customer hasn't paid.
-//
-//   - NET CHARGE (upgrade / add / qty-increase, proratedCents > 0) → BLOCK.
-//     We refuse to pile a second receivable onto an unpaid current-period
-//     invoice (Recurly blocks past-due changes; Stripe recommends
-//     proration_behavior=none on an unpaid latest invoice). The operator must
-//     settle or void the outstanding invoice first. Returned as
-//     errs.InvalidState so the atomic tx rolls the item change back and the
-//     operator sees a clean 409 — nothing half-applies.
-//
-//   - NET CREDIT (downgrade / removal / qty-decrease, proratedCents < 0) →
-//     reduce the open invoice's amount_due via a tax-reversing ADJUSTMENT
-//     credit note, capped at amount_due plus the customer credits applied to
-//     the invoice. No cash was funded, so nothing is refunded; applied credits
-//     the note displaces go back to the balance (ADR-061). This is the same adjustment credit note
-//     the engine's cancel relief writes for an unpaid invoice —
-//     Chargebee's "Adjustment Credit", Lago's credit-note, Orb's adjustment.
-//
-// The adjustment is carried on the detail's Clawback* fields and issued by the
-// caller AFTER the tx commits (the CN service is not tx-aware), exactly like
-// the PAID downgrade clawback (ADR-048); the non-atomic path issues inline.
-func (h *Handler) settleUnpaidSourceProration(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, oldPlan, newPlan domain.Plan, src domain.Invoice, proratedCents int64, tx *sql.Tx) (*ProrationDetail, error) {
-	if proratedCents > 0 {
-		slog.InfoContext(ctx, "item change blocked: net charge against an unpaid in_advance source invoice (ADR-050)",
-			"subscription_id", sub.ID,
-			"item_id", spec.itemID,
-			"change_type", spec.changeType,
-			"source_invoice_id", src.ID,
-			"source_payment_status", src.PaymentStatus,
-			"amount_due_cents", src.AmountDueCents,
-		)
-		return nil, errs.InvalidState(fmt.Sprintf(
-			"invoice %s for the current period is unpaid (%.2f %s outstanding); settle or void it before changing this subscription",
-			src.InvoiceNumber, float64(src.AmountDueCents)/100, src.Currency,
-		)).WithCode("unpaid_invoice_blocks_change")
-	}
-
-	// Net credit: settle the unused slice against the open invoice as an
-	// adjustment, capped at what the invoice can still be relieved of — what
-	// is owed plus the customer credits applied to it, which the note hands
-	// back when issued (ADR-061; the same clamp the engine's unpaid-cancel
-	// relief applies).
-	creditAmount := -proratedCents
-	grossCredit := grossUpByInvoiceRatio(creditAmount, src.SubtotalCents, src.TotalAmountCents)
-	reduceBy := min(grossCredit, src.UnpaidRelievableCents())
-	if reduceBy <= 0 {
-		// Nothing left to reduce on the source, so this branch cannot place the
-		// credit. Reaching here with a credit owed used to `return nil, nil` —
-		// the change committed and the money owed vanished with no row, no error
-		// and no log (2026-07-30). The in-flight case that made it reachable now
-		// routes to the draft path upstream; anything ELSE landing here is a
-		// state we have not modelled, so say so LOUDLY rather than silently
-		// under-crediting (no-silent-fallbacks).
-		slog.ErrorContext(ctx, "downgrade credit could not be placed: unpaid source has no amount_due or applied credits left to relieve — customer may be under-credited, reconcile manually",
-			"subscription_id", sub.ID,
-			"item_id", spec.itemID,
-			"source_invoice_id", src.ID,
-			"source_status", string(src.Status),
-			"source_payment_status", string(src.PaymentStatus),
-			"source_amount_due_cents", src.AmountDueCents,
-			"gross_credit_cents", grossCredit,
-		)
-		return nil, nil
-	}
-
-	detail := &ProrationDetail{
-		OldPlanID:          spec.oldPlanID,
-		NewPlanID:          spec.newPlanID,
-		Type:               "adjustment",
-		AmountCents:        reduceBy,
-		ClawbackInvoiceID:  src.ID,
-		ClawbackGrossCents: reduceBy,
-		ClawbackReason:     clawbackReason(spec.changeType),
-		ClawbackMemo:       prorationMemo(spec, oldPlan, newPlan),
-	}
-	// Non-atomic path issues inline; the atomic wrappers issue after tx.Commit.
-	if tx == nil {
-		h.issueClawbackCreditNote(ctx, tenantID, detail)
-	}
-	slog.InfoContext(ctx, "unpaid-source downgrade settled via adjustment credit note (amount_due reduced; no refundable credit)",
+// unpaidSourceBlocksCharge is the ADR-050 block: a net charge (upgrade / add /
+// qty-increase) against an in_advance period whose base invoice is finalized
+// but NOT paid is refused. Velox never stacks a second receivable on an unpaid
+// current-period invoice (Recurly blocks past-due changes; Stripe recommends
+// proration_behavior=none on an unpaid latest invoice); the operator settles or
+// voids the outstanding invoice first. errs.InvalidState rolls the item change
+// back and the operator sees a clean 409.
+func unpaidSourceBlocksCharge(ctx context.Context, sub domain.Subscription, spec itemProrationSpec, src domain.Invoice) error {
+	slog.InfoContext(ctx, "item change blocked: net charge against an unpaid in_advance source invoice (ADR-050)",
 		"subscription_id", sub.ID,
 		"item_id", spec.itemID,
 		"change_type", spec.changeType,
 		"source_invoice_id", src.ID,
-		"net_cents", creditAmount,
-		"reduce_by_cents", reduceBy,
+		"source_payment_status", src.PaymentStatus,
+		"amount_due_cents", src.AmountDueCents,
+	)
+	return errs.InvalidState(fmt.Sprintf(
+		"invoice %s for the current period is unpaid (%.2f %s outstanding); settle or void it before changing this subscription",
+		src.InvoiceNumber, float64(src.AmountDueCents)/100, src.Currency,
+	)).WithCode("unpaid_invoice_blocks_change")
+}
+
+// creditUnusedTime credits netCredit (net, tax excluded) of unused prepaid
+// time for a downgrade, quantity decrease or item removal, by the one
+// crediting rule (domain.AllocateUnusedCredit, ADR-118): the invoices that
+// charged this item, newest first, each capped at its room. A paid invoice's
+// share goes to the customer's balance; an unpaid one's reduces what it still
+// asks for (ADR-050: never a refundable credit for money not paid); an
+// in-flight one's is held by Issue until the charge settles (ADR-059). Each
+// share is a tax-reversing adjustment credit note on its own invoice (ADR-048).
+//
+// Read-only: it records the shares on the detail. The atomic caller writes
+// them as drafts on its tx (createClawbackDraftsTx) and issues them after
+// commit; the non-atomic path (tx == nil, tests and the legacy UpdateItem)
+// issues inline. A returned error rolls the change back before it commits.
+//
+// What does not fit is not owed (every invoice is credited up to its total,
+// or relieved of all it asks for), so the change goes ahead and records it on
+// the detail (UncreditedCents → the audit row's uncredited_cents).
+func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, detail *ProrationDetail, netCredit int64, memo string, tx *sql.Tx) (*ProrationDetail, error) {
+	if h.creditNotes == nil || h.invoices == nil {
+		return nil, fmt.Errorf("credit for unused time: the credit-note issuer is not wired")
+	}
+	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
+		return nil, nil
+	}
+	funding, err := h.invoices.FindFundingInvoicesForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
+	if errors.Is(err, errs.ErrNotFound) {
+		// No in_advance invoice funded this period (a fresh subscription whose
+		// first prebill has not been generated): nothing was charged, so
+		// nothing is credited. Cycle close bills the period as it now stands.
+		slog.InfoContext(ctx, "item proration: no in_advance invoice funded the current period; nothing to credit",
+			"subscription_id", sub.ID, "item_id", spec.itemID, "change_type", spec.changeType)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("credit for unused time: find funding invoices: %w", err)
+	}
+	// Headroom is read OFF the change's tx: it counts drafts, so an on-tx read
+	// would let this change's own drafts shrink their room. The draft write
+	// re-checks the cap under the invoice lock.
+	credited := make(map[string]int64, len(funding))
+	for _, f := range funding {
+		c, cerr := h.creditNotes.CreditedCents(ctx, tenantID, f.ID)
+		if cerr != nil {
+			return nil, fmt.Errorf("credit for unused time: read creditable headroom for %s: %w", f.ID, cerr)
+		}
+		credited[f.ID] = c
+	}
+	shares, unplaced := domain.AllocateUnusedCredit(funding, credited, spec.itemID, netCredit)
+	if src, pending := domain.TaxPendingShare(funding, shares); pending {
+		return nil, errs.InvalidState(fmt.Sprintf(
+			"funding invoice %s is a draft whose tax is still %s; retry once it is calculated", src.ID, src.TaxStatus)).
+			WithCode("funding_invoice_tax_pending")
+	}
+
+	// "credit" when any share goes to the balance, "adjustment" when every
+	// share only reduces what an open invoice asks for.
+	detail.Type = "adjustment"
+	var gross int64
+	for _, sh := range shares {
+		gross += sh.GrossCents
+		if sh.Paid {
+			detail.Type = "credit"
+		}
+	}
+	if len(shares) == 0 {
+		detail.Type = "credit" // nothing placed: the invoices had no room left
+	}
+	detail.AmountCents = gross
+	detail.UncreditedCents = unplaced
+	detail.ClawbackPieces = shares
+	detail.ClawbackReason = clawbackReason(spec.changeType)
+	detail.ClawbackMemo = memo
+	if tx == nil {
+		h.issueClawbackCreditNote(ctx, tenantID, detail)
+	}
+	slog.InfoContext(ctx, "item proration: unused time credited to the invoices that charged it",
+		"subscription_id", sub.ID,
+		"item_id", spec.itemID,
+		"change_type", spec.changeType,
+		"invoices", len(shares),
+		"net_cents", netCredit,
+		"gross_cents", gross,
+		"uncredited_cents", unplaced,
 	)
 	return detail, nil
 }
@@ -3278,8 +2966,13 @@ func addProrationMeta(payload map[string]any, detail *ProrationDetail, currency 
 	}
 	// An adjustment reduces the open invoice the change was billed on; the
 	// activity line links it (ADR-128 rule 8).
-	if detail.Type == "adjustment" && detail.ClawbackInvoiceID != "" {
-		payload["adjusted_invoice_id"] = detail.ClawbackInvoiceID
+	if detail.Type == "adjustment" && len(detail.ClawbackPieces) > 0 {
+		payload["adjusted_invoice_id"] = detail.ClawbackPieces[0].InvoiceID
+	}
+	// Unused time the invoices had no room left for: not owed, recorded so the
+	// line can say the credit was limited (ADR-118 amendment 2026-10-22).
+	if detail.UncreditedCents > 0 {
+		payload["uncredited_cents"] = detail.UncreditedCents
 	}
 	if currency != "" {
 		payload["currency"] = currency
