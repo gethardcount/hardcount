@@ -157,6 +157,64 @@ func (e *StripeKeyError) OperatorSafeMessage() string {
 // OperatorErrorCode names the fault so a caller can tell it from a decline.
 func (e *StripeKeyError) OperatorErrorCode() string { return "stripe_key_unusable" }
 
+// BelowMinimumError is Stripe refusing a charge, or a payment-mode Checkout
+// Session, because the amount is below Stripe's minimum charge: HTTP 400,
+// invalid_request_error, code amount_too_small (seen on a test-mode account,
+// 2026-10-22: "Amount must be at least $0.50 usd"). Stripe makes no
+// PaymentIntent and no session, so nothing was charged, and asking again
+// gets the same answer with any card. domain.ErrBelowMinimumCharge says what
+// Velox does with it.
+//
+// It must not be or wrap a *PaymentError, for the reason StripeKeyError
+// gives: the auto-charge sweep, the dunning retry and Collect all read a
+// *PaymentError with Unknown=false as a decline. Nor ErrPaymentTransient:
+// that leaves the invoice queued, and the sweep would ask Stripe every tick.
+type BelowMinimumError struct {
+	Message string // Stripe's sentence, scrubbed; it names the minimum
+}
+
+func (e *BelowMinimumError) Error() string {
+	return "below Stripe's minimum charge: " + e.Message
+}
+
+func (e *BelowMinimumError) Unwrap() error { return domain.ErrBelowMinimumCharge }
+
+// belowMinimumOf reads Stripe's amount_too_small refusal off err, or nil.
+// Keyed on the error code, not the message: the code is Stripe's contract.
+func belowMinimumOf(err error) *BelowMinimumError {
+	var se *stripe.Error
+	if errors.As(err, &se) && se.Code == stripe.ErrorCodeAmountTooSmall {
+		return &BelowMinimumError{Message: stripeErrorMessage(err)}
+	}
+	return nil
+}
+
+// BelowMinimumOf is belowMinimumOf for the hosted page's Checkout Session
+// create, which calls stripe-go itself (api/adapters.go).
+func BelowMinimumOf(err error) *BelowMinimumError { return belowMinimumOf(err) }
+
+// IsDefiniteRefusal reports whether Stripe answered a create request with a
+// refusal that proves it created nothing: a 4xx other than 409 (a request
+// with the same idempotency key may still be running, #976) and 429 (it
+// speaks only for this request), and not an idempotency_error (the key was
+// used before, so an earlier request reached Stripe). A network error, a 5xx
+// or anything that is not a Stripe error is not one.
+func IsDefiniteRefusal(err error) bool {
+	var se *stripe.Error
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch {
+	case se.HTTPStatusCode < 400 || se.HTTPStatusCode >= 500:
+		return false
+	case se.HTTPStatusCode == http.StatusConflict || se.HTTPStatusCode == http.StatusTooManyRequests:
+		return false
+	case se.Type == stripe.ErrorTypeIdempotency:
+		return false
+	}
+	return true
+}
+
 // isRateLimited reports whether Stripe refused the request with HTTP 429. A
 // real test-mode reply (2026-10-14) is status 429, type "rate_limit_error",
 // code "rate_limit", with no PaymentIntent. Stripe sends 429 only before it
@@ -400,6 +458,12 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		var se *stripe.Error
 		if errors.As(err, &se) && (se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden) {
 			return PaymentIntentResult{}, &StripeKeyError{Reason: StripeKeyRejected, Message: errs.Scrub(se.Msg)}
+		}
+		// Below Stripe's minimum charge: an invalid_request_error, so read by
+		// type it was a decline that started dunning and emailed the
+		// customer "declined". Keyed on the code (domain.ErrBelowMinimumCharge).
+		if bm := belowMinimumOf(err); bm != nil {
+			return PaymentIntentResult{}, bm
 		}
 		return PaymentIntentResult{}, classifyStripeError(err)
 	}

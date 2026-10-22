@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -23,11 +24,15 @@ import (
 const (
 	minChargePIRefusal       = `{"error":{"type":"invalid_request_error","code":"amount_too_small","param":"amount","message":"Amount must be at least $0.50 usd"}}`
 	minChargeCheckoutRefusal = `{"error":{"type":"invalid_request_error","code":"amount_too_small","message":"The Checkout Session's total amount due must add up to at least $0.50 usd"}}`
+	// A charge at or above the minimum is declined, so a payment recovery
+	// starts the ordinary way.
+	minChargeDecline = `{"error":{"type":"card_error","code":"card_declined","decline_code":"generic_decline","message":"Your card was declined.","payment_intent":{"id":"pi_min_declined_%d","object":"payment_intent","status":"requires_payment_method"}}}`
 )
 
 // minChargeStripe stands in for api.stripe.com. It saves cards (customer,
-// setup session, payment method) and refuses every charge and every
-// payment-mode Checkout Session as below the minimum.
+// setup session, payment method), refuses every charge under 50 cents and
+// every payment-mode Checkout Session as below the minimum, and declines a
+// charge of 50 cents or more.
 type minChargeStripe struct {
 	mu    sync.Mutex
 	calls []string
@@ -75,7 +80,11 @@ func (s *minChargeStripe) answer(req *http.Request) *http.Response {
 	case call == "POST /v1/checkout/sessions":
 		body = fmt.Sprintf(`{"id":"cs_min_%d","object":"checkout.session","mode":"setup","url":"https://checkout.stripe.test/c/cs_min_%d"}`, n, n)
 	case call == "POST /v1/payment_intents":
-		status, body = 400, minChargePIRefusal
+		if amount, _ := strconv.Atoi(form.Get("amount")); amount >= 50 {
+			status, body = 402, fmt.Sprintf(minChargeDecline, n)
+		} else {
+			status, body = 400, minChargePIRefusal
+		}
 	default:
 		status = 404
 		body = fmt.Sprintf(`{"error":{"type":"invalid_request_error","message":"stub has no answer for %s"}}`, call)
@@ -114,7 +123,10 @@ func (s *minChargeStripe) count(call string) int {
 //   - the hosted page offers no Pay button, and a Pay click Stripe refuses
 //     frees the payment page at once instead of holding charges for an hour;
 //   - a payment recovery already running ends when its charge gets this
-//     answer, without a warning email to the customer.
+//     answer, without a warning email to the customer: started with no card
+//     and ended by the auto-charge sweep once a card is saved (C), or
+//     started by a decline and ended by its own retry once credits bring the
+//     amount below the minimum (D).
 func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	// A configured server queues customer emails, so an email Velox wrongly
@@ -323,5 +335,50 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	belowMinimum("invoice C after the advance", getInvoice(invC))
 	if n := customerEmails(invC); n != 0 {
 		t.Errorf("payment-failure emails for invoice C: %d, want none", n)
+	}
+
+	// D: an $0.80 invoice is declined at finalize, so recovery starts and
+	// the invoice leaves the auto-charge queue. A $0.50 credit then leaves
+	// $0.30, which the first retry applies before it charges: Stripe refuses
+	// the charge, and the retry ends recovery at its own instant.
+	custD := newCustomer("d", clockID)
+	saveCard(custD, "pm_min_d")
+	idD := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
+		"customer_id": custD,
+		"line_items":  []map[string]any{{"description": "Clocked usage", "quantity": 1, "unit_amount_cents": 80}},
+	}}).want(t, 201, "create invoice D").body, "id")
+	call("POST", "/v1/invoices/"+idD+"/finalize", flowReq{}).want(t, 200, "finalize D")
+	if inv := getInvoice(idD); flowStr(inv, "payment_status") != "failed" {
+		t.Fatalf("invoice D after the declined finalize: payment_status %v, want failed", inv["payment_status"])
+	}
+	runs = runsOf(idD)
+	if len(runs) != 1 || flowStr(runs[0], "state") != "active" {
+		t.Fatalf("invoice D runs after the decline: %v, want one active run", runs)
+	}
+	call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
+		"customer_id": custD, "amount_cents": 50, "description": "Goodwill",
+	}}).want(t, 201, "grant credit D")
+	warningsBefore := flowCount(t, db, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = 'dunning_warning'`, tenantID)
+	charges = stripe.count("POST /v1/payment_intents")
+	call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
+		"frozen_time": frozen.Add(10 * 24 * time.Hour).Format(time.RFC3339),
+	}}).want(t, 200, "advance clock for D")
+	if got := stripe.count("POST /v1/payment_intents") - charges; got != 1 {
+		t.Errorf("charges sent on D's advance: %d, want 1 (the first retry; the refusal ends recovery)", got)
+	}
+	runs = runsOf(idD)
+	if len(runs) != 1 || flowStr(runs[0], "state") != "resolved" || flowStr(runs[0], "resolution") != "amount_below_minimum" {
+		t.Errorf("invoice D run after the advance: %v, want resolved with amount_below_minimum", runs)
+	}
+	if len(runs) == 1 && flowInt(runs[0], "attempt_count") != 1 {
+		t.Errorf("invoice D run attempt_count %v, want 1", runs[0]["attempt_count"])
+	}
+	invD := getInvoice(idD)
+	belowMinimum("invoice D after the advance", invD)
+	if flowInt(invD, "amount_due_cents") != 30 {
+		t.Errorf("invoice D amount due %d, want 30 after the credit", flowInt(invD, "amount_due_cents"))
+	}
+	if n := flowCount(t, db, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = 'dunning_warning'`, tenantID) - warningsBefore; n != 0 {
+		t.Errorf("dunning warning emails on D's advance: %d, want none", n)
 	}
 }

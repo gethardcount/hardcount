@@ -211,6 +211,7 @@ func (e AttentionAction) Valid() bool {
 
 // Defines values for AttentionReason.
 const (
+	AttentionReasonAmountBelowMinimum   AttentionReason = "amount_below_minimum"
 	AttentionReasonAwaitingPayment      AttentionReason = "awaiting_payment"
 	AttentionReasonCollectionPaused     AttentionReason = "collection_paused"
 	AttentionReasonCommitExposure       AttentionReason = "commit_exposure"
@@ -229,6 +230,8 @@ const (
 // Valid indicates whether the value is a known member of the AttentionReason enum.
 func (e AttentionReason) Valid() bool {
 	switch e {
+	case AttentionReasonAmountBelowMinimum:
+		return true
 	case AttentionReasonAwaitingPayment:
 		return true
 	case AttentionReasonCollectionPaused:
@@ -692,6 +695,7 @@ func (e DunningPolicyListItemFinalSubscriptionAction) Valid() bool {
 // Defines values for DunningRunResolution.
 const (
 	DunningRunResolutionActionFailed          DunningRunResolution = "action_failed"
+	DunningRunResolutionAmountBelowMinimum    DunningRunResolution = "amount_below_minimum"
 	DunningRunResolutionInvoiceNotCollectible DunningRunResolution = "invoice_not_collectible"
 	DunningRunResolutionInvoiceVoided         DunningRunResolution = "invoice_voided"
 	DunningRunResolutionManuallyResolved      DunningRunResolution = "manually_resolved"
@@ -703,6 +707,8 @@ const (
 func (e DunningRunResolution) Valid() bool {
 	switch e {
 	case DunningRunResolutionActionFailed:
+		return true
+	case DunningRunResolutionAmountBelowMinimum:
 		return true
 	case DunningRunResolutionInvoiceNotCollectible:
 		return true
@@ -853,12 +859,15 @@ func (e HeldUsageGroupReason) Valid() bool {
 
 // Defines values for HostedInvoicePayUnavailableReason.
 const (
+	AmountBelowMinimum       HostedInvoicePayUnavailableReason = "amount_below_minimum"
 	OnlinePaymentUnavailable HostedInvoicePayUnavailableReason = "online_payment_unavailable"
 )
 
 // Valid indicates whether the value is a known member of the HostedInvoicePayUnavailableReason enum.
 func (e HostedInvoicePayUnavailableReason) Valid() bool {
 	switch e {
+	case AmountBelowMinimum:
+		return true
 	case OnlinePaymentUnavailable:
 		return true
 	default:
@@ -2266,16 +2275,16 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 
 // Defines values for PostV1CreditNotesJSONBodyRefundType.
 const (
-	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
-	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
+	Credit PostV1CreditNotesJSONBodyRefundType = "credit"
+	Refund PostV1CreditNotesJSONBodyRefundType = "refund"
 )
 
 // Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
 func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
 	switch e {
-	case PostV1CreditNotesJSONBodyRefundTypeCredit:
+	case Credit:
 		return true
-	case PostV1CreditNotesJSONBodyRefundTypeRefund:
+	case Refund:
 		return true
 	default:
 		return false
@@ -2446,19 +2455,19 @@ func (e ListDunningRunsParamsState) Valid() bool {
 
 // Defines values for ResolveDunningRunJSONBodyResolution.
 const (
-	ResolveDunningRunJSONBodyResolutionInvoiceNotCollectible ResolveDunningRunJSONBodyResolution = "invoice_not_collectible"
-	ResolveDunningRunJSONBodyResolutionInvoiceVoided         ResolveDunningRunJSONBodyResolution = "invoice_voided"
-	ResolveDunningRunJSONBodyResolutionPaymentRecovered      ResolveDunningRunJSONBodyResolution = "payment_recovered"
+	InvoiceNotCollectible ResolveDunningRunJSONBodyResolution = "invoice_not_collectible"
+	InvoiceVoided         ResolveDunningRunJSONBodyResolution = "invoice_voided"
+	PaymentRecovered      ResolveDunningRunJSONBodyResolution = "payment_recovered"
 )
 
 // Valid indicates whether the value is a known member of the ResolveDunningRunJSONBodyResolution enum.
 func (e ResolveDunningRunJSONBodyResolution) Valid() bool {
 	switch e {
-	case ResolveDunningRunJSONBodyResolutionInvoiceNotCollectible:
+	case InvoiceNotCollectible:
 		return true
-	case ResolveDunningRunJSONBodyResolutionInvoiceVoided:
+	case InvoiceVoided:
 		return true
-	case ResolveDunningRunJSONBodyResolutionPaymentRecovered:
+	case PaymentRecovered:
 		return true
 	default:
 		return false
@@ -3577,7 +3586,13 @@ type Attention struct {
 	// When the invoice also has `payment_anomaly`, that reason stays and
 	// its message asks the operator to check Stripe before any refund.
 	// The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-	// (2026-10-19).
+	// (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+	// refused to charge because the amount is below Stripe's minimum
+	// charge ($0.50 for USD; it depends on the currency). Nothing was
+	// charged, the invoice stays `finalized` with `payment_status`
+	// `pending`, it is not charged again automatically, no dunning starts,
+	// and the customer is not emailed. The operator voids it or records a
+	// payment (2026-10-23).
 	Reason AttentionReason `json:"reason"`
 
 	// Severity Urgency of an Attention surface. Operators sort/filter on this
@@ -3600,12 +3615,14 @@ type Attention struct {
 // status unknown with no payment intent recorded), for a customer
 // who paid another way: Velox records a payment that Stripe shows,
 // and charges the invoice again if none appears within 24 hours.
-// Dashboards render it as a secondary action. `void_invoice` is offered only
-// on prepaid-commit exposure, and only while some of the granted
+// Dashboards render it as a secondary action. `void_invoice` is offered
+// on prepaid-commit exposure, only while some of the granted
 // credit is still unspent: voiding retires the unspent balance
 // (ADR-078) and is the sole recovery for an unpaid invoice whose
 // credit is already live. Credit the customer has already spent
-// is never clawed back (2026-08-04).
+// is never clawed back (2026-08-04). It is also offered on
+// `amount_below_minimum`, an amount Stripe will not charge
+// (2026-10-23).
 type AttentionAction string
 
 // AttentionActionItem defines model for AttentionActionItem.
@@ -3619,12 +3636,14 @@ type AttentionActionItem struct {
 	// status unknown with no payment intent recorded), for a customer
 	// who paid another way: Velox records a payment that Stripe shows,
 	// and charges the invoice again if none appears within 24 hours.
-	// Dashboards render it as a secondary action. `void_invoice` is offered only
-	// on prepaid-commit exposure, and only while some of the granted
+	// Dashboards render it as a secondary action. `void_invoice` is offered
+	// on prepaid-commit exposure, only while some of the granted
 	// credit is still unspent: voiding retires the unspent balance
 	// (ADR-078) and is the sole recovery for an unpaid invoice whose
 	// credit is already live. Credit the customer has already spent
-	// is never clawed back (2026-08-04).
+	// is never clawed back (2026-08-04). It is also offered on
+	// `amount_below_minimum`, an amount Stripe will not charge
+	// (2026-10-23).
 	Code AttentionAction `json:"code"`
 
 	// Label Default rendering label. UIs are free to substitute
@@ -3664,7 +3683,13 @@ type AttentionActionItem struct {
 // When the invoice also has `payment_anomaly`, that reason stays and
 // its message asks the operator to check Stripe before any refund.
 // The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-// (2026-10-19).
+// (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+// refused to charge because the amount is below Stripe's minimum
+// charge ($0.50 for USD; it depends on the currency). Nothing was
+// charged, the invoice stays `finalized` with `payment_status`
+// `pending`, it is not charged again automatically, no dunning starts,
+// and the customer is not emailed. The operator voids it or records a
+// payment (2026-10-23).
 type AttentionReason string
 
 // AttentionSeverity Urgency of an Attention surface. Operators sort/filter on this
@@ -4522,7 +4547,9 @@ type DunningRun struct {
 	// `action_failed` is set on a run that is still `active`. The
 	// final action (pause, cancel or mark uncollectible) failed and
 	// will be retried at `next_action_at`. `manually_resolved` appears
-	// only on older runs.
+	// only on older runs. `amount_below_minimum`: a charge on the
+	// invoice was refused by Stripe because the amount is below its
+	// minimum charge, so the run ended without its final action.
 	Resolution DunningRunResolution `json:"resolution,omitempty"`
 	ResolvedAt time.Time            `json:"resolved_at,omitempty"`
 	State      DunningRunState      `json:"state"`
@@ -4537,7 +4564,9 @@ type DunningRun struct {
 // `action_failed` is set on a run that is still `active`. The
 // final action (pause, cancel or mark uncollectible) failed and
 // will be retried at `next_action_at`. `manually_resolved` appears
-// only on older runs.
+// only on older runs. `amount_below_minimum`: a charge on the
+// invoice was refused by Stripe because the amount is below its
+// minimum charge, so the run ended without its final action.
 type DunningRunResolution string
 
 // DunningRunState defines model for DunningRun.State.
@@ -4808,17 +4837,22 @@ type HostedInvoice struct {
 	Livemode bool `json:"livemode"`
 
 	// PayEnabled True when the customer can pay online now: the invoice is
-	// finalized, something is owed, no payment is in progress, and the
-	// seller has Stripe connected for the invoice's mode.
+	// finalized, something is owed, no payment is in progress, the
+	// seller has Stripe connected for the invoice's mode, and Stripe
+	// has not refused the amount as below its minimum charge.
 	PayEnabled bool `json:"pay_enabled"`
 
-	// PayUnavailableReason Sent only when money is owed but the seller has no payment
-	// provider connected for this mode.
+	// PayUnavailableReason Sent only when money is owed but can't be paid online:
+	// `online_payment_unavailable` when the seller has no payment
+	// provider connected for this mode, `amount_below_minimum` when
+	// Stripe refused the amount as below its minimum charge.
 	PayUnavailableReason HostedInvoicePayUnavailableReason `json:"pay_unavailable_reason,omitempty"`
 }
 
-// HostedInvoicePayUnavailableReason Sent only when money is owed but the seller has no payment
-// provider connected for this mode.
+// HostedInvoicePayUnavailableReason Sent only when money is owed but can't be paid online:
+// `online_payment_unavailable` when the seller has no payment
+// provider connected for this mode, `amount_below_minimum` when
+// Stripe refused the amount as below its minimum charge.
 type HostedInvoicePayUnavailableReason string
 
 // Invoice A Velox invoice. Returned from create, finalize, void, list, get,

@@ -18,12 +18,14 @@
  * status unknown with no payment intent recorded), for a customer
  * who paid another way: Velox records a payment that Stripe shows,
  * and charges the invoice again if none appears within 24 hours.
- * Dashboards render it as a secondary action. `void_invoice` is offered only
- * on prepaid-commit exposure, and only while some of the granted
+ * Dashboards render it as a secondary action. `void_invoice` is offered
+ * on prepaid-commit exposure, only while some of the granted
  * credit is still unspent: voiding retires the unspent balance
  * (ADR-078) and is the sole recovery for an unpaid invoice whose
  * credit is already live. Credit the customer has already spent
- * is never clawed back (2026-08-04).
+ * is never clawed back (2026-08-04). It is also offered on
+ * `amount_below_minimum`, an amount Stripe will not charge
+ * (2026-10-23).
  */
 export type AttentionAction = typeof AttentionAction[keyof typeof AttentionAction];
 

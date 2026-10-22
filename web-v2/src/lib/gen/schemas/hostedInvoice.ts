@@ -25,13 +25,16 @@ export interface HostedInvoice {
   branding: HostedInvoiceBranding;
   /**
      * True when the customer can pay online now: the invoice is
-     * finalized, something is owed, no payment is in progress, and the
-     * seller has Stripe connected for the invoice's mode.
+     * finalized, something is owed, no payment is in progress, the
+     * seller has Stripe connected for the invoice's mode, and Stripe
+     * has not refused the amount as below its minimum charge.
      */
   pay_enabled: boolean;
   /**
-     * Sent only when money is owed but the seller has no payment
-     * provider connected for this mode.
+     * Sent only when money is owed but can't be paid online:
+     * `online_payment_unavailable` when the seller has no payment
+     * provider connected for this mode, `amount_below_minimum` when
+     * Stripe refused the amount as below its minimum charge.
      */
   pay_unavailable_reason?: HostedInvoicePayUnavailableReason;
   /** False for a test-mode invoice. The page shows a test-mode banner. */

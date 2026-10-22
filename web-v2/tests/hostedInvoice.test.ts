@@ -36,6 +36,12 @@ test('an amount below the card minimum says so, not "already being processed" or
 
 test('no Stripe keys: the page names who to contact', () => {
   assert.equal(payUnavailableCopy('Acme'), "Online payment isn't set up for this invoice. Contact Acme to arrange payment.")
+  assert.equal(payUnavailableCopy('Acme', 'online_payment_unavailable'), "Online payment isn't set up for this invoice. Contact Acme to arrange payment.")
+})
+
+test('below the card minimum: the line in place of Pay says so, and who to contact', () => {
+  assert.equal(payUnavailableCopy('Acme', 'amount_below_minimum'), payErrorCopy('amount_below_minimum', 'Acme', 409))
+  assert.match(payUnavailableCopy('', 'amount_below_minimum'), /Contact the sender of this invoice to pay another way/)
 })
 
 test('a bad link reads as an invalid link, not "invoice not found"', () => {

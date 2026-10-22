@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
@@ -828,6 +829,30 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		return nil
 	}
 
+	// Below Stripe's minimum charge: Stripe refused the amount, not the card,
+	// so no retry, card or final action can collect it. The charge path left
+	// the invoice open for the operator; recovery ends here, at this retry's
+	// instant, with no warning email and no final action (which by default
+	// pauses the subscription). The attempt stays counted: Stripe was asked.
+	if errors.Is(retryErr, domain.ErrBelowMinimumCharge) {
+		slog.Info("dunning ended — Stripe refused the amount as below its minimum charge",
+			"run_id", run.ID, "invoice_id", run.InvoiceID, "attempt", run.AttemptCount)
+		if _, eerr := s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
+			RunID:        run.ID,
+			InvoiceID:    run.InvoiceID,
+			EventType:    domain.DunningEventRetryAttempted,
+			State:        domain.DunningResolved,
+			AttemptCount: run.AttemptCount,
+			Reason:       domain.DunningRetryReasonBelowMinimum,
+			CreatedAt:    now,
+		}); eerr != nil {
+			slog.Warn("dunning: could not record the below-minimum retry on the timeline; the run still ends",
+				"run_id", run.ID, "invoice_id", run.InvoiceID, "error", eerr)
+		}
+		_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), &now)
+		return rerr
+	}
+
 	if retryErr != nil {
 		run.State = domain.DunningActive // Will retry again later
 		slog.Warn("dunning retry failed",
@@ -950,7 +975,9 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// The failure reason renders INSIDE the customer email. A no-PM retry
 	// failure is internal phrasing — mapped to empty so the warning renders
 	// without the diagnostic callout (2026-07-22 payment-surfacing audit,
-	// P2-3); real decline reasons pass through.
+	// P2-3); real decline reasons pass through as the provider's words
+	// alone: the charge path's "payment failed: " wrapper is stripped, as the
+	// timeline strips it (min-charge check 2026-10-22, finding 4.1).
 	//
 	// A card the bank refused for good (#966) gets the "use a different
 	// card" copy, on the retry that drew the decline and on every retry that
@@ -959,7 +986,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	var warnTx func(tx *sql.Tx) error
 	if run.AttemptCount < policy.MaxRetryAttempts && s.emailNotifier != nil && s.customerEmail != nil {
 		needsNewCard := cardNeedsReplacing(retryErr)
-		reason := retryErr.Error()
+		reason := activity.StripWrapper(retryErr.Error())
 		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || needsNewCard {
 			reason = ""
 		}

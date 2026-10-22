@@ -352,6 +352,13 @@ type Invoice struct {
 	// collect or the auto-charge retry sweep), checked by the sweep so a no-PM
 	// invoice is emailed exactly once, not per tick (ADR-087 follow-up).
 	NoPMNotifiedAt *time.Time `json:"no_pm_notified_at,omitempty"`
+	// BelowMinimumAt is when Stripe last refused to charge this invoice
+	// because its amount is below Stripe's minimum charge (ErrBelowMinimumCharge).
+	// The charge path stamps it with payment_status 'pending' and the
+	// auto-charge queue cleared, in one write. It stays set: an open invoice's
+	// amount due only goes down, so the fact stays true. The attention notice
+	// and the hosted page read it. Internal: the notice is the API's view.
+	BelowMinimumAt *time.Time `json:"-"`
 	// ChargeAttemptSeq seeds the Stripe charge idempotency key
 	// (payment.ChargeIdempotencyKey). It moves ONLY when a charge attempt
 	// outcome is recorded — every UPDATE that stamps stripe_payment_intent_id

@@ -39,7 +39,7 @@ export function hostedTotalRows(inv: HostedTotalsInput): HostedTotalRow[] {
 // already in flight: paying again is what the server is protecting against.
 export function payErrorCopy(code: string | undefined, seller: string, status = 0): string {
   const who = seller || 'the sender of this invoice'
-  if (status === 409 && code !== 'not_payable' && code !== 'online_payment_unavailable') {
+  if (status === 409 && code !== 'not_payable' && code !== 'online_payment_unavailable' && code !== 'amount_below_minimum') {
     return 'A payment on this invoice is already being processed, so you can\u2019t pay twice. Refresh the page in a minute.'
   }
   switch (code) {
@@ -48,6 +48,10 @@ export function payErrorCopy(code: string | undefined, seller: string, status = 
       return `Online payment isn't available for this invoice. Contact ${who} to pay another way.`
     case 'not_payable':
       return 'This invoice can no longer be paid online. Refresh the page to see its current status.'
+    // Stripe refused the amount as below its minimum charge: no card can pay
+    // it, so "try again" would be false.
+    case 'amount_below_minimum':
+      return belowMinimumCopy(who)
     case 'invalid_state':
       return 'A payment on this invoice is already being processed, so you can’t pay twice. Refresh the page in a minute.'
     default:
@@ -55,11 +59,18 @@ export function payErrorCopy(code: string | undefined, seller: string, status = 
   }
 }
 
-// unavailableCopy is the line shown in place of the Pay button when the
-// invoice is owed but can't be paid online (the seller has no payment
-// provider connected).
-export function payUnavailableCopy(seller: string): string {
-  return `Online payment isn't set up for this invoice. Contact ${seller || 'the sender of this invoice'} to arrange payment.`
+// payUnavailableCopy is the line shown in place of the Pay button when the
+// invoice is owed but can't be paid online: the amount is below Stripe's
+// minimum charge, or (any other reason) the seller has no payment provider
+// connected.
+export function payUnavailableCopy(seller: string, reason?: string): string {
+  const who = seller || 'the sender of this invoice'
+  if (reason === 'amount_below_minimum') return belowMinimumCopy(who)
+  return `Online payment isn't set up for this invoice. Contact ${who} to arrange payment.`
+}
+
+function belowMinimumCopy(who: string): string {
+  return `This amount is below the minimum for a card payment, so it can\u2019t be paid online. Contact ${who} to pay another way.`
 }
 
 // loadErrorCopy is the page shown when the link does not resolve. A 404 is

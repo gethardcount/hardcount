@@ -28,7 +28,9 @@ export interface DunningRun {
      * `action_failed` is set on a run that is still `active`. The
      * final action (pause, cancel or mark uncollectible) failed and
      * will be retried at `next_action_at`. `manually_resolved` appears
-     * only on older runs.
+     * only on older runs. `amount_below_minimum`: a charge on the
+     * invoice was refused by Stripe because the amount is below its
+     * minimum charge, so the run ended without its final action.
      */
   resolution?: DunningRunResolution;
   created_at: string;

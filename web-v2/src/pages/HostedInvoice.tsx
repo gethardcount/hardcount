@@ -655,11 +655,12 @@ export default function HostedInvoicePage() {
                 </div>
               )}
 
-            {/* Owed, but the seller has no payment provider connected: say so
-                instead of offering a Pay button that can only fail. */}
-            {data.pay_unavailable_reason === 'online_payment_unavailable' && (
+            {/* Owed, but it can't be paid online: the seller has no payment
+                provider connected, or the amount is below the card minimum.
+                Say so instead of offering a Pay button that can only fail. */}
+            {data.pay_unavailable_reason && (
               <div role="status" className="rounded-lg bg-muted px-4 py-3 text-sm text-foreground">
-                {payUnavailableCopy(seller)}
+                {payUnavailableCopy(seller, data.pay_unavailable_reason)}
               </div>
             )}
 

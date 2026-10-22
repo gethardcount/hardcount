@@ -338,6 +338,8 @@ func recoveryOutcome(res domain.DunningResolution) (string, activity.Tone, bool)
 		return "Invoice voided", activity.ToneNeutral, true
 	case domain.ResolutionInvoiceNotCollectible:
 		return "Invoice marked uncollectible", activity.ToneNeutral, true
+	case domain.ResolutionAmountBelowMinimum:
+		return "Amount below Stripe's minimum charge", activity.ToneWarning, true
 	case domain.ResolutionManuallyResolved:
 		// Legacy, no writer since 0170. The one kind of run that still holds
 		// it is one whose invoice never changed state, so neither "voided"
@@ -394,6 +396,11 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 		case evt.Reason == domain.DunningRetryReasonCardRefused:
 			l.Kind, l.Title, l.Tone = "payment_recovery.retry_not_attempted", fmt.Sprintf("Payment retry %d not attempted", evt.AttemptCount), activity.ToneWarning
 			l.Problem = "The bank refused this card for good. The customer needs to add a different card."
+		case evt.Reason == domain.DunningRetryReasonBelowMinimum:
+			// Stripe refused the amount, not the card: nothing was charged
+			// and recovery ends on it.
+			l.Kind, l.Title, l.Tone = "payment_recovery.retry_refused", fmt.Sprintf("Payment retry %d refused by Stripe", evt.AttemptCount), activity.ToneWarning
+			l.Problem = "The amount is below Stripe's minimum charge. Nothing was charged."
 		default:
 			// A real decline. The attempt row's decline code, when it is
 			// absorbed, replaces this provider text (renderChargeAttempts).

@@ -5406,6 +5406,15 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 		chargeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		if _, err := e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, hold, stripeCusID, stripePMID); err != nil {
 			cancel()
+			// Below Stripe's minimum charge: not a decline and not an error of
+			// this sweep. The charger recorded it (the invoice stays pending,
+			// out of this queue, with the operator's notice) and ended any
+			// payment recovery on it; nothing else is owed here.
+			if errors.Is(err, domain.ErrBelowMinimumCharge) {
+				slog.Info("auto-charge: Stripe refused the amount as below its minimum charge; left for the operator",
+					"invoice_id", inv.ID)
+				continue
+			}
 			// A DEFINITE failure (declined, or refused outright by Stripe):
 			// ChargeInvoice recorded payment_status='failed' AND started
 			// dunning inline (a decline through SettleFailed, which its

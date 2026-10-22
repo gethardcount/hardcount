@@ -41,7 +41,13 @@
  * When the invoice also has `payment_anomaly`, that reason stays and
  * its message asks the operator to check Stripe before any refund.
  * The disputes themselves are at `GET /v1/invoices/{id}/disputes`
- * (2026-10-19).
+ * (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+ * refused to charge because the amount is below Stripe's minimum
+ * charge ($0.50 for USD; it depends on the currency). Nothing was
+ * charged, the invoice stays `finalized` with `payment_status`
+ * `pending`, it is not charged again automatically, no dunning starts,
+ * and the customer is not emailed. The operator voids it or records a
+ * payment (2026-10-23).
  */
 export type AttentionReason = typeof AttentionReason[keyof typeof AttentionReason];
 
@@ -60,4 +66,5 @@ export const AttentionReason = {
   collection_paused: 'collection_paused',
   commit_exposure: 'commit_exposure',
   dispute_lost: 'dispute_lost',
+  amount_below_minimum: 'amount_below_minimum',
 } as const;

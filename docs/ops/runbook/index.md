@@ -58,6 +58,7 @@ row-level-security role you see only one tenant's rows, or none.
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade stopped: table lock](migration-failed-midway.md#it-waited-5s-for-a-table-lock) |
 | `velox_stripe_key_unusable_total` rising, or "Stripe refused this tenant's API key" in the logs: charges paused until the key is fixed in Settings → Payments | [Health checks, alerts and logs](monitoring.md) |
 | `velox_parked_invoices{disposition="open"}` above zero | [A charge's result is unclear: parked](unclear-charge.md#parked-no-paymentintent) |
+| An invoice notice reads "Below Stripe's minimum charge", or a customer's hosted page has no Pay button for a small amount | [An invoice is below Stripe's minimum charge](below-stripe-minimum.md) |
 | "stale charge check: can't confirm an earlier charge with Stripe" in the logs, or `velox_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [A charge's result is unclear: interrupted](unclear-charge.md#interrupted-velox-cannot-ask-stripe) |
 | An invoice says "after a lost dispute", a `payment.dispute_opened` or `payment.dispute_closed` webhook, or Stripe emails about a dispute | [Card disputes](card-disputes.md) |
 | `velox_creditnote_pending_issue_drafts` growing over days | [A charge's result is unclear: clawback drafts](unclear-charge.md#clawback-drafts-waiting) |

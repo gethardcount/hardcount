@@ -686,7 +686,10 @@ export default function InvoiceDetailPage() {
             )
           })()}
 
-          {invoiceCanCollect(invoice) && (
+          {/* Stripe refused this amount as below its minimum charge, so
+              Collect would get the same refusal; the notice offers Void and
+              names Record offline payment instead. */}
+          {invoiceCanCollect(invoice) && invoice.attention?.reason !== 'amount_below_minimum' && (
             !hasPaymentMethod ? (
               // No card → no collect. A greyed-out primary next to the
               // banner's active primary was competing noise; the banner

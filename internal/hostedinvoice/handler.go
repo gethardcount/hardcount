@@ -101,6 +101,11 @@ type StripeReadiness interface {
 // but the seller has no payment provider connected for its mode.
 const PayUnavailableOnline = "online_payment_unavailable"
 
+// PayUnavailableBelowMinimum is pay_unavailable_reason when Stripe refused to
+// charge the invoice because the amount is below its minimum charge
+// (domain.ErrBelowMinimumCharge): no card can pay it online.
+const PayUnavailableBelowMinimum = domain.BelowMinimumCode
+
 type Handler struct {
 	invoices    InvoiceResolver
 	customers   CustomerGetter
@@ -348,13 +353,14 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 
 	owed := payEnabled(inv)
 	online := owed && h.onlinePaymentReady(r.Context(), inv)
+	belowMinimum := inv.BelowMinimumAt != nil
 	respond.JSON(w, r, http.StatusOK, hostedInvoicePayload{
 		Invoice:              toViewInvoice(inv),
 		LineItems:            toViewLineItems(items),
 		BillTo:               billTo,
 		Branding:             branding,
-		PayEnabled:           owed && online,
-		PayUnavailableReason: payUnavailableReason(owed, online),
+		PayEnabled:           owed && online && !belowMinimum,
+		PayUnavailableReason: payUnavailableReason(owed, online, belowMinimum),
 		// resolveToken pinned the row's livemode onto the request ctx.
 		Livemode: postgres.Livemode(r.Context()),
 	})
@@ -376,6 +382,14 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		// honest state code so integrators know the operation was rejected.
 		respond.Error(w, r, http.StatusConflict, "invalid_request_error", "not_payable",
 			"invoice is not in a payable state")
+		return
+	}
+	if inv.BelowMinimumAt != nil {
+		// Stripe already refused this amount as below its minimum charge, so
+		// a Checkout Session for it would be refused too. The page hides Pay
+		// in this state; a direct POST gets the same answer the session
+		// create would.
+		respond.FromError(w, r, domain.ErrBelowMinimumCharge, "invoice")
 		return
 	}
 	if h.stripe == nil {
@@ -508,9 +522,14 @@ func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) bo
 }
 
 // payUnavailableReason is set only when money is owed but can't be paid
-// online, so the page can say "contact the seller" instead of nothing.
-func payUnavailableReason(owed, online bool) string {
-	if owed && !online {
+// online, so the page can say "contact the seller" instead of nothing: the
+// amount is below Stripe's minimum charge, or the seller has no payment
+// provider connected.
+func payUnavailableReason(owed, online, belowMinimum bool) string {
+	switch {
+	case owed && belowMinimum:
+		return PayUnavailableBelowMinimum
+	case owed && !online:
 		return PayUnavailableOnline
 	}
 	return ""

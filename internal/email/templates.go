@@ -186,7 +186,7 @@ func renderDunningWarningHTML(customerName, invoiceNumber string, attemptNumber,
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">We weren't able to process your payment</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
-	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">Attempt <strong style="color:#111827;">` + escape(itoa(attemptNumber)) + ` of ` + escape(itoa(maxAttempts)) + `</strong> to charge invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong> was declined.</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">Attempt <strong style="color:#111827;">` + escape(itoa(attemptNumber)) + ` of ` + escape(itoa(maxAttempts)) + `</strong> to charge invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong> didn't go through.</p>`)
 	// Surface the decline reason inline so customers can act
 	// (insufficient_funds → top up; lost_card → swap card). Empty
 	// reason = no callout, no false noise.
