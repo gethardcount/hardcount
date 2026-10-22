@@ -681,3 +681,88 @@ func TestDownRoundTrip(t *testing.T) {
 		t.Fatal("the refused Down changed the database")
 	}
 }
+
+// A Velox 0.8.x database (its tables, golang-migrate's record at 180, no
+// goose record) has no upgrade path. Migration 180 runs the baseline, which
+// stops on its first CREATE inside its transaction: a FileError, and no
+// table or record changes. goose creates its own table, with row 0 only,
+// before it runs 180; that is all the attempt leaves. Mutation: bring back
+// the adopt branch; Up then records 180 over the old tables and succeeds.
+func TestUpOnV08DatabaseStopsOnBaseline(t *testing.T) {
+	dsn, db := scratchDB(t, "velox_migrate_v08_stops")
+	ctx := context.Background()
+	if err := up(ctx, dsn, noFiles); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+	buildV08(t, db, 180, false)
+	before := fingerprint(t, db)
+
+	err := up(ctx, dsn, noFiles)
+	var fe *FileError
+	if !errors.As(err, &fe) || fe.Version != baselineVersion {
+		t.Fatalf("Up on a v0.8 database: want a FileError for 180, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "already has Velox tables but no migration record") {
+		t.Errorf("message: %v", err)
+	}
+	if n := gooseRows(t, db, baselineVersion); n != 0 {
+		t.Fatalf("goose_db_version holds %d rows for 180, want 0", n)
+	}
+	mustExec(t, db, `DROP TABLE IF EXISTS public.goose_db_version`)
+	if after := fingerprint(t, db); after != before {
+		t.Errorf("Up changed the database:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
+// Our own dev databases moved to goose and kept golang-migrate's
+// schema_migrations table. With goose at 180, that table is never read,
+// whatever it holds. Mutation: refuse a goose database that also has
+// schema_migrations; the unmarked and dirty cases then fail.
+func TestUpIgnoresOldRecordWhenGooseHas180(t *testing.T) {
+	ctx := context.Background()
+	for i, tc := range []struct {
+		name  string
+		build func(t *testing.T, db *sql.DB)
+	}{
+		{"frozen record with its comment", func(t *testing.T, db *sql.DB) {
+			writeV08Record(t, db, "public", 180, false)
+			mustExec(t, db, `COMMENT ON TABLE public.schema_migrations IS 'velox: frozen at 180; the migration record moved to public.goose_db_version'`)
+		}},
+		{"record at 180 without the comment", func(t *testing.T, db *sql.DB) {
+			writeV08Record(t, db, "public", 180, false)
+		}},
+		{"dirty record at 1", func(t *testing.T, db *sql.DB) {
+			writeV08Record(t, db, "public", 1, true)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn, db := scratchDB(t, "velox_migrate_old_record_"+string(rune('a'+i)))
+			if err := up(ctx, dsn, migrationFiles()); err != nil {
+				t.Fatalf("Up: %v", err)
+			}
+			tc.build(t, db)
+			before := fingerprint(t, db)
+			if err := up(ctx, dsn, migrationFiles()); err != nil {
+				t.Fatalf("second Up: %v", err)
+			}
+			if after := fingerprint(t, db); after != before {
+				t.Errorf("a no-op Up changed the database:\nbefore %s\nafter  %s", before, after)
+			}
+			if err := CheckSchemaReady(db); err != nil {
+				t.Fatalf("CheckSchemaReady: %v", err)
+			}
+			pool, err := openPool(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = pool.Close() }()
+			p, err := readPlan(ctx, pool, migrationFiles())
+			if err != nil {
+				t.Fatalf("readPlan: %v", err)
+			}
+			if p.State != PlanUpToDate {
+				t.Fatalf("status: state %q, want %q", p.State, PlanUpToDate)
+			}
+		})
+	}
+}
