@@ -569,7 +569,20 @@ type subscriptionPauserAdapter struct {
 }
 
 func (a *subscriptionPauserAdapter) PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (bool, error) {
-	return a.svc.PauseCollectionForDunning(ctx, tenantID, subID, invoiceID)
+	applied, err := a.svc.PauseCollectionForDunning(ctx, tenantID, subID, invoiceID)
+	return applied, dunningGraceWait(err)
+}
+
+// dunningGraceWait maps subscription's "the period is inside its invoice
+// grace" answer to dunning's SubscriptionActionNotYet, so the run waits for
+// the grace instead of counting a failed action (ADR-120 amendment
+// 2026-10-22). Every other error passes through.
+func dunningGraceWait(err error) error {
+	var inGrace *subscription.InsideInvoiceGraceError
+	if errors.As(err, &inGrace) {
+		return &dunning.SubscriptionActionNotYet{Until: inGrace.Until}
+	}
+	return err
 }
 
 // subscriptionCancelerAdapter bridges subscription.Service →
@@ -585,8 +598,10 @@ func (a *subscriptionCancelerAdapter) Cancel(ctx context.Context, tenantID, id s
 	// dunning as the driver, rather than each guessing from the absence of
 	// a request actor (ADR-090 PR4 review).
 	ctx = subscription.WithCancelOrigin(ctx, "dunning")
-	_, _, err := a.svc.Cancel(ctx, tenantID, id)
-	return err
+	// CancelForDunning, not the operator's Cancel: it waits for the invoice
+	// grace rather than closing the ended period now.
+	_, _, err := a.svc.CancelForDunning(ctx, tenantID, id)
+	return dunningGraceWait(err)
 }
 
 // subscriptionStateAdapter bridges subscription.Service →

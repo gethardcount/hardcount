@@ -1557,10 +1557,20 @@ export interface DunningRun {
   invoice_currency?: string
   // Owning sub's test-clock frozen_time when applicable. Used as the
   // "now" baseline for relative-time rendering on this row (Next
-  // Retry / Started). Missing for wall-clock runs — renderer falls
+  // step / Started). Missing for wall-clock runs — renderer falls
   // back to Date.now(). Authoritative; replaces prior heuristic.
   effective_now?: string
   test_clock_id?: string
+  // The run's policy's retry limit (list responses).
+  max_retry_attempts?: number
+}
+
+// dunningFinalStepNext: every retry is used, so next_action_at is when the
+// policy's final action (pause, cancel, write-off) runs, not a charge. The
+// run stays active there while that action waits for the invoice grace or is
+// tried again after it failed.
+export function dunningFinalStepNext(run: DunningRun): boolean {
+  return !!run.max_retry_attempts && run.attempt_count >= run.max_retry_attempts
 }
 
 export interface DunningEvent {

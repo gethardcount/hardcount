@@ -317,9 +317,9 @@ customer's time. On a test clock, that is the clock's time. The
 
 A LiteLLM proxy can send each AI call to Velox for you, with no code. Each
 call becomes token events on the `tokens` meter. LiteLLM's `user` must be
-the customer's external ID. Cache-write tokens have no `token_type` of
-their own from LiteLLM yet: for Anthropic and Bedrock, LiteLLM counts them
-as input tokens, so they are billed at your input price. See [LiteLLM
-integration](integrations/litellm.md).
+the customer's external ID. Anthropic cache writes become
+`cache_write_5m` and `cache_write_1h` events, priced by your cache-write
+rules. Failed calls and LiteLLM response-cache hits are not billed. See
+[LiteLLM integration](integrations/litellm.md).
 
 Next: [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md).

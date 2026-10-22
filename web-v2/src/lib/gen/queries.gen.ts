@@ -16564,13 +16564,15 @@ export const getIngestLitellmSpendUrl = () => {
  * Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
  * one LiteLLM log record, a JSON array of records, or
  * `{"events": [...]}`. Each completion, chat, text-completion or
- * embedding record becomes up to three usage events on the `tokens`
+ * embedding record becomes up to five usage events on the `tokens`
  * meter, one per `token_type` dimension: `input` (prompt tokens not
- * read from cache), `cache_read` and `output`. Each event also carries
- * `model` (a model family name when recognised), `model_raw` and
- * `provider`, plus `team_id` and `request_tags` from `metadata` when
- * present. Other call types, and records with no token counts, are
- * counted as `skipped`.
+ * read from or written to the cache), `cache_read`, `cache_write_5m`,
+ * `cache_write_1h` and `output`. A record's events are recorded in
+ * one transaction. Each event also carries `model` (a model family
+ * name when recognised), `model_raw` and `provider`, plus `team_id`
+ * and `request_tags` from `metadata` when present. Other call types,
+ * records with no token counts, failed calls and LiteLLM
+ * response-cache hits are counted as `skipped`.
  *
  * The customer is the record's `user` or `end_user` (or
  * `metadata.user_api_key_end_user_id`), matched against the

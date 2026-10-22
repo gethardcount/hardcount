@@ -7,7 +7,16 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { LitellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails } from './litellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails';
 
 export type LitellmSpendLogUsagePromptTokensDetails = {
   cached_tokens?: number;
+  cache_creation_tokens?: number;
+  /**
+     * Anthropic's cache writes by cache lifetime. They become
+     * `cache_write_5m` and `cache_write_1h` events, taken out
+     * of `input`. Without this split, or when it does not add
+     * up to the cache-write count, the writes stay in `input`.
+     */
+  cache_creation_token_details?: LitellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails;
 };

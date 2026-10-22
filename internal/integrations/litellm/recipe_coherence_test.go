@@ -28,9 +28,9 @@ var noCachePublished = map[string]bool{
 // TestModelFamilies_EveryTokenPricedByARecipe pins mapper↔recipe coherence
 // on BOTH axes: every recipe token the mapper can emit on the `model`
 // dimension must have a pricing rule for every token_type the mapper can
-// emit (input, output, cache_read — cache_write is deferred, see MapPayload)
-// — or traffic on that (family, role) ingests fine and then silently
-// doesn't bill at cycle close. The original version of this test checked
+// emit for it (input, output, cache_read, and for Anthropic families
+// cache_write_5m and cache_write_1h) — or traffic on that (family, role)
+// ingests fine and then silently doesn't bill at cycle close. The original version of this test checked
 // only the model axis, which let a family with an input rule but no output
 // rule pass while half its revenue leaked.
 //
@@ -38,9 +38,10 @@ var noCachePublished = map[string]bool{
 // is a wildcard: it matches any role, so it covers the family completely.
 //
 // Direction matters: mapper tokens ⊆ recipe rules. The reverse (recipe
-// prices a family the mapper doesn't detect, or a role it doesn't emit,
-// like Anthropic's cache_write tiers) is harmless — direct API ingest can
-// still use it.
+// prices a family the mapper doesn't detect, or a role it doesn't emit) is
+// harmless — direct API ingest can still use it. The write roles are
+// required for Anthropic families only: an OpenAI record carries no
+// cache_creation split, so the mapper never emits them for OpenAI traffic.
 func TestModelFamilies_EveryTokenPricedByARecipe(t *testing.T) {
 	// recipeRoles parses a recipe YAML into model → set of priced
 	// token_types, with the empty string standing for a wildcard rule.
@@ -78,13 +79,16 @@ func TestModelFamilies_EveryTokenPricedByARecipe(t *testing.T) {
 	// The roles MapPayload can emit — keep in sync with the TokenType*
 	// constants and the emission sites in mapper.go.
 	mapperRoles := []string{TokenTypeInput, TokenTypeOutput, TokenTypeCacheRead}
+	anthropicWriteRoles := []string{TokenTypeCacheWrite5m, TokenTypeCacheWrite1h}
 
 	for _, f := range modelFamilies {
 		var roles map[string]map[string]bool
 		var where string
+		familyRoles := mapperRoles
 		switch {
 		case strings.HasPrefix(f.recipeToken, "claude-"):
 			roles, where = anthropic, "anthropic_style.yaml"
+			familyRoles = append(append([]string{}, mapperRoles...), anthropicWriteRoles...)
 		case strings.HasPrefix(f.recipeToken, "gpt-"),
 			strings.HasPrefix(f.recipeToken, "o1"),
 			strings.HasPrefix(f.recipeToken, "o3"),
@@ -103,7 +107,7 @@ func TestModelFamilies_EveryTokenPricedByARecipe(t *testing.T) {
 		if priced[""] {
 			continue // wildcard rule (no token_type) covers every role
 		}
-		for _, role := range mapperRoles {
+		for _, role := range familyRoles {
 			if role == TokenTypeCacheRead && noCachePublished[f.recipeToken] {
 				continue
 			}

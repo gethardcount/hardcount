@@ -289,6 +289,7 @@ export * from './litellmSpendLogCostBreakdown';
 export * from './litellmSpendLogMetadata';
 export * from './litellmSpendLogUsage';
 export * from './litellmSpendLogUsagePromptTokensDetails';
+export * from './litellmSpendLogUsagePromptTokensDetailsCacheCreationTokenDetails';
 export * from './litellmSpendResult';
 export * from './litellmSpendResultErrorsItem';
 export * from './marginReport';

@@ -43,7 +43,7 @@ Each LiteLLM call maps to up to two Velox usage events on the single `tokens` me
 | `user`                | (resolves to `external_customer_id`)           | (same)                                          |
 | `id`                  | `idempotency_key = id + ":input"`              | `idempotency_key = id + ":output"`              |
 
-Cache roles (`cache_read`, `cache_write_5m`, `cache_write_1h`) are a fast-follow once the payload parser reads `prompt_tokens_details.cached_tokens` / Anthropic `cache_creation` and normalizes them to additive-disjoint quantities (ADR-044).
+Cache roles (`cache_read`, `cache_write_5m`, `cache_write_1h`) are emitted too, as additive-disjoint quantities taken out of `input`: `cache_read` from `prompt_tokens_details.cached_tokens`, and the two write roles from `prompt_tokens_details.cache_creation_token_details` (ADR-044, amended 2026-10-22). Failed calls (`status: failure`) and LiteLLM response-cache hits (`cache_hit: true`) emit nothing.
 
 ### Customer resolution
 
@@ -99,7 +99,9 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > The 200 counts such rows in `after_close`, and
 > `velox_usage_after_close_total` counts them with a WARN line each
 > (ADR-120 amendment 2026-10-22). A row that comes back as
-> `deduplicated` is never counted.
+> `deduplicated` is never counted. A call first saved before the
+> cache-write split is written the old way, and only the old-way rows
+> that call writes are counted.
 
 ### What's NOT in scope (deferred)
 

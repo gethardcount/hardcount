@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, type DunningRun, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
+import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, dunningFinalStepNext, type DunningRun, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
 import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { IssueCreditDialog } from '@/components/IssueCreditDialog'
@@ -1772,6 +1772,10 @@ function OperatorContextCard({
               // has escalated, drop the future-step line entirely. Real
               // decline recovery (has-card) keeps "Next retry". attempt 0 is
               // humanized to match the Dunning list's "No retries yet" (P2-2).
+              // With every retry used, the scheduled step is the final
+              // action (waiting for the invoice grace, or tried again after
+              // it failed), never a charge: "Final step", not "Next retry".
+              const finalStep = dunningFinalStepNext(dunningRun)
               const cardless =
                 invoice.attention?.reason === 'no_payment_method' ||
                 invoice.attention?.reason === 'dunning_exhausted'
@@ -1790,10 +1794,13 @@ function OperatorContextCard({
 
                   {dunningRun.next_action_at && !escalated && (
                     <>
-                      <dt className="text-xs text-muted-foreground">{cardless ? 'Next reminder' : 'Next retry'}</dt>
+                      <dt className="text-xs text-muted-foreground">{finalStep ? 'Final step' : cardless ? 'Next reminder' : 'Next retry'}</dt>
                       <dd className="text-foreground">
                         {formatDateTime(dunningRun.next_action_at)}
-                        {cardless && (
+                        {finalStep && (
+                          <span className="block text-xs text-muted-foreground">All retries used. No more charges; the dunning policy's final action runs then.</span>
+                        )}
+                        {cardless && !finalStep && (
                           <span className="block text-xs text-muted-foreground">Won't charge until a card is added.</span>
                         )}
                         {invoice.attention?.code === 'payment.page_open' && (

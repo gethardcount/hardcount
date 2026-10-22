@@ -264,10 +264,6 @@ func markAfterClose(ctx context.Context, event *domain.UsageEvent, class Class) 
 	recordAfterClose(ctx, *event)
 }
 
-// prepare runs the full per-event validation + timestamp resolution and
-// composes the domain row, WITHOUT writing it. Split from ingest so
-// BatchIngest can validate every event up front and then hand the whole
-// slice to one store transaction (all-or-nothing).
 // lateUsageEvents counts events, other than backfills, whose timestamp is
 // more than 24h before the customer's effective now when they arrive, and
 // logs a WARN for each. That is all it measures. It is a proxy for "missed
@@ -296,15 +292,46 @@ func init() {
 	}
 }
 
+// prepare runs the full per-event validation + timestamp resolution and
+// composes the domain row, WITHOUT writing it, then records the event as
+// late if it is. Split from ingest so BatchIngest can validate every event
+// up front and then hand the whole slice to one store transaction
+// (all-or-nothing).
 func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, error) {
+	ev, late, err := s.build(ctx, tenantID, input, origin)
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
+	if late {
+		recordLate(ctx, ev)
+	}
+	return ev, nil
+}
+
+// recordLate counts and logs one late event (see lateUsageEvents).
+func recordLate(ctx context.Context, ev domain.UsageEvent) {
+	lateUsageEvents.WithLabelValues(string(ev.Origin)).Inc()
+	slog.WarnContext(ctx, "late usage event (>24h past) — may fall in an already-finalized period and go unbilled",
+		"customer_id", ev.CustomerID,
+		"meter_id", ev.MeterID,
+		"timestamp", ev.Timestamp,
+		"origin", string(ev.Origin),
+	)
+}
+
+// build is prepare without recording anything: it validates the event,
+// resolves its timestamp and composes the row, and reports whether the row
+// is late. A caller that builds rows it may not write (IngestCall builds a
+// call's two mappings and writes one) records only the rows it wrote.
+func (s *Service) build(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, bool, error) {
 	if strings.TrimSpace(input.CustomerID) == "" {
-		return domain.UsageEvent{}, errs.Required("customer_id")
+		return domain.UsageEvent{}, false, errs.Required("customer_id")
 	}
 	if strings.TrimSpace(input.MeterID) == "" {
-		return domain.UsageEvent{}, errs.Required("meter_id")
+		return domain.UsageEvent{}, false, errs.Required("meter_id")
 	}
 	if err := validateDimensions(input.Dimensions); err != nil {
-		return domain.UsageEvent{}, err
+		return domain.UsageEvent{}, false, err
 	}
 	// quantity == 0 (absent or explicit) stays 0 — PRESENCE semantics.
 	// The old code silently coerced it to 1: an integrator emitting
@@ -321,7 +348,7 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 	// fractional precision beyond 12 places is rounded by the column, not an
 	// error, so only the integer magnitude is gated.)
 	if input.Quantity.Abs().Cmp(maxQuantityMagnitude) >= 0 {
-		return domain.UsageEvent{}, errs.Invalid("quantity", "magnitude too large — must be less than 10^26")
+		return domain.UsageEvent{}, false, errs.Invalid("quantity", "magnitude too large — must be less than 10^26")
 	}
 
 	// "Now" is the CUSTOMER's effective now — a test clock's frozen_time
@@ -342,7 +369,7 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 		// in a future billing period. Backfill applies its own stricter
 		// past-only gate before reaching here.
 		if input.Timestamp.After(now.Add(usageFutureSkew)) {
-			return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future")
+			return domain.UsageEvent{}, false, errs.Invalid("timestamp", "must not be in the future")
 		}
 		ts = input.Timestamp.UTC()
 	}
@@ -358,17 +385,9 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 	// invoice. Velox does not refuse late events (refusing would break
 	// retries and stream pipelines) and does not move them onto a later
 	// invoice; it flags them (billing_status "after_close", open_period.go).
-	// The counter below is a proxy (see lateUsageEvents), not a report of
-	// missed events.
-	if origin != domain.UsageOriginBackfill && ts.Before(now.Add(-24*time.Hour)) {
-		lateUsageEvents.WithLabelValues(string(origin)).Inc()
-		slog.WarnContext(ctx, "late usage event (>24h past) — may fall in an already-finalized period and go unbilled",
-			"customer_id", input.CustomerID,
-			"meter_id", input.MeterID,
-			"timestamp", ts,
-			"origin", string(origin),
-		)
-	}
+	// The late flag below feeds a counter that is a proxy (see
+	// lateUsageEvents), not a report of missed events.
+	late := origin != domain.UsageOriginBackfill && ts.Before(now.Add(-24*time.Hour))
 	return domain.UsageEvent{
 		CustomerID:     input.CustomerID,
 		MeterID:        input.MeterID,
@@ -381,7 +400,7 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 		// over the rate table or is replaced by the table's figure on
 		// RETURNING. Nil leaves the phase-1 behaviour untouched.
 		ProviderCostMicros: input.ObservedCostMicros,
-	}, nil
+	}, late, nil
 }
 
 // BatchResult is what one batch wrote.

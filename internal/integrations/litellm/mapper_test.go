@@ -26,7 +26,7 @@ func TestMapPayload_HappyPath(t *testing.T) {
 		EndTime:   1700000003.456,
 	}
 
-	out, err := MapPayload(p)
+	out, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestMapPayload_CacheRead(t *testing.T) {
 			CacheReadInputTokens: 7277,
 		},
 	}
-	out, err := MapPayload(p)
+	out, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -170,34 +170,6 @@ func TestMapPayload_CacheRead(t *testing.T) {
 	}
 }
 
-// TestMapPayload_CacheWriteDeferred: cache-write (cache_creation) tokens are
-// NOT yet emitted as events (LiteLLM exposes no 5m/1h TTL split). The fully-
-// cached-write call (cached_tokens=0, cache_creation>0) emits only output here.
-func TestMapPayload_CacheWriteDeferred(t *testing.T) {
-	p := StandardLoggingPayload{
-		ID: "w1", CallType: "completion", User: "cus_x",
-		Model: "claude-3-5-sonnet-20241022", CustomLLMProvider: "anthropic",
-		Usage: &Usage{
-			PromptTokens:             19, // prompt_tokens excludes cache_creation
-			CompletionTokens:         400,
-			CacheCreationInputTokens: 7277,
-		},
-	}
-	out, err := MapPayload(p)
-	if err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-	for _, e := range out {
-		if e.Dimensions["token_type"] == "cache_write" || e.Dimensions["token_type"] == "cache_write_5m" || e.Dimensions["token_type"] == "cache_write_1h" {
-			t.Errorf("cache-write should be deferred (not emitted), got event token_type=%v", e.Dimensions["token_type"])
-		}
-	}
-	// input (19) + output (400) only.
-	if len(out) != 2 {
-		t.Errorf("expected 2 events (input + output; cache-write deferred), got %d", len(out))
-	}
-}
-
 func TestMapPayload_NonTokenBearingSkipped(t *testing.T) {
 	cases := []string{"image_generation", "moderation", "speech", "transcription"}
 	for _, ct := range cases {
@@ -205,7 +177,7 @@ func TestMapPayload_NonTokenBearingSkipped(t *testing.T) {
 			ID: "x", CallType: ct, User: "cus_x",
 			Usage: &Usage{PromptTokens: 100},
 		}
-		out, err := MapPayload(p)
+		out, err := mapEvents(p)
 		if err != nil {
 			t.Errorf("%s: unexpected: %v", ct, err)
 		}
@@ -220,7 +192,7 @@ func TestMapPayload_MissingUser(t *testing.T) {
 		ID: "x", CallType: "completion", User: "",
 		Usage: &Usage{PromptTokens: 100},
 	}
-	_, err := MapPayload(p)
+	_, err := mapEvents(p)
 	if !errors.Is(err, ErrMissingUser) {
 		t.Fatalf("expected ErrMissingUser, got %v", err)
 	}
@@ -233,7 +205,7 @@ func TestMapPayload_ZeroTokens(t *testing.T) {
 		ID: "x", CallType: "completion", User: "cus_x",
 		Usage: &Usage{PromptTokens: 0, CompletionTokens: 0},
 	}
-	out, err := MapPayload(p)
+	out, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -251,7 +223,7 @@ func TestMapPayload_EmbeddingOnlyPromptTokens(t *testing.T) {
 		CustomLLMProvider: "openai",
 		Usage:             &Usage{PromptTokens: 500, CompletionTokens: 0},
 	}
-	out, err := MapPayload(p)
+	out, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -276,7 +248,7 @@ func TestMapPayload_CostBreakdownSurfaced(t *testing.T) {
 			TotalCost:  0.057,
 		},
 	}
-	out, _ := MapPayload(p)
+	out, _ := mapEvents(p)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(out))
 	}
@@ -298,7 +270,7 @@ func TestMapPayload_TimestampFromEndTime(t *testing.T) {
 		StartTime: 1700000000,
 		EndTime:   1700000003.5,
 	}
-	out, _ := MapPayload(p)
+	out, _ := mapEvents(p)
 	if len(out) == 0 {
 		t.Fatal("expected at least one event")
 	}
@@ -322,7 +294,7 @@ func TestMapPayload_RequestTagsListBecomesScalar(t *testing.T) {
 		Usage:    &Usage{PromptTokens: 10, CompletionTokens: 5},
 		Metadata: map[string]any{"request_tags": []any{"prod", "batch"}},
 	}
-	out, err := MapPayload(p)
+	out, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -340,7 +312,7 @@ func TestMapPayload_RequestTagsListBecomesScalar(t *testing.T) {
 	}
 	// Scalar tags still pass through untouched.
 	p.Metadata = map[string]any{"request_tags": "prod"}
-	out, err = MapPayload(p)
+	out, err = mapEvents(p)
 	if err != nil {
 		t.Fatalf("map scalar: %v", err)
 	}
@@ -364,7 +336,7 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 	}
 
 	t.Run("no start/end leaves nil timestamp (service applies frozen_time)", func(t *testing.T) {
-		out, err := MapPayload(base) // StartTime/EndTime both zero
+		out, err := mapEvents(base) // StartTime/EndTime both zero
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
 		}
@@ -381,7 +353,7 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 	t.Run("EndTime is used verbatim, not wall-clock", func(t *testing.T) {
 		p := base
 		p.EndTime = 1700000003.456
-		out, err := MapPayload(p)
+		out, err := mapEvents(p)
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
 		}
@@ -396,7 +368,7 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 	t.Run("only StartTime present uses StartTime", func(t *testing.T) {
 		p := base
 		p.StartTime = 1700000000.1
-		out, err := MapPayload(p)
+		out, err := mapEvents(p)
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
 		}
@@ -417,7 +389,13 @@ func TestMapPayload_MissingID(t *testing.T) {
 		ID: "", CallType: "completion", User: "acme",
 		Usage: &Usage{PromptTokens: 100, CompletionTokens: 10},
 	}
-	if _, err := MapPayload(p); !errors.Is(err, ErrMissingID) {
+	if _, err := mapEvents(p); !errors.Is(err, ErrMissingID) {
 		t.Fatalf("expected ErrMissingID, got %v", err)
 	}
+}
+
+// mapEvents is MapPayload's events, for the tests that only look at them.
+func mapEvents(p StandardLoggingPayload) ([]ExternalIngest, error) {
+	m, err := MapPayload(p)
+	return m.Events, err
 }
