@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -29,6 +30,18 @@ type RatingTier struct {
 	UnitAmountCents decimal.Decimal `json:"unit_amount_cents"`
 }
 
+// RatingTiers is a rule's graduated tiers. It marshals as [] when there are
+// none: a flat or package rule, whose stored tiers read back as nil, sent
+// null, and strict clients type the field as an array.
+type RatingTiers []RatingTier
+
+func (t RatingTiers) MarshalJSON() ([]byte, error) {
+	if t == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]RatingTier(t))
+}
+
 type RatingRuleLifecycle string
 
 const (
@@ -52,7 +65,7 @@ type RatingRuleVersion struct {
 	// and PackageAmountCents stay whole int64 — a package is a fixed fee for a
 	// whole block, not a per-unit rate.
 	FlatAmountCents        decimal.Decimal `json:"flat_amount_cents"`
-	GraduatedTiers         []RatingTier    `json:"graduated_tiers"`
+	GraduatedTiers         RatingTiers     `json:"graduated_tiers"`
 	PackageSize            int64           `json:"package_size"`
 	PackageAmountCents     int64           `json:"package_amount_cents"`
 	OverageUnitAmountCents decimal.Decimal `json:"overage_unit_amount_cents"`

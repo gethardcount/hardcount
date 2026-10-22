@@ -97,7 +97,9 @@ const subCols = `id, tenant_id, code, display_name, customer_id, status, billing
 	billing_next_attempt_at, COALESCE(billing_last_error,''),
 	created_at, updated_at`
 
-const itemCols = `id, tenant_id, subscription_id, plan_id, quantity, metadata,
+// itemCols reads an empty metadata object ('{}', the column default) as NULL,
+// so an item with no metadata leaves the field out of the JSON.
+const itemCols = `id, tenant_id, subscription_id, plan_id, quantity, NULLIF(metadata, '{}'::jsonb),
 	COALESCE(pending_plan_id,''), pending_plan_effective_at, plan_changed_at,
 	created_at, updated_at`
 
@@ -338,6 +340,46 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 		}
 	}
 	return subs, total, nil
+}
+
+// ListByTestClock returns the subscriptions pinned to a test clock, oldest
+// first, in the same shape List returns (items and thresholds hydrated).
+// It backs GET /v1/test-clocks/{id}/subscriptions. Capped at 1000 rows,
+// far above the handful of subscriptions a simulation holds.
+func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID string) ([]domain.Subscription, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
+		WHERE s.test_clock_id = $1
+		ORDER BY s.created_at ASC, s.id ASC LIMIT 1000
+	`, clockID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var subs []domain.Subscription
+	for rows.Next() {
+		var sub domain.Subscription
+		if err := scanSubRow(rows, &sub); err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range subs {
+		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
+			return nil, err
+		}
+	}
+	return subs, nil
 }
 
 func cancelSpec() transitionSpec {
@@ -2897,7 +2939,7 @@ func hydrateThresholds(ctx context.Context, tx *sql.Tx, sub *domain.Subscription
 
 func scanItemDest(it *domain.SubscriptionItem) []any {
 	return []any{
-		&it.ID, &it.TenantID, &it.SubscriptionID, &it.PlanID, &it.Quantity, &it.Metadata,
+		&it.ID, &it.TenantID, &it.SubscriptionID, &it.PlanID, &it.Quantity, (*[]byte)(&it.Metadata),
 		&it.PendingPlanID, &it.PendingPlanEffectiveAt, &it.PlanChangedAt,
 		&it.CreatedAt, &it.UpdatedAt,
 	}
