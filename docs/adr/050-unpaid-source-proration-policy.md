@@ -198,9 +198,12 @@ The **net-credit** side no longer reads the base invoice. It credits through
 same rule as a cancel or swap (ADR-118 amendment 2026-10-22): the invoices
 that charged the item, newest first. An unpaid invoice's share is still an
 adjustment that reduces what it asks for, capped at amount due plus credits
-applied; a paid invoice's share is still a balance credit. Before, an unpaid
+applied (and at total − already credited); a paid invoice's share is still a
+balance credit. Before, an unpaid
 base sent the whole credit to the base invoice alone
 (`settleUnpaidSourceProration`, now deleted), so an upgrade invoice paid
 while an async base charge was processing was never credited when that charge
-later failed. `ProrationDetail.Type` is `"adjustment"` when no share is on a
-paid invoice, otherwise `"credit"`.
+later failed. `ProrationDetail.Type` is `"credit"` when any share goes to
+the balance (a paid invoice, or one whose charge is in flight, which normally
+succeeds), otherwise `"adjustment"`. A credit that went both ways records the
+open-invoice part as `adjusted_cents`, and the timeline shows both parts.

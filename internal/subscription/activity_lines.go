@@ -383,13 +383,16 @@ func prorationSegment(meta map[string]any, lb lineLabels) activity.Segment {
 		if amt == 0 && limitedCredit(meta) {
 			return activity.Segment{activity.T("No credit: the invoices had nothing left to credit")}
 		}
-		seg = activity.Segment{activity.T("Credit "), money}
-	case "adjustment":
-		if id := metaString(meta, "adjusted_invoice_id"); lb.invoices[id] != "" {
-			seg = activity.Segment{activity.T("Open invoice "), activity.L(activity.LinkInvoice, id, lb.invoices[id]), activity.T(" adjusted by "), money}
+		// Part of the credit may have reduced an open invoice instead of
+		// reaching the balance: show each part.
+		if adj, ok := metaInt(meta, "adjusted_cents"); ok && adj > 0 && adj < amt {
+			seg = activity.Segment{activity.T("Credit "), activity.M(amt-adj, metaString(meta, "currency")), activity.T(", ")}
+			seg = append(seg, adjustedSegment(meta, lb, false, activity.M(adj, metaString(meta, "currency")))...)
 		} else {
-			seg = activity.Segment{activity.T("Open invoice adjusted by "), money}
+			seg = activity.Segment{activity.T("Credit "), money}
 		}
+	case "adjustment":
+		seg = adjustedSegment(meta, lb, true, money)
 	default:
 		return nil
 	}
@@ -397,6 +400,23 @@ func prorationSegment(meta map[string]any, lb lineLabels) activity.Segment {
 		seg = append(seg, activity.T(" (limited to what the invoices had left)"))
 	}
 	return seg
+}
+
+// adjustedSegment is "Open invoice VLX-000120 adjusted by $54.44": the open
+// invoice the credit reduced, linked when there is exactly one, or "2 open
+// invoices adjusted by …" when it reduced several.
+func adjustedSegment(meta map[string]any, lb lineLabels, first bool, money activity.Part) activity.Segment {
+	open := "open invoice"
+	if first {
+		open = "Open invoice"
+	}
+	if n, ok := metaInt(meta, "adjusted_invoice_count"); ok && n > 1 {
+		return activity.Segment{activity.T(fmt.Sprintf("%d open invoices adjusted by ", n)), money}
+	}
+	if id := metaString(meta, "adjusted_invoice_id"); lb.invoices[id] != "" {
+		return activity.Segment{activity.T(open + " "), activity.L(activity.LinkInvoice, id, lb.invoices[id]), activity.T(" adjusted by "), money}
+	}
+	return activity.Segment{activity.T(open + " adjusted by "), money}
 }
 
 // limitedCredit reports a row whose credit for unused time did not fit in the

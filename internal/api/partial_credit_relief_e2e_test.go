@@ -137,6 +137,9 @@ func TestE2E_RemoveItemAfterPartialCredit_GivesBackWhatFits(t *testing.T) {
 	if n, sum := r.creditNotesOn(invID), r.creditNoteTotalOn(invID); n != 2 || sum != 4000 {
 		t.Errorf("%d notes summing to %dc, want 2 summing to 4000c (the 3600c note and a 400c credit)", n, sum)
 	}
+	if got := r.auditInt(string(domain.AuditActionUpdate), "uncredited_cents"); got != 267 {
+		t.Errorf("removal audit uncredited_cents = %d, want 267 (667c owed, 400c fit)", got)
+	}
 }
 
 // TestE2E_CrossIntervalSwapAfterPartialCredit_GivesBackWhatFits: plan A
@@ -155,6 +158,9 @@ func TestE2E_CrossIntervalSwapAfterPartialCredit_GivesBackWhatFits(t *testing.T)
 		map[string]any{"new_plan_id": r.planY, "immediate": true}, http.StatusOK)
 	if n, sum := r.creditNotesOn(invID), r.creditNoteTotalOn(invID); n != 2 || sum != 3000 {
 		t.Errorf("%d notes summing to %dc on April's invoice, want 2 summing to 3000c (the 2500c note and a 500c relief)", n, sum)
+	}
+	if got := r.auditInt(domain.AuditActionSubscriptionItemUpdated, "uncredited_cents"); got != 1000 {
+		t.Errorf("swap audit uncredited_cents = %d, want 1000 (1500c owed, 500c fit)", got)
 	}
 }
 

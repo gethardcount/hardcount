@@ -2180,8 +2180,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		return nil, fmt.Errorf("proration spec resolved no plan; cannot price item mutation")
 	}
 
-	// Industry-standard gates on immediate proration emission. Two
-	// scenarios must NOT produce an immediate invoice or credit grant:
+	// Two rules shape immediate proration:
 	//
 	// (1) effective plan is in_arrears: the customer hasn't paid for
 	//     the current period yet (in_arrears bills at cycle close).
@@ -2195,16 +2194,15 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	//     plan/qty actually in effect for it — accurate per-segment, no
 	//     double-counting and no phantom credit.
 	//
-	// (2) effective plan is in_advance BUT the source invoice for the
-	//     current period was not paid: the would-be credit is against
-	//     money the customer never put in (Chargebee "Adjustment" credit
-	//     case; Stripe explicitly warns about this). Skip immediate
-	//     emission; if the operator wants to settle, void the unpaid
-	//     invoice or wait for dunning.
+	// (2) effective plan is in_advance BUT an invoice that charged the
+	//     period is unpaid: a credit must not become a refundable balance
+	//     for money the customer never put in (Chargebee "Adjustment"
+	//     credit case). The credit reduces what that invoice still asks
+	//     for instead (creditUnusedTime), and a net charge against an
+	//     unpaid base invoice is refused (ADR-050).
 	//
-	// Both gates are silent-defer (logged at info, no error). The
-	// downstream item change itself still applies — just no proration
-	// artifact.
+	// Rule (1) is a silent defer (logged at info, no error): the item
+	// change itself still applies, with no proration artifact.
 	if effectivePlan.BaseBillTiming != domain.BillInAdvance {
 		slog.InfoContext(ctx, "item proration deferred: in_arrears plan; cycle close bills segment-aware",
 			"subscription_id", sub.ID,
@@ -2653,7 +2651,8 @@ func unpaidSourceBlocksCharge(ctx context.Context, sub domain.Subscription, spec
 // charged this item, newest first, each capped at its room. A paid invoice's
 // share goes to the customer's balance; an unpaid one's reduces what it still
 // asks for (ADR-050: never a refundable credit for money not paid); an
-// in-flight one's is held by Issue until the charge settles (ADR-059). Each
+// in-flight one's is held by Issue until the charge settles (ADR-059) and
+// counts as a balance credit, the usual outcome. Each
 // share is a tax-reversing adjustment credit note on its own invoice (ADR-048).
 //
 // Read-only: it records the shares on the detail. The atomic caller writes
@@ -2701,13 +2700,14 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 			WithCode("funding_invoice_tax_pending")
 	}
 
-	// "credit" when any share goes to the balance, "adjustment" when every
-	// share only reduces what an open invoice asks for.
+	// "credit" when any share goes to the balance (paid, or a charge in
+	// flight), "adjustment" when every share only reduces what an open invoice
+	// asks for.
 	detail.Type = "adjustment"
 	var gross int64
 	for _, sh := range shares {
 		gross += sh.GrossCents
-		if sh.Paid {
+		if sh.ToBalance {
 			detail.Type = "credit"
 		}
 	}
@@ -2964,10 +2964,25 @@ func addProrationMeta(payload map[string]any, detail *ProrationDetail, currency 
 	if detail.InvoiceID != "" {
 		payload["proration_invoice_id"] = detail.InvoiceID
 	}
-	// An adjustment reduces the open invoice the change was billed on; the
-	// activity line links it (ADR-128 rule 8).
-	if detail.Type == "adjustment" && len(detail.ClawbackPieces) > 0 {
-		payload["adjusted_invoice_id"] = detail.ClawbackPieces[0].InvoiceID
+	// The part that reduced open invoices rather than reaching the balance.
+	// The activity line links the invoice when there is one (ADR-128 rule 8),
+	// and a credit that went both ways shows both parts.
+	var adjustedCents int64
+	var adjusted []string
+	for _, p := range detail.ClawbackPieces {
+		if !p.ToBalance {
+			adjustedCents += p.GrossCents
+			adjusted = append(adjusted, p.InvoiceID)
+		}
+	}
+	switch {
+	case len(adjusted) == 1:
+		payload["adjusted_invoice_id"] = adjusted[0]
+	case len(adjusted) > 1:
+		payload["adjusted_invoice_count"] = len(adjusted)
+	}
+	if detail.Type == "credit" && adjustedCents > 0 {
+		payload["adjusted_cents"] = adjustedCents
 	}
 	// Unused time the invoices had no room left for: not owed, recorded so the
 	// line can say the credit was limited (ADR-118 amendment 2026-10-22).

@@ -73,13 +73,13 @@ func TestAllocateUnusedCredit(t *testing.T) {
 			want: []CreditShare{{"up", 300, true}, {"base", 1367, true}},
 		},
 		{
-			name: "in flight is capped like paid, not by what is due",
+			name: "in flight is capped like paid, not by what is due, and goes to the balance",
 			sources: []Invoice{func() Invoice {
 				b := base
 				b.PaymentStatus, b.AmountDueCents = PaymentProcessing, 0
 				return b
 			}()}, net: 2500,
-			want: []CreditShare{{"base", 2500, false}},
+			want: []CreditShare{{"base", 2500, true}},
 		},
 		{
 			name: "unpaid room is what is due plus credits applied",
@@ -89,6 +89,18 @@ func TestAllocateUnusedCredit(t *testing.T) {
 				return u
 			}()}, itemID: "item_a", net: 1667,
 			want: []CreditShare{{"up", 900, false}, {"base", 767, true}},
+		},
+		{
+			// A note drafted while the charge was in flight is held until the
+			// reconciler issues it, so it has not reduced what is due yet. The
+			// credit-note writer counts it; the room must too.
+			name: "unpaid room leaves out notes not issued yet",
+			sources: []Invoice{base, func() Invoice {
+				u := up
+				u.PaymentStatus, u.AmountDueCents = PaymentFailed, 1500
+				return u
+			}()}, credited: map[string]int64{"up": 467}, itemID: "item_a", net: 1733,
+			want: []CreditShare{{"up", 1033, false}, {"base", 700, true}},
 		},
 		{
 			name:    "an invoice with no room is skipped",

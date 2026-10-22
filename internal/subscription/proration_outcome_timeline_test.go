@@ -41,6 +41,36 @@ func TestAddProrationMeta_StampsOutcome(t *testing.T) {
 			t.Errorf("adjustment must stamp adjusted_invoice_id: %+v", p)
 		}
 	})
+	// A credit that went partly to the balance and partly to an open invoice
+	// records the open-invoice part, so the line can show both (T2's state:
+	// $15.00 off the unpaid upgrade invoice, $1.67 to the balance).
+	t.Run("a mixed credit records the open-invoice part", func(t *testing.T) {
+		p := map[string]any{}
+		addProrationMeta(p, &ProrationDetail{Type: "credit", AmountCents: 1667, ClawbackPieces: []domain.CreditShare{
+			{InvoiceID: "inv_up", GrossCents: 1500}, {InvoiceID: "inv_base", GrossCents: 167, ToBalance: true}}}, "USD")
+		if p["adjusted_invoice_id"] != "inv_up" || p["adjusted_cents"] != int64(1500) {
+			t.Errorf("mixed credit must stamp the unpaid invoice and its 1500c: %+v", p)
+		}
+	})
+	t.Run("a credit wholly to the balance records no adjustment", func(t *testing.T) {
+		p := map[string]any{}
+		addProrationMeta(p, &ProrationDetail{Type: "credit", AmountCents: 1667, ClawbackPieces: []domain.CreditShare{
+			{InvoiceID: "inv_up", GrossCents: 1500, ToBalance: true}, {InvoiceID: "inv_base", GrossCents: 167, ToBalance: true}}}, "USD")
+		if _, has := p["adjusted_cents"]; has {
+			t.Errorf("all-balance credit must not stamp adjusted_cents: %+v", p)
+		}
+		if _, has := p["adjusted_invoice_id"]; has {
+			t.Errorf("all-balance credit must not stamp adjusted_invoice_id: %+v", p)
+		}
+	})
+	t.Run("two open invoices: no single invoice is named", func(t *testing.T) {
+		p := map[string]any{}
+		addProrationMeta(p, &ProrationDetail{Type: "adjustment", AmountCents: 2000, ClawbackPieces: []domain.CreditShare{
+			{InvoiceID: "inv_u2", GrossCents: 1500}, {InvoiceID: "inv_u1", GrossCents: 500}}}, "USD")
+		if _, has := p["adjusted_invoice_id"]; has || p["adjusted_invoice_count"] != 2 {
+			t.Errorf("two open invoices must stamp a count, not one id: %+v", p)
+		}
+	})
 }
 
 // TestDescribeSubscriptionAction_RendersProrationOutcome proves the timeline
@@ -112,6 +142,24 @@ func TestDescribeSubscriptionAction_RendersProrationOutcome(t *testing.T) {
 				"proration_type": "credit", "proration_amount_cents": float64(0), "uncredited_cents": float64(667), "currency": "USD",
 			},
 			wantDesc: "Item removed", wantContains: "No credit: the invoices had nothing left to credit",
+		},
+		{
+			name:   "a mixed credit shows the balance part and the open-invoice part",
+			action: "subscription.item_updated",
+			meta: map[string]any{
+				"action": "item_quantity_changed", "immediate": true, "quantity": float64(3),
+				"proration_type": "credit", "proration_amount_cents": float64(1667), "adjusted_cents": float64(1500), "currency": "USD",
+			},
+			wantDesc: "Quantity changed", wantContains: "Credit $1.67, open invoice adjusted by $15.00",
+		},
+		{
+			name:   "an adjustment across two open invoices does not name one",
+			action: "subscription.item_updated",
+			meta: map[string]any{
+				"action": "item_quantity_changed", "immediate": true, "quantity": float64(3),
+				"proration_type": "adjustment", "proration_amount_cents": float64(2000), "adjusted_invoice_count": float64(2), "currency": "USD",
+			},
+			wantDesc: "Quantity changed", wantContains: "2 open invoices adjusted by $20.00",
 		},
 		{
 			name:   "a cancel's limited credit says so",

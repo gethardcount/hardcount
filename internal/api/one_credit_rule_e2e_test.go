@@ -173,6 +173,14 @@ func TestE2E_OneCreditRule_UnpaidNewestRelievedFirst(t *testing.T) {
 	if bal := r.creditBalance(); bal != 167 {
 		t.Errorf("balance = %dc, want 167c", bal)
 	}
+	// The timeline shows both parts: $1.67 to the balance, $15.00 off the
+	// open upgrade invoice, not "Credit $16.67".
+	if got := r.auditString(domain.AuditActionSubscriptionItemUpdated, "proration_type"); got != "credit" {
+		t.Errorf("proration_type = %q, want credit", got)
+	}
+	if got := r.auditInt(domain.AuditActionSubscriptionItemUpdated, "adjusted_cents"); got != 1500 {
+		t.Errorf("adjusted_cents = %d, want 1500 (the part that reduced the open upgrade invoice)", got)
+	}
 }
 
 // T3: an item change credits only the invoices that charged that item. Add-on
@@ -321,8 +329,50 @@ func TestE2E_OneCreditRule_RemainderRecorded(t *testing.T) {
 	}
 }
 
-// auditInt reads one integer field of the subscription's audit row for action.
-func (r *seatRig) auditInt(action, key string) int64 {
+// T9: a note drafted while a charge was in flight is held until the
+// reconciler issues it, so it has not reduced what is due yet; the next
+// change must still leave room for it. The upgrade invoice ($15.00) is a bank
+// debit, still processing on Sep 17, when 8 → 7 seats credits it $4.67 (held,
+// and labelled a credit: the usual outcome is a paid invoice). The debit then
+// fails, and 7 → 3 on Sep 18 owes $17.33: $10.33 fits on the upgrade invoice,
+// $7.00 goes to the base. Sizing the upgrade invoice by what is due ($15.00)
+// asked the credit-note writer for more than its room, and the change failed.
+func TestE2E_OneCreditRule_HeldNoteKeepsItsRoom(t *testing.T) {
+	skipShort(t)
+	r := newSeatRig(t, ocP0, 5)
+	up := r.upgradeTo8(false)
+	r.chargeInFlight(up, "pi_t9_up", ocUp.Add(time.Hour))
+
+	sep17 := ocUp.AddDate(0, 0, 1)
+	r.setSeats(7, sep17)
+	r.wantNotes("upgrade invoice after the held note", up, 467)
+	if got := r.auditString(domain.AuditActionSubscriptionItemUpdated, "proration_type"); got != "credit" {
+		t.Errorf("in-flight decrease proration_type = %q, want credit", got)
+	}
+	r.chargeFails(up, "pi_t9_up", sep17.Add(time.Hour))
+
+	r.setSeats(3, sep17.AddDate(0, 0, 1))
+	r.wantNotes("upgrade invoice", up, 1500)
+	r.wantNotes("base invoice", r.baseID, 700)
+}
+
+// auditInt reads one integer field of the subscription's latest audit row for
+// action.
+func (r *lagRig) auditInt(action, key string) int64 {
+	r.t.Helper()
+	f, _ := r.auditMeta(action)[key].(float64)
+	return int64(f)
+}
+
+// auditString reads one string field of the subscription's latest audit row
+// for action.
+func (r *lagRig) auditString(action, key string) string {
+	r.t.Helper()
+	s, _ := r.auditMeta(action)[key].(string)
+	return s
+}
+
+func (r *lagRig) auditMeta(action string) map[string]any {
 	r.t.Helper()
 	tx, err := r.db.BeginTx(context.Background(), postgres.TxBypass, "")
 	if err != nil {
@@ -339,8 +389,7 @@ func (r *seatRig) auditInt(action, key string) int64 {
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		r.t.Fatalf("audit metadata: %v", err)
 	}
-	f, _ := meta[key].(float64)
-	return int64(f)
+	return meta
 }
 
 // T8: two seat changes at once, 8 → 4 and 8 → 2. They serialize on the

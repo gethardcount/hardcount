@@ -7,14 +7,14 @@ import (
 )
 
 // CreditShare is one invoice's part of the credit for unused, prepaid time:
-// GrossCents is the credit note's amount, tax included. Paid says the invoice
-// is paid, so Issue gives the share to the customer's balance; an unpaid
-// share reduces what the invoice still asks for, and an in-flight one waits
-// in Issue until its charge settles.
+// GrossCents is the credit note's amount, tax included. ToBalance says the
+// share goes to the customer's balance: the invoice is paid, or its charge is
+// in flight, which Issue holds until the charge settles and which normally
+// succeeds. Otherwise the share reduces what the open invoice still asks for.
 type CreditShare struct {
 	InvoiceID  string
 	GrossCents int64
-	Paid       bool
+	ToBalance  bool
 }
 
 // AllocateUnusedCredit splits netCents of unused prepaid time (tax excluded)
@@ -38,7 +38,10 @@ type CreditShare struct {
 //     left of its total: total − credited. For an in-flight invoice Issue
 //     picks the channel once the charge settles. An unpaid invoice can take
 //     what it still asks for plus the customer credits applied to it, which
-//     the note hands back (ADR-061). An invoice with no room is skipped.
+//     the note hands back (ADR-061), and never more than total − credited:
+//     a note held while a charge was in flight has not reduced what is due
+//     yet, and the credit-note writer counts it. An invoice with no room is
+//     skipped.
 //
 // credited maps an invoice id to the credit notes already on it (counting
 // drafts). Callers MUST read it outside the change's transaction: the change's
@@ -67,7 +70,7 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		if inv.PaymentStatus == PaymentSucceeded || inv.PaymentInFlight() {
 			grossCap = inv.TotalAmountCents - credited[inv.ID]
 		} else {
-			grossCap = inv.UnpaidRelievableCents()
+			grossCap = min(inv.UnpaidRelievableCents(), inv.TotalAmountCents-credited[inv.ID])
 		}
 		if grossCap <= 0 {
 			continue // no room left
@@ -108,7 +111,7 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		if gross <= 0 {
 			continue
 		}
-		shares = append(shares, CreditShare{InvoiceID: c.inv.ID, GrossCents: gross, Paid: c.inv.PaymentStatus == PaymentSucceeded})
+		shares = append(shares, CreditShare{InvoiceID: c.inv.ID, GrossCents: gross, ToBalance: c.inv.PaymentStatus == PaymentSucceeded || c.inv.PaymentInFlight()})
 	}
 	return shares, unplaced
 }

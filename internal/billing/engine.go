@@ -5031,7 +5031,7 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 			return domain.Relief{}, fmt.Errorf("%s: credit-note draft on %s: %w", what, sh.InvoiceID, cerr)
 		}
 		r.DraftIDs = append(r.DraftIDs, cn.ID)
-		if sh.Paid {
+		if sh.ToBalance {
 			r.CreditedCents += sh.GrossCents
 		}
 	}
