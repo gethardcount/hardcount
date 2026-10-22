@@ -6157,10 +6157,9 @@ export const getUpdatePlanUrl = (id: string,) => {
 }
 
 /**
- * `name`, `base_amount_cents`, `base_bill_timing`, `meter_ids` and
- * `status` are left unchanged when omitted. `description` and
- * `tax_code` are always written: omitting them clears them. `code`,
- * `currency` and `billing_interval` cannot be changed and are ignored.
+ * A field left out keeps its current value. To clear `description`
+ * or `tax_code`, send an empty string. `code`, `currency` and
+ * `billing_interval` cannot be changed and are ignored.
  *
  * `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
  * subscriptions are billed. Changing any of them is refused while a

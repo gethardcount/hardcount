@@ -13,7 +13,7 @@ import type { UpdatePlanBodyStatus } from './updatePlanBodyStatus';
 export type UpdatePlanBody = {
   /** Whitespace is trimmed. Empty or omitted keeps the current name. */
   name?: string;
-  /** Omitting it clears the stored description. */
+  /** Whitespace is trimmed. Omit to keep the current description; an empty string clears it. */
   description?: string;
   /** Ignored when 0 or less. */
   base_amount_cents?: number;
@@ -21,6 +21,6 @@ export type UpdatePlanBody = {
   /** Replaces the plan's meters. Omit to keep them. */
   meter_ids?: string[];
   status?: UpdatePlanBodyStatus;
-  /** Stripe product tax code. Omitting it clears the stored code. */
+  /** Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`. */
   tax_code?: string;
 };
