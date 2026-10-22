@@ -531,35 +531,76 @@ func TestDownRoundTrip(t *testing.T) {
 	}
 }
 
-// A Velox 0.8.x database (its tables, golang-migrate's record at 180, no
-// goose record) has no upgrade path. Migration 180 runs the baseline, which
-// stops on its first CREATE inside its transaction: a FileError, and no
-// table or record changes. goose creates its own table, with row 0 only,
-// before it runs 180; that is all the attempt leaves. Mutation: bring back
-// the adopt branch; Up then records 180 over the old tables and succeeds.
-func TestUpOnV08DatabaseStopsOnBaseline(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_v08_stops")
+// A database with Velox's tables but no goose record for 180: a Velox
+// 0.8.x database, or a backup restored without its migration table. It has
+// no upgrade path. Status says so, the boot check refuses, and Up refuses
+// before it takes the lock or creates anything; goose's own table included.
+// Mutation: drop the refusal from decide; status then says "empty", and
+// Up runs the baseline, which fails and leaves goose_db_version behind.
+func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 	ctx := context.Background()
-	if err := up(ctx, dsn, noFiles); err != nil {
-		t.Fatalf("baseline: %v", err)
-	}
-	buildV08(t, db)
-	before := fingerprint(t, db)
+	for i, tc := range []struct {
+		name  string
+		build func(t *testing.T, db *sql.DB)
+	}{
+		{"Velox 0.8.x database", buildV08},
+		{"restored without its migration table", func(t *testing.T, db *sql.DB) {
+			mustExec(t, db, `DROP TABLE public.goose_db_version`)
+		}},
+		{"goose table with only row 0, left by an earlier attempt", func(t *testing.T, db *sql.DB) {
+			buildV08(t, db)
+			recordGoose(t, db)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn, db := scratchDB(t, "velox_migrate_unrecorded_"+string(rune('a'+i)))
+			if err := up(ctx, dsn, migrationFiles()); err != nil {
+				t.Fatalf("Up: %v", err)
+			}
+			tc.build(t, db)
+			before := fingerprint(t, db)
+			hadGooseTable := tableExists(t, db, versionTable)
 
-	err := up(ctx, dsn, noFiles)
-	var fe *FileError
-	if !errors.As(err, &fe) || fe.Version != baselineVersion {
-		t.Fatalf("Up on a v0.8 database: want a FileError for 180, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "already has Velox tables but no migration record") {
-		t.Errorf("message: %v", err)
-	}
-	if n := gooseRows(t, db, baselineVersion); n != 0 {
-		t.Fatalf("goose_db_version holds %d rows for 180, want 0", n)
-	}
-	mustExec(t, db, `DROP TABLE IF EXISTS public.goose_db_version`)
-	if after := fingerprint(t, db); after != before {
-		t.Errorf("Up changed the database:\nbefore %s\nafter  %s", before, after)
+			pool, err := openPool(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = pool.Close() }()
+			p, err := readPlan(ctx, pool, migrationFiles())
+			if err != nil {
+				t.Fatalf("readPlan: %v", err)
+			}
+			if p.State != PlanState("no migration record") || len(p.Pending) != 0 {
+				t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), "no migration record")
+			}
+			out := FormatPlan(p, "v0.9.1")
+			if !strings.Contains(out, "Velox tables, no migration record") || strings.Contains(out, `run "velox migrate"`) {
+				t.Errorf("status output:\n%s", out)
+			}
+
+			ready := CheckSchemaReady(db)
+			if ready == nil || !strings.Contains(ready.Error(), "no migration record") || strings.Contains(ready.Error(), "to apply") {
+				t.Errorf("CheckSchemaReady: %v", ready)
+			}
+
+			err = up(ctx, dsn, migrationFiles())
+			var fe *FileError
+			if err == nil || errors.As(err, &fe) {
+				t.Errorf("Up: want a refusal before any migration runs, got %v", err)
+			} else {
+				for _, want := range []string{"Velox tables but no migration record", "Nothing was changed", "Upgrading from Velox 0.8.x is not supported", RunbookPath} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("Up's message lacks %q: %v", want, err)
+					}
+				}
+			}
+			if !hadGooseTable && tableExists(t, db, versionTable) {
+				t.Error("a refused command created goose_db_version")
+			}
+			if after := fingerprint(t, db); after != before {
+				t.Errorf("a refused command changed the database:\nbefore %s\nafter  %s", before, after)
+			}
+		})
 	}
 }
 
