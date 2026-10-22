@@ -129,3 +129,47 @@ func TestRenderPDF_LongFooterStaysOnThePage(t *testing.T) {
 		})
 	}
 }
+
+// A footer of many short lines (bank details, one per line) can be taller
+// than what is left of the page, or than a whole page, while still under the
+// 1000-character limit. It breaks across pages like any other long block:
+// every line prints once, in order, on the page, and nothing is drawn past
+// the bottom edge or over the page number.
+func TestRenderPDF_ManyFooterLinesStayOnThePage(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 70; i++ {
+		lines = append(lines, fmt.Sprintf("Bank line %02d", i))
+	}
+	ts := domain.TenantSettings{InvoiceFooter: strings.Join(lines, "\n"), SupportURL: "https://seller.test/help"}
+	for _, n := range []int{2, 20, 40} {
+		t.Run(fmt.Sprintf("items=%d", n), func(t *testing.T) {
+			inv, items := longInvoice(n, domain.InvoiceDraft)
+			pages := renderedText(t, inv, items, ts)
+			for _, m := range pdftest.Misplaced(pages, edgeGap, bodyFloor, isPageNumber) {
+				t.Error(m)
+			}
+			for _, m := range pdftest.Overlapping(pages, textGap, isWatermark) {
+				t.Error(m)
+			}
+			var printed []string
+			generated := false
+			for _, p := range pages {
+				for _, r := range p.Runs {
+					if strings.HasPrefix(r.Text, "Bank line ") {
+						printed = append(printed, r.Text)
+					}
+					generated = generated || strings.HasPrefix(r.Text, "Generated on ")
+				}
+			}
+			if got, want := strings.Join(printed, "|"), strings.Join(lines, "|"); got != want {
+				t.Errorf("footer printed as %q, want every line once, in order", got)
+			}
+			if !onAnyPage(pages, "Need help? https://seller.test/help") {
+				t.Error("support line missing")
+			}
+			if !generated {
+				t.Error("Generated on line missing")
+			}
+		})
+	}
+}
