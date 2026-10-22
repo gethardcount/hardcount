@@ -414,8 +414,8 @@ func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (
 // reconciler). ADR-056 coordinator pattern. The external finalize (tax commit +
 // auto-charge) and the proration relief's legs run post-commit via the caller
 // (FinalizeOnCreateInvoice / FinishRelief). billFn may be nil. billFn gets
-// the row as the flip left it, pause and schedule included; the row returned
-// is the retired one (retireLiveOnlyStateTx).
+// the row as the flip left it; the row returned is the retired one
+// (retireLiveOnlyStateTx).
 func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -443,18 +443,18 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 
 // retireLiveOnlyStateTx clears, on a subscription its caller canceled in tx,
 // the state that only says what a live subscription does next: the cancel
-// schedule, the collection pause, and its items' pending plan changes. Each
-// cancel writer runs it as the last write of its transaction and returns its
-// row. Left on the row, they made the API and the dashboard show a scheduled
-// cancel or a paused collection (with Undo and Resume) on a canceled
-// subscription, and the pause-resume sweep sent
-// subscription.collection_resumed for it once resumes_at passed. A column
-// added later that only a live subscription uses is cleared here too.
+// schedule and its items' pending plan changes. Each cancel writer runs it
+// as the last write of its transaction and returns its row. Left on the row,
+// they made the API and the dashboard show a scheduled cancel (with Undo) or
+// a coming plan change on a canceled subscription. A column added later that
+// only a live subscription uses is cleared here too.
 //
-// It runs after billFn, never in the flip itself: the final invoice is
-// decided from the canceled row the flip returns, and a keep_as_draft pause
-// in force at the cancel instant keeps that invoice a draft. Clearing the
-// pause in the flip would finalize it and charge the card on file.
+// The collection pause is not live-only, so it stays. It holds the
+// subscription's unpaid invoices after the cancel: the auto-charge sweep
+// (notPausedForCollection) and the tax retry's auto-finalize read it, and a
+// cancel's own keep_as_draft final invoice is one of them. Clearing it would
+// let Velox charge invoices the operator, or dunning's pause, held back.
+// Resume collection releases them.
 //
 // The pending plan lives on subscription_items, so it takes a second UPDATE.
 // Clearing only the pending columns writes no subscription_item_changes row:
@@ -464,14 +464,12 @@ func retireLiveOnlyStateTx(ctx context.Context, tx *sql.Tx, id string) (domain.S
 	if err := scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET cancel_at = NULL,
-		    cancel_at_period_end = false,
-		    pause_collection_behavior = NULL,
-		    pause_collection_resumes_at = NULL
+		    cancel_at_period_end = false
 		WHERE id = $1 AND status = 'canceled'
 		RETURNING `+subCols,
 		id,
 	), &sub); err != nil {
-		return domain.Subscription{}, fmt.Errorf("clear the canceled subscription's schedule and pause: %w", err)
+		return domain.Subscription{}, fmt.Errorf("clear the canceled subscription's cancel schedule: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE subscription_items
@@ -658,7 +656,7 @@ func (s *PostgresStore) FireScheduledCancellationTx(ctx context.Context, tx *sql
 		return domain.Subscription{}, err
 	}
 	// The engine built this close's invoice from its snapshot before the tx,
-	// pause included, so the retire can run before that insert.
+	// so the retire can run before that insert.
 	return retireLiveOnlyStateTx(ctx, tx, id)
 }
 
@@ -818,9 +816,8 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 
 // ClearPauseCollection nulls both pause_collection_* columns. A row with no
 // pause returns ErrNotPaused; a missing row errs.ErrNotFound. Status is not
-// checked: every cancel writer clears the pause in its own transaction
-// (retireLiveOnlyStateTx), and migration 192 cleared the rows earlier
-// cancels left, so a canceled subscription has no pause to clear.
+// checked: a canceled subscription keeps its pause, which still holds its
+// unpaid invoices, and clearing it is how an operator releases them.
 func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

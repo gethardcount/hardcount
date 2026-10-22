@@ -212,13 +212,12 @@ func (m *memStore) CancelAtomic(ctx context.Context, tenantID, id string) (domai
 }
 
 // retireLiveOnlyState mirrors the store's retireLiveOnlyStateTx: the last
-// write of every cancel writer clears the schedule, the pause and the items'
-// pending plan changes.
+// write of every cancel writer clears the schedule and the items' pending
+// plan changes, and keeps the pause.
 func (m *memStore) retireLiveOnlyState(id string) domain.Subscription {
 	s := m.subs[id]
 	s.CancelAt = nil
 	s.CancelAtPeriodEnd = false
-	s.PauseCollection = nil
 	m.subs[id] = s
 	for itemID, it := range m.items {
 		if it.SubscriptionID == id && it.PendingPlanID != "" {

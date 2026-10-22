@@ -9,20 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
-	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
-// A canceled subscription carries none of the state that says what a live
-// subscription does next: no cancel schedule, no collection pause, no
-// pending plan change on its items. Every cancel writer used to leave some
-// of it. The rows then lied: the API and the dashboard showed a scheduled
-// cancel or a paused collection (with Undo and Resume) on a canceled
-// subscription, and the pause-resume sweep announced a resume for it.
+// A canceled subscription carries no cancel schedule and no pending plan
+// change on its items: both say what a live subscription does next. Every
+// cancel writer used to leave them, so the API and the dashboard showed a
+// scheduled cancel (with Undo) or a coming plan change on a canceled
+// subscription. The collection pause stays: it still holds the
+// subscription's unpaid invoices until an operator resumes collection.
 
 // liveStateRig is one tenant with two plans, for subscriptions that carry a
 // cancel schedule, a keep_as_draft pause with resumes_at, and a pending plan
@@ -111,7 +108,7 @@ func (r *liveStateRig) itemChanges(subID string) int {
 }
 
 // requireRetired fails unless sub (the returned and the stored row) is
-// canceled with no schedule, no pause and no pending plan change.
+// canceled with no schedule and no pending plan change, and keeps its pause.
 func (r *liveStateRig) requireRetired(label string, sub domain.Subscription) {
 	r.t.Helper()
 	if sub.Status != domain.SubscriptionCanceled {
@@ -120,8 +117,8 @@ func (r *liveStateRig) requireRetired(label string, sub domain.Subscription) {
 	if sub.CancelAt != nil || sub.CancelAtPeriodEnd {
 		r.t.Errorf("%s: cancel schedule left on a canceled subscription: cancel_at=%v at_period_end=%v", label, sub.CancelAt, sub.CancelAtPeriodEnd)
 	}
-	if sub.PauseCollection != nil {
-		r.t.Errorf("%s: pause left on a canceled subscription: %+v", label, *sub.PauseCollection)
+	if sub.PauseCollection == nil {
+		r.t.Errorf("%s: the cancel cleared the pause: it still holds the subscription's unpaid invoices", label)
 	}
 	if len(sub.Items) == 0 {
 		r.t.Fatalf("%s: no items", label)
@@ -135,11 +132,11 @@ func (r *liveStateRig) requireRetired(label string, sub domain.Subscription) {
 
 // TestCancelWriters_RetireLiveOnlyState runs each of the four cancel writers
 // on a subscription with a cancel schedule, a pause and a pending plan
-// change. Each must hand back, and store, a row with none of them, without
-// writing an item-change row (clearing the pending columns is no plan or
-// quantity change). A writer that runs billFn must give it the row as it was
-// at the cancel instant, pause included: the final invoice is decided from
-// it.
+// change. Each must hand back, and store, a row with no schedule and no
+// pending plan change but with its pause, without writing an item-change
+// row (clearing the pending columns is no plan or quantity change). A writer
+// that runs billFn must give it the row with its pause: the final invoice is
+// decided against the pause in force at the cancel instant.
 //
 // Mutation: drop retireLiveOnlyStateTx from any one writer and its case
 // fails; drop its items UPDATE and every case fails.
@@ -222,96 +219,10 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 	}
 }
 
-// TestProcessExpiredPauseCollections_CanceledSubAnnouncesNothing: a paused
-// subscription is canceled, then its pause's resumes_at passes. The sweep
-// used to pick it up (its status filter only holds back live subscriptions
-// that still owe a close) and wrote a collection_resumed audit row and sent
-// subscription.collection_resumed for a subscription that had ended. The
-// cancel now clears the pause, so neither sweep finds it.
-func TestProcessExpiredPauseCollections_CanceledSubAnnouncesNothing(t *testing.T) {
-	r := newLiveStateRig(t, "Canceled Pause Sweep")
-	logger := audit.NewLogger(r.db)
-	outbox := webhook.NewOutboxStore(r.db)
-
-	newSvc := func(now time.Time) *Service {
-		svc := NewService(r.store, clock.NewFake(now))
-		svc.SetAuditLogger(logger)
-		svc.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
-		return svc
-	}
-	cancelPaused := func(t *testing.T, code string) domain.Subscription {
-		t.Helper()
-		sub := r.seed(code, domain.SubscriptionActive)
-		if _, err := r.store.CancelAtomicWithBill(r.ctx, r.tenantID, sub.ID, nil); err != nil {
-			t.Fatalf("cancel: %v", err)
-		}
-		return sub
-	}
-	requireSilent := func(t *testing.T, sub domain.Subscription, processed int, errs []error) {
-		t.Helper()
-		if len(errs) != 0 {
-			t.Fatalf("sweep errors: %v", errs)
-		}
-		if processed != 0 {
-			t.Errorf("sweep resumed %d subscriptions, want 0: the only paused one was canceled", processed)
-		}
-		rows, _, err := logger.Query(r.ctx, r.tenantID, audit.QueryFilter{ResourceType: "subscription", ResourceID: sub.ID})
-		if err != nil {
-			t.Fatalf("query audit: %v", err)
-		}
-		for _, row := range rows {
-			if row.Metadata["action"] == domain.SubAuditCollectionResumed {
-				t.Errorf("collection_resumed audit row written for canceled subscription %s", sub.ID)
-			}
-		}
-		var events int
-		if err := r.db.WithTenantTx(r.ctx, r.tenantID, func(tx *sql.Tx) error {
-			return tx.QueryRowContext(r.ctx, `SELECT count(*) FROM webhook_outbox WHERE event_type = $1 AND payload->>'subscription_id' = $2`,
-				domain.EventSubscriptionCollectionResumed, sub.ID).Scan(&events)
-		}); err != nil {
-			t.Fatalf("count outbox: %v", err)
-		}
-		if events != 0 {
-			t.Errorf("%d subscription.collection_resumed events queued for canceled subscription %s, want 0", events, sub.ID)
-		}
-	}
-	past := r.now.Add(11 * 24 * time.Hour) // past the seed's resumes_at
-
-	t.Run("wall clock", func(t *testing.T) {
-		sub := cancelPaused(t, "sub-pause-sweep-wall")
-		processed, errs := newSvc(past).ProcessExpiredPauseCollections(r.ctx, 100)
-		requireSilent(t, sub, processed, errs)
-	})
-
-	t.Run("test clock", func(t *testing.T) {
-		const clockID = "vlx_tclk_canceled_pause"
-		sub := cancelPaused(t, "sub-pause-sweep-clock")
-		tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		defer postgres.Rollback(tx)
-		for _, q := range []string{
-			`SELECT set_config('app.livemode', 'off', true)`,
-			`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode) VALUES ('` + clockID + `', '` + r.tenantID + `', 'canceled pause', now(), 'ready', false)`,
-			`UPDATE subscriptions SET test_clock_id = '` + clockID + `' WHERE id = '` + sub.ID + `'`,
-		} {
-			if _, err := tx.ExecContext(r.ctx, q); err != nil {
-				t.Fatalf("seed clock: %v", err)
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
-		processed, errs := newSvc(past).ProcessExpiredPauseCollectionsForClock(r.ctx, r.tenantID, clockID, past)
-		requireSilent(t, sub, processed, errs)
-	})
-}
-
 // TestMigration_ClearsLiveOnlyStateOnCanceledSubs: every cancel before this
-// release left its schedule, pause and pending plan change on the row, and
-// the pause-resume sweep still acts on such rows. The migration clears them
-// on canceled and archived subscriptions and leaves a live one untouched.
+// release left its schedule and pending plan change on the row. The
+// migration clears them on canceled and archived subscriptions, keeps their
+// pause, and leaves a live one untouched.
 func TestMigration_ClearsLiveOnlyStateOnCanceledSubs(t *testing.T) {
 	r := newLiveStateRig(t, "Migration Clears Live State")
 	canceled := r.seed("sub-mig-canceled", domain.SubscriptionActive)
@@ -340,9 +251,12 @@ func TestMigration_ClearsLiveOnlyStateOnCanceledSubs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get %s: %v", id, err)
 		}
-		if got.CancelAtPeriodEnd || got.CancelAt != nil || got.PauseCollection != nil || got.Items[0].PendingPlanID != "" || got.Items[0].PendingPlanEffectiveAt != nil {
-			t.Errorf("%s (%s) keeps live-only state: at_period_end=%v cancel_at=%v pause=%v pending=%q",
-				id, got.Status, got.CancelAtPeriodEnd, got.CancelAt, got.PauseCollection, got.Items[0].PendingPlanID)
+		if got.CancelAtPeriodEnd || got.CancelAt != nil || got.Items[0].PendingPlanID != "" || got.Items[0].PendingPlanEffectiveAt != nil {
+			t.Errorf("%s (%s) keeps live-only state: at_period_end=%v cancel_at=%v pending=%q",
+				id, got.Status, got.CancelAtPeriodEnd, got.CancelAt, got.Items[0].PendingPlanID)
+		}
+		if got.PauseCollection == nil {
+			t.Errorf("%s (%s): the migration cleared the pause, which still holds its unpaid invoices", id, got.Status)
 		}
 	}
 	got, err := r.store.Get(r.ctx, r.tenantID, live.ID)

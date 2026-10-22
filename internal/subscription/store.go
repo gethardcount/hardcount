@@ -116,8 +116,9 @@ type Store interface {
 	//
 	// Every cancel writer (this, CancelAtomicWithBill, CancelAtTrialEnd and
 	// both FireScheduledCancellation methods) stores and returns the canceled
-	// row with no cancel schedule, no collection pause and no pending plan
-	// change on its items (retireLiveOnlyStateTx).
+	// row with no cancel schedule and no pending plan change on its items
+	// (retireLiveOnlyStateTx). The collection pause stays: it still holds the
+	// subscription's unpaid invoices.
 	CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// CancelAtomicWithBill cancels the subscription AND runs billFn (the

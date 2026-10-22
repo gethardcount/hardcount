@@ -1,13 +1,14 @@
 -- +goose Up
--- A canceled or archived subscription carries no cancel schedule, no
--- collection pause and no pending plan change: those say what a live
--- subscription does next. Before this release every cancel left whichever of
--- them the subscription had. The API and the dashboard then showed a
--- scheduled cancel or a paused collection (with Undo and Resume) on a
--- canceled subscription, and once a pause's resumes_at passed, the
--- pause-resume sweep sent subscription.collection_resumed for it. Every
--- cancel now clears them in its own transaction; this clears the rows
--- earlier cancels left.
+-- A canceled or archived subscription carries no cancel schedule and no
+-- pending plan change: both say what a live subscription does next. Before
+-- this release every cancel left them, so the API and the dashboard showed a
+-- scheduled cancel (with Undo) or a coming plan change on a canceled
+-- subscription. Every cancel now clears them in its own transaction; this
+-- clears the rows earlier cancels left.
+--
+-- The collection pause is kept: it still holds the subscription's unpaid
+-- invoices (the auto-charge sweep and the tax retry read it) until an
+-- operator resumes collection.
 --
 -- Clearing the pending columns writes no subscription_item_changes row: the
 -- trigger records plan, quantity and removal changes only.
@@ -17,11 +18,9 @@
 -- bypass on for its own transaction.
 SET LOCAL app.bypass_rls = 'on';
 UPDATE subscriptions
-SET cancel_at = NULL, cancel_at_period_end = false,
-    pause_collection_behavior = NULL, pause_collection_resumes_at = NULL
+SET cancel_at = NULL, cancel_at_period_end = false
 WHERE status IN ('canceled', 'archived')
-  AND (cancel_at IS NOT NULL OR COALESCE(cancel_at_period_end, false)
-       OR pause_collection_behavior IS NOT NULL OR pause_collection_resumes_at IS NOT NULL);
+  AND (cancel_at IS NOT NULL OR COALESCE(cancel_at_period_end, false));
 UPDATE subscription_items i
 SET pending_plan_id = NULL, pending_plan_effective_at = NULL
 FROM subscriptions s
