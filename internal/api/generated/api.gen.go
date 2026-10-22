@@ -1564,7 +1564,6 @@ func (e RecipeRatingRuleMode) Valid() bool {
 
 // Defines values for RecoveryWarningCode.
 const (
-	RecoverySuperseded       RecoveryWarningCode = "recovery_superseded"
 	ReliefNotReissued        RecoveryWarningCode = "relief_not_reissued"
 	TaxReversedUnrecoverable RecoveryWarningCode = "tax_reversed_unrecoverable"
 )
@@ -1572,8 +1571,6 @@ const (
 // Valid indicates whether the value is a known member of the RecoveryWarningCode enum.
 func (e RecoveryWarningCode) Valid() bool {
 	switch e {
-	case RecoverySuperseded:
-		return true
 	case ReliefNotReissued:
 		return true
 	case TaxReversedUnrecoverable:
@@ -4741,8 +4738,8 @@ type HeldUsageReleaseResult struct {
 
 	// PendingThresholdInvoice Released rows of a sum or count meter stamped before the end of
 	// this period's spend-threshold invoice, while that invoice is not
-	// paid. If it is paid, no invoice counts them. If it is voided or
-	// written off before the period closes, the period's invoice
+	// paid. If it is paid or written off, no invoice counts them. If
+	// it is voided before the period closes, the period's invoice
 	// counts them.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 
@@ -5996,8 +5993,6 @@ type RecipeWebhook struct {
 // `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
 // tax provider and cannot be re-reported automatically; the recorded
 // payment collects tax already reported as not collected.
-// `recovery_superseded` — the invoice was billed on a usage threshold
-// and that usage has since been re-billed; the payment double-collects.
 // `relief_not_reissued` — a credit the invoice was owed was never
 // applied, so `amount_due_cents` is higher than what is owed and the
 // customer may have overpaid.
@@ -6628,11 +6623,11 @@ type UsageEvent struct {
 	// subscription that prices this meter already invoiced the
 	// event's time, so the event is stored but billed on no invoice,
 	// now or later. Bill it with a one-off invoice if it should be
-	// charged. A spend-threshold invoice counts only once it is paid:
-	// until then it can be voided or written off, and then the
-	// period's invoice bills the event. Absent otherwise, which is not
-	// a promise that the event will be billed. Never sent on a replay
-	// or a read.
+	// charged. A spend-threshold invoice that fired with
+	// `reset_billing_cycle: false` counts only once it is paid: until
+	// then it can be voided, and then the period's invoice bills the
+	// event. Absent otherwise, which is not a promise that the event
+	// will be billed. Never sent on a replay or a read.
 	BillingStatus UsageEventBillingStatus `json:"billing_status,omitempty"`
 	CustomerId    string                  `json:"customer_id"`
 
@@ -6667,11 +6662,11 @@ type UsageEvent struct {
 // subscription that prices this meter already invoiced the
 // event's time, so the event is stored but billed on no invoice,
 // now or later. Bill it with a one-off invoice if it should be
-// charged. A spend-threshold invoice counts only once it is paid:
-// until then it can be voided or written off, and then the
-// period's invoice bills the event. Absent otherwise, which is not
-// a promise that the event will be billed. Never sent on a replay
-// or a read.
+// charged. A spend-threshold invoice that fired with
+// `reset_billing_cycle: false` counts only once it is paid: until
+// then it can be voided, and then the period's invoice bills the
+// event. Absent otherwise, which is not a promise that the event
+// will be billed. Never sent on a replay or a read.
 type UsageEventBillingStatus string
 
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.

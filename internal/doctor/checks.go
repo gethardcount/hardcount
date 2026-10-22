@@ -196,7 +196,12 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		// overlap on the meter is the same events billed twice, whatever
 		// the bucket (each pins its rules at its own period start, so a
 		// rule published in between gives the two lines different versions).
-		// Lines on one invoice are excluded (i.id < j.id).
+		// Lines on one invoice are excluded (i.id < j.id). Live means not
+		// voided: a written-off invoice still billed its window (ADR-066
+		// amendment 2026-10-23, as idx_invoices_billing_idempotency already
+		// counts it), so a second invoice billing that window is the double
+		// charge, paid later or not. Before 2026-10-23 the threshold
+		// watermark re-billed exactly that shape and this check skipped it.
 		SQL: `SELECT a.invoice_id, a.tenant_id, i.subscription_id, a.meter_id, a.rating_rule_version_id, a.billing_period_start, a.billing_period_end, b.invoice_id AS other_invoice_id, j.subscription_id AS other_subscription_id
 		        FROM invoice_line_items a
 		        JOIN invoices i ON i.id = a.invoice_id
@@ -204,7 +209,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		        JOIN invoice_line_items b ON b.invoice_id = j.id AND b.meter_id = a.meter_id AND b.line_type = 'usage'
 		         AND (j.subscription_id <> i.subscription_id OR b.rating_rule_version_id IS NOT DISTINCT FROM a.rating_rule_version_id)
 		       WHERE a.line_type = 'usage' AND i.subscription_id IS NOT NULL
-		         AND i.status NOT IN ('voided','uncollectible') AND j.status NOT IN ('voided','uncollectible')
+		         AND i.status <> 'voided' AND j.status <> 'voided'
 		         AND a.billing_period_start IS NOT NULL AND b.billing_period_start IS NOT NULL
 		         AND a.billing_period_start < b.billing_period_end AND b.billing_period_start < a.billing_period_end
 		         AND i.id < j.id;`,

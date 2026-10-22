@@ -83,8 +83,9 @@ func TestClassify(t *testing.T) {
 		{"before the watermark, max (deferred)", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{watermark}, max, InOpen},
 		{"before the watermark, last_ever", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{watermark}, MeterBuckets{Additive: true, LastEver: true}, InOpen},
 		{"after the watermark", opMay.AddDate(0, 0, 25), "m", []OpenPeriod{watermark}, sum, InOpen},
-		// Review finding 1 on #1350: an unpaid threshold invoice can still be
-		// voided or written off, and then the close bills from the start.
+		// Review finding 1 on #1350: an unpaid threshold invoice (open or
+		// written off) can still be voided, and then the close bills from
+		// the start.
 		{"before an unpaid watermark, sum", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{unpaid}, sum, Unsettled},
 		{"before an unpaid watermark, max", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{unpaid}, max, InOpen},
 		{"before the paid fire of two", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{partPaid}, sum, AfterClose},

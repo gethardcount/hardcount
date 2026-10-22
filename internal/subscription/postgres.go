@@ -991,9 +991,16 @@ func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, in
 // not deadlocked with. Any other subscription is not locked, so a payment
 // waits behind nothing it did not wait behind before.
 //
-// A pause dunning sets after this read cannot need the lock: SetDunningPause
-// locks the subscription, then waits for the invoice lock this transaction
-// takes next, and then finds the invoice paid.
+// A pause dunning sets after this read usually cannot need the lock:
+// SetDunningPause locks the subscription, then waits for the invoice lock
+// this transaction takes next, and then finds the invoice paid. Not when
+// SetDunningPause already holds the invoice at this read and commits after
+// it: this transaction then waits for the invoice, holds it when the pause
+// commits, and its ReleaseDunningPauseTx waits for the subscription row
+// lock. A transaction holding the subscription that then waits for this
+// invoice's row lock deadlocks with it (40P01, one side fails and is
+// retried). The period closers' watermark read takes FOR KEY SHARE, which
+// does not wait for a payment, for this reason.
 func (s *PostgresStore) LockDunningPauseTx(ctx context.Context, tx *sql.Tx, invoiceID string) error {
 	var one int
 	err := tx.QueryRowContext(ctx, `
@@ -2019,8 +2026,9 @@ func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, ex
 // subscription's state lock in one order: subscription row, item rows,
 // billing_intervals, invoices. The dunning pause takes the same order: its
 // write (SetDunningPause) and the payment that lifts it (LockDunningPauseTx,
-// before the payment locks the invoice) lock the subscription row first. So
-// two of them cannot deadlock, and a change
+// before the payment locks the invoice) lock the subscription row first,
+// except when the pause commits after the payment's check (see
+// LockDunningPauseTx). So two of them cannot deadlock, and a change
 // that read the state under this lock (LockForItemChangeTx) has seen every
 // item change that committed before it. A transaction that already holds the
 // row (the plan swap after its period CAS, an item change after

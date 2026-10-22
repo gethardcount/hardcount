@@ -391,7 +391,15 @@ func TestUsageAfterClose_LastEverMeterIsNotFlagged(t *testing.T) {
 // paid yet.
 func thresholdFired(t *testing.T) (*lagRig, time.Time, string) {
 	t.Helper()
-	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
+	return thresholdFiredWithCredit(t, 0)
+}
+
+// thresholdFiredWithCredit is thresholdFired for a customer granted
+// grantCents of credit on April 1, which the fire's collection applies to the
+// threshold invoice.
+func thresholdFiredWithCredit(t *testing.T, grantCents int64) (*lagRig, time.Time, string) {
+	t.Helper()
+	r := newLagRigBare(t, "in_arrears", grantCents, WithInvoiceGrace(e2eGrace))
 	peak := r.newMeter("peak", "max")
 	r.newSub("thr", r.planWith("plan_p", 3000, r.meterID, peak), lagP0, nil)
 	r.postEvent("/v1/usage-events", "calls", "calls-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
@@ -444,13 +452,14 @@ func TestUsageAfterClose_ThresholdWatermark(t *testing.T) {
 }
 
 // TestUsageAfterClose_ThresholdWatermark_Unpaid: review finding 1 on #1350.
-// While the threshold invoice is unpaid it can still be voided or written
-// off, and then April's close bills usage from April 1 (#243). So a sum
-// event stamped before the watermark that arrives while the invoice is
-// unpaid is not flagged: after a void or a write-off April's invoice bills
-// it, and a flag would have told the operator to bill it a second time. If
-// the invoice is paid instead, the event is billed nowhere and was not
-// flagged: a missed flag, never a wrong one.
+// While the threshold invoice is unpaid it can still be voided, and then
+// April's close bills usage from April 1 (#243). So a sum event stamped
+// before the watermark that arrives while the invoice is unpaid is not
+// flagged: after a void April's invoice bills it, and a flag would have told
+// the operator to bill it a second time. If the invoice is paid or written
+// off instead, its window stays billed (ADR-066 amendment 2026-10-23), so
+// the event is billed nowhere and was not flagged: a missed flag, never a
+// wrong one.
 //
 // Mutation check: flag before the watermark of any threshold invoice, paid
 // or not → the event is flagged in all three cases.
@@ -461,7 +470,7 @@ func TestUsageAfterClose_ThresholdWatermark_Unpaid(t *testing.T) {
 		wantUsage int64 // on April's cycle invoice; the 5 peak is billed there either way
 	}{
 		{"void", 100 + 30 + 5},
-		{"mark-uncollectible", 100 + 30 + 5},
+		{"mark-uncollectible", 5},
 		{"record-payment", 5},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
@@ -626,6 +635,46 @@ func TestUsageAfterClose_HeldReleaseAroundThresholdWatermark(t *testing.T) {
 	out = r.heldRelease(lagP0.AddDate(0, 0, 24), lagP0.AddDate(0, 0, 24).Add(time.Hour))
 	if count(out, "released") != 2 || count(out, "in_open_period") != 2 {
 		t.Errorf("release after the watermark = %v, want released 2, in_open_period 2", out)
+	}
+}
+
+// TestUsageAfterClose_HeldReleaseUnderWrittenOffThresholdInvoice: a
+// written-off threshold invoice keeps its window billed (ADR-066 amendment
+// 2026-10-23), so April's invoice does not bill rows stamped inside it. It
+// can still be voided, so rows released into it count as
+// pending_threshold_invoice, not in_open_period. Once it is voided, April's
+// invoice bills the window again: rows released into it are in_open_period.
+//
+// Mutation check: put 'uncollectible' back in the watermark predicate → the
+// rows released after the write-off count in_open_period.
+func TestUsageAfterClose_HeldReleaseUnderWrittenOffThresholdInvoice(t *testing.T) {
+	skipShort(t)
+	r, planT := newTokensRig(t)
+	r.newSub("held", planT, lagP0, nil)
+	r.postEvent("/v1/usage-events", "tokens", "tokens-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
+	fireAt := lagP0.AddDate(0, 0, 19)
+	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(-time.Hour),
+		map[string]any{"amount_gte": 100, "reset_billing_cycle": false}, http.StatusOK)
+	if n := r.scanThresholds(fireAt); n != 1 {
+		t.Fatalf("threshold scan fired %d invoices, want 1", n)
+	}
+	var thr string
+	for _, inv := range r.invoices() {
+		if inv.reason == string(domain.BillingReasonThreshold) {
+			thr = inv.id
+		}
+	}
+
+	r.invoiceAction(thr, "mark-uncollectible", fireAt.Add(10*time.Minute))
+	out := r.heldReleaseVia(lagP0.AddDate(0, 0, 14), fireAt.Add(20*time.Minute), fireAt.Add(time.Hour))
+	if count(out, "released") != 2 || count(out, "pending_threshold_invoice") != 2 || count(out, "in_open_period") != 0 {
+		t.Errorf("release before a written-off watermark = %v, want released 2, pending_threshold_invoice 2", out)
+	}
+
+	r.invoiceAction(thr, "void", fireAt.Add(90*time.Minute))
+	out = r.heldReleaseVia(lagP0.AddDate(0, 0, 15), fireAt.Add(100*time.Minute), fireAt.Add(2*time.Hour))
+	if count(out, "released") != 2 || count(out, "in_open_period") != 2 || count(out, "pending_threshold_invoice") != 0 {
+		t.Errorf("release after the void = %v, want released 2, in_open_period 2", out)
 	}
 }
 

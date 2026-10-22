@@ -261,13 +261,15 @@ the next close bills it.
 
 An event before the end of a threshold invoice that is **not paid yet**
 is not flagged either. The close's watermark counts every threshold
-invoice that is not voided or written off (#243): if that invoice is
-voided or written off before the close, the close bills the period's sum
-and count usage from the period start, the event included. A paid invoice
-can be neither voided nor written off (the status write refuses both), so
-its end is a watermark the close never goes below. If the unpaid invoice
-is paid instead, the event is billed nowhere and was not flagged: a missed
-flag, not a wrong one.
+invoice that is not voided (#243; a written-off one counts since the
+[ADR-066 amendment of 2026-10-23](066-threshold-money-semantics.md#amendment-2026-10-23-a-write-off-keeps-the-window-billed)):
+if that invoice is voided before the close, the close bills the period's
+sum and count usage from the period start, the event included. A paid
+invoice cannot be voided (the status write refuses it), so its end is a
+watermark the close never goes below. A written-off one still can be, so
+its end does not flag. If the unpaid invoice is paid or written off
+instead, the event is billed nowhere and was not flagged: a missed flag,
+not a wrong one.
 
 **Why the flag is never false.** Ingest reads the periods before it writes
 the event. Every writer of a period start, and the threshold watermark
@@ -302,7 +304,7 @@ the subscription continues past the end and its plan from then on prices
 the meter. A row the rule calls after_close counts as
 `outside_open_period`. A row before the end of an unpaid threshold invoice
 counts as `pending_threshold_invoice`: the period's invoice bills it only
-if that threshold invoice is voided or written off first.
+if that threshold invoice is voided first.
 
 ## References
 

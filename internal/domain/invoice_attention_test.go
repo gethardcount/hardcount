@@ -1072,12 +1072,15 @@ func TestRecoveryWarnsOnOfflinePayment(t *testing.T) {
 		}
 	})
 
-	t.Run("threshold warns", func(t *testing.T) {
+	t.Run("a written-off threshold invoice says nothing", func(t *testing.T) {
+		// A written-off threshold invoice keeps its window billed (ADR-066
+		// amendment 2026-10-23): no later invoice bills that usage again, so
+		// a payment on it settles the window once. The old
+		// recovery_superseded warning said the opposite.
 		i := writtenOff()
 		i.BillingReason = BillingReasonThreshold
-		w := RecoveryWarnsOnOfflinePayment(i, 0)
-		if w == nil || w.Code != "recovery_superseded" {
-			t.Fatalf("got %+v, want a recovery_superseded warning", w)
+		if w := RecoveryWarnsOnOfflinePayment(i, 0); w != nil {
+			t.Fatalf("warned on a written-off threshold invoice: %+v — its usage is billed nowhere else", w)
 		}
 	})
 

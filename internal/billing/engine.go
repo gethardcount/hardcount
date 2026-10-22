@@ -658,17 +658,24 @@ type InvoiceWriter interface {
 	// credit-note cap. ErrNotFound when nothing funded the period (trial / pure
 	// in_arrears) so callers keep their existing no-op behavior.
 	FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error)
-	// GetLatestThresholdInvoiceForCycle returns the newest non-voided
-	// threshold-fired invoice whose billing_period_start falls inside
-	// [periodStart, periodEnd) — the same predicate as
-	// LatestThresholdPeriodEnd but the full row, so the fire-once probe can
-	// also HEAL a crash between invoice-create and the $0/credited MarkPaid
-	// (ADR-066). errs.ErrNotFound when the cycle has no threshold invoice.
+	// GetLatestThresholdInvoiceForCycle returns the threshold watermark: the
+	// newest threshold-fired invoice whose billing_period_start falls inside
+	// [periodStart, periodEnd) and that still bills its window — any status
+	// but voided; a written-off one keeps its window billed (ADR-066
+	// amendment 2026-10-23). errs.ErrNotFound when there is none.
 	GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
+	// GetThresholdInvoiceForCycleAnyStatus is the fire-once probe's read: the
+	// same window in ANY status, since the cycle's one threshold slot
+	// (idx_invoices_threshold_unique_per_cycle) is held whatever the status.
+	// The full row lets the probe also HEAL a crash between invoice-create
+	// and the $0/credited MarkPaid (ADR-066). Never a watermark.
+	GetThresholdInvoiceForCycleAnyStatus(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
 	// GetLatestThresholdInvoiceForCycleTx is the same read on the closer's tx
 	// (ADR-115): issued after the row-lock CAS it sees every fire that
 	// committed before the lock, so the closer proves the watermark it built
-	// its lines against is still the watermark — or rolls back.
+	// its lines against is still the watermark — or rolls back. It holds the
+	// threshold invoice FOR KEY SHARE until the tx ends, so a void after the
+	// read lands after the closer's commit; a payment does not wait for it.
 	GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
 	// GetInvoiceForPeriod returns the newest non-voided invoice keyed exactly
 	// like idx_invoices_billing_idempotency (subscription, period_start,
@@ -1352,7 +1359,9 @@ type periodCloseOutcome struct {
 //     nil vs nil, or the same instant. A reset=false fire that committed
 //     between buildLineItems and this tx does not move the period (the CAS
 //     passes) but has already billed part of the window; this compare is
-//     what catches it.
+//     what catches it. So does a void that committed in between. The read
+//     holds the threshold invoice FOR KEY SHARE, so a later void waits for
+//     this commit (a payment does not).
 //  3. NextInvoiceNumberTx — after the CAS, so a lost race burns no number.
 //  4. CreateInvoiceWithLineItemsTx + emitFinalizeAuditTx (ADR-090 shared fate).
 //  5. the subscription.net_negative_usage row for belowZero, when any usage
@@ -1380,6 +1389,10 @@ func (e *Engine) commitPeriodClose(ctx context.Context, sub domain.Subscription,
 			return err
 		}
 
+		// FOR KEY SHARE on the threshold invoice until this tx ends: a void that
+		// arrives after this read waits for the commit and lands after the
+		// period's invoice (the window is forgiven); one that holds the row
+		// now is waited for and seen.
 		var current *time.Time
 		wm, err := e.invoices.GetLatestThresholdInvoiceForCycleTx(ctx, tx, sub.TenantID, sub.ID, periodStart, periodEnd)
 		switch {
@@ -4501,7 +4514,14 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// billOnePeriod: base skipped when a fire exists, additive buckets
 	// clamped to the residual window, deferred non-additive buckets billed
 	// full-window exactly once.
-	wm, err := e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd)
+	//
+	// Read on the cancel's tx when there is one: after the cancel's UPDATE
+	// locked the subscription, and holding the threshold invoice FOR KEY
+	// SHARE until the cancel commits. A void of that invoice after this read then
+	// lands after the final invoice and the window is forgiven; a void that
+	// commits first is seen here, and the final invoice bills the window
+	// (ADR-066 amendment 2026-10-23).
+	wm, err := e.loadThresholdWatermarkTx(ctx, tx, sub.TenantID, sub.ID, periodStart, periodEnd)
 	if err != nil {
 		return domain.Invoice{}, err
 	}

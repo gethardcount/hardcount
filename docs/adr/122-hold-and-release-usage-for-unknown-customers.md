@@ -108,7 +108,7 @@ release it once with an honest statement of what it will bill.
    invoices included: a sum or count row before the end of a paid one
    counts as `outside_open_period`, and before the end of an unpaid one as
    `pending_threshold_invoice` (billed by the period's invoice only if that
-   threshold invoice is voided or written off first).
+   threshold invoice is voided first).
 5. **Discard.** `POST /v1/usage-events/held/discard` marks rows discarded.
    They are kept as a record and never billed. Audited.
 6. **A resend after the customer exists.** The LiteLLM door ingests through

@@ -1236,7 +1236,7 @@ func (s *PostgresStore) MarkPaid(ctx context.Context, tenantID, id string, strip
 // MarkPaidReportingTransition is MarkPaid plus a `transitioned` flag:
 // true when THIS call moved the invoice finalized/uncollectible → paid,
 // false when it was already paid (the idempotent no-op branch). The
-// SELECT … FOR UPDATE serializes concurrent callers, so for two
+// row lock serializes concurrent callers, so for two
 // at-least-once webhook deliveries of the SAME charge exactly one gets
 // transitioned=true. SettleSucceeded gates its post-paid side-effects
 // (payment.succeeded event, receipt email, card stamp) on the flag so a
@@ -1318,9 +1318,14 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
 		return domain.Invoice{}, false, err
 	}
+	// FOR NO KEY UPDATE serializes with every other writer of the row and
+	// leaves a period closer's FOR KEY SHARE watermark read free
+	// (GetLatestThresholdInvoiceForCycleTx): this transaction can need the
+	// subscription lock that closer holds (the dunning-pause release), so
+	// the closer must not wait for it.
 	var status, taxStatus string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR UPDATE`, id,
+		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id,
 	).Scan(&status, &taxStatus); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Invoice{}, false, errs.ErrNotFound
@@ -3948,7 +3953,11 @@ func (s *PostgresStore) GetByStripeInvoiceID(ctx context.Context, tenantID, stri
 //
 // Voided / uncollectible invoices are filtered out — they don't
 // represent revenue the customer paid for, even if their line items
-// match the period. ORDER BY created_at DESC + LIMIT 1 surfaces the
+// match the period. This is deliberately NOT the threshold watermark's
+// predicate (thresholdBillsWindow, which keeps a written-off invoice):
+// that one asks whether a window was billed; this one asks whether there
+// is a collectible charge to relieve or to gate a change on, and a
+// write-off ends collection. ORDER BY created_at DESC + LIMIT 1 surfaces the
 // most-recent matching invoice (relevant for plan-swap chains within
 // the same period that re-issued the base line).
 func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
@@ -4001,6 +4010,11 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 //     [periodStart, periodEnd), billing_period_end = periodEnd. (Its base-fee
 //     lines' billing_period_start is NULL, so the line predicate can't see
 //     it — the header is the reliable key.)
+//
+// Uncollectible is excluded for the reason FindBaseInvoiceForPeriod gives: a
+// relief credit note on a written-off invoice would be voided as an orphan
+// before it issued (creditnote holdIssue), so a written-off source has no
+// room to credit, and nothing collectible on it to relieve.
 //
 // Ordered base-first (subscription_update sorts last) then created_at ASC, so a
 // caller allocating a fixed total across the set has a deterministic order for
@@ -4058,60 +4072,38 @@ func (s *PostgresStore) FindFundingInvoicesForPeriod(ctx context.Context, tenant
 	return out, nil
 }
 
-// LatestThresholdPeriodEnd returns the latest billing_period_end across
-// the subscription's threshold-fired invoices for the cycle starting at
-// periodStart. The billing engine's cycle close uses it as the
-// "already billed through" watermark: usage before that instant (and
-// the in_arrears base fee) landed on the threshold invoice, so the
-// cycle-close invoice must bill only the residual window — otherwise a
-// reset_billing_cycle=false threshold double-bills the customer.
-//
-// Window-scoped by billing_period_start ∈ [periodStart, periodEnd) so
-// the watermark generalizes to multiple threshold fires per cycle
-// (each successive fire's period starts at the previous one's end).
-// Voided / uncollectible invoices don't count — their amounts were
-// returned or written off, so the usage they covered is billable again.
-// Returns errs.ErrNotFound when no threshold invoice fired this cycle.
-func (s *PostgresStore) LatestThresholdPeriodEnd(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	if subscriptionID == "" {
-		return time.Time{}, errs.ErrNotFound
-	}
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer postgres.Rollback(tx)
+// thresholdBillsWindow is the one predicate for "this threshold invoice
+// billed its window": every status but voided (ADR-066 amendment
+// 2026-10-23). A write-off ends collection, not the sale (ADR-111, ADR-113),
+// and a written-off invoice can still be paid (an offline payment, a card
+// charge that settles late), so its window stays billed: no later invoice
+// bills it again. Only a void, which can never be paid, reopens it. Every
+// watermark read below uses this constant, so the closers (cycle close and
+// its in-tx re-read, immediate cancel, cross-interval swap), the swap's
+// re-anchor guard, the operator preview, the live balance and the
+// after_close classifier cannot disagree. Unqualified on purpose: every
+// query that uses it reads one table.
+const thresholdBillsWindow = `status <> 'voided'`
 
-	var end sql.NullTime
-	err = tx.QueryRowContext(ctx, `
-		SELECT MAX(billing_period_end) FROM invoices
-		WHERE subscription_id = $1
-		  AND billing_reason = 'threshold'
-		  AND status NOT IN ('voided', 'uncollectible')
-		  AND billing_period_start >= $2
-		  AND billing_period_start < $3
-	`, subscriptionID, periodStart, periodEnd).Scan(&end)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !end.Valid {
-		return time.Time{}, errs.ErrNotFound
-	}
-	return end.Time, nil
-}
+// thresholdAnyStatus is the fire-once probe's status predicate: none.
+const thresholdAnyStatus = `TRUE`
 
 // ThresholdWatermarks returns two instants for the subscription's cycle
-// [periodStart, periodEnd), over the same threshold invoices as
-// LatestThresholdPeriodEnd. Usage ingest reads them before it writes an
-// event (usage.ThresholdWatermark):
+// [periodStart, periodEnd), over the period's threshold invoices. Usage
+// ingest reads them before it writes an event (usage.ThresholdWatermark):
 //
-//   - billedThrough is the cycle close's watermark: the latest
-//     billing_period_end of a threshold invoice that is not voided or
-//     uncollectible. Nil when none.
+//   - billedThrough is the closers' watermark: the latest
+//     billing_period_end of a threshold invoice that still bills its window
+//     (thresholdBillsWindow: not voided; a written-off one counts). Nil when
+//     none.
 //   - paidThrough is the latest billing_period_end of a paid one. Nil when
 //     none. It never passes billedThrough, and it never falls back: a paid
 //     invoice can be neither voided nor written off (updateStatusInTx's
 //     allowed sources), so the close's watermark stays at or past it.
+//
+// billedThrough falls back only on a void, and a void is final: the cycle
+// has one threshold invoice (idx_invoices_threshold_unique_per_cycle), so
+// nothing raises it again in that cycle.
 func (s *PostgresStore) ThresholdWatermarks(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (billedThrough, paidThrough *time.Time, err error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -4121,7 +4113,7 @@ func (s *PostgresStore) ThresholdWatermarks(ctx context.Context, tenantID, subsc
 
 	var billed, paid sql.NullTime
 	err = tx.QueryRowContext(ctx, `
-		SELECT MAX(billing_period_end) FILTER (WHERE status NOT IN ('voided', 'uncollectible')),
+		SELECT MAX(billing_period_end) FILTER (WHERE `+thresholdBillsWindow+`),
 		       MAX(billing_period_end) FILTER (WHERE status = 'paid')
 		FROM invoices
 		WHERE subscription_id = $1
@@ -4141,12 +4133,15 @@ func (s *PostgresStore) ThresholdWatermarks(ctx context.Context, tenantID, subsc
 	return billedThrough, paidThrough, nil
 }
 
-// GetLatestThresholdInvoiceForCycle returns the newest non-voided
-// threshold-fired invoice for the cycle window — the same predicate as
-// LatestThresholdPeriodEnd but the full row. The billing engine's fire-once
-// probe uses it so a probe hit can also HEAL a crash between invoice-create
-// and the $0/credited MarkPaid (ADR-066): the probe needs the invoice's
-// status, payment_status and amount_due, not just the watermark instant.
+// GetLatestThresholdInvoiceForCycle returns the newest threshold-fired
+// invoice for the cycle window [periodStart, periodEnd) that still bills its
+// window (thresholdBillsWindow: not voided; a written-off one counts). It is
+// the "billed through" watermark of every closer: usage before its
+// billing_period_end (and the in_arrears base fee) landed on it, so the
+// closer bills only the residual window; without it a
+// reset_billing_cycle=false fire would be billed twice. Window-scoped by
+// billing_period_start so the watermark generalizes to several fires per
+// cycle. errs.ErrNotFound when the cycle has no such invoice.
 func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound
@@ -4156,35 +4151,93 @@ func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, t
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
-	return s.latestThresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "")
 }
 
 // GetLatestThresholdInvoiceForCycleTx is GetLatestThresholdInvoiceForCycle
-// on the caller's tx — the period closer's in-tx watermark re-read
-// (ADR-115). Under READ COMMITTED a statement issued AFTER the closer's
-// row-lock wait sees every threshold fire that committed before it took the
-// lock, so the closer can prove the watermark it built its lines against is
-// still the watermark, and roll back if a fire landed in between.
+// on the caller's tx, holding the invoice row FOR KEY SHARE until that tx
+// ends. Its callers are the period's closers (the cycle close's in-tx
+// re-read, ADR-115; the immediate cancel; the cross-interval swap and its
+// re-anchor guard), and each calls it after its tx locked the subscription
+// row.
+//
+// Under READ COMMITTED a statement issued after the closer's row-lock wait
+// sees every threshold fire that committed before it took the lock, so the
+// closer can prove the watermark it built its lines against is still the
+// watermark, and roll back if a fire landed in between. The lock does the
+// same for a void (ADR-066 amendment 2026-10-23). A void locks the invoice
+// FOR UPDATE (UpdateStatusWithReversalPriorTx), which conflicts with this
+// lock. A void that holds the row when the read runs is waited for: the row
+// is re-checked after it commits, a voided row no longer matches, and the
+// closer bills the reopened window. A void that arrives after the read waits
+// for the closer's commit, so it lands after the period's invoice and the
+// window is forgiven. Without the lock that void could commit first and
+// still find its window billed nowhere.
+//
+// FOR KEY SHARE, not FOR SHARE: the paid flips (markPaidReportingTransition,
+// the credit note's LockForCreditNoteTx, SettleZeroDue) lock the invoice FOR
+// NO KEY UPDATE, which this lock does not wait for and does not block. Only
+// a void changes the watermark, and a paid flip can need the subscription
+// row while it holds the invoice: when dunning's SetDunningPause for this
+// invoice commits after the payment's LockDunningPauseTx read, the
+// payment's pause release waits for the subscription lock this closer
+// holds. Had this read waited for the payment, the two would deadlock.
+// Every writer that locks the invoice FOR UPDATE (void, write-off, charge
+// claims, payment failures, draft edits, disputes) takes no subscription
+// lock in that transaction, except the cancel's and swap's own prebill
+// void, which already holds it. Test-clock teardown (testclock clockTeardownStatements)
+// is the exception: it deletes the clock's invoices before its
+// subscriptions, so a teardown that overlaps a closer on one of that
+// clock's subscriptions fails one of the two with a deadlock error (40P01);
+// a retry succeeds. Before this lock the same overlap could fail the
+// teardown on a foreign key. Simulation data only.
+//
 // tenantID is accepted for symmetry with the store's other *Tx methods; RLS
 // scoping rides the tx's tenant binding.
 func (s *PostgresStore) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
-	return s.latestThresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "FOR KEY SHARE")
 }
 
-func (s *PostgresStore) latestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+// GetThresholdInvoiceForCycleAnyStatus is the fire-once probe's read: the
+// cycle window's newest threshold invoice in ANY status. The partial unique
+// index idx_invoices_threshold_unique_per_cycle keeps one threshold invoice
+// per (subscription, billing_period_start) whatever its status, so a voided
+// or written-off fire still holds the cycle's one slot and no later fire can
+// insert. Probing with the watermark predicate instead re-evaluated the
+// crossing every tick after a void (and, before 2026-10-23, after a
+// write-off), running a paid tax calculation before the index refused the
+// insert. Never a watermark: a voided row billed nothing.
+func (s *PostgresStore) GetThresholdInvoiceForCycleAnyStatus(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	if subscriptionID == "" {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	defer postgres.Rollback(tx)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdAnyStatus, "")
+}
+
+// thresholdInvoiceForCycleTx reads the newest threshold invoice whose
+// billing_period_start falls in [periodStart, periodEnd) and that matches
+// statusPredicate, with lockClause ("" or "FOR KEY SHARE") on the row it
+// returns. Both are this file's constants, never caller input.
+func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, subscriptionID string, periodStart, periodEnd time.Time, statusPredicate, lockClause string) (domain.Invoice, error) {
 	var inv domain.Invoice
 	err := tx.QueryRowContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.subscription_id = $1
 		  AND i.billing_reason = 'threshold'
-		  AND i.status NOT IN ('voided', 'uncollectible')
+		  AND `+statusPredicate+`
 		  AND i.billing_period_start >= $2
 		  AND i.billing_period_start < $3
 		ORDER BY i.billing_period_end DESC
 		LIMIT 1
+		`+lockClause+`
 	`, subscriptionID, periodStart, periodEnd).Scan(s.scanInvDest(&inv)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
