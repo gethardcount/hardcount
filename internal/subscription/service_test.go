@@ -323,11 +323,32 @@ func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, 
 		t := *pc.ResumesAt
 		pcCopy.ResumesAt = &t
 	}
+	pcCopy.SetBy = domain.PauseSetByOperator
 	s.PauseCollection = &pcCopy
 	s.UpdatedAt = clock.Now(ctx)
 	m.subs[id] = s
 	s.Items = m.hydrateItems(id)
 	return s, nil
+}
+
+// SetDunningPause mirrors the real store's write rule (the invoice gate is
+// the real store's alone: memStore has no invoices).
+func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ string) (domain.Subscription, DunningPauseOutcome, error) {
+	s, ok := m.subs[subID]
+	if !ok || s.TenantID != tenantID {
+		return domain.Subscription{}, 0, errs.ErrNotFound
+	}
+	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+		return domain.Subscription{}, 0, errs.InvalidState("terminal")
+	}
+	if s.PauseCollection.InForceAt(clock.Now(ctx)) {
+		return domain.Subscription{}, DunningPauseAlreadyHeld, nil
+	}
+	s.PauseCollection = &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, SetBy: domain.PauseSetByDunning}
+	s.UpdatedAt = clock.Now(ctx)
+	m.subs[subID] = s
+	s.Items = m.hydrateItems(subID)
+	return s, DunningPauseWritten, nil
 }
 
 func (m *memStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {

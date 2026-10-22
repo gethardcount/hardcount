@@ -80,7 +80,9 @@ flowchart LR
    emails the customer. Each retry first uses any credit the customer got
    since the last try, so credit added later can pay an older invoice. If
    every retry fails, it does what your dunning policy says: pause or
-   cancel the subscription, write off the invoice, both, or neither.
+   cancel the subscription, write off the invoice, both, or neither. A
+   pause from dunning lifts by itself once the customer pays what they
+   owe; a pause you set stays until you resume it.
 
    **You see:** the invoice on the **Dunning** page while it is being
    retried. The schedule is under **Dunning policies**. A new account

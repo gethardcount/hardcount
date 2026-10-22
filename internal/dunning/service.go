@@ -56,8 +56,14 @@ type PaymentRetrier interface {
 // dunning until resumed). Pre-amendment this called PauseAtomic
 // (hard pause, no further cycles); that was non-Stripe and silently
 // skipped invoice generation for the affected periods.
+//
+// invoiceID is the run's unpaid invoice. The pause is dunning's: a payment
+// that leaves the subscription owing nothing lifts it (ADR-036 amendment
+// 2026-10-22). applied reports whether collection is paused on return: an
+// operator's pause already in force counts and is left as it is; an
+// invoice paid before the pause landed does not, and nothing is paused.
 type SubscriptionPauser interface {
-	PauseCollection(ctx context.Context, tenantID, id string) error
+	PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (applied bool, err error)
 }
 
 // SubscriptionCanceler cancels a subscription when dunning exhausts
@@ -1161,7 +1167,7 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 				"run_id", run.ID, "invoice_id", run.InvoiceID)
 		} else {
 			subApplied, subFailed := s.applySubscriptionAction(
-				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID)
+				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID, run.InvoiceID)
 			actionFailed = actionFailed || subFailed
 			switch {
 			case !subApplied:
@@ -1324,7 +1330,7 @@ type appliedActions = domain.DunningEscalationOutcome
 // state, reporting whether that state now holds and whether the attempt
 // errored. See SubscriptionStateReader for why the skip-if-done read
 // exists rather than tolerating the movers' already-terminal errors.
-func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, action domain.DunningSubscriptionAction, subID string) (applied, failed bool) {
+func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, action domain.DunningSubscriptionAction, subID, invoiceID string) (applied, failed bool) {
 	if action == domain.SubActionNone {
 		return false, false
 	}
@@ -1377,9 +1383,20 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 				"subscription_id", subID)
 			return false, false
 		}
-		if err := s.subPauser.PauseCollection(ctx, tenantID, subID); err != nil {
+		paused, err := s.subPauser.PauseCollection(ctx, tenantID, subID, invoiceID)
+		if err != nil {
 			slog.Warn("failed to pause collection after dunning exhausted",
 				"subscription_id", subID, "error", err)
+			return false, true
+		}
+		if !paused {
+			// The invoice was paid after the late paid re-check and before
+			// the pause could land: nothing is paused. Reported as failed so
+			// the run is not escalated over a paid invoice: it stays active
+			// (unless the settle already resolved it), and the next tick's
+			// paid check resolves it as recovered.
+			slog.Info("dunning pause skipped: the invoice was paid first; the next dunning tick resolves the run",
+				"subscription_id", subID, "invoice_id", invoiceID)
 			return false, true
 		}
 		slog.Info("collection paused by dunning", "subscription_id", subID)

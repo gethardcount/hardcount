@@ -104,8 +104,8 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 	scheduled := newInvoice("scheduled", newCustomer("ready", "ready@acme.test", true), "", domain.InvoiceFinalized, domain.PaymentPending)
 
 	pausedCust := newCustomer("paused", "paused@acme.test", true)
-	exec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time, pause_collection_behavior)
-		VALUES ('vlx_sub_paused', $1, 'paused', 'paused', $2, 'active', 'anniversary', 'keep_as_draft')`, tenantID, pausedCust)
+	exec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time, pause_collection_behavior, pause_collection_set_by)
+		VALUES ('vlx_sub_paused', $1, 'paused', 'paused', $2, 'active', 'anniversary', 'keep_as_draft', 'operator')`, tenantID, pausedCust)
 	paused := newInvoice("paused", pausedCust, "vlx_sub_paused", domain.InvoiceFinalized, domain.PaymentPending)
 	if err := seedInv.SetAutoChargePending(ctx, tenantID, paused, true); err != nil {
 		t.Fatalf("queue: %v", err)

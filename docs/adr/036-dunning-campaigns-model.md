@@ -1,7 +1,7 @@
 # ADR-036: Dunning campaigns model (multi-policy-per-tenant)
 
 **Date:** 2026-05-16
-**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
+**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a dunning pause lifts when the debt is paid; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
 
 > ⚠️ **The 2026-05-16 amendment below describes a `final_action` column that no
 > longer exists.** [ADR-112](112-dunning-exhaustion-settles-two-questions.md)
@@ -230,7 +230,7 @@ but two independent choices. The behaviours described are unchanged.)*
 | Velox enum (2026-05-16 amendment; column split by ADR-112) | Behavior |
 |---|---|
 | `manual_review` | Run lands state=escalated. No sub/invoice mutation. Operator handles via dashboard. Maps to Stripe "Keep active." |
-| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; charging + dunning paused until operator resumes. Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
+| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; charging + dunning paused until the debt is paid or the operator resumes (amendment 2026-10-22). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
 | `mark_uncollectible` | Calls `invoice.Service.MarkUncollectible` — flips the unpaid invoice to status='uncollectible' (new status, migration 0089). Stripe-standard semantics: receivable closed but invoice stays in financial reporting. Distinct from voided. |
 | `cancel_subscription` | Calls `subscription.Service.Cancel`. Stripe-default terminal action; supported by 3 of 4 reference platforms. Previously missing — operator workflow required a manual cancel step after escalation. |
 
@@ -353,3 +353,60 @@ then keeps the default. The no-policy skip of point 2 is unchanged and now
 applies only to accounts created before this change. Details, values and
 the rejected alternatives are in
 [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md).
+
+## Amendment 2026-10-22 — a dunning pause lifts when the debt is paid
+
+The `pause` final action used to hold "until the operator resumes". A
+customer who then paid the overdue invoice (by card, offline, or through a
+credit note that left nothing due) stayed paused. Their new invoices stayed
+drafts and nothing charged them, with no sign of why. Found as A3 in the
+2026-10-21 product sweep.
+
+**Decision.**
+
+1. A collection pause records who set it: `pause_collection_set_by` is
+   `operator` (the API or the dashboard) or `dunning` (migrations 193 and
+   194). A paired CHECK requires it whenever a pause is set, so a writer
+   that forgets it fails. Pauses set before the migration are `operator`:
+   they were set under the old rule.
+2. When a payment leaves a dunning-paused subscription with no other
+   finalized or written-off invoice still owed, collection resumes. This is
+   Stripe's "All invoices" rule for lifting a subscription's dunning state:
+   a write-off is still a debt. In the single-invoice case it is "the
+   invoice that caused the pause is paid", and it needs no stored cause.
+3. The release rides the paid transaction. Every paid flip goes through the
+   invoice store's `markPaidLockedTx` (ADR-068's choke point), so card,
+   offline, credit-note and credits-cover payments release it the same
+   way. The release locks the subscription row before it counts what is
+   owed, so two payments committing together cannot each see the other
+   unpaid.
+4. The release does not clear the pause. It sets `resumes_at` to the
+   payment's instant, and the scheduled resumer does the rest, as for an
+   operator's timed pause:
+   - a period that ended under the pause still closes as a draft;
+   - the resumer's compare-and-clear announces the resume once;
+   - the resumer writes the "Collection resumed" row (detail "The overdue
+     invoice was paid") and sends `subscription.collection_resumed`, both
+     with `triggered_by=payment`.
+
+   Every reader already treats a `resumes_at` in the past as resumed.
+5. Dunning never overrides a pause in force. The pause write locks the
+   unpaid invoice first and pauses only while that invoice is still owed (a
+   payment that commits first wins), and it leaves an operator's pause, with
+   its `resumes_at`, as it is. A second exhaustion on a subscription dunning
+   already paused writes no second "Collection paused" row. This closes
+   ADR-112's deferred "pause has no skip-if-done" item.
+6. An operator pause never lifts on a payment. An operator who pauses a
+   subscription dunning paused takes the pause over (`set_by=operator`).
+
+**Kept as today.** Drafts from paused periods stay drafts; only periods
+that end after the payment finalize and charge (Stripe: after a resume you
+turn automatic collection back on for each draft). A void or a write-off of
+the invoice does not lift the pause; only a payment does. A canceled
+subscription keeps its pause.
+
+**Not built.** A dunning pause sends no `subscription.collection_paused`
+webhook (the operator's does). The operator's resume sends
+`subscription.collection_resumed` even when nothing was paused. The
+resumer's clear does not check that `resumes_at` is unchanged since it
+listed the row. Each waits for a reported need.

@@ -34,9 +34,9 @@ func (c *recordingSubCanceler) Cancel(_ context.Context, _, _ string) error { c.
 
 type recordingPauser struct{ calls int }
 
-func (p *recordingPauser) PauseCollection(_ context.Context, _, _ string) error {
+func (p *recordingPauser) PauseCollection(_ context.Context, _, _, _ string) (bool, error) {
 	p.calls++
-	return nil
+	return true, nil
 }
 
 // dueRunAt seeds an active run for inv_1 that is due now (backdated

@@ -9,7 +9,7 @@
  */
 
 /**
- * What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+ * What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once a payment leaves the subscription owing nothing; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
  */
 export type RecipeDunningPolicyFinalSubscriptionAction = typeof RecipeDunningPolicyFinalSubscriptionAction[keyof typeof RecipeDunningPolicyFinalSubscriptionAction];
 

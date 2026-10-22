@@ -465,11 +465,14 @@ func TestDunningPause_AnotherInvoiceStillOwed(t *testing.T) {
 	r.assertResumedByPayment(subID)
 }
 
-// T5 (C3). Two payments on one dunning-paused subscription commit at the
-// same time. Each sees the other's invoice still open unless the release
-// locks the subscription before it counts what is owed; then the second
-// waits for the first and sees it paid. Mutation: drop the subscription
-// row lock in ReleaseDunningPauseTx and some iterations stay paused.
+// T5 (C3). Two payments on one dunning-paused subscription, through the
+// offline-payment service, started together behind a barrier. Each sees the
+// other's invoice still open unless the release locks the subscription
+// before it counts what is owed; then the second waits for the first and
+// sees it paid. How often the two transactions overlap depends on timing,
+// so the losing interleaving is pinned without timing in
+// TestReleaseDunningPause_TwoPaymentsAtOnce (internal/subscription), which
+// is the mutation check for the lock.
 func TestDunningPause_ConcurrentPaymentsRelease(t *testing.T) {
 	const iterations = 50
 	r := newPauseRig(t, "Dunning Pause Concurrent", domain.InvActionNone)

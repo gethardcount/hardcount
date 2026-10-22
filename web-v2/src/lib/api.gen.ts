@@ -2578,7 +2578,8 @@ export interface paths {
          *     periods that end before that instant bill as drafts, and later
          *     periods bill normally. Without it, the pause lasts until you call
          *     `DELETE /v1/subscriptions/{id}/pause-collection`. A new call
-         *     replaces the current pause.
+         *     replaces the current pause, including one dunning set; the pause is
+         *     then yours (`set_by: operator`), and a payment no longer lifts it.
          *
          *     Sends the `subscription.collection_paused` webhook event.
          */
@@ -7869,7 +7870,7 @@ export interface components {
             max_retries: number;
             intervals_hours: number[];
             /**
-             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once a payment leaves the subscription owing nothing; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
              * @enum {string}
              */
             final_subscription_action: "none" | "pause" | "cancel";
@@ -8252,9 +8253,21 @@ export interface components {
             behavior: "keep_as_draft";
             /**
              * Format: date-time
-             * @description When collection resumes. Absent when the pause lasts until it is cleared.
+             * @description When collection resumes. Absent when the pause lasts until it is
+             *     cleared. On a pause set by dunning, it is the time of the payment
+             *     that left the subscription owing nothing.
              */
             resumes_at?: string;
+            /**
+             * @description Who paused collection. `operator`: you, through the API or the
+             *     dashboard; the pause lasts until you resume it or until
+             *     `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+             *     A dunning pause lifts by itself once a payment leaves the
+             *     subscription with no finalized or written-off invoice still owed.
+             *     Periods that ended during the pause keep their draft invoices.
+             * @enum {string}
+             */
+            readonly set_by: "operator" | "dunning";
         };
         /** @description Limits that make Velox invoice before the period ends. */
         SubscriptionBillingThresholds: {

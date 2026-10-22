@@ -440,6 +440,7 @@ export * from './subscriptionItemProrationType';
 export * from './subscriptionItemThreshold';
 export * from './subscriptionPauseCollection';
 export * from './subscriptionPauseCollectionBehavior';
+export * from './subscriptionPauseCollectionSetBy';
 export * from './subscriptionStatus';
 export * from './subscriptionTimelineEvent';
 export * from './subscriptionTimelineEventSource';

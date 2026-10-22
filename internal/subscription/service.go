@@ -2601,22 +2601,17 @@ func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string)
 // ResumesAt is optional; when set, the cycle scan auto-clears the pause
 // at the start of the period containing or after that timestamp so that
 // period bills normally. When nil, only an explicit DELETE clears it.
-//
-// TriggeredBy is set by the caller (handler / dunning adapter / future
-// callers) so the audit trail can distinguish operator-driven pauses
-// from system-driven ones. Not exposed in JSON so the field can't be
-// spoofed by an API client. Defaults to "operator" inside the service
-// if empty.
 type PauseCollectionInput struct {
-	Behavior    domain.PauseCollectionBehavior `json:"behavior"`
-	ResumesAt   *time.Time                     `json:"resumes_at,omitempty"`
-	TriggeredBy string                         `json:"-"`
+	Behavior  domain.PauseCollectionBehavior `json:"behavior"`
+	ResumesAt *time.Time                     `json:"resumes_at,omitempty"`
 }
 
-// PauseCollection sets the Stripe-parity collection-pause state. Distinct
-// from Pause (hard freeze on status). The cycle keeps advancing; the engine
-// generates the invoice as draft and skips finalize/charge/dunning while
-// pause_collection is non-null.
+// PauseCollection sets the operator's Stripe-parity collection-pause state.
+// Distinct from Pause (hard freeze on status). The cycle keeps advancing;
+// the engine generates the invoice as draft and skips finalize/charge/dunning
+// while pause_collection is non-null. The pause is the operator's
+// (set_by=operator), also when it replaces a dunning pause, so a payment no
+// longer lifts it. Dunning pauses through PauseCollectionForDunning.
 //
 // Idempotent: a second call with the same input replaces the row's
 // pause_collection_* columns with the same values. Switching from one
@@ -2668,15 +2663,11 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 	}
 
 	if s.audit != nil {
-		triggeredBy := input.TriggeredBy
-		if triggeredBy == "" {
-			triggeredBy = "operator"
-		}
 		meta := map[string]any{
 			"action":       domain.SubAuditCollectionPaused,
 			"customer_id":  sub.CustomerID,
 			"behavior":     string(input.Behavior),
-			"triggered_by": triggeredBy,
+			"triggered_by": "operator",
 		}
 		if sub.PauseCollection != nil && sub.PauseCollection.ResumesAt != nil {
 			meta["resumes_at"] = sub.PauseCollection.ResumesAt.UTC()
@@ -2687,16 +2678,53 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 	return sub, nil
 }
 
+// PauseCollectionForDunning is dunning's pause final action for the unpaid
+// invoice invoiceID. applied reports whether collection is paused when it
+// returns: true when this call paused it, and when a pause was already in
+// force (the operator's, which it leaves as it is, or this run's earlier
+// attempt). It is false when the invoice was paid before the pause could
+// land; nothing is paused then. The "Collection paused" row is written only
+// when this call paused collection, so a re-attempted exhaustion writes no
+// second row.
+//
+// The pause lifts when a payment leaves the subscription owing nothing
+// (ADR-036 amendment 2026-10-22, PostgresStore.ReleaseDunningPauseTx).
+func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, invoiceID string) (bool, error) {
+	ctx = s.bindForSub(ctx, tenantID, id)
+	// The ended period's invoice follows the pause state at its end, as
+	// for an operator's pause.
+	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
+		return false, err
+	}
+	sub, outcome, err := s.store.SetDunningPause(ctx, tenantID, id, invoiceID)
+	if err != nil {
+		return false, err
+	}
+	switch outcome {
+	case DunningPauseInvoiceSettled:
+		return false, nil
+	case DunningPauseAlreadyHeld:
+		return true, nil
+	}
+	if s.audit != nil {
+		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
+			"action":       domain.SubAuditCollectionPaused,
+			"customer_id":  sub.CustomerID,
+			"behavior":     string(domain.PauseCollectionKeepAsDraft),
+			"triggered_by": "dunning",
+			"invoice_id":   invoiceID,
+		})
+	}
+	return true, nil
+}
+
 // ResumeCollection clears any active collection-pause. Idempotent — a row
 // without an active pause returns unchanged. Distinct from Resume (which
 // flips status from paused back to active).
 //
-// All current callers of this method are operator-driven (handler);
-// the engine's cycle-scan auto-resume writes its own audit row with
-// triggered_by="schedule" via Engine.SetAuditLogger and does not call
-// this service method. If a future system path resumes via the service
-// (e.g. webhook callback from PSP), thread a TriggeredBy param the same
-// way PauseCollection does today.
+// Its one caller is the operator (handler). The scheduled resumers write
+// their own row (triggered_by "schedule", or "payment" for a dunning pause
+// a payment released) and do not call this method.
 func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	// A period that ended while paused keeps a draft invoice; the resume
@@ -3145,12 +3173,13 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 			batchErrs = append(batchErrs, fmt.Errorf("clear pause %s: %w", sub.ID, err))
 			continue
 		}
+		triggeredBy := scheduledResumeTrigger(sub)
 		if s.audit != nil {
 			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
 				"action":       domain.SubAuditCollectionResumed,
 				"customer_id":  cleared.CustomerID,
 				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": "schedule",
+				"triggered_by": triggeredBy,
 			})
 		}
 		if s.events != nil {
@@ -3158,12 +3187,23 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 				"subscription_id": cleared.ID,
 				"customer_id":     cleared.CustomerID,
 				"resumed_at":      resumeAt.UTC(),
-				"triggered_by":    "schedule",
+				"triggered_by":    triggeredBy,
 			})
 		}
 		processed++
 	}
 	return processed, batchErrs
+}
+
+// scheduledResumeTrigger names what lifted a pause the scheduled resumer
+// clears: "payment" for a dunning pause, whose resumes_at only the payment
+// that left the subscription owing nothing sets (ReleaseDunningPauseTx);
+// "schedule" for an operator's timed pause.
+func scheduledResumeTrigger(listed domain.Subscription) string {
+	if listed.PauseCollection != nil && listed.PauseCollection.SetBy == domain.PauseSetByDunning {
+		return "payment"
+	}
+	return "schedule"
 }
 
 // ProcessExpiredPauseCollections is the wall-clock cron counterpart —
@@ -3203,12 +3243,13 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 			batchErrs = append(batchErrs, fmt.Errorf("clear pause %s: %w", sub.ID, err))
 			continue
 		}
+		triggeredBy := scheduledResumeTrigger(sub)
 		if s.audit != nil {
 			_ = s.audit.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
 				"action":       domain.SubAuditCollectionResumed,
 				"customer_id":  cleared.CustomerID,
 				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": "schedule",
+				"triggered_by": triggeredBy,
 			})
 		}
 		if s.events != nil {
@@ -3216,7 +3257,7 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 				"subscription_id": cleared.ID,
 				"customer_id":     cleared.CustomerID,
 				"resumed_at":      resumeAt.UTC(),
-				"triggered_by":    "schedule",
+				"triggered_by":    triggeredBy,
 			})
 		}
 		processed++

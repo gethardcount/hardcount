@@ -21,10 +21,11 @@ import (
 )
 
 type PostgresStore struct {
-	db           *postgres.DB
-	enc          *crypto.Encryptor
-	outbox       OutboxEnqueuer
-	commitFunder CommitFunder
+	db                  *postgres.DB
+	enc                 *crypto.Encryptor
+	outbox              OutboxEnqueuer
+	commitFunder        CommitFunder
+	dunningPauseRelease DunningPauseReleaser
 }
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
@@ -58,6 +59,21 @@ type CommitFunder interface {
 
 // SetCommitFunder wires commit-grant funding at finalize (ADR-078).
 func (s *PostgresStore) SetCommitFunder(f CommitFunder) { s.commitFunder = f }
+
+// DunningPauseReleaser lifts a dunning collection pause in the transaction
+// that marks an invoice paid, when the subscription then owes nothing
+// (ADR-036 amendment 2026-10-22). Every paid flip goes through
+// markPaidLockedTx, so every payment path (card, offline, credit note,
+// credits) releases the pause the same way. Satisfied by
+// *subscription.PostgresStore; declared consumer-side so the invoice store
+// needs no subscription import. The producer always wires it; unwired, a
+// dunning pause stays until the operator resumes it.
+type DunningPauseReleaser interface {
+	ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, subID, paidInvoiceID string, at time.Time) error
+}
+
+// SetDunningPauseReleaser wires the dunning-pause release on payment.
+func (s *PostgresStore) SetDunningPauseReleaser(r DunningPauseReleaser) { s.dunningPauseRelease = r }
 
 // SetEncryptor wires AES-256-GCM encryption for the hosted-invoice public_token
 // at rest. When set (non-noop), the raw token is encrypted before storage and
@@ -1434,6 +1450,15 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
 		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", "", attemptSimAt); err != nil {
 		return domain.Invoice{}, err
+	}
+	// A dunning pause lifts when this payment leaves the subscription owing
+	// nothing, in this transaction: the release cannot be lost to a crash
+	// after commit, and the subscription row lock it takes (after this
+	// invoice's) serializes two payments on one subscription.
+	if inv.SubscriptionID != "" && s.dunningPauseRelease != nil {
+		if err := s.dunningPauseRelease.ReleaseDunningPauseTx(ctx, tx, inv.SubscriptionID, inv.ID, now); err != nil {
+			return domain.Invoice{}, err
+		}
 	}
 	return inv, nil
 }

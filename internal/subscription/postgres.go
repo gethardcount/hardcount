@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/sagarsuperuser/velox/internal/platform/leader"
 	"strings"
@@ -87,7 +88,7 @@ func (s *PostgresStore) enqueueLifecycle(ctx context.Context, tx *sql.Tx, eventT
 const subCols = `id, tenant_id, code, display_name, customer_id, status, billing_time,
 	trial_start_at, trial_end_at, started_at, activated_at, canceled_at,
 	cancel_at, COALESCE(cancel_at_period_end, false),
-	pause_collection_behavior, pause_collection_resumes_at,
+	pause_collection_behavior, pause_collection_resumes_at, pause_collection_set_by,
 	billing_threshold_amount_gte, COALESCE(billing_threshold_reset_cycle, true),
 	current_billing_period_start, current_billing_period_end, next_billing_at,
 	COALESCE(billing_anchor_day, 0),
@@ -708,11 +709,13 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 	return sub, nil
 }
 
-// SetPauseCollection writes (behavior, resumes_at) onto the row. Rejects
-// rows in canceled/archived since collection-pause on a terminated sub has
-// no meaning — the engine wouldn't observe the row anyway, but failing
-// loudly here keeps the API honest. Active and paused (hard) are both
-// allowed: a hard-paused sub can simultaneously have pause_collection
+// SetPauseCollection writes the operator's (behavior, resumes_at) onto the
+// row, marked set_by='operator': an operator who re-pauses a subscription
+// dunning paused takes the pause over, and a payment no longer lifts it.
+// Rejects rows in canceled/archived since collection-pause on a terminated
+// sub has no meaning — the engine wouldn't observe the row anyway, but
+// failing loudly here keeps the API honest. Active and paused (hard) are
+// both allowed: a hard-paused sub can simultaneously have pause_collection
 // configured for the moment status flips back to active.
 func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -727,6 +730,7 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 		UPDATE subscriptions
 		SET pause_collection_behavior = $1,
 		    pause_collection_resumes_at = $2,
+		    pause_collection_set_by = 'operator',
 		    updated_at = $3
 		WHERE id = $4 AND status NOT IN ('canceled','archived')
 		RETURNING `+subCols,
@@ -757,6 +761,134 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 	return sub, nil
 }
 
+// SetDunningPause is dunning's pause final action for the unpaid invoice
+// invoiceID: keep_as_draft with no resumes_at, set_by='dunning'.
+//
+// It locks the invoice first and pauses only while that invoice is still
+// owed (finalized or uncollectible). A payment that commits between
+// dunning's paid re-check and this write is seen here, and nothing is
+// paused (DunningPauseInvoiceSettled): a pause written after the payment
+// would have nothing left to lift it. The lock order, invoice then
+// subscription, is the paid transaction's (ReleaseDunningPauseTx), so the
+// two serialize.
+//
+// It never overrides a pause in force (DunningPauseAlreadyHeld). An
+// operator's pause, timed or not, keeps its resumes_at and stays the
+// operator's; a dunning pause already set (a re-attempted exhaustion) is
+// left as it is. A pause whose resumes_at has passed but which the resumer
+// has not cleared yet is not in force, and is replaced. errs.InvalidState
+// covers a canceled or archived subscription.
+func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	defer postgres.Rollback(tx)
+
+	var invStatus string
+	err = tx.QueryRowContext(ctx, `SELECT status FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, invoiceID).Scan(&invStatus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Subscription{}, 0, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Subscription{}, 0, fmt.Errorf("lock invoice for the dunning pause: %w", err)
+	}
+	if invStatus != string(domain.InvoiceFinalized) && invStatus != string(domain.InvoiceUncollectible) {
+		return domain.Subscription{}, DunningPauseInvoiceSettled, nil
+	}
+
+	now := clock.Now(ctx)
+	var sub domain.Subscription
+	err = scanSubRow(tx.QueryRowContext(ctx, `
+		UPDATE subscriptions
+		SET pause_collection_behavior = $1,
+		    pause_collection_resumes_at = NULL,
+		    pause_collection_set_by = 'dunning',
+		    updated_at = $2
+		WHERE id = $3 AND status NOT IN ('canceled','archived')
+		  AND (pause_collection_behavior IS NULL
+		       OR (pause_collection_resumes_at IS NOT NULL AND pause_collection_resumes_at <= $2))
+		RETURNING `+subCols,
+		string(domain.PauseCollectionKeepAsDraft), now, subID,
+	), &sub)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Not written: the subscription is terminal or missing, or a pause
+		// is in force.
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM subscriptions WHERE id = $1`, subID).Scan(&status); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return domain.Subscription{}, 0, errs.ErrNotFound
+			}
+			return domain.Subscription{}, 0, err
+		}
+		if status == string(domain.SubscriptionCanceled) || status == string(domain.SubscriptionArchived) {
+			return domain.Subscription{}, 0, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", status))
+		}
+		return domain.Subscription{}, DunningPauseAlreadyHeld, nil
+	}
+	if err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	return sub, DunningPauseWritten, nil
+}
+
+// ReleaseDunningPauseTx runs in the transaction that marks paidInvoiceID
+// paid (the invoice store's markPaidLockedTx, through
+// invoice.DunningPauseReleaser). When dunning paused the subscription's
+// collection and the subscription now owes nothing else, it stamps
+// pause_collection_resumes_at = at. From that instant every reader treats
+// the pause as lifted (PauseCollection.InForceAt), and the scheduled
+// resumer clears it, writes the "Collection resumed" row and sends
+// subscription.collection_resumed, after any period that ended under the
+// pause has closed as a draft.
+//
+// "Owes nothing else" counts every other finalized or written-off invoice
+// with an amount due: a write-off is still a debt. The subscription row is
+// locked before that count, so two payments on the same subscription
+// committing together serialize here, and the second sees the first one
+// paid. An operator's pause, a pause already timed, and a canceled or
+// archived subscription are left alone.
+func (s *PostgresStore) ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, subID, paidInvoiceID string, at time.Time) error {
+	var one int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1 FROM subscriptions
+		WHERE id = $1
+		  AND pause_collection_set_by = 'dunning'
+		  AND pause_collection_resumes_at IS NULL
+		  AND status NOT IN ('canceled','archived')
+		FOR NO KEY UPDATE`, subID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock subscription for the dunning-pause release: %w", err)
+	}
+	var owed bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM invoices
+			WHERE subscription_id = $1 AND id <> $2
+			  AND status IN ('finalized','uncollectible') AND amount_due_cents > 0)`,
+		subID, paidInvoiceID).Scan(&owed); err != nil {
+		return fmt.Errorf("count the subscription's other unpaid invoices: %w", err)
+	}
+	if owed {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE subscriptions SET pause_collection_resumes_at = $1, updated_at = $1
+		WHERE id = $2`, at, subID); err != nil {
+		return fmt.Errorf("release the dunning pause: %w", err)
+	}
+	return nil
+}
+
 // ClearPauseCollection nulls both pause_collection_* columns. Idempotent —
 // runs even on a row that already has them null, returning the unchanged
 // subscription. Returns errs.ErrNotFound if the row doesn't exist; status
@@ -779,6 +911,7 @@ func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id s
 		UPDATE subscriptions
 		SET pause_collection_behavior = NULL,
 		    pause_collection_resumes_at = NULL,
+		    pause_collection_set_by = NULL,
 		    updated_at = $1
 		WHERE id = $2
 		  AND pause_collection_behavior IS NOT NULL
@@ -2768,7 +2901,7 @@ type rowScanner interface {
 // thresholds are hydrated separately by hydrateThresholds since they
 // live in an aux table.
 func scanSubRow(row rowScanner, sub *domain.Subscription) error {
-	var pauseBehavior sql.NullString
+	var pauseBehavior, pauseSetBy sql.NullString
 	var pauseResumesAt sql.NullTime
 	var thresholdAmountGTE sql.NullInt64
 	var thresholdResetCycle bool
@@ -2780,7 +2913,7 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 		&sub.Status, &sub.BillingTime, &sub.TrialStartAt, &sub.TrialEndAt, &sub.StartedAt,
 		&sub.ActivatedAt, &sub.CanceledAt,
 		&sub.CancelAt, &sub.CancelAtPeriodEnd,
-		&pauseBehavior, &pauseResumesAt,
+		&pauseBehavior, &pauseResumesAt, &pauseSetBy,
 		&thresholdAmountGTE, &thresholdResetCycle,
 		&sub.CurrentBillingPeriodStart,
 		&sub.CurrentBillingPeriodEnd, &sub.NextBillingAt,
@@ -2797,6 +2930,7 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	if pauseBehavior.Valid {
 		pc := &domain.PauseCollection{
 			Behavior: domain.PauseCollectionBehavior(pauseBehavior.String),
+			SetBy:    domain.PauseCollectionSetBy(pauseSetBy.String),
 		}
 		if pauseResumesAt.Valid {
 			t := pauseResumesAt.Time

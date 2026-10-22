@@ -8,6 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { SubscriptionPauseCollectionBehavior } from './subscriptionPauseCollectionBehavior';
+import type { SubscriptionPauseCollectionSetBy } from './subscriptionPauseCollectionSetBy';
 
 /**
  * Present on a subscription while collection is paused. Invoices are
@@ -15,6 +16,19 @@ import type { SubscriptionPauseCollectionBehavior } from './subscriptionPauseCol
  */
 export interface SubscriptionPauseCollection {
   behavior: SubscriptionPauseCollectionBehavior;
-  /** When collection resumes. Absent when the pause lasts until it is cleared. */
+  /**
+     * When collection resumes. Absent when the pause lasts until it is
+     * cleared. On a pause set by dunning, it is the time of the payment
+     * that left the subscription owing nothing.
+     */
   resumes_at?: string;
+  /**
+     * Who paused collection. `operator`: you, through the API or the
+     * dashboard; the pause lasts until you resume it or until
+     * `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+     * A dunning pause lifts by itself once a payment leaves the
+     * subscription with no finalized or written-off invoice still owed.
+     * Periods that ended during the pause keep their draft invoices.
+     */
+  readonly set_by: SubscriptionPauseCollectionSetBy;
 }
