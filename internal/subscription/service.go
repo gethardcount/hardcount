@@ -644,16 +644,18 @@ type CreateItemInput struct {
 	Quantity int64  `json:"quantity,omitempty"`
 }
 
+// maxTrialDays is the longest trial create and extend-trial accept: two
+// years, Stripe's limit for trial_end.
+const maxTrialDays = 730
+
 type CreateInput struct {
-	Code          string                         `json:"code"`
-	DisplayName   string                         `json:"display_name"`
-	CustomerID    string                         `json:"customer_id"`
-	Items         []CreateItemInput              `json:"items"`
-	BillingTime   domain.SubscriptionBillingTime `json:"billing_time"`
-	TrialDays     int                            `json:"trial_days,omitempty"`
-	StartNow      bool                           `json:"start_now,omitempty"`
-	UsageCapUnits *int64                         `json:"usage_cap_units,omitempty"`
-	OverageAction string                         `json:"overage_action,omitempty"`
+	Code        string                         `json:"code"`
+	DisplayName string                         `json:"display_name"`
+	CustomerID  string                         `json:"customer_id"`
+	Items       []CreateItemInput              `json:"items"`
+	BillingTime domain.SubscriptionBillingTime `json:"billing_time"`
+	TrialDays   int                            `json:"trial_days,omitempty"`
+	StartNow    bool                           `json:"start_now,omitempty"`
 }
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
@@ -705,6 +707,12 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	}
 	if billingTime != domain.BillingTimeCalendar && billingTime != domain.BillingTimeAnniversary {
 		return domain.Subscription{}, errs.Invalid("billing_time", "must be calendar or anniversary")
+	}
+	// A negative trial_days used to read as "no trial", so with start_now the
+	// customer was charged on day 1. The upper bound is Stripe's: a trial
+	// "can be at most two years". A longer pause in billing is not a trial.
+	if input.TrialDays < 0 || input.TrialDays > maxTrialDays {
+		return domain.Subscription{}, errs.Invalid("trial_days", fmt.Sprintf("must be between 0 and %d", maxTrialDays))
 	}
 
 	// Reject mixed billing intervals across items (Stripe / Lago parity).
@@ -851,11 +859,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		billingAnchorDay = anchorDay
 	}
 
-	overageAction := input.OverageAction
-	if overageAction == "" {
-		overageAction = "charge"
-	}
-
 	// ADR-031: in_advance plans get a day-1 invoice covering the upcoming
 	// period's base fee. Build it IN THE SAME tx as the subscription insert
 	// (ADR-056 coordinator) so a billing failure rolls the whole create back
@@ -881,8 +884,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		CurrentBillingPeriodEnd:   periodEnd,
 		NextBillingAt:             nextBilling,
 		BillingAnchorDay:          billingAnchorDay,
-		UsageCapUnits:             input.UsageCapUnits,
-		OverageAction:             overageAction,
 		TestClockID:               inheritedClockID,
 		Items:                     items,
 	}, func(tx *sql.Tx, created domain.Subscription) error {
@@ -3239,6 +3240,11 @@ func (s *Service) ExtendTrial(ctx context.Context, tenantID, id string, newTrial
 		return domain.Subscription{}, err
 	}
 	newEnd := newTrialEnd.UTC()
+	// The create bound holds here too: a trial ends at most maxTrialDays
+	// after it started, counted the way create counts trial_days.
+	if current.TrialStartAt != nil && newEnd.After(domain.AddDaysIn(*current.TrialStartAt, maxTrialDays, loc)) {
+		return domain.Subscription{}, errs.Invalid("trial_end", fmt.Sprintf("A trial can last at most %d days from its start. Pick an earlier date.", maxTrialDays))
+	}
 	interval := s.firstPlanInterval(ctx, tenantID, current.Items)
 	ps, pe, anchorDay := firstPeriodAfterTrial(newEnd, current.BillingTime, interval, loc)
 	return s.store.ExtendTrial(ctx, tenantID, id, newEnd, ps, pe, pe, anchorDay)

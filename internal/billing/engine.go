@@ -2779,8 +2779,8 @@ func nominalRate(rule domain.RatingRuleVersion) *decimal.Decimal {
 // buildLineItems computes the invoice line items and subtotal for one
 // billing period: per-item base-fee segments (change-log aware) plus
 // per-meter usage charges (multi-dimensional and single-rule paths),
-// honoring usage caps, thresholds already billed this cycle, and
-// scheduled-cancel terminal-cycle skips. Extracted whole from
+// honoring thresholds already billed this cycle and scheduled-cancel
+// terminal-cycle skips. Extracted whole from
 // billOnePeriod (behavior-preserving) to separate the pricing
 // computation from the billing-cycle orchestration; it remains large
 // and is the next candidate for further decomposition. Usage left
@@ -2888,8 +2888,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// meter has exactly one full-period interval — output collapses
 	// to the pre-segment-aware single-line behavior. For subs where
 	// a mid-period plan change adds/removes meters, each meter
-	// bills only for the time it was actually on the sub. The usage
-	// cap scales every (meter, interval) quantity by one factor.
+	// bills only for the time it was actually on the sub.
 
 	// The windows each meter is billed over, from item segments and
 	// removed-item segments (meterUsageIntervals; shared with every other
@@ -2901,19 +2900,8 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, thresholdBilledThrough, floors)
 
 	// Usage is read once per window (one read covers every meter for a
-	// window; a pricing-rule meter reads its buckets per window). The block
-	// usage cap counts each meter over the windows it bills, before the
-	// threshold clamp, and every usage quantity below is scaled by it
-	// (usage_cap.go).
+	// window; a pricing-rule meter reads its buckets per window).
 	reads := newWindowUsage(e, sub, meterAggs)
-	capWindows := meterIntervals
-	if thresholdBilledThrough != nil {
-		capWindows = meterIntervalsFull
-	}
-	usageCap, err := e.usageCapFor(ctx, sub, capWindows, reads)
-	if err != nil {
-		return nil, 0, nil, err
-	}
 
 	// Union of meters with billable windows. When a watermark exists, a
 	// meter whose clamped intervals vanished entirely (all usage inside the
@@ -2937,7 +2925,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	}
 	// One tier ladder per usage bucket for the whole close, continuing from
 	// what a threshold fire already billed (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm, usageCap.binds())
+	ladder := newUsageLadder(wm)
 	for meterID := range meterIDSet {
 		meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 		if err != nil {
@@ -2986,9 +2974,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 					return nil, 0, nil, err
 				}
 				for _, agg := range aggs {
-					// The cap's one factor. A bucket below zero bills 0, so
-					// the cap leaves it at its own value.
-					qty := usageCap.apply(agg.Quantity)
+					qty := agg.Quantity
 					if qty.IsZero() {
 						continue
 					}
@@ -3076,9 +3062,6 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 			if err != nil {
 				return nil, 0, nil, err
 			}
-			// The cap's one factor, for a full-period and a sub-period
-			// quantity alike; not for a quantity below zero (it bills 0).
-			quantity = usageCap.apply(quantity)
 			if quantity.IsZero() {
 				continue
 			}
@@ -4118,8 +4101,8 @@ const (
 // subtotal for an immediate mid-period cancel: segment-aware in_arrears
 // base fees over the partial period [periodStart, canceledAt] (skipped
 // entirely when a threshold fire already billed the unprorated base)
-// plus segment-aware usage, honoring the usage cap and the threshold
-// watermark's clamped/full dual-window protocol. Extracted whole from
+// plus segment-aware usage, honoring the threshold watermark's
+// clamped/full dual-window protocol. Extracted whole from
 // billFinalOnImmediateCancelImpl (behavior-preserving) to separate the
 // pricing computation from the cancel-invoice orchestration; it is the
 // cancel-path analog of buildLineItems and shares its segment model.
@@ -4242,20 +4225,8 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	}
 	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, canceledAt, wm.billedThrough, floors)
 
-	// The block usage cap, worked out as the period close works it out
-	// (usage_cap.go): the partial window [periodStart, canceledAt] is the
-	// entire billable extent of the final cycle, so the per-cycle cap
-	// applies to it whole, each meter over the windows it bills. The cap
-	// and the lines read usage through reads, once per window.
+	// The lines read usage through reads, once per window.
 	reads := newWindowUsage(e, sub, meterAggs)
-	capWindows := meterIntervals
-	if wm.exists() {
-		capWindows = meterIntervalsFull
-	}
-	usageCap, err := e.usageCapFor(ctx, sub, capWindows, reads)
-	if err != nil {
-		return nil, 0, fmt.Errorf("cancel: %w", err)
-	}
 
 	// Union of meters with billable windows (a meter fully clamped away can
 	// still owe a full-window bill for a deferred non-additive bucket) +
@@ -4272,7 +4243,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		nonAdditiveOnly bool
 	}
 	// Same per-bucket tier ladder as the cycle close (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm, usageCap.binds())
+	ladder := newUsageLadder(wm)
 	for meterID := range cancelMeterIDSet {
 		// Does this meter price via dimension-match pricing rules (the
 		// multi-dim shape: e.g. the AI `tokens` meter, one rule per
@@ -4320,9 +4291,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 					return nil, 0, fmt.Errorf("cancel: %w", err)
 				}
 				for _, agg := range aggs {
-					// The cap's one factor, as in billOnePeriod's multi-dim
-					// branch (not for a bucket below zero, which bills 0).
-					qty := usageCap.apply(agg.Quantity)
+					qty := agg.Quantity
 					if qty.IsZero() {
 						continue
 					}
@@ -4402,9 +4371,6 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 			if err != nil {
 				return nil, 0, fmt.Errorf("cancel: %w", err)
 			}
-			// The cap's one factor, for the whole window and a segment
-			// alike; not for a quantity below zero, which bills 0.
-			quantity = usageCap.apply(quantity)
 			if quantity.IsZero() {
 				continue
 			}

@@ -114,8 +114,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var req CreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 
@@ -127,6 +126,22 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		if req.CreditAmountCents > 0 {
 			respond.Validation(w, r, "credit_amount_cents cannot be used with commit_relief — paying relief from the customer's balance would refund the very credits being retired")
 			return
+		}
+		// The relief's split lives inside commit_relief. At the top level it
+		// was ignored and the relief defaulted to a full card refund, so a
+		// dispute-loss relief meant as out_of_band paid the customer twice.
+		for _, f := range []struct {
+			name string
+			set  bool
+		}{
+			{"refund_amount_cents", req.RefundAmountCents != 0},
+			{"out_of_band_amount_cents", req.OutOfBandAmountCents != 0},
+			{"refund_type", req.RefundType != ""},
+		} {
+			if f.set {
+				respond.ValidationField(w, r, f.name, f.name+" goes inside commit_relief for a relief, for example {\"commit_relief\": {\"retire_all\": true, \"out_of_band_amount_cents\": 5000}}")
+				return
+			}
 		}
 		relief := *req.CommitRelief
 		if relief.InvoiceID == "" {

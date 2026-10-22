@@ -467,6 +467,11 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 		existing.Email = addr
 	}
 	if status := domain.CustomerStatus(input.Status); status != "" {
+		// Checked here, not left to customers_status_check: the constraint's
+		// error is a 500, which the idempotency middleware caches.
+		if status != domain.CustomerStatusActive && status != domain.CustomerStatusArchived {
+			return domain.Customer{}, errs.Invalid("status", "must be active or archived")
+		}
 		// Archive = 409-BLOCK while any subscription still bills, never
 		// auto-cancel (ADR-067). Auto-cancel would run the immediate-cancel
 		// billing path — final prorated invoice + auto-charge of the saved

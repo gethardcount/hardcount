@@ -2621,6 +2621,21 @@ func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
 	}
 }
 
+// Defines values for PostV1PlansJSONBodyStatus.
+const (
+	PostV1PlansJSONBodyStatusActive PostV1PlansJSONBodyStatus = "active"
+)
+
+// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyStatus enum.
+func (e PostV1PlansJSONBodyStatus) Valid() bool {
+	switch e {
+	case PostV1PlansJSONBodyStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPlan200JSONResponseBodyBaseBillTiming.
 const (
 	GetPlan200JSONResponseBodyBaseBillTimingInAdvance GetPlan200JSONResponseBodyBaseBillTiming = "in_advance"
@@ -2788,19 +2803,19 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 
 // Defines values for GetV1RatingRulesParamsLifecycleState.
 const (
-	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
-	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
-	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
+	Active   GetV1RatingRulesParamsLifecycleState = "active"
+	Archived GetV1RatingRulesParamsLifecycleState = "archived"
+	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
 func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 	switch e {
-	case GetV1RatingRulesParamsLifecycleStateActive:
+	case Active:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateArchived:
+	case Archived:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateDraft:
+	case Draft:
 		return true
 	default:
 		return false
@@ -5896,9 +5911,6 @@ type Subscription struct {
 	Items         []SubscriptionItem `json:"items,omitempty"`
 	NextBillingAt time.Time          `json:"next_billing_at,omitempty"`
 
-	// OverageAction `block` or `charge` (the default).
-	OverageAction string `json:"overage_action,omitempty"`
-
 	// PauseCollection Present on a subscription while collection is paused. Invoices are
 	// still created, but stay drafts and are not charged.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
@@ -5909,9 +5921,6 @@ type Subscription struct {
 	TrialEndAt      time.Time                   `json:"trial_end_at,omitempty"`
 	TrialStartAt    time.Time                   `json:"trial_start_at,omitempty"`
 	UpdatedAt       time.Time                   `json:"updated_at"`
-
-	// UsageCapUnits Most usage units per billing period. Absent means no cap.
-	UsageCapUnits int64 `json:"usage_cap_units,omitempty"`
 }
 
 // SubscriptionBillingTime defines model for Subscription.BillingTime.
@@ -6829,7 +6838,11 @@ type ListCreditNotesParamsDir string
 type PostV1CreditNotesJSONBody struct {
 	AutoIssue bool `json:"auto_issue,omitempty"`
 
-	// CommitRelief Mutually exclusive with lines/credit_amount_cents.
+	// CommitRelief Mutually exclusive with lines and credit_amount_cents. The
+	// relief's split goes in here, not at the top level: a top-level
+	// `refund_amount_cents`, `out_of_band_amount_cents` or
+	// `refund_type` is a 422. Example after a lost dispute:
+	// `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
 	CommitRelief struct {
 		// InvoiceId Optional. Defaults to the top-level invoice_id.
 		InvoiceId            string `json:"invoice_id,omitempty"`
@@ -6857,13 +6870,17 @@ type PostV1CreditNotesJSONBody struct {
 		Quantity          int    `json:"quantity,omitempty"`
 		UnitAmountCents   int    `json:"unit_amount_cents,omitempty"`
 	} `json:"lines,omitempty"`
+
+	// OutOfBandAmountCents Not with commit_relief; put the relief's split inside commit_relief.
 	OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
 	Reason               string `json:"reason,omitempty"`
-	RefundAmountCents    int    `json:"refund_amount_cents,omitempty"`
+
+	// RefundAmountCents Not with commit_relief; put the relief's split inside commit_relief.
+	RefundAmountCents int `json:"refund_amount_cents,omitempty"`
 
 	// RefundType Older single-channel form. On a paid invoice whose three
 	// `*_amount_cents` fields are all 0, `refund` or `credit`
-	// puts the whole note in that channel.
+	// puts the whole note in that channel. Not with commit_relief.
 	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
 }
 
@@ -7643,6 +7660,9 @@ type PostV1PlansJSONBody struct {
 	MeterIds        []string                           `json:"meter_ids,omitempty"`
 	Name            string                             `json:"name"`
 
+	// Status Optional. A plan is created active; archive it with PATCH.
+	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
+
 	// TaxCode Stripe product tax code for the base fee, such as
 	// `txcd_10103001`. Empty or omitted means the tenant's
 	// `default_product_tax_code`.
@@ -7664,6 +7684,9 @@ type PostV1PlansJSONBodyBaseBillTiming string
 
 // PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyBillingInterval string
+
+// PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
+type PostV1PlansJSONBodyStatus string
 
 // GetPlan200JSONResponseBodyBaseBillTiming defines parameters for GetPlan.
 type GetPlan200JSONResponseBodyBaseBillTiming string
@@ -8064,7 +8087,7 @@ type EndSubscriptionTrialParams struct {
 
 // ExtendSubscriptionTrialJSONBody defines parameters for ExtendSubscriptionTrial.
 type ExtendSubscriptionTrialJSONBody struct {
-	// TrialEnd The new trial end. Must be in the future and after the current `trial_end_at`.
+	// TrialEnd The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
 	TrialEnd time.Time `json:"trial_end"`
 }
 

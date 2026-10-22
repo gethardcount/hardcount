@@ -386,8 +386,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input CreateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -444,8 +443,7 @@ func (h *Handler) addLineItem(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	var input AddLineItemInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -1265,8 +1263,9 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body RefundRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	// Strict: amount_cents=0 means "refund everything still refundable", so a
+	// dropped `amount` key would be a full card refund.
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
 
