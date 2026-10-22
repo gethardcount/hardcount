@@ -177,7 +177,7 @@ func TestChokePointCloses(t *testing.T) {
 					t.Errorf("resumes_at %v, want the payment's instant (%v)", pc.ResumesAt, paidAt)
 				}
 				if pc.InForceAt(time.Now()) {
-					t.Error("the pause still holds after the payment left nothing owed")
+					t.Error("the pause still holds after the invoice it was set for was paid")
 				}
 
 				svc := subscription.NewService(subs, clock.Real())

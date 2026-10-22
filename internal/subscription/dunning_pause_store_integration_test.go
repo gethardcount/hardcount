@@ -2,7 +2,6 @@ package subscription
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -160,10 +159,10 @@ func TestSetDunningPause_Rules(t *testing.T) {
 }
 
 // T6 (C2). A payment commits while dunning's pause is being written. The
-// pause locks the invoice first, so it waits for the payment's transaction,
-// then finds the invoice paid and pauses nothing. Mutation: drop the
-// invoice FOR NO KEY UPDATE in SetDunningPause and the pause lands on a paid
-// debt, with nothing left to lift it.
+// pause locks the invoice (after the subscription), so it waits for the
+// payment's transaction, then finds the invoice paid and pauses nothing.
+// Mutation: drop the invoice FOR NO KEY UPDATE in SetDunningPause and the
+// pause lands on a paid debt, with nothing left to lift it.
 func TestSetDunningPause_PaymentCommitsFirst(t *testing.T) {
 	r := newDunningPauseRig(t, "A3 Pause Race")
 	x := r.invoice("INV-A3-RACE", 0) // nothing due: SettleZeroDueTx is the paid writer the test can hold open
@@ -207,74 +206,35 @@ func TestSetDunningPause_PaymentCommitsFirst(t *testing.T) {
 	}
 }
 
-// T5 (C3), the interleaving that loses the release: two payments (here two
-// credit notes, whose transaction the test can hold open) on one
-// dunning-paused subscription, each the last thing owed but the other's,
-// with both transactions open at once. The first counts the second's
-// invoice as still owed (its payment has not committed). The release locks
-// the subscription before it counts, so the second payment waits for the
-// first to commit, then counts nothing owed and releases. Mutation: drop
-// the subscription FOR NO KEY UPDATE in ReleaseDunningPauseTx and the second
-// counts the first's invoice still owed: the pause sticks on a subscription
-// that owes nothing.
-func TestReleaseDunningPause_TwoPaymentsAtOnce(t *testing.T) {
-	r := newDunningPauseRig(t, "A3 Release Race")
-	x1 := r.invoice("INV-A3-X1", 1000)
-	x2 := r.invoice("INV-A3-X2", 1000)
-	if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x1); err != nil {
-		t.Fatalf("dunning pause: %v", err)
-	}
-	settle := func(invID string) (*sql.Tx, error) {
-		tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
-		if err != nil {
-			return nil, err
-		}
-		var one int
-		if err := tx.QueryRowContext(r.ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, invID).Scan(&one); err != nil {
-			postgres.Rollback(tx)
-			return nil, err
-		}
-		// A credit note's transaction: the note takes what is due to zero,
-		// and the invoice is marked paid. Until it commits, the other
-		// payment still sees this invoice owed.
-		if _, err := tx.ExecContext(r.ctx, `UPDATE invoices SET amount_due_cents = 0 WHERE id = $1`, invID); err != nil {
-			postgres.Rollback(tx)
-			return nil, err
-		}
-		if _, paid, err := r.invs.SettleZeroDueTx(r.ctx, tx, r.tenantID, invID, time.Now().UTC()); err != nil || !paid {
-			postgres.Rollback(tx)
-			return nil, fmt.Errorf("settle %s: paid=%v err=%v", invID, paid, err)
-		}
-		return tx, nil
+// T4 at the store. A dunning pause belongs to the invoice whose dunning set
+// it (Sagar's A3 decision, 2026-10-21): paying another invoice leaves it,
+// and paying that invoice lifts it even while another invoice is still owed.
+func TestReleaseDunningPause_OnlyThePausingInvoice(t *testing.T) {
+	r := newDunningPauseRig(t, "A3 Release Pausing Invoice")
+	pausing := r.invoice("INV-A3-P1", 1000)
+	other := r.invoice("INV-A3-P2", 1000)
+	stillOwed := r.invoice("INV-A3-P3", 1000)
+	if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, pausing); err != nil || outcome != DunningPauseWritten {
+		t.Fatalf("dunning pause: %v, %v", outcome, err)
 	}
 
-	tx1, err := settle(x1) // X2 still owed: no release; with the lock, holds the subscription
-	if err != nil {
-		t.Fatal(err)
+	if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, other, "", time.Now().UTC()); err != nil {
+		t.Fatalf("pay the other invoice: %v", err)
 	}
-	second := make(chan error, 1)
-	go func() {
-		tx2, err := settle(x2) // with the lock, waits here for tx1
-		if err != nil {
-			second <- err
-			return
-		}
-		second <- tx2.Commit()
-	}()
-	time.Sleep(300 * time.Millisecond) // the second payment reaches its release
-	if err := tx1.Commit(); err != nil {
-		t.Fatalf("commit X1: %v", err)
+	if pc := r.pause(); pc == nil || pc.ResumesAt != nil {
+		t.Fatalf("pause = %+v after paying an invoice dunning did not pause for, want it held", pc)
 	}
-	if err := <-second; err != nil {
-		t.Fatalf("X2: %v", err)
+
+	if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, pausing, "", time.Now().UTC()); err != nil {
+		t.Fatalf("pay the pausing invoice: %v", err)
 	}
 	if pc := r.pause(); pc == nil || pc.ResumesAt == nil {
-		t.Fatalf("pause = %+v after both invoices were paid, want resumes_at set", pc)
+		t.Fatalf("pause = %+v after paying the invoice it was set for (%s still owed), want resumes_at set", pc, stillOwed)
 	}
 }
 
 // ReleaseDunningPauseTx leaves an operator's pause and a canceled
-// subscription alone, and counts a written-off invoice as owed.
+// subscription alone.
 func TestReleaseDunningPause_Rules(t *testing.T) {
 	t.Run("operator pause", func(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Release Operator")
@@ -290,21 +250,20 @@ func TestReleaseDunningPause_Rules(t *testing.T) {
 		}
 	})
 
-	t.Run("written-off invoice still owed", func(t *testing.T) {
-		r := newDunningPauseRig(t, "A3 Release Written Off")
-		x1 := r.invoice("INV-A3-L2", 1000)
-		x2 := r.invoice("INV-A3-L3", 1000)
-		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x1); err != nil {
+	t.Run("operator took over a dunning pause", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Release Takeover")
+		x := r.invoice("INV-A3-L2", 1000)
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x); err != nil {
 			t.Fatalf("dunning pause: %v", err)
 		}
-		if _, err := testutil.AdminPool(t).Exec(`UPDATE invoices SET status = 'uncollectible', uncollectible_at = now() WHERE id = $1`, x2); err != nil {
-			t.Fatalf("write off: %v", err)
+		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
+			t.Fatalf("operator pause: %v", err)
 		}
-		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, x1, "", time.Now().UTC()); err != nil {
+		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, x, "", time.Now().UTC()); err != nil {
 			t.Fatalf("mark paid: %v", err)
 		}
-		if pc := r.pause(); pc == nil || pc.ResumesAt != nil {
-			t.Errorf("pause = %+v with a written-off invoice still owed, want it held", pc)
+		if pc := r.pause(); pc == nil || pc.ResumesAt != nil || pc.SetBy != domain.PauseSetByOperator {
+			t.Errorf("pause = %+v, want the operator's, untouched", pc)
 		}
 	})
 
@@ -326,16 +285,95 @@ func TestReleaseDunningPause_Rules(t *testing.T) {
 	})
 }
 
-// T10. The paired CHECK makes a writer that sets the pause without saying
-// who set it fail.
-func TestPauseSetBy_PairedCheck(t *testing.T) {
-	r := newDunningPauseRig(t, "A3 Paired Check")
-	_, err := testutil.AdminPool(t).Exec(`UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft' WHERE id = $1`, r.subID)
-	if err == nil || !strings.Contains(err.Error(), "subscriptions_pause_collection_set_by_pair_check") {
-		t.Fatalf("setting the pause with no set_by: %v, want the pair CHECK to refuse it", err)
+// waitForLockWait returns once some transaction on this database waits for
+// a row lock: the goroutine under test has reached its blocking lock.
+func waitForLockWait(t *testing.T) {
+	t.Helper()
+	admin := testutil.AdminPool(t)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting int
+		if err := admin.QueryRow(`SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&waiting); err != nil {
+			t.Fatalf("read pg_locks: %v", err)
+		}
+		if waiting > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	_, err = testutil.AdminPool(t).Exec(`UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_set_by = 'customer' WHERE id = $1`, r.subID)
-	if err == nil || !strings.Contains(err.Error(), "subscriptions_pause_collection_set_by_check") {
-		t.Fatalf("set_by='customer': %v, want the value CHECK to refuse it", err)
+	t.Fatal("no transaction waited for a lock within 5s")
+}
+
+// Lock order (finding 2 of the #1340 review). A cancel or a plan swap holds
+// the subscription row and then writes the overdue invoice (its relief).
+// The two A3 writers that touch both rows, a payment of the pausing invoice
+// and dunning's pause, take the subscription first too (the order
+// lockSubscriptionRow documents), so each waits behind the cancel instead
+// of holding the invoice the cancel needs. Mutation: take the invoice first
+// in either writer, and Postgres aborts one side with "deadlock detected".
+func TestDunningPause_SubscriptionLockedBeforeInvoice(t *testing.T) {
+	// holdSubscriptionThenInvoice stands in for the cancel: it locks the
+	// subscription, waits until op blocks, then locks the invoice.
+	holdSubscriptionThenInvoice := func(t *testing.T, r *dunningPauseRig, invID string, op func() error) {
+		t.Helper()
+		tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var one int
+		if err := tx.QueryRowContext(r.ctx, `SELECT 1 FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, r.subID).Scan(&one); err != nil {
+			t.Fatalf("lock subscription: %v", err)
+		}
+		done := make(chan error, 1)
+		go func() { done <- op() }()
+		waitForLockWait(t)
+		if err := tx.QueryRowContext(r.ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR UPDATE`, invID).Scan(&one); err != nil {
+			t.Fatalf("the cancel's invoice lock: %v (want it granted: the other writer must wait on the subscription first)", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit the cancel: %v", err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("the writer behind the cancel: %v", err)
+		}
+	}
+
+	t.Run("payment of the pausing invoice", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Lock Order Payment")
+		x := r.invoice("INV-A3-LO1", 1000)
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x); err != nil {
+			t.Fatalf("dunning pause: %v", err)
+		}
+		holdSubscriptionThenInvoice(t, r, x, func() error {
+			_, err := r.invs.MarkPaid(r.ctx, r.tenantID, x, "", time.Now().UTC())
+			return err
+		})
+		if pc := r.pause(); pc == nil || pc.ResumesAt == nil {
+			t.Errorf("pause = %+v after the payment, want resumes_at set", pc)
+		}
+	})
+
+	t.Run("dunning pause", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Lock Order Pause")
+		x := r.invoice("INV-A3-LO2", 1000)
+		holdSubscriptionThenInvoice(t, r, x, func() error {
+			_, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x)
+			if err == nil && outcome != DunningPauseWritten {
+				return fmt.Errorf("outcome %v, want written", outcome)
+			}
+			return err
+		})
+	})
+}
+
+// T10. The CHECK makes a writer that clears the pause but leaves the
+// invoice it was set for fail.
+func TestPauseInvoice_Check(t *testing.T) {
+	r := newDunningPauseRig(t, "A3 Pause Invoice Check")
+	_, err := testutil.AdminPool(t).Exec(`UPDATE subscriptions SET pause_collection_invoice_id = 'inv_x' WHERE id = $1`, r.subID)
+	if err == nil || !strings.Contains(err.Error(), "subscriptions_pause_collection_invoice_id_check") {
+		t.Fatalf("an invoice id with no pause: %v, want the CHECK to refuse it", err)
 	}
 }

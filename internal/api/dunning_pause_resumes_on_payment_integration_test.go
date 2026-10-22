@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -21,9 +20,9 @@ import (
 )
 
 // A3 (product sweep 2026-10-21, ADR-036 amendment 2026-10-22): when dunning
-// paused a subscription's collection and a payment leaves the subscription
-// owing nothing, collection resumes by itself and the subscription's
-// activity says so. An operator's pause never lifts on a payment.
+// paused a subscription's collection and the invoice whose dunning paused
+// it is paid, collection resumes by itself and the subscription's activity
+// says so. An operator's pause never lifts on a payment.
 //
 // Real router, real Postgres. The pause comes from a real dunning
 // exhaustion under a policy whose final subscription action is `pause`, and
@@ -367,8 +366,8 @@ func TestDunningPause_PaymentResumesCollection(t *testing.T) {
 	}
 }
 
-// T2. Negative controls: only a payment that leaves a dunning pause with
-// nothing owed lifts it.
+// T2. Negative controls: only the full payment of the invoice a dunning
+// pause was set for lifts it.
 func TestDunningPause_PaymentLeavesOtherPausesAlone(t *testing.T) {
 	t.Run("operator pause", func(t *testing.T) {
 		r := newPauseRig(t, "Operator Pause Paid", domain.InvActionNone)
@@ -443,80 +442,22 @@ func TestDunningPause_KeepsThePauseInForce(t *testing.T) {
 	})
 }
 
-// T4. Collection resumes when the subscription owes nothing, not when the
-// first invoice is paid. Fails on main: the second payment does not
-// release either.
-func TestDunningPause_AnotherInvoiceStillOwed(t *testing.T) {
+// T4. The pause belongs to the invoice whose dunning set it (Sagar's A3
+// decision, 2026-10-21): paying another invoice leaves it, and paying that
+// invoice lifts it even while a third invoice is still owed. Fails before
+// the review fix, which held the pause until nothing at all was owed.
+func TestDunningPause_OnlyThePausingInvoiceLiftsIt(t *testing.T) {
 	r := newPauseRig(t, "Dunning Pause Two Invoices", domain.InvActionNone)
-	subID, x1 := r.dunningPaused("two")
-	x2 := r.openInvoice(subID, "INV-A3-X2", 2500)
+	subID, pausing := r.dunningPaused("two")
+	other := r.openInvoice(subID, "INV-A3-X2", 2500)
+	r.openInvoice(subID, "INV-A3-X3", 2500) // still owed at the end
 
-	r.payOffline(x1)
-	if pc := r.pause(subID); pc == nil || pc["resumes_at"] != nil {
-		t.Fatalf("pause_collection = %v after paying X1 with X2 still owed, want the pause held", pc)
-	}
-	r.resumer()
-	if r.pause(subID) == nil {
-		t.Fatal("the resumer lifted the pause while X2 is still owed")
-	}
+	r.payOffline(other)
+	r.assertStillPaused(subID, "dunning")
 
-	r.payOffline(x2)
-	r.assertReleasedBy(subID, x2)
+	r.payOffline(pausing)
+	r.assertReleasedBy(subID, pausing)
 	r.assertResumedByPayment(subID)
-}
-
-// T5 (C3). Two payments on one dunning-paused subscription, through the
-// offline-payment service, started together behind a barrier. Each sees the
-// other's invoice still open unless the release locks the subscription
-// before it counts what is owed; then the second waits for the first and
-// sees it paid. How often the two transactions overlap depends on timing,
-// so the losing interleaving is pinned without timing in
-// TestReleaseDunningPause_TwoPaymentsAtOnce (internal/subscription), which
-// is the mutation check for the lock.
-func TestDunningPause_ConcurrentPaymentsRelease(t *testing.T) {
-	const iterations = 50
-	r := newPauseRig(t, "Dunning Pause Concurrent", domain.InvActionNone)
-	subID, dayOne := r.dunningPaused("concurrent")
-	r.payOffline(dayOne) // released and resumed; each iteration below pauses again
-	r.resumer()
-
-	stuck := 0
-	for i := 0; i < iterations; i++ {
-		x1 := r.openInvoice(subID, fmt.Sprintf("INV-A3-C%02d-1", i), 1000)
-		x2 := r.openInvoice(subID, fmt.Sprintf("INV-A3-C%02d-2", i), 1000)
-		if _, err := r.admin.Exec(`UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft',
-			pause_collection_resumes_at = NULL, pause_collection_set_by = 'dunning' WHERE id = $1`, subID); err != nil {
-			t.Fatalf("pause: %v", err)
-		}
-		var wg sync.WaitGroup
-		start := make(chan struct{})
-		errs := make([]error, 2)
-		for j, id := range []string{x1, x2} {
-			wg.Add(1)
-			go func(j int, id string) {
-				defer wg.Done()
-				<-start
-				_, errs[j] = r.srv.InvoiceSvc.RecordOfflinePayment(r.ctx, r.tenantID, id, "wire received")
-			}(j, id)
-		}
-		close(start)
-		wg.Wait()
-		for _, err := range errs {
-			if err != nil {
-				t.Fatalf("iteration %d: record payment: %v", i, err)
-			}
-		}
-		var resumes sql.NullTime
-		if err := r.admin.QueryRow(`SELECT pause_collection_resumes_at FROM subscriptions WHERE id = $1`, subID).Scan(&resumes); err != nil {
-			t.Fatalf("read pause: %v", err)
-		}
-		if !resumes.Valid {
-			stuck++
-		}
-	}
-	if stuck > 0 {
-		t.Errorf("%d of %d iterations left the subscription paused with nothing owed", stuck, iterations)
-	}
 }
 
 // T7 (C7). On a test clock: a period that ends under the dunning pause

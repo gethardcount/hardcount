@@ -448,3 +448,37 @@ func TestProcessRun_StaleSnapshot_DoesNotChargeOrClobber(t *testing.T) {
 		t.Fatalf("state = %q, want active", got.State)
 	}
 }
+
+// settlingPauser models the payment that commits between exhaustRun's late
+// paid re-check and dunning's pause write: the pause finds the invoice paid
+// and pauses nothing (subscription.PostgresStore.SetDunningPause).
+type settlingPauser struct{ paid *bool }
+
+func (p settlingPauser) PauseCollection(_ context.Context, _, _, _ string) (bool, error) {
+	*p.paid = true
+	return false, nil
+}
+
+// An invoice paid just before dunning's pause lands closes the run as
+// recovered in that same tick. Before, the run was saved active with
+// resolution action_failed and a retry a day out, beside a paid invoice.
+func TestExhaust_PauseFindsInvoicePaid_ResolvesRecovered(t *testing.T) {
+	store := newMemStore()
+	twoAxisPolicy(store, domain.SubActionPause, domain.InvActionNone)
+	svc := NewService(store, &noopRetrier{}, nil)
+	paid := false
+	emails := &capturingEscalationEmail{}
+	svc.SetSubscriptionPauser(settlingPauser{paid: &paid}, flagInvGet{paid: &paid})
+	svc.SetEmailNotifier(emails)
+
+	run := exhaustedRun(t, store, svc)
+	svc.ProcessDueRuns(context.Background(), "t1", 20)
+
+	got := store.runs[run.ID]
+	if got.State != domain.DunningResolved || got.Resolution != domain.ResolutionPaymentRecovered {
+		t.Fatalf("run = state %q, resolution %q; want resolved as payment_recovered", got.State, got.Resolution)
+	}
+	if len(emails.outcomes) != 0 {
+		t.Errorf("escalation emails %v for a paid invoice, want none", emails.outcomes)
+	}
+}

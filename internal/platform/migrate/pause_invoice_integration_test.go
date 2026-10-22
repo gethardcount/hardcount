@@ -9,9 +9,8 @@ import (
 	"testing/fstest"
 )
 
-// pauseSetByVersion is 00193_subscription_pause_set_by.sql; 00194 validates
-// its CHECKs.
-const pauseSetByVersion = 193
+// pauseInvoiceVersion is 00193_subscription_pause_invoice.sql.
+const pauseInvoiceVersion = 193
 
 // filesBefore is the embedded migration set without version v and later.
 func filesBefore(t *testing.T, v int64) fstest.MapFS {
@@ -36,14 +35,15 @@ func filesBefore(t *testing.T, v int64) fstest.MapFS {
 	return out
 }
 
-// T10. 00193 marks every pause set before it as the operator's (they were
-// set under "until the operator resumes"), the pair CHECK refuses a pause
-// with no set_by once 00194 validated it, and the Down removes the column.
-func TestPauseSetBy_BackfillAndRollback(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_pause_set_by")
+// T10. 00193 leaves every pause set before it as the operator's (no
+// invoice: they were set under "until the operator resumes"), its CHECK
+// refuses an invoice on a subscription with no pause, and the Down removes
+// the column.
+func TestPauseInvoice_UpAndRollback(t *testing.T) {
+	dsn, db := scratchDB(t, "velox_migrate_pause_invoice")
 	ctx := context.Background()
-	if err := up(ctx, dsn, filesBefore(t, pauseSetByVersion)); err != nil {
-		t.Fatalf("Up to before %d: %v", pauseSetByVersion, err)
+	if err := up(ctx, dsn, filesBefore(t, pauseInvoiceVersion)); err != nil {
+		t.Fatalf("Up to before %d: %v", pauseInvoiceVersion, err)
 	}
 	// execErr runs one statement past RLS, as the app's bypass transactions do.
 	execErr := func(q string) error {
@@ -75,42 +75,28 @@ func TestPauseSetBy_BackfillAndRollback(t *testing.T) {
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	setBy := func(id string) sql.NullString {
-		t.Helper()
-		var v sql.NullString
-		if err := db.QueryRow(`SELECT pause_collection_set_by FROM subscriptions WHERE id = $1`, id).Scan(&v); err != nil {
-			t.Fatal(err)
-		}
-		return v
-	}
-	if v := setBy("sub_paused"); !v.Valid || v.String != "operator" {
-		t.Errorf("a pause set before the migration has set_by %v, want operator", v)
-	}
-	if v := setBy("sub_running"); v.Valid {
-		t.Errorf("an unpaused subscription has set_by %q, want NULL", v.String)
-	}
-	var validated int
-	if err := db.QueryRow(`SELECT count(*) FROM pg_constraint WHERE conname IN
-		('subscriptions_pause_collection_set_by_check', 'subscriptions_pause_collection_set_by_pair_check') AND convalidated`).Scan(&validated); err != nil {
+	var inv sql.NullString
+	if err := db.QueryRow(`SELECT pause_collection_invoice_id FROM subscriptions WHERE id = 'sub_paused'`).Scan(&inv); err != nil {
 		t.Fatal(err)
 	}
-	if validated != 2 {
-		t.Errorf("%d of the two set_by CHECKs validated, want both", validated)
+	if inv.Valid {
+		t.Errorf("a pause set before the migration has invoice %q, want none: it stays the operator's", inv.String)
 	}
-	if err := execErr(`UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft' WHERE id = 'sub_running'`); err == nil {
-		t.Error("a pause with no set_by was accepted, want the pair CHECK to refuse it")
+	if err := execErr(`UPDATE subscriptions SET pause_collection_invoice_id = 'inv_x' WHERE id = 'sub_running'`); err == nil {
+		t.Error("an invoice on a subscription with no pause was accepted, want the CHECK to refuse it")
 	}
+	exec(`UPDATE subscriptions SET pause_collection_invoice_id = 'inv_x' WHERE id = 'sub_paused'`)
 
-	if _, err := down(ctx, dsn, migrationFiles(), pauseSetByVersion-1); err != nil {
-		t.Fatalf("Down to before %d: %v", pauseSetByVersion, err)
+	if _, err := down(ctx, dsn, migrationFiles(), pauseInvoiceVersion-1); err != nil {
+		t.Fatalf("Down to before %d: %v", pauseInvoiceVersion, err)
 	}
 	var exists bool
 	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns
-		WHERE table_name = 'subscriptions' AND column_name = 'pause_collection_set_by')`).Scan(&exists); err != nil {
+		WHERE table_name = 'subscriptions' AND column_name = 'pause_collection_invoice_id')`).Scan(&exists); err != nil {
 		t.Fatal(err)
 	}
 	if exists {
-		t.Error("the Down left pause_collection_set_by")
+		t.Error("the Down left pause_collection_invoice_id")
 	}
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up again: %v", err)
