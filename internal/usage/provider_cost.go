@@ -315,7 +315,6 @@ type MarginReport struct {
 	ByModel                  []MarginModelRow `json:"by_model"`
 	UnattributedRevenueCents int64            `json:"unattributed_revenue_cents"`
 	UnresolvedEvents         int64            `json:"unresolved_events"`
-	CacheWriteExcluded       bool             `json:"cache_write_excluded"`
 }
 
 // MarginAssembler joins stamped COGS with rated usage revenue.
@@ -340,7 +339,7 @@ func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID
 }
 
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
-	rep := MarginReport{CustomerID: customerID, From: from, To: to, CostCurrency: "USD", CacheWriteExcluded: true, ByModel: []MarginModelRow{}}
+	rep := MarginReport{CustomerID: customerID, From: from, To: to, CostCurrency: "USD", ByModel: []MarginModelRow{}}
 
 	byModel, unresolved, err := a.store.CustomerProviderCost(ctx, tenantID, customerID, from, to)
 	if err != nil {

@@ -2,34 +2,52 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/shopspring/decimal"
 
+	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/clock"
 )
 
-// CallEvent is one usage row of a LiteLLM call.
+// A LiteLLM call is written whole (#1044 held semantics per key, one
+// transaction per call). The mapper turns one call into up to five events
+// that share a customer and a meter: input, cache_read, cache_write_5m,
+// cache_write_1h and output. Writing them in one transaction means a crash
+// or a store failure leaves all of the call or none of it, which the replay
+// guard below depends on.
+
+// CallEvent is one usage row of a call. The customer and meter are the
+// call's.
 type CallEvent struct {
-	Quantity           decimal.Decimal
-	Dimensions         map[string]any
-	IdempotencyKey     string
-	Timestamp          *time.Time
+	Quantity       decimal.Decimal
+	Dimensions     map[string]any
+	IdempotencyKey string
+	// Timestamp nil means the customer's effective now, as for Ingest.
+	Timestamp *time.Time
+	// ObservedCostMicros is the provider's own cost for this row (ADR-079
+	// D4); nil falls to the rate table.
 	ObservedCostMicros *int64
 }
 
-// CallInput is one LiteLLM call whose customer and meter exist.
+// CallInput is one call whose customer and meter exist.
 type CallInput struct {
 	CustomerID string
 	MeterID    string
-	Events     []CallEvent
-	Legacy     []CallEvent
-	LegacyKey  string
+	// Events is the call as the current mapper records it.
+	Events []CallEvent
+	// Legacy is the same call as the mapper before the cache-write split
+	// recorded it, nil when the two agree. LegacyKey is the key both carry
+	// with different quantities (the call's input key): if a row is already
+	// stored under it with Legacy's quantity, the call was first recorded
+	// the old way and is written as Legacy, so its cache writes, already
+	// inside that input row, are not billed a second time.
+	Legacy    []CallEvent
+	LegacyKey string
 }
 
-// HoldCallInput is one LiteLLM call whose customer or meter does not exist.
+// HoldCallInput is one call whose customer or meter does not exist yet.
 type HoldCallInput struct {
 	Source             string
 	ExternalCustomerID string
@@ -40,50 +58,105 @@ type HoldCallInput struct {
 	LegacyKey          string
 }
 
-// CallResult reports what one call's write did.
+// CallResult reports what writing one call did.
 type CallResult struct {
-	Inserted     int
+	// Inserted counts rows newly written (or newly held).
+	Inserted int
+	// Deduplicated counts rows already stored, already held, or held and
+	// then discarded.
 	Deduplicated int
-	Legacy       bool
+	// Legacy is true when the call was written the pre-split way.
+	Legacy bool
 }
 
-// IngestCall (stub: one event at a time, as before).
+// IngestCall writes one call's events in one transaction. Each event gets
+// Ingest's checks and timestamp rules; a key held and then discarded is not
+// written, and a key still held is written and its held row released (see
+// PostgresStore.IngestCallResolvingHeld).
 func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput) (CallResult, error) {
-	var res CallResult
-	for _, ev := range in.Events {
-		_, err := s.IngestResolvingHeld(ctx, tenantID, IngestInput{
-			CustomerID: in.CustomerID, MeterID: in.MeterID, Quantity: ev.Quantity, Dimensions: ev.Dimensions,
-			IdempotencyKey: ev.IdempotencyKey, Timestamp: ev.Timestamp, ObservedCostMicros: ev.ObservedCostMicros,
-		})
-		switch {
-		case err == nil:
-			res.Inserted++
-		case errors.Is(err, errs.ErrDuplicateKey):
-			res.Deduplicated++
-		default:
-			return res, err
-		}
+	if s.held == nil {
+		return CallResult{}, ErrHoldUnavailable
 	}
-	return res, nil
+	// One clock lookup for the call: prepare reads the bound instant.
+	ctx = clock.WithSim(ctx, s.simNow(ctx, tenantID, in.CustomerID))
+	prep := func(evs []CallEvent) ([]domain.UsageEvent, error) {
+		if evs == nil {
+			return nil, nil
+		}
+		out := make([]domain.UsageEvent, 0, len(evs))
+		for _, e := range evs {
+			ev, err := s.prepare(ctx, tenantID, IngestInput{
+				CustomerID:         in.CustomerID,
+				MeterID:            in.MeterID,
+				Quantity:           e.Quantity,
+				Dimensions:         e.Dimensions,
+				IdempotencyKey:     e.IdempotencyKey,
+				Timestamp:          e.Timestamp,
+				ObservedCostMicros: e.ObservedCostMicros,
+			}, domain.UsageOriginAPI)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ev)
+		}
+		return out, nil
+	}
+	events, err := prep(in.Events)
+	if err != nil {
+		return CallResult{}, err
+	}
+	legacy, err := prep(in.Legacy)
+	if err != nil {
+		return CallResult{}, err
+	}
+	res, err := s.held.IngestCallResolvingHeld(ctx, tenantID, StoreCall{Events: events, Legacy: legacy, LegacyKey: in.LegacyKey})
+	if err == nil && res.Inserted > 0 {
+		mw.RecordUsageIngested(res.Inserted)
+	}
+	return res, err
 }
 
-// HoldCall (stub: one event at a time, as before).
+// HoldCall holds one call's events in one transaction, each with Hold's
+// checks. A key already held is counted as deduplicated.
 func (s *Service) HoldCall(ctx context.Context, tenantID string, in HoldCallInput) (CallResult, error) {
-	var res CallResult
-	for _, ev := range in.Events {
-		_, err := s.Hold(ctx, tenantID, HoldInput{
-			Source: in.Source, ExternalCustomerID: in.ExternalCustomerID, MeterKey: in.MeterKey,
-			Quantity: ev.Quantity, Dimensions: ev.Dimensions, IdempotencyKey: ev.IdempotencyKey,
-			EventAt: ev.Timestamp, ObservedCostMicros: ev.ObservedCostMicros, Reason: in.Reason,
-		})
-		switch {
-		case err == nil:
-			res.Inserted++
-		case errors.Is(err, errs.ErrDuplicateKey):
-			res.Deduplicated++
-		default:
-			return res, err
-		}
+	if s.held == nil {
+		return CallResult{}, ErrHoldUnavailable
 	}
-	return res, nil
+	prep := func(evs []CallEvent) ([]domain.HeldUsageEvent, error) {
+		if evs == nil {
+			return nil, nil
+		}
+		out := make([]domain.HeldUsageEvent, 0, len(evs))
+		for _, e := range evs {
+			ev, err := heldEvent(HoldInput{
+				Source:             in.Source,
+				ExternalCustomerID: in.ExternalCustomerID,
+				MeterKey:           in.MeterKey,
+				Quantity:           e.Quantity,
+				Dimensions:         e.Dimensions,
+				IdempotencyKey:     e.IdempotencyKey,
+				EventAt:            e.Timestamp,
+				ObservedCostMicros: e.ObservedCostMicros,
+				Reason:             in.Reason,
+			})
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ev)
+		}
+		return out, nil
+	}
+	events, err := prep(in.Events)
+	if err != nil {
+		return CallResult{}, err
+	}
+	legacy, err := prep(in.Legacy)
+	if err != nil {
+		return CallResult{}, err
+	}
+	res, err := s.held.HoldCall(ctx, tenantID, HeldCall{Events: events, Legacy: legacy, LegacyKey: in.LegacyKey})
+	if err == nil && res.Inserted > 0 {
+		heldUsageEvents.WithLabelValues(string(in.Reason)).Add(float64(res.Inserted))
+	}
+	return res, err
 }

@@ -18,6 +18,15 @@ import type { LitellmSpendLogUsage } from './litellmSpendLogUsage';
 export interface LitellmSpendLog {
   /** LiteLLM's call id. Used to build the events' idempotency keys. */
   id?: string;
+  /** A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries. */
+  status?: string;
+  /**
+     * `true` when LiteLLM answered from its own response cache. The
+     * record is skipped and counted in `cache_hits`: the provider
+     * charged nothing.
+     * @nullable
+     */
+  cache_hit?: boolean | null;
   /**
      * Only completion, acompletion, chat, chat.completion, embedding,
      * aembedding, text_completion and atext_completion records produce
@@ -39,13 +48,16 @@ export interface LitellmSpendLog {
   response_cost?: number;
   /**
      * The provider's own cost, in dollars. When present, each event's
-     * provider cost comes from its part (input, output or cache read)
-     * instead of the provider-costs table. A part that is missing or
-     * negative falls back to the table. `input_cost` includes cache
-     * reads, so the input event gets `input_cost` minus
-     * `cache_read_cost`. If there were cache reads but no
-     * `cache_read_cost`, the input and cache-read events use the
-     * provider-costs table.
+     * provider cost comes from its part (input, output, cache read or
+     * cache write) instead of the provider-costs table. A part that is
+     * missing or negative falls back to the table. `input_cost`
+     * includes cache reads and cache writes, so the input event gets
+     * `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
+     * If there were cache reads but no `cache_read_cost`, or split-off
+     * cache writes but no `cache_creation_cost`, the input-side events
+     * use the provider-costs table. With 1-hour cache writes they
+     * always do: LiteLLM prices `cache_creation_cost` at the 5-minute
+     * rate.
      */
   cost_breakdown?: LitellmSpendLogCostBreakdown;
   /** Unix seconds. Event time when `endTime` is absent. */

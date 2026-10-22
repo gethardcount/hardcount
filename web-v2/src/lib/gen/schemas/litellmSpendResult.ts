@@ -20,8 +20,10 @@ export interface LitellmSpendResult {
      * `POST /v1/usage-events/held/release`.
      */
   held: number;
-  /** Records that carry no billable tokens. */
+  /** Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
   skipped: number;
-  /** One entry per event or record that was not recorded. A record can appear more than once. */
+  /** The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
+  cache_hits: number;
+  /** One entry per record that was not recorded. A record's events are recorded together or not at all. */
   errors?: LitellmSpendResultErrorsItem[];
 }

@@ -70,6 +70,20 @@ func (s *Service) Hold(ctx context.Context, tenantID string, in HoldInput) (doma
 	if s.held == nil {
 		return domain.HeldUsageEvent{}, ErrHoldUnavailable
 	}
+	ev, err := heldEvent(in)
+	if err != nil {
+		return domain.HeldUsageEvent{}, err
+	}
+	out, err := s.held.Hold(ctx, tenantID, ev)
+	if err == nil {
+		heldUsageEvents.WithLabelValues(string(in.Reason)).Inc()
+	}
+	return out, err
+}
+
+// heldEvent checks one row to hold and builds it. A row the checks refuse
+// could never be released, so it is refused now.
+func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 	if strings.TrimSpace(in.IdempotencyKey) == "" {
 		// A row without a key cannot be released safely: a resend would
 		// bill it twice.
@@ -109,7 +123,7 @@ func (s *Service) Hold(ctx context.Context, tenantID string, in HoldInput) (doma
 	if source == "" {
 		source = domain.HeldUsageSourceLiteLLM
 	}
-	out, err := s.held.Hold(ctx, tenantID, domain.HeldUsageEvent{
+	return domain.HeldUsageEvent{
 		Source:             source,
 		ExternalCustomerID: in.ExternalCustomerID,
 		MeterKey:           in.MeterKey,
@@ -119,11 +133,7 @@ func (s *Service) Hold(ctx context.Context, tenantID string, in HoldInput) (doma
 		EventAt:            at,
 		ObservedCostMicros: in.ObservedCostMicros,
 		Reason:             in.Reason,
-	})
-	if err == nil {
-		heldUsageEvents.WithLabelValues(string(in.Reason)).Inc()
-	}
-	return out, err
+	}, nil
 }
 
 // ListHeld returns the rows still held, grouped, with totals.

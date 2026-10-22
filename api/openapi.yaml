@@ -1398,8 +1398,6 @@ components:
         cost_rates_configured:
           type: boolean
           description: Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up.
-        cache_write_excluded:
-          type: boolean
 
     InvoiceWithLineItems:
       type: object
@@ -3755,6 +3753,16 @@ components:
         id:
           type: string
           description: LiteLLM's call id. Used to build the events' idempotency keys.
+        status:
+          type: string
+          description: A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries.
+        cache_hit:
+          type: boolean
+          nullable: true
+          description: |
+            `true` when LiteLLM answered from its own response cache. The
+            record is skipped and counted in `cache_hits`: the provider
+            charged nothing.
         call_type:
           type: string
           description: |
@@ -3790,13 +3798,32 @@ components:
                 cached_tokens:
                   type: integer
                   format: int64
+                cache_creation_tokens:
+                  type: integer
+                  format: int64
+                cache_creation_token_details:
+                  type: object
+                  description: |
+                    Anthropic's cache writes by cache lifetime. They become
+                    `cache_write_5m` and `cache_write_1h` events, taken out
+                    of `input`. Without this split, or when it does not add
+                    up to the cache-write count, the writes stay in `input`.
+                  properties:
+                    ephemeral_5m_input_tokens:
+                      type: integer
+                      format: int64
+                      nullable: true
+                    ephemeral_1h_input_tokens:
+                      type: integer
+                      format: int64
+                      nullable: true
             cache_read_input_tokens:
               type: integer
               format: int64
             cache_creation_input_tokens:
               type: integer
               format: int64
-              description: Not billed on its own; billed as input only when included in prompt_tokens.
+              description: Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`.
         prompt_tokens:
           type: integer
           format: int64
@@ -3814,19 +3841,24 @@ components:
           type: object
           description: |
             The provider's own cost, in dollars. When present, each event's
-            provider cost comes from its part (input, output or cache read)
-            instead of the provider-costs table. A part that is missing or
-            negative falls back to the table. `input_cost` includes cache
-            reads, so the input event gets `input_cost` minus
-            `cache_read_cost`. If there were cache reads but no
-            `cache_read_cost`, the input and cache-read events use the
-            provider-costs table.
+            provider cost comes from its part (input, output, cache read or
+            cache write) instead of the provider-costs table. A part that is
+            missing or negative falls back to the table. `input_cost`
+            includes cache reads and cache writes, so the input event gets
+            `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
+            If there were cache reads but no `cache_read_cost`, or split-off
+            cache writes but no `cache_creation_cost`, the input-side events
+            use the provider-costs table. With 1-hour cache writes they
+            always do: LiteLLM prices `cache_creation_cost` at the 5-minute
+            rate.
           properties:
             input_cost:
               type: number
             output_cost:
               type: number
             cache_read_cost:
+              type: number
+            cache_creation_cost:
               type: number
             tool_usage_cost:
               type: number
@@ -3931,7 +3963,7 @@ components:
 
     LitellmSpendResult:
       type: object
-      required: [accepted, deduplicated, held, skipped]
+      required: [accepted, deduplicated, held, skipped, cache_hits]
       properties:
         accepted:
           type: integer
@@ -3947,10 +3979,13 @@ components:
             `POST /v1/usage-events/held/release`.
         skipped:
           type: integer
-          description: Records that carry no billable tokens.
+          description: Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
+        cache_hits:
+          type: integer
+          description: The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0.
         errors:
           type: array
-          description: One entry per event or record that was not recorded. A record can appear more than once.
+          description: One entry per record that was not recorded. A record's events are recorded together or not at all.
           items:
             type: object
             required: [id, error]
@@ -13256,13 +13291,15 @@ paths:
         Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
         one LiteLLM log record, a JSON array of records, or
         `{"events": [...]}`. Each completion, chat, text-completion or
-        embedding record becomes up to three usage events on the `tokens`
+        embedding record becomes up to five usage events on the `tokens`
         meter, one per `token_type` dimension: `input` (prompt tokens not
-        read from cache), `cache_read` and `output`. Each event also carries
-        `model` (a model family name when recognised), `model_raw` and
-        `provider`, plus `team_id` and `request_tags` from `metadata` when
-        present. Other call types, and records with no token counts, are
-        counted as `skipped`.
+        read from or written to the cache), `cache_read`, `cache_write_5m`,
+        `cache_write_1h` and `output`. A record's events are recorded in
+        one transaction. Each event also carries `model` (a model family
+        name when recognised), `model_raw` and `provider`, plus `team_id`
+        and `request_tags` from `metadata` when present. Other call types,
+        records with no token counts, failed calls and LiteLLM
+        response-cache hits are counted as `skipped`.
 
         The customer is the record's `user` or `end_user` (or
         `metadata.user_api_key_end_user_id`), matched against the

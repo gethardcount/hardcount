@@ -35,6 +35,13 @@ type HeldStore interface {
 	// unless a held row with the same key was discarded, and resolves a
 	// held row with the same key as released.
 	IngestResolvingHeld(ctx context.Context, tenantID string, event domain.UsageEvent) (domain.UsageEvent, error)
+	// IngestCallResolvingHeld writes every event of one LiteLLM call in one
+	// transaction, with IngestResolvingHeld's per-key rules and the
+	// pre-split replay guard.
+	IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error)
+	// HoldCall holds every event of one LiteLLM call in one transaction,
+	// with the same replay guard.
+	HoldCall(ctx context.Context, tenantID string, call HeldCall) (CallResult, error)
 }
 
 // HeldListCustomers caps how many external customer ids
@@ -443,4 +450,324 @@ func (s *PostgresStore) IngestResolvingHeld(ctx context.Context, tenantID string
 		return domain.UsageEvent{}, ingestErr
 	}
 	return out, nil
+}
+
+// StoreCall is one LiteLLM call for IngestCallResolvingHeld: Events is how
+// the current mapper records it, Legacy (with LegacyKey) how the mapper
+// before the cache-write split did. See CallInput.
+type StoreCall struct {
+	Events    []domain.UsageEvent
+	Legacy    []domain.UsageEvent
+	LegacyKey string
+}
+
+// HeldCall is StoreCall for HoldCall.
+type HeldCall struct {
+	Events    []domain.HeldUsageEvent
+	Legacy    []domain.HeldUsageEvent
+	LegacyKey string
+}
+
+// heldKeyRow is a held row's state, read under its lock.
+type heldKeyRow struct {
+	id       string
+	status   string
+	quantity decimal.Decimal
+}
+
+// lockHeldKeys reads and locks the held rows with these keys, in key order
+// so two calls sharing keys lock them in the same order. The lock is the one
+// ReleaseHeld's and DiscardHeld's UPDATEs take, so whichever runs second
+// sees the first one's status.
+func lockHeldKeys(ctx context.Context, tx *sql.Tx, tenantID string, keys []string) (map[string]heldKeyRow, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT idempotency_key, id, status, quantity FROM usage_held_events
+		WHERE tenant_id = $1 AND idempotency_key = ANY($2::text[])
+		ORDER BY idempotency_key
+		FOR UPDATE
+	`, tenantID, postgres.StringArray(keys))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]heldKeyRow{}
+	for rows.Next() {
+		var k string
+		var r heldKeyRow
+		if err := rows.Scan(&k, &r.id, &r.status, &r.quantity); err != nil {
+			return nil, err
+		}
+		out[k] = r
+	}
+	return out, rows.Err()
+}
+
+// storedEventQuantity is the quantity of the usage_events row with this key.
+func storedEventQuantity(ctx context.Context, tx *sql.Tx, key string) (decimal.Decimal, bool, error) {
+	var q decimal.Decimal
+	err := tx.QueryRowContext(ctx, `SELECT quantity FROM usage_events WHERE idempotency_key = $1`, key).Scan(&q)
+	if errors.Is(err, sql.ErrNoRows) {
+		return decimal.Decimal{}, false, nil
+	}
+	return q, err == nil, err
+}
+
+// callKeys is every key of both mappings, deduplicated.
+func callKeys(groups ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, g := range groups {
+		for _, k := range g {
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// IngestCallResolvingHeld writes one LiteLLM call — every event the mapper
+// made from it — in ONE transaction, so a crash or a store failure leaves
+// all of the call or none of it, and a LiteLLM resend finds the call whole.
+//
+// Each key follows IngestResolvingHeld's rules: a key held and then
+// discarded is not written (counted as deduplicated), a key still held is
+// written and its held row marked released, a key usage_events already has
+// is deduplicated. The held rows are read under FOR UPDATE first.
+//
+// The replay guard (when call.Legacy is set): the call's input key may
+// already be stored by the mapper before the cache-write split, whose input
+// quantity includes the writes. Writing the split mapping on top would add
+// the write rows on new keys while :input dedups: the writes billed twice.
+// So the input key decides, from the row already stored under it, in
+// usage_events or usage_held_events, in any status:
+//
+//   - held row: its quantity decides (it is locked above).
+//   - otherwise the split :input is INSERTed first. That insert is the
+//     claim: ON CONFLICT on the (tenant_id, livemode, idempotency_key)
+//     UNIQUE waits for an uncommitted insert of the same key — such as a
+//     copy of the previous release writing the old :input during a rolling
+//     deploy — and then sees it. A SELECT-then-INSERT would not see the
+//     uncommitted row and would double-bill.
+//   - on conflict, the stored row's quantity decides.
+//
+// A stored quantity equal to the pre-split input quantity means the call was
+// first recorded the old way: it is written as call.Legacy (no write rows,
+// the old input quantity and cost), so every key of it dedups or releases
+// its held row. Any other stored quantity, or none, means the split mapping.
+func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
+	eventKey := func(e domain.UsageEvent) string { return e.IdempotencyKey }
+	keysOf := func(evs []domain.UsageEvent) []string {
+		out := make([]string, 0, len(evs))
+		for _, e := range evs {
+			out = append(out, e.IdempotencyKey)
+		}
+		return out
+	}
+
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return CallResult{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	held, err := lockHeldKeys(ctx, tx, tenantID, callKeys(keysOf(call.Events), keysOf(call.Legacy)))
+	if err != nil {
+		return CallResult{}, err
+	}
+
+	var res CallResult
+	events := call.Events
+	written := map[string]bool{}
+	if len(call.Legacy) > 0 {
+		legacy, ok := firstWithKey(call.Legacy, call.LegacyKey, eventKey)
+		claim, okSplit := firstWithKey(call.Events, call.LegacyKey, eventKey)
+		if !ok || !okSplit {
+			return CallResult{}, fmt.Errorf("usage: call legacy key %q is not in both mappings", call.LegacyKey)
+		}
+		var prior *decimal.Decimal
+		if h, isHeld := held[call.LegacyKey]; isHeld {
+			prior = &h.quantity
+		} else {
+			_, err := ingestOneTx(ctx, tx, tenantID, claim)
+			switch {
+			case err == nil:
+				res.Inserted++
+				written[call.LegacyKey] = true
+			case errors.Is(err, errs.ErrDuplicateKey):
+				q, found, err := storedEventQuantity(ctx, tx, call.LegacyKey)
+				if err != nil {
+					return CallResult{}, err
+				}
+				if found {
+					prior = &q
+				}
+			default:
+				return CallResult{}, err
+			}
+		}
+		if prior != nil && prior.Equal(legacy.Quantity) {
+			events = call.Legacy
+			res.Legacy = true
+		}
+	}
+
+	for _, ev := range events {
+		if written[ev.IdempotencyKey] {
+			continue
+		}
+		h, isHeld := held[ev.IdempotencyKey]
+		if isHeld && h.status == string(domain.HeldStatusDiscarded) {
+			// The operator decided these rows are never billed, and a
+			// LiteLLM resend after the customer exists must not undo that.
+			res.Deduplicated++
+			continue
+		}
+		out, err := ingestOneTx(ctx, tx, tenantID, ev)
+		switch {
+		case err == nil:
+			res.Inserted++
+		case errors.Is(err, errs.ErrDuplicateKey):
+			res.Deduplicated++
+		default:
+			return CallResult{}, err
+		}
+		if isHeld && h.status == string(domain.HeldStatusHeld) {
+			// The event id is recorded only when this call wrote it; a
+			// duplicate means usage_events already had the key.
+			var eventID *string
+			if err == nil {
+				eventID = &out.ID
+			}
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE usage_held_events SET status = 'released', resolved_at = now(),
+					released_customer_id = $2, released_event_id = $3
+				WHERE id = $1 AND status = 'held'
+			`, h.id, ev.CustomerID, eventID); err != nil {
+				return CallResult{}, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return CallResult{}, err
+	}
+	return res, nil
+}
+
+// HoldCall holds one LiteLLM call — every event the mapper made from it — in
+// ONE transaction, ON CONFLICT DO NOTHING per key, so a resend of a call
+// already held is counted as deduplicated. It applies
+// IngestCallResolvingHeld's replay guard, with the claim on the held
+// table: the call's input key is looked up in usage_events (a customer
+// deleted and recreated under the same external id), and otherwise the
+// split :input is held first. That insert waits for an uncommitted hold of
+// the same key, and on conflict the held row's quantity (any status)
+// decides. A stored pre-split input quantity holds the call as call.Legacy.
+//
+// One race stays open: a copy of the previous release INGESTING the old
+// :input (its customer exists) while this one HOLDS the same call (its
+// customer lookup ran before the customer existed). The held write rows
+// would then be released on top of the old :input. It needs a rolling
+// deploy, a resend and a customer created between two lookups of one call.
+func (s *PostgresStore) HoldCall(ctx context.Context, tenantID string, call HeldCall) (CallResult, error) {
+	heldKey := func(e domain.HeldUsageEvent) string { return e.IdempotencyKey }
+
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return CallResult{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	var res CallResult
+	events := call.Events
+	written := map[string]bool{}
+	if len(call.Legacy) > 0 {
+		legacy, ok := firstWithKey(call.Legacy, call.LegacyKey, heldKey)
+		claim, okSplit := firstWithKey(call.Events, call.LegacyKey, heldKey)
+		if !ok || !okSplit {
+			return CallResult{}, fmt.Errorf("usage: call legacy key %q is not in both mappings", call.LegacyKey)
+		}
+		var prior *decimal.Decimal
+		if q, found, err := storedEventQuantity(ctx, tx, call.LegacyKey); err != nil {
+			return CallResult{}, err
+		} else if found {
+			prior = &q
+		} else {
+			inserted, err := insertHeldTx(ctx, tx, tenantID, claim)
+			if err != nil {
+				return CallResult{}, err
+			}
+			if inserted {
+				res.Inserted++
+				written[call.LegacyKey] = true
+			} else {
+				var q decimal.Decimal
+				if err := tx.QueryRowContext(ctx,
+					`SELECT quantity FROM usage_held_events WHERE tenant_id = $1 AND idempotency_key = $2`, tenantID, call.LegacyKey).Scan(&q); err != nil {
+					return CallResult{}, err
+				}
+				prior = &q
+			}
+		}
+		if prior != nil && prior.Equal(legacy.Quantity) {
+			events = call.Legacy
+			res.Legacy = true
+		}
+	}
+
+	for _, ev := range events {
+		if written[ev.IdempotencyKey] {
+			continue
+		}
+		inserted, err := insertHeldTx(ctx, tx, tenantID, ev)
+		if err != nil {
+			return CallResult{}, err
+		}
+		if inserted {
+			res.Inserted++
+		} else {
+			res.Deduplicated++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return CallResult{}, err
+	}
+	return res, nil
+}
+
+// firstWithKey is the event with this key.
+func firstWithKey[E any](events []E, key string, keyOf func(E) string) (E, bool) {
+	for _, e := range events {
+		if keyOf(e) == key {
+			return e, true
+		}
+	}
+	var zero E
+	return zero, false
+}
+
+// insertHeldTx inserts one held row, ON CONFLICT DO NOTHING on the
+// idempotency key. It reports whether the row was new.
+func insertHeldTx(ctx context.Context, tx *sql.Tx, tenantID string, ev domain.HeldUsageEvent) (bool, error) {
+	props, err := propertiesJSON(ev.Dimensions)
+	if err != nil {
+		return false, err
+	}
+	var id string
+	err = tx.QueryRowContext(ctx, `
+		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id,
+			meter_key, quantity, properties, idempotency_key, event_at,
+			observed_cost_micros, reason)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
+		RETURNING id
+	`, postgres.NewID("vlx_hue"), tenantID, ev.Source, ev.ExternalCustomerID,
+		ev.MeterKey, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
+		ev.ObservedCostMicros, string(ev.Reason),
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }

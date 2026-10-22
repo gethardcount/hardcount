@@ -5327,6 +5327,11 @@ type ItemChangeType string
 // LitellmSpendLog The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
 // Other fields are accepted and ignored.
 type LitellmSpendLog struct {
+	// CacheHit `true` when LiteLLM answered from its own response cache. The
+	// record is skipped and counted in `cache_hits`: the provider
+	// charged nothing.
+	CacheHit bool `json:"cache_hit,omitempty"`
+
 	// CallType Only completion, acompletion, chat, chat.completion, embedding,
 	// aembedding, text_completion and atext_completion records produce
 	// usage. Others are skipped.
@@ -5334,19 +5339,23 @@ type LitellmSpendLog struct {
 	CompletionTokens int64  `json:"completion_tokens,omitempty"`
 
 	// CostBreakdown The provider's own cost, in dollars. When present, each event's
-	// provider cost comes from its part (input, output or cache read)
-	// instead of the provider-costs table. A part that is missing or
-	// negative falls back to the table. `input_cost` includes cache
-	// reads, so the input event gets `input_cost` minus
-	// `cache_read_cost`. If there were cache reads but no
-	// `cache_read_cost`, the input and cache-read events use the
-	// provider-costs table.
+	// provider cost comes from its part (input, output, cache read or
+	// cache write) instead of the provider-costs table. A part that is
+	// missing or negative falls back to the table. `input_cost`
+	// includes cache reads and cache writes, so the input event gets
+	// `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
+	// If there were cache reads but no `cache_read_cost`, or split-off
+	// cache writes but no `cache_creation_cost`, the input-side events
+	// use the provider-costs table. With 1-hour cache writes they
+	// always do: LiteLLM prices `cache_creation_cost` at the 5-minute
+	// rate.
 	CostBreakdown struct {
-		CacheReadCost float32 `json:"cache_read_cost,omitempty"`
-		InputCost     float32 `json:"input_cost,omitempty"`
-		OutputCost    float32 `json:"output_cost,omitempty"`
-		ToolUsageCost float32 `json:"tool_usage_cost,omitempty"`
-		TotalCost     float32 `json:"total_cost,omitempty"`
+		CacheCreationCost float32 `json:"cache_creation_cost,omitempty"`
+		CacheReadCost     float32 `json:"cache_read_cost,omitempty"`
+		InputCost         float32 `json:"input_cost,omitempty"`
+		OutputCost        float32 `json:"output_cost,omitempty"`
+		ToolUsageCost     float32 `json:"tool_usage_cost,omitempty"`
+		TotalCost         float32 `json:"total_cost,omitempty"`
 	} `json:"cost_breakdown,omitempty"`
 	CustomLlmProvider string `json:"custom_llm_provider,omitempty"`
 
@@ -5371,10 +5380,13 @@ type LitellmSpendLog struct {
 	ResponseCost float32 `json:"response_cost,omitempty"`
 
 	// StartTime Unix seconds. Event time when `endTime` is absent.
-	StartTime   float32 `json:"startTime,omitempty"`
-	TotalTokens int64   `json:"total_tokens,omitempty"`
+	StartTime float32 `json:"startTime,omitempty"`
+
+	// Status A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries.
+	Status      string `json:"status,omitempty"`
+	TotalTokens int64  `json:"total_tokens,omitempty"`
 	Usage       struct {
-		// CacheCreationInputTokens Not billed on its own; billed as input only when included in prompt_tokens.
+		// CacheCreationInputTokens Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`.
 		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
 		CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 		CompletionTokens         int64 `json:"completion_tokens,omitempty"`
@@ -5382,7 +5394,16 @@ type LitellmSpendLog struct {
 		// PromptTokens Includes cache-read tokens.
 		PromptTokens        int64 `json:"prompt_tokens,omitempty"`
 		PromptTokensDetails struct {
-			CachedTokens int64 `json:"cached_tokens,omitempty"`
+			// CacheCreationTokenDetails Anthropic's cache writes by cache lifetime. They become
+			// `cache_write_5m` and `cache_write_1h` events, taken out
+			// of `input`. Without this split, or when it does not add
+			// up to the cache-write count, the writes stay in `input`.
+			CacheCreationTokenDetails struct {
+				Ephemeral1hInputTokens int64 `json:"ephemeral_1h_input_tokens,omitempty"`
+				Ephemeral5mInputTokens int64 `json:"ephemeral_5m_input_tokens,omitempty"`
+			} `json:"cache_creation_token_details,omitempty"`
+			CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
+			CachedTokens        int64 `json:"cached_tokens,omitempty"`
 		} `json:"prompt_tokens_details,omitempty"`
 		TotalTokens int64 `json:"total_tokens,omitempty"`
 	} `json:"usage,omitempty"`
@@ -5396,10 +5417,13 @@ type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
 
+	// CacheHits The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0.
+	CacheHits int `json:"cache_hits"`
+
 	// Deduplicated Usage events already recorded, or already held, by an earlier delivery.
 	Deduplicated int `json:"deduplicated"`
 
-	// Errors One entry per event or record that was not recorded. A record can appear more than once.
+	// Errors One entry per record that was not recorded. A record's events are recorded together or not at all.
 	Errors []struct {
 		Error string `json:"error"`
 
@@ -5412,7 +5436,7 @@ type LitellmSpendResult struct {
 	// `POST /v1/usage-events/held/release`.
 	Held int `json:"held"`
 
-	// Skipped Records that carry no billable tokens.
+	// Skipped Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
 	Skipped int `json:"skipped"`
 }
 
@@ -5428,7 +5452,6 @@ type MarginReport struct {
 		Model        string `json:"model"`
 		RevenueCents int64  `json:"revenue_cents,omitempty"`
 	} `json:"by_model"`
-	CacheWriteExcluded bool `json:"cache_write_excluded,omitempty"`
 
 	// CostCurrency Currency of cost_micros. Always USD.
 	CostCurrency string `json:"cost_currency"`

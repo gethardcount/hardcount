@@ -6534,13 +6534,15 @@ export interface paths {
          * @description Target for LiteLLM Proxy's `generic_api` logging callback. Accepts
          *     one LiteLLM log record, a JSON array of records, or
          *     `{"events": [...]}`. Each completion, chat, text-completion or
-         *     embedding record becomes up to three usage events on the `tokens`
+         *     embedding record becomes up to five usage events on the `tokens`
          *     meter, one per `token_type` dimension: `input` (prompt tokens not
-         *     read from cache), `cache_read` and `output`. Each event also carries
-         *     `model` (a model family name when recognised), `model_raw` and
-         *     `provider`, plus `team_id` and `request_tags` from `metadata` when
-         *     present. Other call types, and records with no token counts, are
-         *     counted as `skipped`.
+         *     read from or written to the cache), `cache_read`, `cache_write_5m`,
+         *     `cache_write_1h` and `output`. A record's events are recorded in
+         *     one transaction. Each event also carries `model` (a model family
+         *     name when recognised), `model_raw` and `provider`, plus `team_id`
+         *     and `request_tags` from `metadata` when present. Other call types,
+         *     records with no token counts, failed calls and LiteLLM
+         *     response-cache hits are counted as `skipped`.
          *
          *     The customer is the record's `user` or `end_user` (or
          *     `metadata.user_api_key_end_user_id`), matched against the
@@ -7898,7 +7900,6 @@ export interface components {
             costed_events: number;
             /** @description Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
             cost_rates_configured: boolean;
-            cache_write_excluded?: boolean;
         };
         /**
          * @description Response shape for `GET /v1/invoices/{id}`. The handler returns the
@@ -9405,6 +9406,14 @@ export interface components {
         LitellmSpendLog: {
             /** @description LiteLLM's call id. Used to build the events' idempotency keys. */
             id?: string;
+            /** @description A `failure` record (a call the provider refused or that timed out) is skipped, whatever token counts it carries. */
+            status?: string;
+            /**
+             * @description `true` when LiteLLM answered from its own response cache. The
+             *     record is skipped and counted in `cache_hits`: the provider
+             *     charged nothing.
+             */
+            cache_hit?: boolean | null;
             /**
              * @description Only completion, acompletion, chat, chat.completion, embedding,
              *     aembedding, text_completion and atext_completion records produce
@@ -9430,12 +9439,26 @@ export interface components {
                 prompt_tokens_details?: {
                     /** Format: int64 */
                     cached_tokens?: number;
+                    /** Format: int64 */
+                    cache_creation_tokens?: number;
+                    /**
+                     * @description Anthropic's cache writes by cache lifetime. They become
+                     *     `cache_write_5m` and `cache_write_1h` events, taken out
+                     *     of `input`. Without this split, or when it does not add
+                     *     up to the cache-write count, the writes stay in `input`.
+                     */
+                    cache_creation_token_details?: {
+                        /** Format: int64 */
+                        ephemeral_5m_input_tokens?: number | null;
+                        /** Format: int64 */
+                        ephemeral_1h_input_tokens?: number | null;
+                    };
                 };
                 /** Format: int64 */
                 cache_read_input_tokens?: number;
                 /**
                  * Format: int64
-                 * @description Not billed on its own; billed as input only when included in prompt_tokens.
+                 * @description Cache-write tokens, included in prompt_tokens. Split into `cache_write_5m` and `cache_write_1h` by `prompt_tokens_details.cache_creation_token_details`.
                  */
                 cache_creation_input_tokens?: number;
             };
@@ -9452,18 +9475,22 @@ export interface components {
             response_cost?: number;
             /**
              * @description The provider's own cost, in dollars. When present, each event's
-             *     provider cost comes from its part (input, output or cache read)
-             *     instead of the provider-costs table. A part that is missing or
-             *     negative falls back to the table. `input_cost` includes cache
-             *     reads, so the input event gets `input_cost` minus
-             *     `cache_read_cost`. If there were cache reads but no
-             *     `cache_read_cost`, the input and cache-read events use the
-             *     provider-costs table.
+             *     provider cost comes from its part (input, output, cache read or
+             *     cache write) instead of the provider-costs table. A part that is
+             *     missing or negative falls back to the table. `input_cost`
+             *     includes cache reads and cache writes, so the input event gets
+             *     `input_cost` minus `cache_read_cost` and `cache_creation_cost`.
+             *     If there were cache reads but no `cache_read_cost`, or split-off
+             *     cache writes but no `cache_creation_cost`, the input-side events
+             *     use the provider-costs table. With 1-hour cache writes they
+             *     always do: LiteLLM prices `cache_creation_cost` at the 5-minute
+             *     rate.
              */
             cost_breakdown?: {
                 input_cost?: number;
                 output_cost?: number;
                 cache_read_cost?: number;
+                cache_creation_cost?: number;
                 tool_usage_cost?: number;
                 total_cost?: number;
             };
@@ -9560,9 +9587,11 @@ export interface components {
              *     `POST /v1/usage-events/held/release`.
              */
             held: number;
-            /** @description Records that carry no billable tokens. */
+            /** @description Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit. */
             skipped: number;
-            /** @description One entry per event or record that was not recorded. A record can appear more than once. */
+            /** @description The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
+            cache_hits: number;
+            /** @description One entry per record that was not recorded. A record's events are recorded together or not at all. */
             errors?: {
                 /** @description The LiteLLM record id. */
                 id: string;

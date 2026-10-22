@@ -31,5 +31,4 @@ export interface MarginReport {
   costed_events: number;
   /** Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up. */
   cost_rates_configured: boolean;
-  cache_write_excluded?: boolean;
 }

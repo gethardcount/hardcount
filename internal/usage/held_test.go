@@ -94,6 +94,13 @@ func (h *heldMemStore) DiscardHeld(context.Context, string, string, string, func
 func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent) (domain.UsageEvent, error) {
 	return h.Ingest(ctx, tenantID, ev)
 }
+func (h *heldMemStore) IngestCallResolvingHeld(context.Context, string, StoreCall) (CallResult, error) {
+	return CallResult{}, nil
+}
+func (h *heldMemStore) HoldCall(_ context.Context, _ string, call HeldCall) (CallResult, error) {
+	h.held = append(h.held, call.Events...)
+	return CallResult{Inserted: len(call.Events)}, nil
+}
 
 // Hold refuses what a release could not ingest: no key, bad dimensions, a
 // quantity the column cannot hold, a time in the future. Without a held

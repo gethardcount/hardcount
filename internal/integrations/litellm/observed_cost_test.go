@@ -33,8 +33,8 @@ func costOf(t *testing.T, evs []ExternalIngest, half string) *int64 {
 }
 
 // TestObservedCost_PerHalfOnly is the money assertion behind ADR-079 D4.
-// One LiteLLM call fans out to up to three usage events. Stamping a
-// whole-call figure on each would multi-count COGS by up to 3x, which is
+// One LiteLLM call fans out to up to five usage events. Stamping a
+// whole-call figure on each would multi-count COGS by up to 5x, which is
 // precisely why phase 1 stamped nothing. Each half must carry only its own
 // side's cost. The cached case is TestObservedCost_CachedCallCountsEachTokenOnce.
 func TestObservedCost_PerHalfOnly(t *testing.T) {
@@ -340,6 +340,24 @@ func TestObservedCost_CacheWrite1hFallsToTable(t *testing.T) {
 	}
 	if c := got[TokenTypeOutput]; c == nil || *c != 7500 {
 		t.Errorf("output cost = %v, want 7500", c)
+	}
+
+	// The same when the figures do nest: a model whose 1-hour rate LiteLLM
+	// knows prices input_cost right (0.513), yet cache_creation_cost still
+	// prices all 100,000 writes at the 5-minute rate (0.375). Subtracting it
+	// would cost the input at 0.138 instead of 0.003.
+	// Mutation-verify: drop the w1h > 0 condition in roleCosts → stamped.
+	p.ID = "nested-1h"
+	p.CostBreakdown.InputCost = 0.513
+	m, err = MapPayload(p)
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	got = costsByRole(t, m.Events)
+	for _, tt := range []string{TokenTypeInput, TokenTypeCacheWrite5m, TokenTypeCacheWrite1h} {
+		if c, ok := got[tt]; !ok || c != nil {
+			t.Errorf("nesting figures: %s cost = %v (present %v), want nil", tt, c, ok)
+		}
 	}
 }
 
