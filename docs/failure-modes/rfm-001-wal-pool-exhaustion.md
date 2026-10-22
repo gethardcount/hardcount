@@ -53,9 +53,9 @@ Checkpoints, autovacuum, locks and WAL creation all look like slow writes;
 only per-second pool depth tells them apart. Three observations, together,
 distinguish it:
 
-1. **Coincidence.** Sample the pool depth once per second. Each freeze-second
-   coincides with a pool-empty reading. In one instrumented series, 29 of 32
-   freeze-seconds had the pool at zero.
+1. **Coincidence.** Sample the pool depth once per second. Freeze-seconds
+   coincide with pool-empty readings: in one instrumented series, 29 of 32
+   had the pool at zero.
 2. **Negative coincidence.** Zero of those freeze-seconds coincide with a
    logged autovacuum completion. (A vacuum storm looks different: average I/O size collapses
    ~107 KB → ~6 KB with queue depth in the hundreds. See
@@ -114,7 +114,7 @@ frequency.
 - **The pool is not the only wall on this path.** In the same campaign,
   checkpoint-era write bursts saturated a 100 GB gp3 volume (3,000 IOPS) at
   15–25k events/s. Where the volume genuinely cannot absorb the rate, a
-  deeper pool does not help — that is a capacity problem, not this disease.
+  deeper pool does not help — that is a capacity problem, not this failure.
   A collapse observed at 25k on one stock series did not replicate on
   another, and is published as *storage-bound, not replicated*.
 - **At very high rates on stock settings, the freezes can stop on their own**

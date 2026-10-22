@@ -1,7 +1,7 @@
 # Webhook outbox backed up
 
 Velox queues every webhook event in the `webhook_outbox` table. A
-background job turns each row into an event and one delivery per endpoint,
+background job turns each row into an event and one delivery per matching endpoint,
 before anything is sent. An endpoint that keeps failing does not grow it: see
 [A webhook endpoint keeps failing](webhook-endpoint-failing.md). Back to the
 [runbook index](index.md).

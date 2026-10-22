@@ -43,7 +43,7 @@ To upgrade a stack built from source, run these in `deploy/compose`. This exampl
    docker compose up -d
    ```
 
-   **You see:** after a few seconds, `curl -fsS http://localhost/health/ready` answers `"status":"ok"` again.
+   **You see:** after a few seconds, `curl -fsS http://localhost/health/ready` (`localhost:8080` if `NGINX_HTTP_PORT=127.0.0.1:8080`, as in Production on one VM) answers `"status":"ok"` again.
 
 Read the [changelog](../../CHANGELOG.md) upgrade notes first, as for any upgrade. If the upgrade stops with an error, see [If something goes wrong](#if-something-goes-wrong).
 

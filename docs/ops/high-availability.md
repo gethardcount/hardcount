@@ -66,7 +66,7 @@ On a stop signal (SIGTERM), a copy first tells the load balancer it is leaving: 
 | 2. A test-clock advance in progress | Stopped at the limit. The clock stays `advancing` until a copy restarts. See [Test-clock advance hung](runbook/test-clock-advance-hung.md). | Up to 30s |
 | 3. Background jobs | | Up to 30s |
 
-The worst case is `SHUTDOWN_DRAIN_DELAY` plus 90 seconds. Usually it takes under 2 seconds.
+The worst case is `SHUTDOWN_DRAIN_DELAY` plus 90 seconds. Usually the three stages take under 2 seconds after the drain delay.
 
 A grace period shorter than that can kill a copy (SIGKILL) halfway through. Velox is built to survive that: queued webhooks and emails a copy had claimed are picked up again when its lease runs out, and the next copy to start recovers a killed test-clock advance. The cost is that a few webhooks or emails can be sent twice.
 

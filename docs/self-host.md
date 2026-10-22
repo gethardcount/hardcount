@@ -69,7 +69,7 @@ To check it, sign in, switch the dashboard to test mode and open the audit log. 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `APP_ENV` | `local` | `local`, `staging` or `production`. `staging` and `production` need HTTPS to sign in and turn on the start-up checks on this page. Another value that starts with `prod`, such as `prod`, stops start-up; any other value starts with a warning and counts as not production. |
+| `APP_ENV` | `local` | `local`, `staging` or `production`. `staging` and `production` mark the sign-in cookie `Secure`, so sign-in needs HTTPS (or `http://localhost` in Chrome or Firefox), and turn on the start-up checks on this page. Another value that starts with `prod`, such as `prod`, stops start-up; any other value starts with a warning and counts as not production. |
 | `RUN_MIGRATIONS_ON_BOOT` | `false` | Apply database upgrades at start-up. With `false`, run `velox migrate` before starting a new release. A value other than `true` or `false` (or `yes`, `no`, `1`, `0`) stops start-up. |
 | `MIGRATION_LOCK_TIMEOUT` | `5s` | How long a database upgrade waits for a table lock before it stops. A duration such as `30s`, or `0` for no limit. Any other value stops the upgrade. |
 | `DASHBOARD_BASE_URL` | unset | The dashboard's address, for password-reset and invite links. What breaks without it: [Email setup](ops/email-setup.md#what-breaks-when-a-setting-is-missing). For local development use `http://localhost:5173`. |

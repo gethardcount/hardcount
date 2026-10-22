@@ -4,7 +4,7 @@ This page takes a fresh Linux server to a Velox that bills real customers, with 
 
 Velox is down while it restarts. If that is not acceptable, see [High availability](ops/high-availability.md).
 
-Load-tested on a €6.49/month Hetzner CX23 (ingest and billing only, without HTTPS, Stripe or email): see [How much traffic Velox handles](scale.md#what-one-small-server-handles).
+Load-tested on a €6.49/month Hetzner CX23 (ingest, billing and dashboard calls, without HTTPS, Stripe or email): see [How much traffic Velox handles](scale.md#what-one-small-server-handles).
 
 At the end you have:
 
