@@ -191,8 +191,10 @@ func specBodySchemas(t *testing.T) (map[string]map[string]any, map[string]any) {
 // TestOpenAPISpec_RequestBodies ties each spec request body to the Go type its
 // handler decodes. A field the type reads but the spec leaves out is invisible
 // to generated clients; a field the spec lists but the type does not have is
-// dropped, or refused by a strict route. Both directions fail, at every depth
-// where both sides describe an object.
+// dropped, or refused by a strict route. Both directions fail, at every depth.
+// So does a shape mismatch: a Go slice against a schema with no items, or a Go
+// struct with fields against a schema with no properties. Value types are not
+// compared.
 //
 // The check starts from the spec, so every operation with a JSON body must be
 // in requestBodies or bodiesNotChecked. It cannot see a handler that decodes a
@@ -388,8 +390,12 @@ func (c *bodyComparer) compare(at string, t reflect.Type, schema map[string]any)
 
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return // []byte decodes from a base64 string.
+		}
 		items, _ := schema["items"].(map[string]any)
 		if items == nil {
+			c.diffs = append(c.diffs, specAt(at)+" is not an array")
 			return
 		}
 		c.compare(at+"[]", t.Elem(), items)
@@ -397,8 +403,8 @@ func (c *bodyComparer) compare(at string, t reflect.Type, schema map[string]any)
 		props, hasProps := schema["properties"].(map[string]any)
 		fields := jsonFields(t)
 		if !hasProps {
-			if at == "" {
-				c.diffs = append(c.diffs, "the spec body lists no properties")
+			if len(fields) > 0 {
+				c.diffs = append(c.diffs, specAt(at)+" lists no properties")
 			}
 			return
 		}
@@ -424,6 +430,14 @@ func (c *bodyComparer) compare(at string, t reflect.Type, schema map[string]any)
 			c.diffs = append(c.diffs, key+" not read")
 		}
 	}
+}
+
+// specAt names the spec schema at path at, for a shape diff.
+func specAt(at string) string {
+	if at == "" {
+		return "the spec body"
+	}
+	return at + ": the spec"
 }
 
 func join(at, name string) string {
@@ -459,8 +473,10 @@ func TestBodyComparer_ShapeMismatch(t *testing.T) {
 			want:   []string{"the spec body is not an array"},
 		},
 		{
-			name:   "nested array decoded, spec is an object",
-			body:   struct{ L []inner `json:"l"` }{},
+			name: "nested array decoded, spec is an object",
+			body: struct {
+				L []inner `json:"l"`
+			}{},
 			schema: obj(map[string]any{"l": map[string]any{"type": "object"}}),
 			want:   []string{"l: the spec is not an array"},
 		},

@@ -96,8 +96,13 @@ spec's properties, nested objects included, and fails when:
   cannot send it;
 - the spec lists a field the type does not have, so the server drops it, or
   refuses it on a strict route;
+- one side is an array or an object with fields and the other is not, at
+  any depth;
 - an operation with a JSON body is in neither `requestBodies` nor
   `bodiesNotChecked`.
+
+It compares field names and shape, not value types: a spec `string` against
+a Go `int64` passes.
 
 A field left out of the spec on purpose, such as a read-only `id` on a type
 the handler decodes whole, goes in the entry's `undocumented` with the
