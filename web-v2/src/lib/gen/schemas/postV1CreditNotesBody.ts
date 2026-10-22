@@ -9,6 +9,7 @@
  */
 import type { PostV1CreditNotesBodyCommitRelief } from './postV1CreditNotesBodyCommitRelief';
 import type { PostV1CreditNotesBodyLinesItem } from './postV1CreditNotesBodyLinesItem';
+import type { PostV1CreditNotesBodyRefundType } from './postV1CreditNotesBodyRefundType';
 
 export type PostV1CreditNotesBody = {
   invoice_id: string;
@@ -17,6 +18,12 @@ export type PostV1CreditNotesBody = {
   refund_amount_cents?: number;
   credit_amount_cents?: number;
   out_of_band_amount_cents?: number;
+  /**
+     * Older single-channel form. On a paid invoice whose three
+     * `*_amount_cents` fields are all 0, `refund` or `credit`
+     * puts the whole note in that channel.
+     */
+  refund_type?: PostV1CreditNotesBodyRefundType;
   auto_issue?: boolean;
   /** Mutually exclusive with lines/credit_amount_cents. */
   commit_relief?: PostV1CreditNotesBodyCommitRelief;

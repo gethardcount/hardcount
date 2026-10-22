@@ -82,7 +82,7 @@ func itSignIn(h http.Handler, ip, email, password string) int {
 // itSignInWith signs in from ip, sending the velox_device cookie when
 // browser is not nil.
 func itSignInWith(h http.Handler, ip, email, password string, browser *http.Cookie) *httptest.ResponseRecorder {
-	body, _ := json.Marshal(loginReq{Email: email, Password: password})
+	body, _ := json.Marshal(LoginReq{Email: email, Password: password})
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))
 	req.RemoteAddr = ip + ":40000"
 	if browser != nil {

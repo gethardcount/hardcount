@@ -165,6 +165,8 @@ export interface paths {
                         display_name: string;
                         email?: string;
                         additional_emails?: string[];
+                        /** @description Test mode only. Attaches the customer to a test clock. */
+                        test_clock_id?: string;
                     };
                 };
             };
@@ -1212,6 +1214,8 @@ export interface paths {
                         invoice_id: string;
                         reason?: string;
                         lines?: {
+                            /** @description Optional. The invoice line this credit line reverses. */
+                            invoice_line_item_id?: string;
                             description?: string;
                             quantity?: number;
                             unit_amount_cents?: number;
@@ -1219,9 +1223,20 @@ export interface paths {
                         refund_amount_cents?: number;
                         credit_amount_cents?: number;
                         out_of_band_amount_cents?: number;
+                        /**
+                         * @description Older single-channel form. On a paid invoice whose three
+                         *     `*_amount_cents` fields are all 0, `refund` or `credit`
+                         *     puts the whole note in that channel.
+                         * @enum {string}
+                         */
+                        refund_type?: "refund" | "credit";
                         auto_issue?: boolean;
                         /** @description Mutually exclusive with lines/credit_amount_cents. */
                         commit_relief?: {
+                            /** @description Optional. Defaults to the top-level invoice_id. */
+                            invoice_id?: string;
+                            /** @description Optional. Defaults to the top-level reason. */
+                            reason?: string;
                             /** @description Commit credits to retire (1..remaining). */
                             retire_cents?: number;
                             /** @description Retire the LIVE remaining (absorbs racing drawdowns). */
@@ -2914,6 +2929,7 @@ export interface paths {
                         dimensions?: {
                             [key: string]: unknown;
                         };
+                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
                         properties?: {
                             [key: string]: unknown;
                         };
@@ -3028,6 +3044,10 @@ export interface paths {
                         /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
                         quantity: number | string;
                         dimensions?: {
+                            [key: string]: unknown;
+                        };
+                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
+                        properties?: {
                             [key: string]: unknown;
                         };
                         /**
@@ -8204,7 +8224,7 @@ export interface components {
             amount_cents: number;
             /**
              * Format: int64
-             * @description Customer's credit balance after this entry.
+             * @description Customer's credit balance after this entry, in cents.
              */
             balance_after: number;
             description: string;

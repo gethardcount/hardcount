@@ -12,6 +12,10 @@
  * Mutually exclusive with lines/credit_amount_cents.
  */
 export type PostV1CreditNotesBodyCommitRelief = {
+  /** Optional. Defaults to the top-level invoice_id. */
+  invoice_id?: string;
+  /** Optional. Defaults to the top-level reason. */
+  reason?: string;
   /** Commit credits to retire (1..remaining). */
   retire_cents?: number;
   /** Retire the LIVE remaining (absorbs racing drawdowns). */
