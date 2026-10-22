@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import {
   TERMINAL_INVOICE_STATUSES,
   isTerminalInvoiceStatus,
+  invoiceAmountCents,
   invoiceAmountLabel,
   invoiceAmountLine,
   invoiceAwaitingPayment,
@@ -85,6 +86,20 @@ test('invoiceDueCents: a void owes nothing; everything else owes amount_due', ()
   assert.equal(invoiceDueCents({ ...base, status: 'draft' }), 2900)
   // Paid: the settle zeroed amount_due.
   assert.equal(invoiceDueCents({ ...base, status: 'paid', amount_due_cents: 0, amount_paid_cents: 2900 }), 0)
+})
+
+test('invoiceAmountCents: a list row shows the invoice amount, not what is owed', () => {
+  // A void keeps amount_due; the Invoices and Dunning lists show it under
+  // "Amount" (sign-off of #1328: every void read $0.00 there).
+  assert.equal(invoiceAmountCents({ ...base, status: 'voided' }), 2900)
+  assert.equal(invoiceAmountCents({ ...base, status: 'uncollectible' }), 2900)
+  // Paid: what paid it, card plus customer credit; amount_due was zeroed.
+  assert.equal(invoiceAmountCents({ ...base, status: 'paid', amount_due_cents: 0, amount_paid_cents: 1900, credits_applied_cents: 1000 }), 2900)
+  // Open and draft: amount_due.
+  assert.equal(invoiceAmountCents({ ...base, status: 'finalized', amount_due_cents: 1900, credits_applied_cents: 1000 }), 1900)
+  assert.equal(invoiceAmountCents({ ...base, status: 'draft' }), 2900)
+  // Negative control: what is owed on the same void is still nothing.
+  assert.equal(invoiceDueCents({ ...base, status: 'voided' }), 0)
 })
 
 test('invoiceRowAmount says what the figure is, and a closed invoice is never "due"', () => {

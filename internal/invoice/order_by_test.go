@@ -16,11 +16,11 @@ func TestInvoiceOrderBy_DefaultsToCreatedAtDesc(t *testing.T) {
 // resolves to a real column. New SPA columns must be added to the
 // allow-list (invoiceSortColumn) — this test catches the asymmetry.
 func TestInvoiceOrderBy_AllowedColumns(t *testing.T) {
-	const amountDueOwed = "(CASE WHEN status = 'voided' THEN 0 ELSE amount_due_cents END)"
+	const amountShown = "(CASE WHEN status = 'paid' THEN amount_paid_cents + credits_applied_cents ELSE amount_due_cents END)"
 	cases := map[string]string{
 		"invoice_number":       "invoice_number",
-		"amount_due_cents":     amountDueOwed,
-		"amount_due":           amountDueOwed, // alias
+		"amount_due_cents":     amountShown,
+		"amount_due":           amountShown, // alias
 		"billing_period_start": "billing_period_start",
 		"period":               "billing_period_start", // alias
 		"due_at":               "due_at",

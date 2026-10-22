@@ -91,19 +91,28 @@ export function invoiceDueCents(inv: InvoiceMoneyInput): number {
 }
 
 /**
+ * The invoice's amount on a row: what a list shows under "Amount", and what
+ * the server's amount sort orders by (invoiceSortColumn in
+ * internal/invoice/postgres.go). Paid: what the payment and the customer
+ * credit applied paid together, because the settle zeroed amount_due and
+ * credit never reaches amount_paid: an invoice a prepaid commit paid in full
+ * read "$0.00 paid". Everything else: amount_due, which a void and a write-off
+ * keep, so a void reads the amount it was voided at. Not what is owed: that
+ * is invoiceDueCents, and a void owes nothing.
+ */
+export function invoiceAmountCents(inv: InvoiceMoneyInput): number {
+  if (inv.status === 'paid') return (inv.amount_paid_cents ?? 0) + (inv.credits_applied_cents ?? 0)
+  return inv.amount_due_cents
+}
+
+/**
  * The amount a row shows beside the invoice's status badge, with the word that
- * says what it is. Open: "$29.00 due". Paid: "$29.00 paid", what the payment
- * and the customer credit applied paid together, because the settle zeroed
- * amount_due and credit never reaches amount_paid: an invoice a prepaid
- * commit paid in full read "$0.00 paid". Draft, void and write-off: the
- * invoice amount, bare; the badge beside it says which.
+ * says what it is. Open: "$29.00 due". Paid: "$29.00 paid". Draft, void and
+ * write-off: the invoice amount, bare; the badge beside it says which.
  */
 export function invoiceRowAmount(inv: InvoiceMoneyInput): string {
-  if (inv.status === 'paid') {
-    const paid = (inv.amount_paid_cents ?? 0) + (inv.credits_applied_cents ?? 0)
-    return `${formatCents(paid, inv.currency)} paid`
-  }
-  const amount = formatCents(inv.amount_due_cents, inv.currency)
+  const amount = formatCents(invoiceAmountCents(inv), inv.currency)
+  if (inv.status === 'paid') return `${amount} paid`
   return inv.status === 'finalized' ? `${amount} due` : amount
 }
 
@@ -150,21 +159,35 @@ export function invoiceAwaitingPayment(inv: InvoiceMoneyInput): boolean {
     inv.payment_status !== 'processing'
 }
 
-/**
- * The amount a dunning run is chasing, in its invoice's currency. The invoice
- * loaded on the page decides, because it carries the status: a run on a
- * voided invoice is chasing nothing, though the joined amount_due survived the
- * void and read "$29.00" on the Dunning list (sweep A7 / E1). A run whose
- * invoice did not load falls back to the server-side join.
- */
-export function dunningAmountDue(
-  run: { invoice_amount_due_cents?: number; invoice_currency?: string },
-  inv?: InvoiceMoneyInput,
-): string | null {
-  if (inv) return formatCents(invoiceDueCents(inv), inv.currency)
-  // The join leaves the currency empty when it found no invoice.
+type DunningRunInvoiceJoin = { invoice_amount_due_cents?: number; invoice_currency?: string }
+
+// The server-side join, for a run whose invoice did not load on the page. It
+// leaves the currency empty when it found no invoice.
+function dunningJoinAmount(run: DunningRunInvoiceJoin): string | null {
   if (run.invoice_currency && run.invoice_amount_due_cents !== undefined) {
     return formatCents(run.invoice_amount_due_cents, run.invoice_currency)
   }
   return null
+}
+
+/**
+ * The amount a dunning run is chasing, in its invoice's currency: the resolve
+ * dialog's "Amount due". The invoice loaded on the page decides, because it
+ * carries the status: a run on a voided invoice is chasing nothing, though the
+ * joined amount_due survived the void (sweep A7 / E1).
+ */
+export function dunningAmountDue(run: DunningRunInvoiceJoin, inv?: InvoiceMoneyInput): string | null {
+  if (inv) return formatCents(invoiceDueCents(inv), inv.currency)
+  return dunningJoinAmount(run)
+}
+
+/**
+ * The Dunning list's "Amount": the run's invoice amount (invoiceAmountCents),
+ * so a run closed by a void reads the amount it was voided at. Showing what
+ * was owed instead turned the whole Resolved tab into $0.00 rows (sign-off of
+ * #1328).
+ */
+export function dunningRunAmount(run: DunningRunInvoiceJoin, inv?: InvoiceMoneyInput): string | null {
+  if (inv) return formatCents(invoiceAmountCents(inv), inv.currency)
+  return dunningJoinAmount(run)
 }

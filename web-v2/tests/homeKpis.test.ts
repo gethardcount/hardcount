@@ -4,7 +4,7 @@
 // -1 on real data.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { customersTrend, failedPaymentsTrend, subscriptionsHint } from '../src/lib/homeKpis.ts'
+import { FAILED_PAYMENTS_DEFINITION, customersTrend, failedPaymentsTrend, subscriptionsHint } from '../src/lib/homeKpis.ts'
 
 const base = {
   live_customers: 3,
@@ -34,4 +34,10 @@ test('the hint names trialing subscriptions only when there are some', () => {
   assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 2 }), '1 active subscription · 2 trialing subscriptions')
   assert.equal(subscriptionsHint({ ...base, trialing_subscriptions: 0 }), '3 active subscriptions')
   assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 0 }), '1 active subscription')
+})
+
+test('the failed payments caption names the statuses the server excludes', () => {
+  // The server counts only status = 'finalized' (#1328). The caption uses the
+  // product's status names, as the Invoices filter tabs do.
+  assert.match(FAILED_PAYMENTS_DEFINITION, /Void and uncollectible invoices are not counted\./)
 })

@@ -21,7 +21,7 @@ import { retriesOffNotice } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { atRiskText } from '@/lib/money'
-import { dunningAmountDue } from '@/lib/invoiceTerminal'
+import { dunningAmountDue, dunningRunAmount } from '@/lib/invoiceTerminal'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -338,7 +338,7 @@ function RunsTab() {
                     <TableHead className="w-8"></TableHead>
                     <TableHead>Customer</TableHead>
                     <TableHead>Invoice</TableHead>
-                    <TableHead className="text-right">Amount Due</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Progress</TableHead>
                     <TableHead>Next Retry</TableHead>
@@ -388,10 +388,10 @@ function RunsTab() {
                             </div>
                           </TableCell>
                           <TableCell className="text-right tabular-nums font-mono text-sm">
-                            {/* The loaded invoice decides (it carries the
-                                status: a void owes nothing); the server-side
-                                join is the fallback when it did not load. */}
-                            {dunningAmountDue(run, inv) ?? '\u2014'}
+                            {/* The invoice's amount, a void's included; the
+                                server-side join is the fallback when the
+                                invoice did not load. */}
+                            {dunningRunAmount(run, inv) ?? '\u2014'}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">

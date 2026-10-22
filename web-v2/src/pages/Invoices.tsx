@@ -15,7 +15,7 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
 import { paymentStatusLabel } from '@/lib/status'
 import { humanizeStatus, invoicePaymentChip, invoiceStatus, toneBorderColor } from '@/lib/statusLabels'
-import { invoiceDueCents } from '@/lib/invoiceTerminal'
+import { invoiceAmountCents } from '@/lib/invoiceTerminal'
 import { StatusBadge } from '@/components/StatusBadge'
 import { attentionReasonLabel } from '@/lib/attentionLabels'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -405,7 +405,7 @@ export default function InvoicesPage() {
                     <SortableHead label="Status" sortKey="status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                     <SortableHead label="Payment" sortKey="payment_status" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
                     <SortableHead label="Period" sortKey="billing_period_start" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} />
-                    <SortableHead label="Amount due" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="text-right" />
+                    <SortableHead label="Amount" sortKey="amount_due_cents" activeSortKey={sortKey} sortDir={sortDir} onSort={onSort} className="text-right" />
                     <TableHead className="text-xs font-medium text-right">PDF</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -499,8 +499,10 @@ export default function InvoicesPage() {
                         {inv.billing_period_display || '\u2014'}
                       </TableCell>
                       <TableCell className="text-right tabular-nums font-mono text-sm">
-                        {/* A void owes nothing; amount_due survives it. */}
-                        {formatCents(invoiceDueCents(inv), inv.currency)}
+                        {/* The invoice's amount, as the amount sort orders
+                            it: a void at what it was voided at, a paid
+                            invoice at what paid it. */}
+                        {formatCents(invoiceAmountCents(inv), inv.currency)}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

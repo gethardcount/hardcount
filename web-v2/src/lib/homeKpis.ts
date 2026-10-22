@@ -32,7 +32,7 @@ export const MRR_DEFINITION =
   'Monthly recurring revenue: the base fees of active subscriptions, per month. Usage is not included. ARR is the same × 12.'
 
 export const FAILED_PAYMENTS_DEFINITION =
-  'Open invoices created in this period whose payment failed. Voided and written-off invoices are not counted.'
+  'Open invoices created in this period whose payment failed. Void and uncollectible invoices are not counted.'
 
 // Never negative: a count below zero is a bug, and a negative baseline turns
 // the percentage upside down.

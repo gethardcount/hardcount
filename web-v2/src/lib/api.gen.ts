@@ -3390,7 +3390,7 @@ export interface paths {
                     overdue?: boolean;
                     /** @description Comma-separated invoice IDs to fetch exactly. */
                     ids?: string;
-                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a voided invoice as 0, since it owes nothing. */
+                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. */
                     sort?: string;
                     dir?: "asc" | "desc";
                     limit?: number;
