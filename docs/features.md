@@ -68,9 +68,9 @@ Good to know about billing thresholds: one fires at most once per billing
 period. With `reset_billing_cycle`, it starts a new period, so it can fire
 again. Velox checks thresholds on each billing run: every hour, or every 5
 minutes when `APP_ENV=local`. Without `reset_billing_cycle`, the period's
-own invoice bills only what came after the threshold invoice. Writing the
-threshold invoice off does not change that. Voiding it before the period's
-invoice is built does: that invoice then bills the whole period
+own invoice does not bill again what the threshold invoice billed. Writing
+the threshold invoice off does not change that. Voiding it before the
+period's invoice is built does: that invoice then bills those charges too
 ([runbook](ops/runbook/invoice-timing-late-usage.md)).
 
 ## Credits and refunds

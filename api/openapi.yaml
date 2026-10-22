@@ -10313,8 +10313,8 @@ paths:
 
         A spend-threshold invoice (`billing_reason = threshold`) that fired
         with `reset_billing_cycle: false` and is voided before its period's
-        invoice is built gives its charges back: that invoice bills the base
-        fee and usage the threshold invoice billed. Voided after that, or
+        invoice is built gives its charges back: that invoice bills them
+        too. Voided after that, or
         fired with `reset_billing_cycle: true`, its charges are billed on no
         invoice; bill them with a one-off invoice if they should be charged.
 

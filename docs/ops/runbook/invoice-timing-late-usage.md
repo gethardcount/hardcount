@@ -52,9 +52,12 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   event is flagged only after a paid spend-threshold invoice, which cannot
   be voided.
 - **Writing off or voiding a spend-threshold invoice.** A spend-threshold
-  invoice made with `reset_billing_cycle: false` bills the period's base
-  fee and usage up to when it fired. What happens to those charges depends
-  on what you do with it, and when:
+  invoice made with `reset_billing_cycle: false` bills the usage up to when
+  it fired, and the base fee if the plan bills it in arrears. It leaves out
+  usage priced with `max`, `last_during_period` or `last_ever`: the
+  period-end invoice bills that for the whole period. What happens to the
+  charges on the threshold invoice depends on what you do with it, and
+  when:
   - **Write it off** (mark uncollectible): they stay billed on it. The
     period-end invoice does not bill them again, and if the customer pays
     the written-off invoice later, it simply reads paid. Writing off means

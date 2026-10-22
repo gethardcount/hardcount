@@ -4106,8 +4106,13 @@ func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, t
 // closer's commit, so it lands after the period's invoice and the window is
 // forgiven. Without the lock that void could commit first and still find
 // its window billed nowhere. Lock order is subscription row, then invoice
-// row, as every writer of both takes them (subscription
-// lockSubscriptionRow, LockDunningPauseTx).
+// row, as every billing writer of both takes them (subscription
+// lockSubscriptionRow, LockDunningPauseTx). Test-clock teardown
+// (testclock clockTeardownStatements) is the exception: it deletes the
+// clock's invoices before its subscriptions, so a teardown that overlaps a
+// closer on one of that clock's subscriptions fails one of the two with a
+// deadlock error (40P01); a retry succeeds. Before this lock the same
+// overlap could fail the teardown on a foreign key. Simulation data only.
 //
 // tenantID is accepted for symmetry with the store's other *Tx methods; RLS
 // scoping rides the tx's tenant binding.

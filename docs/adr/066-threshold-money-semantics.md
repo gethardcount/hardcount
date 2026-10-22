@@ -229,7 +229,8 @@ share is F(seed) recomputed under the rule.
 ## Amendment 2026-10-23: a write-off keeps the window billed
 
 **The defect.** Under `reset=false` the fire bills the in_arrears base and
-`[periodStart, fire)`. Since #243 every reader of that watermark skipped a
+the additive usage of `[periodStart, fire)` (§4 keeps max and last-value
+buckets off it; the close bills them full-period). Since #243 every reader of that watermark skipped a
 threshold invoice in status `voided` **or `uncollectible`**. So after a
 write-off, the period's next closer billed the window again from the
 period start: the base and the pre-fire usage, a second time. A
@@ -285,10 +286,14 @@ arrives after the read waits for the commit and lands after the period's
 invoice (forgiven). A void that holds the row at the read is waited for;
 Postgres re-checks the row after it commits, a voided row no longer
 matches, and the closer bills the window (the cycle close through the
-`ErrWatermarkMoved` re-plan). Lock order is the one every writer of both
-takes, subscription row then invoice row (`lockSubscriptionRow`,
+`ErrWatermarkMoved` re-plan). Lock order is the one every billing writer
+of both takes, subscription row then invoice row (`lockSubscriptionRow`,
 `LockDunningPauseTx` before a paid flip); `Void` and `MarkUncollectible`
-lock only the invoice. A write-off, a payment or a card settle on the
+lock only the invoice. Test-clock teardown is the exception: it deletes
+the clock's invoices before its subscriptions, so a teardown overlapping a
+closer on that clock now fails one side with a deadlock error (40P01)
+where it could fail the teardown on a foreign key. Simulation data only;
+a retry succeeds. A write-off, a payment or a card settle on the
 threshold invoice also waits for the closer's commit; none changes the
 watermark. The live balance, the preview and the after_close classifier
 read without a lock: they display or flag, and never write an invoice.
