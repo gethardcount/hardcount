@@ -815,6 +815,11 @@ func (h *Handler) markUncollectible(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, inv)
 }
 
+// RecordPaymentInput is the POST /v1/invoices/{id}/record-payment body.
+type RecordPaymentInput struct {
+	Note string `json:"note"`
+}
+
 // recordOfflinePayment flips an unpaid (or uncollectible) invoice to
 // paid based on operator-recorded out-of-band collection (cheque,
 // wire, cash). Stripe-parity: their paid_out_of_band=true flag on
@@ -832,9 +837,7 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var input struct {
-		Note string `json:"note"`
-	}
+	var input RecordPaymentInput
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			respond.BadRequest(w, r, "invalid JSON body")
@@ -911,19 +914,22 @@ func (h *Handler) rotatePublicToken(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, inv)
 }
 
+// SendEmailInput is the POST /v1/invoices/{id}/send body.
+type SendEmailInput struct {
+	Email string `json:"email"`
+	// AdditionalEmails overrides the CC list for THIS send
+	// (ADR-082): absent → the customer's stored additional_emails;
+	// explicit [] → primary only; explicit list → validated exact
+	// override. Legacy {email}-only bodies therefore now CC the
+	// stored list — the Orb-parity default.
+	AdditionalEmails *[]string `json:"additional_emails,omitempty"`
+}
+
 func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var body struct {
-		Email string `json:"email"`
-		// AdditionalEmails overrides the CC list for THIS send
-		// (ADR-082): absent → the customer's stored additional_emails;
-		// explicit [] → primary only; explicit list → validated exact
-		// override. Legacy {email}-only bodies therefore now CC the
-		// stored list — the Orb-parity default.
-		AdditionalEmails *[]string `json:"additional_emails,omitempty"`
-	}
+	var body SendEmailInput
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
 		respond.BadRequest(w, r, "email is required")
 		return
@@ -1236,6 +1242,14 @@ func (h *Handler) resolveDunningRecovered(ctx context.Context, tenantID, invoice
 	}
 }
 
+// RefundRequest is the POST /v1/invoices/{id}/refund body. The handler turns
+// it into a RefundInput for the RefundIssuer.
+type RefundRequest struct {
+	AmountCents int64  `json:"amount_cents"`
+	Reason      string `json:"reason"`
+	Description string `json:"description"`
+}
+
 // refund issues a direct refund on a paid invoice. Convenience wrapper around
 // creditnote.Service.CreateRefund — the caller passes a reason + optional
 // amount and gets back the issued credit note (which carries the Stripe
@@ -1250,11 +1264,7 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		AmountCents int64  `json:"amount_cents"`
-		Reason      string `json:"reason"`
-		Description string `json:"description"`
-	}
+	var body RefundRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
