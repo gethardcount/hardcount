@@ -8,20 +8,35 @@ import "github.com/prometheus/client_golang/prometheus"
 // price, below what the provider charges.
 var cacheWriteUnsplit *prometheus.CounterVec
 
+// skippedWithTokens counts records Velox does not bill because of their call
+// type although they carry token counts (images, audio, realtime, batch
+// results, A2A, ...). The label is a skip-list key or the Vertex AI Live
+// label, never a free string from the payload, so it is bounded.
+var skippedWithTokens *prometheus.CounterVec
+
 func init() {
+	skippedWithTokens = register(prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "velox_litellm_skipped_with_tokens_total",
+		Help: "LiteLLM records skipped because Velox does not bill their call type, although they carry token counts. call_type is LiteLLM's.",
+	}, []string{"call_type"}))
+
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "velox_litellm_cache_write_unsplit_total",
-		Help: "LiteLLM calls whose cache-write tokens had no usable 5m/1h split and were billed as input tokens. reason: no_split, sum_mismatch or not_in_prompt.",
+		Help: "LiteLLM calls whose cache-write tokens had no usable 5m/1h split and were billed as input tokens. reason: no_split, sum_mismatch, not_in_prompt or no_count.",
 	}, []string{"provider", "reason"})
+	cacheWriteUnsplit = register(c)
+}
+
+// register registers c, or returns the collector already registered under
+// its name.
+func register(c *prometheus.CounterVec) *prometheus.CounterVec {
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
 		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			cacheWriteUnsplit = are.ExistingCollector.(*prometheus.CounterVec)
-		} else {
-			panic(err)
+			return are.ExistingCollector.(*prometheus.CounterVec)
 		}
-	} else {
-		cacheWriteUnsplit = c
+		panic(err)
 	}
+	return c
 }
 
 // metricProvider bounds the provider label: the value comes from the

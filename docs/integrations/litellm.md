@@ -139,6 +139,24 @@ A call without `user` is refused with `payload.user is required`. The rest
 of the batch is still accepted. The refusal is a row in the `errors` list
 of the 200 response (see [Response](#response)).
 
+### Clients that cannot set `user`: Claude Code and Codex
+
+Claude Code (`/v1/messages`) and Codex-style clients (`/v1/responses`) do
+not send `user`. Have them send the customer's external ID in the
+`x-litellm-customer-id` header instead. LiteLLM logs it as the call's end
+user, which is where Velox reads the customer. For Claude Code, set
+`ANTHROPIC_CUSTOM_HEADERS="x-litellm-customer-id: acme-1"` where it runs.
+
+Without the header:
+
+- Claude Code calls arrive with Claude Code's own user ID (its
+  `metadata.user_id`, which includes the session) as the customer. Velox
+  holds them under that ID, so there is no customer to release them to.
+- A call with no customer at all is refused, as above.
+
+The client chooses this header, so whoever runs the client chooses the
+customer it is billed to. Give the header only to clients you trust.
+
 ## 4. What lands in Velox
 
 Each AI call becomes up to five usage events on the `tokens` meter. The
@@ -148,15 +166,24 @@ to the cache, so Velox takes those out of `input`.
 
 | `token_type` | Quantity | Idempotency key |
 |---|---|---|
-| `input` | `prompt_tokens` minus the cache reads and cache writes | `<litellm_id>:input` |
-| `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens`, if any | `<litellm_id>:cache_read` |
-| `cache_write_5m` | cache writes with the 5-minute lifetime, if any | `<litellm_id>:cache_write_5m` |
-| `cache_write_1h` | cache writes with the 1-hour lifetime, if any | `<litellm_id>:cache_write_1h` |
-| `output` | `usage.completion_tokens` | `<litellm_id>:output` |
+| `input` | `prompt_tokens` minus the cache reads and cache writes | `<call>:input` |
+| `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens`, if any | `<call>:cache_read` |
+| `cache_write_5m` | cache writes with the 5-minute lifetime, if any | `<call>:cache_write_5m` |
+| `cache_write_1h` | cache writes with the 1-hour lifetime, if any | `<call>:cache_write_1h` |
+| `output` | `usage.completion_tokens` | `<call>:output` |
 
 The idempotency key is a unique ID for each event. If LiteLLM sends the same
 call again, Velox counts it once. Velox saves a call's events together, or
 none of them.
+
+`<call>` is LiteLLM's call ID, the same ID as the call's row in
+LiteLLM's spend log, so a replay from that log counts each call once.
+When the ID is longer than 240 characters (a `/v1/responses` ID can be
+over 400), `<call>` is `sha256-` followed by the ID's SHA-256 in hex; chat
+completion, text completion and embedding IDs are never changed. On a
+streamed `/v1/messages` call LiteLLM uses the client's `x-litellm-call-id`
+header as the call ID. Two calls that send the same value count once in
+Velox, as in LiteLLM's spend log, so don't reuse that header.
 
 Each event also carries these labels (dimensions):
 
@@ -211,10 +238,52 @@ event with the writes inside) is saved the old way again, and a cache-write
 row of it that Velox was holding is not billed when released, so its writes
 are not billed twice.
 
+A streamed Claude call (Claude Code streams) usually arrives without the
+split: LiteLLM 1.83.9 keeps only the usage of the last streamed event,
+which carries no split. Its cache writes bill as `input` and count in
+`velox_litellm_cache_write_unsplit_total`. The same happens to a
+`/v1/responses` call to a Claude model when the proxy has a `post_call`
+guardrail. LiteLLM's record then has a cache-write cost but no cache-write
+count, and the call counts under `reason="no_count"`.
+
 **Calls that bill nothing.** A call LiteLLM reports as failed (`status`
 `failure`) and a call LiteLLM answered from its own response cache
 (`cache_hit` `true`) are skipped: the provider charged nothing for them.
 Prompt-cache reads (`cache_read`) are a different thing, and are billed.
+
+### Which LiteLLM calls bill
+
+Velox bills a call by its token counts. It skips only kinds of calls whose
+tokens it does not price.
+
+- **Billed:** chat completions (`/v1/chat/completions`), text completions,
+  embeddings, `/v1/messages` (Claude Code), `/v1/responses`, Gemini
+  `generateContent` and `streamGenerateContent`, and LiteLLM's provider
+  pass-through routes such as `/anthropic/v1/messages`. Through `/openai/*`
+  pass-through, only chat completions carry tokens.
+- **Not billed:** images, audio (speech, transcription, realtime, Vertex AI
+  Live), moderation, rerank, search, OCR and video. Also batches, files,
+  fine-tuning, assistants, vector stores, containers, evals, MCP tools,
+  agent-to-agent (A2A) messages, and fetching or cancelling a stored
+  response.
+
+A skipped call that carries tokens is logged as a WARN with its
+`call_type`, and counted in
+`velox_litellm_skipped_with_tokens_total{call_type}`. Image calls on
+`gpt-image-*` models do this every time; a call type that is new to you
+there means LiteLLM sent usage that Velox does not bill.
+
+A model you have no price for is not charged: its usage shows as usage
+with no price. Gemini models have no ready-made prices, so Gemini usage
+shows that way until you price it. But if your `tokens` meter has a default
+price, or a price that does not name a `model`, that price charges it.
+
+Known limits:
+
+- LiteLLM 1.83.9's code does not pass a customer on `/vllm/*` and
+  `/azure/*` pass-through calls, so Velox refuses them.
+- A `/v1/responses` call that uses `file_search` on a provider without it
+  makes two model calls, and LiteLLM reports the tokens of the second only.
 
 ## 5. Check that it worked
 
@@ -261,7 +330,7 @@ Velox customer yet, both of its events are held:
 | `accepted` | New events Velox saved. |
 | `deduplicated` | Events Velox already had, or already held, from an earlier send of the same call. |
 | `held` | Events Velox kept but did not bill, because the customer or the `tokens` meter does not exist yet. See the next section. |
-| `skipped` | Calls that bill nothing: image generation, moderation, a call with zero tokens, a failed call, or a LiteLLM response-cache hit. |
+| `skipped` | Calls that bill nothing: a kind of call Velox does not bill (see [Which LiteLLM calls bill](#which-litellm-calls-bill)), a call with zero tokens, a failed call, or a LiteLLM response-cache hit. |
 | `cache_hits` | The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. |
 | `after_close` | Of `accepted`, events whose billing period was already invoiced, such as a replay after the invoice was built. They are saved but billed on no invoice; bill them with a one-off invoice. A resent event counted in `deduplicated` is never counted here. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |

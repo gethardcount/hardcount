@@ -1,0 +1,283 @@
+[
+  {
+    "api_base": "http://127.0.0.1:18101/v1beta/models/gemini-2.5-flash:generateContent",
+    "cache_hit": null,
+    "cache_key": null,
+    "call_type": "agenerate_content",
+    "completionStartTime": 1792686048.710927,
+    "completion_tokens": 300,
+    "cost_breakdown": {
+      "cache_read_cost": 4.4999999999999996e-05,
+      "discount_amount": 0.0,
+      "discount_percent": 0.0,
+      "input_cost": 0.00019499999999999997,
+      "margin_fixed_amount": 0.0,
+      "margin_percent": 0.0,
+      "margin_total_amount": 0.0,
+      "original_cost": 0.000945,
+      "output_cost": 0.00075,
+      "tool_usage_cost": 0.0,
+      "total_cost": 0.000945
+    },
+    "custom_llm_provider": "gemini",
+    "endTime": 1792686048.710927,
+    "end_user": "cus_f8-generate-content",
+    "error_information": {
+      "error_class": "",
+      "error_code": "",
+      "error_message": "",
+      "llm_provider": "",
+      "traceback": ""
+    },
+    "error_str": null,
+    "guardrail_information": null,
+    "hidden_params": {
+      "additional_headers": null,
+      "api_base": null,
+      "batch_models": null,
+      "cache_key": null,
+      "litellm_model_name": null,
+      "litellm_overhead_time_ms": null,
+      "model_id": null,
+      "response_cost": null,
+      "usage_object": null
+    },
+    "id": "gemresp_f62e0ffb922449d3",
+    "messages": [
+      {
+        "content": "KW_GEM",
+        "role": "user"
+      }
+    ],
+    "metadata": {
+      "applied_guardrails": [],
+      "cold_storage_object_key": null,
+      "mcp_tool_call_metadata": null,
+      "prompt_management_metadata": null,
+      "requester_custom_headers": {
+        "x-litellm-customer-id": "cus_f8-generate-content"
+      },
+      "requester_ip_address": "127.0.0.1",
+      "requester_metadata": {
+        "headers": {
+          "accept-encoding": "identity",
+          "connection": "close",
+          "content-length": "63",
+          "content-type": "application/json",
+          "host": "127.0.0.1:18100",
+          "user-agent": "Python-urllib/3.13",
+          "x-litellm-customer-id": "cus_f8-generate-content"
+        }
+      },
+      "spend_logs_metadata": null,
+      "team_alias": null,
+      "team_id": null,
+      "usage_object": {
+        "cache_read_input_tokens": 1500,
+        "completion_tokens": 300,
+        "completion_tokens_details": {
+          "reasoning_tokens": 100,
+          "text_tokens": 200
+        },
+        "prompt_tokens": 2000,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 1500,
+          "image_tokens": null,
+          "text_tokens": null,
+          "video_tokens": null
+        },
+        "total_tokens": 2300
+      },
+      "user_agent": "Python-urllib/3.13",
+      "user_api_key_alias": null,
+      "user_api_key_auth_metadata": {},
+      "user_api_key_budget_reset_at": null,
+      "user_api_key_end_user_id": "cus_f8-generate-content",
+      "user_api_key_hash": "40bf555e953071ec7126ecc8f134488be77bdc785fad7aa4fb884807c9ac4ed6",
+      "user_api_key_max_budget": null,
+      "user_api_key_org_alias": null,
+      "user_api_key_org_id": null,
+      "user_api_key_project_alias": null,
+      "user_api_key_project_id": null,
+      "user_api_key_request_route": "/v1beta/models/gemini-2.5-flash:generateContent",
+      "user_api_key_spend": 0.0,
+      "user_api_key_team_alias": null,
+      "user_api_key_team_id": null,
+      "user_api_key_user_email": null,
+      "user_api_key_user_id": "default_user_id",
+      "vector_store_request_metadata": null
+    },
+    "model": "gemini/gemini-2.5-flash",
+    "model_group": "gemini-2.5-flash",
+    "model_id": "52c078d42e0164f33ab90379fe476ce620dbdf735447e720dbf359d34073f166",
+    "model_map_information": {
+      "model_map_key": "gemini-2.5-flash",
+      "model_map_value": {
+        "annotation_cost_per_page": null,
+        "cache_creation_input_token_cost": null,
+        "cache_creation_input_token_cost_above_1hr": null,
+        "cache_creation_input_token_cost_above_200k_tokens": null,
+        "cache_read_input_token_cost": 3e-08,
+        "cache_read_input_token_cost_above_200k_tokens": null,
+        "cache_read_input_token_cost_above_272k_tokens": null,
+        "cache_read_input_token_cost_flex": null,
+        "cache_read_input_token_cost_priority": null,
+        "citation_cost_per_token": null,
+        "input_cost_per_audio_per_second": null,
+        "input_cost_per_audio_token": 1e-06,
+        "input_cost_per_character": null,
+        "input_cost_per_image": null,
+        "input_cost_per_image_token": null,
+        "input_cost_per_query": null,
+        "input_cost_per_second": null,
+        "input_cost_per_token": 3e-07,
+        "input_cost_per_token_above_128k_tokens": null,
+        "input_cost_per_token_above_200k_tokens": null,
+        "input_cost_per_token_above_272k_tokens": null,
+        "input_cost_per_token_batches": null,
+        "input_cost_per_token_flex": null,
+        "input_cost_per_token_priority": null,
+        "input_cost_per_video_per_second": null,
+        "key": "gemini/gemini-2.5-flash",
+        "litellm_provider": "gemini",
+        "max_input_tokens": 1048576,
+        "max_output_tokens": 65535,
+        "max_tokens": 65535,
+        "mode": "chat",
+        "ocr_cost_per_page": null,
+        "output_cost_per_audio_token": null,
+        "output_cost_per_character": null,
+        "output_cost_per_character_above_128k_tokens": null,
+        "output_cost_per_image": null,
+        "output_cost_per_image_token": null,
+        "output_cost_per_reasoning_token": 2.5e-06,
+        "output_cost_per_second": null,
+        "output_cost_per_second_1080p": null,
+        "output_cost_per_token": 2.5e-06,
+        "output_cost_per_token_above_128k_tokens": null,
+        "output_cost_per_token_above_200k_tokens": null,
+        "output_cost_per_token_above_272k_tokens": null,
+        "output_cost_per_token_batches": null,
+        "output_cost_per_token_flex": null,
+        "output_cost_per_token_priority": null,
+        "output_cost_per_video_per_second": null,
+        "output_vector_size": null,
+        "provider_specific_entry": null,
+        "rpm": 100000,
+        "search_context_cost_per_query": null,
+        "supported_openai_params": [
+          "temperature",
+          "top_p",
+          "max_tokens",
+          "max_completion_tokens",
+          "stream",
+          "tools",
+          "tool_choice",
+          "functions",
+          "response_format",
+          "n",
+          "stop",
+          "logprobs",
+          "frequency_penalty",
+          "presence_penalty",
+          "modalities",
+          "parallel_tool_calls",
+          "web_search_options",
+          "service_tier",
+          "reasoning_effort",
+          "thinking"
+        ],
+        "supports_assistant_prefill": null,
+        "supports_audio_input": null,
+        "supports_audio_output": false,
+        "supports_computer_use": null,
+        "supports_embedding_image_input": null,
+        "supports_function_calling": true,
+        "supports_native_streaming": null,
+        "supports_native_structured_output": null,
+        "supports_none_reasoning_effort": null,
+        "supports_pdf_input": true,
+        "supports_prompt_caching": true,
+        "supports_reasoning": true,
+        "supports_response_schema": true,
+        "supports_system_messages": true,
+        "supports_tool_choice": true,
+        "supports_url_context": true,
+        "supports_vision": true,
+        "supports_web_search": true,
+        "supports_xhigh_reasoning_effort": null,
+        "tiered_pricing": null,
+        "tpm": 8000000,
+        "uses_embed_content": null
+      }
+    },
+    "model_parameters": {},
+    "prompt_tokens": 2000,
+    "request_tags": [
+      "User-Agent: Python-urllib",
+      "User-Agent: Python-urllib/3.13"
+    ],
+    "requester_ip_address": "127.0.0.1",
+    "response": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "index": 0,
+          "message": {
+            "content": "ok",
+            "function_call": null,
+            "images": [],
+            "role": "assistant",
+            "thinking_blocks": [],
+            "tool_calls": null
+          }
+        }
+      ],
+      "created": 1792686048,
+      "id": "gemresp_f62e0ffb922449d3",
+      "model": "gemini-2.5-flash",
+      "object": "chat.completion",
+      "system_fingerprint": null,
+      "usage": {
+        "cache_read_input_tokens": 1500,
+        "completion_tokens": 300,
+        "completion_tokens_details": {
+          "reasoning_tokens": 100,
+          "text_tokens": 200
+        },
+        "prompt_tokens": 2000,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 1500,
+          "image_tokens": null,
+          "text_tokens": null,
+          "video_tokens": null
+        },
+        "total_tokens": 2300
+      },
+      "vertex_ai_citation_metadata": [],
+      "vertex_ai_grounding_metadata": [],
+      "vertex_ai_safety_results": [],
+      "vertex_ai_url_context_metadata": []
+    },
+    "response_cost": 0.000945,
+    "response_cost_failure_debug_info": null,
+    "response_time": 0.01697397232055664,
+    "saved_cache_cost": 0.0,
+    "standard_built_in_tools_params": {
+      "file_search": null,
+      "web_search_options": null
+    },
+    "startTime": 1792686048.693953,
+    "status": "success",
+    "status_fields": {
+      "guardrail_status": "not_run",
+      "llm_api_status": "success"
+    },
+    "stream": null,
+    "total_tokens": 2300,
+    "trace_id": "8bb4fcff-c913-4369-acf9-4ad30343c1da",
+    "user_agent": "Python-urllib/3.13"
+  }
+]

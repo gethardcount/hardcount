@@ -103,6 +103,24 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > cache-write split is written the old way, and only the old-way rows
 > that call writes are counted.
 
+> **Amendment (2026-10-22): bill on token counts, not call type.** The
+> adapter billed only eight call types (chat, text completion, embedding)
+> and answered 200 for the rest, so `/v1/messages` (Claude Code),
+> `/v1/responses`, Gemini and pass-through usage was never billed. Now a
+> record bills on its token counts. It is skipped only when its call type
+> is one whose tokens Velox does not price (images, audio, realtime,
+> batches, A2A, ...), from a list of LiteLLM 1.83.9's call types. A skipped
+> record that carries tokens is logged and counted in
+> `velox_litellm_skipped_with_tokens_total`. Every event key starts with
+> LiteLLM's call id, the primary key of LiteLLM's own spend log, so a
+> replay from that log deduplicates. A key with the call's `startTime` in
+> it was tried and dropped: the spend log keeps milliseconds only, so a
+> replayed call billed again. For the newly billed call types an id longer
+> than 240 characters is replaced by its SHA-256. LiteLLM gives a streamed
+> `/v1/messages` record the client's `x-litellm-call-id` as its id, so two
+> calls that send the same header bill once, as LiteLLM's spend log
+> records them (decision D6, 2026-10-23: never bill twice).
+
 ### What's NOT in scope (deferred)
 
 - **Cost-table fallback**: when LiteLLM doesn't emit cost (custom model, older proxy version), Velox could fall back to a built-in cost table by model name. Deferred — most operators run a recent LiteLLM with cost tracking enabled; building a cost table is multi-day work for a niche case.

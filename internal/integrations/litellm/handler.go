@@ -102,8 +102,9 @@ func (h *Handler) Routes() chi.Router {
 // delivery and an operator reconciling spend could not tell a retry from
 // fresh consumption. /v1/usage-events/batch already separated the two.
 //
-// skipped counts CALLS that bill nothing: a call type with no tokens, a
-// call with zero tokens, a failed call, and a LiteLLM response-cache hit.
+// skipped counts CALLS that bill nothing: a call type on the skip list
+// (image generation, moderation, ...), a call with zero tokens, a failed
+// call, and a LiteLLM response-cache hit.
 // cache_hits counts the cache hits among them, so an operator can
 // reconcile against LiteLLM's own spend, which counts a hit as $0.
 type SpendResponse struct {
@@ -185,9 +186,9 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 			resp.CacheHits++
 		}
 		if len(m.Events) == 0 {
-			// A call that bills nothing: a non-token call type (image gen,
-			// moderation), zero tokens, a failed call, or a LiteLLM
-			// response-cache hit. Counted as skipped — not rejected — so
+			// A call that bills nothing: a call type on the skip list (image
+			// generation, moderation, ...), zero tokens, a failed call, or a
+			// LiteLLM response-cache hit. Counted as skipped — not rejected — so
 			// the operator's spend dashboard reconciles.
 			resp.Skipped++
 			continue
