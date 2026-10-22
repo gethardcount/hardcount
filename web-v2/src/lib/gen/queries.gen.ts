@@ -6618,7 +6618,7 @@ export const getGetV1SubscriptionsQueryKey = (params?: GetV1SubscriptionsParams,
     }
 
 
-export const getGetV1SubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = unknown>(params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getGetV1SubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -6637,10 +6637,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetV1SubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof getV1Subscriptions>>>
-export type GetV1SubscriptionsQueryError = unknown
+export type GetV1SubscriptionsQueryError = Error
 
 
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = unknown>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
  params: undefined |  GetV1SubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Subscriptions>>,
@@ -6650,7 +6650,7 @@ export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Sub
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = unknown>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
  params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof getV1Subscriptions>>,
@@ -6660,7 +6660,7 @@ export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Sub
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = unknown>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
  params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -6668,7 +6668,7 @@ export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Sub
  * @summary List subscriptions
  */
 
-export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = unknown>(
+export function useGetV1Subscriptions<TData = Awaited<ReturnType<typeof getV1Subscriptions>>, TError = Error>(
  params?: GetV1SubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1Subscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -7224,7 +7224,8 @@ export const getPauseSubscriptionCollectionUrl = (id: string,) => {
  * periods that end before that instant bill as drafts, and later
  * periods bill normally. Without it, the pause lasts until you call
  * `DELETE /v1/subscriptions/{id}/pause-collection`. A new call
- * replaces the current pause.
+ * replaces the current pause, including one dunning set; the pause is
+ * then yours (`set_by: operator`), and a payment no longer lifts it.
  *
  * Sends the `subscription.collection_paused` webhook event.
  * @summary Pause collection

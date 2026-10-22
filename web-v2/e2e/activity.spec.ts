@@ -138,7 +138,7 @@ async function shootCard(page: Page, target: Locator, name: string) {
   await atEachWidth(page, name, file => target.screenshot({ path: file, animations: 'disabled' }))
 }
 
-const STATE_FILTER: Record<string, string> = { active: 'Active', escalated: 'Escalated', resolved: 'Recovered' }
+const STATE_FILTER: Record<string, string> = { active: 'Active', escalated: 'Escalated', resolved: 'Resolved' }
 const RUNS_PAGE_SIZE = 25
 
 // The Dunning page has no link to a single run and reads no URL parameters,

@@ -1,7 +1,7 @@
 // One status vocabulary: each state has one label and one tone everywhere.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, subscriptionFlags, subscriptionStatus } from '../src/lib/statusLabels.ts'
+import { genericStatus, humanizeStatus, invoicePaymentChip, invoiceStatus, subscriptionFlags, subscriptionStatus, trialBadgeEndsAt } from '../src/lib/statusLabels.ts'
 
 const now = Date.parse('2026-10-16T12:00:00Z')
 
@@ -26,10 +26,10 @@ test('Past due follows the given now (a test clock), not the wall clock', () => 
 test('subscriptionStatus and flags: paused collection and scheduled cancel are visible', () => {
   assert.deepEqual(subscriptionStatus({ status: 'active' }), { label: 'Active', tone: 'success' })
   assert.deepEqual(subscriptionStatus({ status: 'canceled' }), { label: 'Canceled', tone: 'neutral' })
-  assert.deepEqual(subscriptionFlags({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }), [{ label: 'Collection paused', tone: 'warning' }])
-  assert.deepEqual(subscriptionFlags({ status: 'trialing', cancel_at_period_end: true }), [{ label: 'Cancel scheduled', tone: 'warning' }])
+  assert.deepEqual(subscriptionFlags({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }, 0), [{ label: 'Collection paused', tone: 'warning' }])
+  assert.deepEqual(subscriptionFlags({ status: 'trialing', cancel_at_period_end: true }, 0), [{ label: 'Cancel scheduled', tone: 'warning' }])
   // A canceled subscription carries no live flags.
-  assert.deepEqual(subscriptionFlags({ status: 'canceled', pause_collection: {} }), [])
+  assert.deepEqual(subscriptionFlags({ status: 'canceled', pause_collection: {} }, 0), [])
 })
 
 test('generic codes read as sentence case, never snake_case', () => {
@@ -45,10 +45,27 @@ test('invoicePaymentChip never repeats what the invoice badge already says', () 
   assert.equal(invoicePaymentChip({ status: 'finalized', payment_status: 'processing' }), null)
   assert.equal(invoicePaymentChip({ status: 'finalized', payment_status: 'succeeded' }), null)
   assert.equal(invoicePaymentChip({ status: 'paid', payment_status: 'succeeded' }), null)
-  // Drafts and voids have no payment to show.
+  // Drafts have no payment yet; a void or write-off is no longer collected,
+  // so "Pending" or "Failed" beside it reads as a payment still expected.
   assert.equal(invoicePaymentChip({ status: 'draft', payment_status: 'pending' }), null)
   assert.equal(invoicePaymentChip({ status: 'voided', payment_status: 'pending' }), null)
+  assert.equal(invoicePaymentChip({ status: 'uncollectible', payment_status: 'failed' }), null)
+  assert.equal(invoicePaymentChip({ status: 'uncollectible', payment_status: 'pending' }), null)
+  // A parked charge can be written off and is marked paid later if it
+  // succeeded (docs/payments.md), so money may still arrive: keep "Unknown".
+  assert.deepEqual(invoicePaymentChip({ status: 'uncollectible', payment_status: 'unknown' }), { label: 'Unknown', tone: 'neutral' })
   // A payment state the badge does not carry still shows.
   assert.deepEqual(invoicePaymentChip({ status: 'finalized', payment_status: 'pending' }), { label: 'Pending', tone: 'warning' })
-  assert.deepEqual(invoicePaymentChip({ status: 'uncollectible', payment_status: 'failed' }), { label: 'Failed', tone: 'danger' })
+  assert.deepEqual(invoicePaymentChip({ status: 'finalized', payment_status: 'unknown' }), { label: 'Unknown', tone: 'neutral' })
+})
+
+test('trialBadgeEndsAt: only a subscription still in its trial shows a trial badge', () => {
+  const end = '2026-10-01T00:00:00Z'
+  assert.equal(trialBadgeEndsAt({ status: 'trialing', trial_end_at: end }), end)
+  // A trial that ended (or was ended now) leaves trial_end_at behind: an
+  // active, paying subscription read a red "Expired" badge (sweep E5).
+  for (const status of ['active', 'canceled', 'paused', 'draft']) {
+    assert.equal(trialBadgeEndsAt({ status, trial_end_at: end }), null, status)
+  }
+  assert.equal(trialBadgeEndsAt({ status: 'trialing' }), null)
 })

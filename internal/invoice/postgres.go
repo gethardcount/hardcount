@@ -21,10 +21,11 @@ import (
 )
 
 type PostgresStore struct {
-	db           *postgres.DB
-	enc          *crypto.Encryptor
-	outbox       OutboxEnqueuer
-	commitFunder CommitFunder
+	db                  *postgres.DB
+	enc                 *crypto.Encryptor
+	outbox              OutboxEnqueuer
+	commitFunder        CommitFunder
+	dunningPauseRelease DunningPauseReleaser
 }
 
 func NewPostgresStore(db *postgres.DB) *PostgresStore {
@@ -58,6 +59,33 @@ type CommitFunder interface {
 
 // SetCommitFunder wires commit-grant funding at finalize (ADR-078).
 func (s *PostgresStore) SetCommitFunder(f CommitFunder) { s.commitFunder = f }
+
+// DunningPauseReleaser lifts a dunning collection pause in the transaction
+// that marks the invoice it was set for paid (ADR-036 amendment
+// 2026-10-22). Every paid flip goes through markPaidLockedTx, so every
+// payment path (card, offline, credit note, credits) releases the pause the
+// same way. LockDunningPauseTx runs first in each transaction that can reach
+// that flip, before the invoice row is locked, so the release takes the
+// subscription row before the invoice like every other writer of both.
+// Satisfied by *subscription.PostgresStore; declared consumer-side so the
+// invoice store needs no subscription import. The producer always wires it;
+// unwired, a dunning pause stays until the operator resumes it.
+type DunningPauseReleaser interface {
+	LockDunningPauseTx(ctx context.Context, tx *sql.Tx, invoiceID string) error
+	ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, subID, paidInvoiceID string, at time.Time) error
+}
+
+// lockDunningPauseTx takes the subscription lock a release of invoiceID's
+// dunning pause needs, before the caller locks the invoice row.
+func (s *PostgresStore) lockDunningPauseTx(ctx context.Context, tx *sql.Tx, invoiceID string) error {
+	if s.dunningPauseRelease == nil {
+		return nil
+	}
+	return s.dunningPauseRelease.LockDunningPauseTx(ctx, tx, invoiceID)
+}
+
+// SetDunningPauseReleaser wires the dunning-pause release on payment.
+func (s *PostgresStore) SetDunningPauseReleaser(r DunningPauseReleaser) { s.dunningPauseRelease = r }
 
 // SetEncryptor wires AES-256-GCM encryption for the hosted-invoice public_token
 // at rest. When set (non-noop), the raw token is encrypted before storage and
@@ -212,6 +240,11 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
 	COALESCE(provider_payment_status,''), provider_synced_at,
 	bill_to_snapshot, supplier_snapshot`
+
+// invClockCol reads the test clock an invoice's dates follow from its
+// customer (domain.Invoice.TestClockID). It follows invCols on the list and
+// get reads only; scan it into inv.TestClockID after scanInvDest.
+const invClockCol = `COALESCE((SELECT c.test_clock_id FROM customers c WHERE c.id = invoices.customer_id), '')`
 
 // qualifiedInvCols returns invCols with every column reference prefixed
 // by the given table alias. Used by ADR-029's per-clock queries that
@@ -432,8 +465,8 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.In
 	defer postgres.Rollback(tx)
 
 	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
-		Scan(s.scanInvDest(&inv)...)
+	err = tx.QueryRowContext(ctx, `SELECT `+invCols+`, `+invClockCol+` FROM invoices WHERE id = $1`, id).
+		Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
@@ -544,7 +577,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 		queryLimit = limit + 1
 	}
 	args = append(args, queryLimit)
-	query := `SELECT ` + invCols + ` FROM invoices` + where +
+	query := `SELECT ` + invCols + `, ` + invClockCol + ` FROM invoices` + where +
 		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args))
 	if !useCursor {
@@ -561,7 +594,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	var invoices []domain.Invoice
 	for rows.Next() {
 		var inv domain.Invoice
-		if err := rows.Scan(s.scanInvDest(&inv)...); err != nil {
+		if err := rows.Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...); err != nil {
 			return nil, 0, err
 		}
 		invoices = append(invoices, inv)
@@ -1223,6 +1256,9 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	//
 	// Re-paying an already-paid invoice is allowed (idempotent — the
 	// PaymentSucceeded webhook can fire twice on legitimate retries).
+	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
+		return domain.Invoice{}, false, err
+	}
 	var status, taxStatus string
 	if err := tx.QueryRowContext(ctx,
 		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR UPDATE`, id,
@@ -1435,6 +1471,14 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", "", attemptSimAt); err != nil {
 		return domain.Invoice{}, err
 	}
+	// A dunning pause set for this invoice lifts in this transaction, so
+	// the release cannot be lost to a crash after commit. The caller took
+	// the subscription lock it needs first (lockDunningPauseTx).
+	if inv.SubscriptionID != "" && s.dunningPauseRelease != nil {
+		if err := s.dunningPauseRelease.ReleaseDunningPauseTx(ctx, tx, inv.SubscriptionID, inv.ID, now); err != nil {
+			return domain.Invoice{}, err
+		}
+	}
 	return inv, nil
 }
 
@@ -1495,8 +1539,13 @@ func (s *PostgresStore) ApplyCreditNote(ctx context.Context, tenantID, id string
 // payment state can both move between its earlier read and its transaction (a
 // credit application, a settle, a void). FOR NO KEY UPDATE serializes with
 // those writers without blocking the foreign-key checks of rows that reference
-// the invoice.
+// the invoice. A note that leaves nothing due marks the invoice paid on this
+// tx (SettleZeroDueTx), so the subscription lock a dunning-pause release
+// needs is taken first.
 func (s *PostgresStore) LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string) (domain.Invoice, error) {
+	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
+		return domain.Invoice{}, err
+	}
 	var inv domain.Invoice
 	err := tx.QueryRowContext(ctx,
 		`SELECT `+invCols+` FROM invoices WHERE id = $1 AND tenant_id = $2 FOR NO KEY UPDATE`,
@@ -1641,6 +1690,9 @@ func (s *PostgresStore) SettleZeroDue(ctx context.Context, tenantID, id string, 
 	}
 	defer postgres.Rollback(tx)
 
+	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
+		return domain.Invoice{}, false, err
+	}
 	var one int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id).Scan(&one); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -4090,12 +4142,19 @@ func invoiceOrderBy(sort, dir string) string {
 // invoiceSortColumn maps the SPA's sort key to a SQL column name.
 // Closed allow-list to prevent injection. Unknown keys default to
 // created_at (the most common sort, matches Stripe Dashboard).
+//
+// amount_due sorts by the invoice's amount as the Invoices list's "Amount"
+// column shows it (invoiceAmountCents in web-v2/src/lib/invoiceTerminal.ts):
+// a paid invoice by what the payment and customer credit paid together, since
+// the settle zeroed its amount_due; every other invoice by amount_due, which a
+// void and a write-off keep. Sorting paid rows by the zeroed figure put a $29
+// paid invoice below a $20 open one (sign-off of #1328).
 func invoiceSortColumn(key string) string {
 	switch key {
 	case "invoice_number":
 		return "invoice_number"
 	case "amount_due_cents", "amount_due":
-		return "amount_due_cents"
+		return "(CASE WHEN status = 'paid' THEN amount_paid_cents + credits_applied_cents ELSE amount_due_cents END)"
 	case "billing_period_start", "period":
 		return "billing_period_start"
 	case "due_at":

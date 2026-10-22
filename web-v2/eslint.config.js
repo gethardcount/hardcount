@@ -51,6 +51,26 @@ const noRawScrollPane = {
     'A hand-rolled scroll pane gives no sign there is more content (macOS hides scrollbars until you scroll). Use <ScrollPane> from @/components/ui/scroll-pane, which fades the edge that has more. If this genuinely is a menu/vendored primitive, add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.',
 }
 
+// Invoice money gate (2026-10-22). An invoice's `payment_status` and
+// `amount_due_cents` mean different things by status: a void keeps its
+// amount_due and its last payment_status, a settle zeroes amount_due, and a
+// write-off is no longer collected. Read raw, a voided invoice showed
+// "pending" and "$29.00 due" on six screens while its own page said $0.00
+// (product sweep 2026-10-21, A7 / E1 / E2 / E3), because each screen decided
+// for itself and most forgot the terminal states. The helpers in src/lib
+// (invoiceTerminal, statusLabels, status) are the only readers; screens call
+// them. Fixtures and src/lib are exempt below.
+// Every way of reading the field: `inv.field`, `inv['field']`, and
+// destructuring (`const { field } = inv`, or in a parameter). An object
+// literal that sends the field is not a read and passes.
+const rawInvoiceMoneyMessage =
+  'Read an invoice\'s payment_status or amount_due_cents through a helper in src/lib (invoiceTerminal: invoiceDueCents, invoiceRowAmount, invoiceCanCollect…; statusLabels: invoiceStatus, invoicePaymentChip). Raw, a voided or written-off invoice reads as owed.'
+const noRawInvoiceMoneyRead = [
+  "MemberExpression[property.name=/^(payment_status|amount_due_cents)$/]",
+  "MemberExpression[computed=true][property.value=/^(payment_status|amount_due_cents)$/]",
+  "ObjectPattern > Property[key.name=/^(payment_status|amount_due_cents)$/]",
+].map(selector => ({ selector, message: rawInvoiceMoneyMessage }))
+
 export default defineConfig([
   globalIgnores(['dist']),
   {
@@ -66,7 +86,7 @@ export default defineConfig([
       globals: globals.browser,
     },
     rules: {
-      'no-restricted-syntax': [...noWallClockNow, noRawScrollPane],
+      'no-restricted-syntax': [...noWallClockNow, noRawScrollPane, ...noRawInvoiceMoneyRead],
       // HMR ergonomics only (fast-refresh works best when component files
       // export only components) — zero runtime correctness. shadcn-style
       // component files and context/hook co-location trip it ~40×; the
@@ -102,7 +122,14 @@ export default defineConfig([
       'src/components/Combobox.tsx',
     ],
     rules: {
-      'no-restricted-syntax': noWallClockNow,
+      'no-restricted-syntax': [...noWallClockNow, ...noRawInvoiceMoneyRead],
+    },
+  },
+  {
+    // src/lib holds the invoice helpers: reading the raw fields is their job.
+    files: ['src/lib/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [...noWallClockNow, noRawScrollPane],
     },
   },
   {

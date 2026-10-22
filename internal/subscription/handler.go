@@ -524,13 +524,36 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		respond.BadRequest(w, r, `billing must be "failing" when set`)
 		return
 	}
+	// ?collection=paused lists live subscriptions whose collection is
+	// paused. Same closed-set rule as ?billing=.
+	collection := r.URL.Query().Get("collection")
+	if collection != "" && collection != ListCollectionPaused {
+		respond.BadRequest(w, r, `collection must be "paused" when set`)
+		return
+	}
+	// ?status= is a closed set too: an unknown value matched no row and
+	// read as "none of those". The Paused tab sent status=paused and was
+	// always empty (sweep E6).
+	status := r.URL.Query().Get("status")
+	switch domain.SubscriptionStatus(status) {
+	case "", domain.SubscriptionDraft, domain.SubscriptionTrialing, domain.SubscriptionActive,
+		domain.SubscriptionCanceled, domain.SubscriptionArchived:
+	default:
+		msg := "status must be one of draft, trialing, active, canceled, archived"
+		if status == "paused" {
+			msg += `; paused collection is not a status, use collection=paused`
+		}
+		respond.BadRequest(w, r, msg)
+		return
+	}
 
 	subs, total, err := h.svc.List(r.Context(), ListFilter{
 		TenantID:   tenantID,
 		CustomerID: r.URL.Query().Get("customer_id"),
 		PlanID:     r.URL.Query().Get("plan_id"),
-		Status:     r.URL.Query().Get("status"),
+		Status:     status,
 		Billing:    billing,
+		Collection: collection,
 		Search:     strings.TrimSpace(r.URL.Query().Get("search")),
 		Limit:      limit,
 		Offset:     offset,
@@ -685,12 +708,6 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
-
-	// triggered_by tag distinguishes operator-driven pauses from
-	// dunning-driven pauses in the Activity timeline. The audit write
-	// itself now happens inside Service.PauseCollection so the dunning
-	// adapter path (which bypasses this handler) also produces an entry.
-	input.TriggeredBy = "operator"
 
 	sub, err := h.svc.PauseCollection(r.Context(), tenantID, id, input)
 	if err != nil {

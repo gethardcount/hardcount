@@ -179,13 +179,16 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		{"paid_invoices", &resp.PaidInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'paid' AND currency = $1 AND paid_at >= $2 AND paid_at < $3` + notSimInvoice,
 			[]any{defaultCurrency, period.Start, period.End}},
+		// Open invoices only: a void or write-off keeps its last
+		// payment_status, so it counted as a failed payment nobody was
+		// collecting any more (sweep A7/E1, 2026-10-21).
 		{"failed_payments", &resp.FailedPayments,
-			`SELECT COUNT(*) FROM invoices WHERE payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
+			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
 			[]any{period.Start, period.End}},
 		// Same predicate over the previous window, so the trend compares like
 		// with like (the dashboard used to compare against a hard-coded 0).
 		{"failed_payments_prev", &resp.FailedPaymentsPrev,
-			`SELECT COUNT(*) FROM invoices WHERE payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
+			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status = 'failed' AND created_at >= $1 AND created_at < $2` + notSimInvoice,
 			[]any{period.PrevStart, period.PrevEnd}},
 		{"open_invoices", &resp.OpenInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status != 'succeeded'` + notSimInvoice, nil},
@@ -531,9 +534,13 @@ func churnRate(ctx context.Context, tx *sql.Tx, start, end any, _ bool) float64 
 	return float64(canceled) / float64(activeAtStart)
 }
 
-// dunningRecoveryRate = resolved-in-period / opened-in-period. Only counts
-// resolutions that landed on 'resolved' (successful recovery), ignoring
-// 'exhausted' / 'written_off' outcomes.
+// dunningRecoveryRate = recovered / opened, over the runs opened in the
+// period. A run is recovered when a payment closed it: resolution
+// payment_recovered, with money paid on the invoice (amount_paid_cents > 0).
+// A run resolved by a void or a write-off is resolved but not recovered, and
+// used to raise the rate (sweep E7b, 2026-10-21); so is a run closed by a
+// credit note or customer credit that left nothing due, which is
+// payment_recovered with nothing paid (review of #1328).
 func dunningRecoveryRate(ctx context.Context, tx *sql.Tx, start, end any) float64 {
 	var opened, recovered int
 	if err := tx.QueryRowContext(ctx, `
@@ -544,8 +551,8 @@ func dunningRecoveryRate(ctx context.Context, tx *sql.Tx, start, end any) float6
 	}
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM invoice_dunning_runs
-		WHERE created_at >= $1 AND created_at < $2 AND state = 'resolved' AND invoice_id IN (SELECT id FROM invoices WHERE is_simulated = false)
-	`, start, end).Scan(&recovered); err != nil {
+		WHERE created_at >= $1 AND created_at < $2 AND state = 'resolved' AND resolution = $3 AND invoice_id IN (SELECT id FROM invoices WHERE is_simulated = false AND amount_paid_cents > 0)
+	`, start, end, string(domain.ResolutionPaymentRecovered)).Scan(&recovered); err != nil {
 		return 0
 	}
 	if opened == 0 {

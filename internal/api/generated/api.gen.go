@@ -1754,6 +1754,24 @@ func (e SubscriptionPauseCollectionBehavior) Valid() bool {
 	}
 }
 
+// Defines values for SubscriptionPauseCollectionSetBy.
+const (
+	Dunning  SubscriptionPauseCollectionSetBy = "dunning"
+	Operator SubscriptionPauseCollectionSetBy = "operator"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionPauseCollectionSetBy enum.
+func (e SubscriptionPauseCollectionSetBy) Valid() bool {
+	switch e {
+	case Dunning:
+		return true
+	case Operator:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubscriptionTimelineEventSource.
 const (
 	Audit SubscriptionTimelineEventSource = "audit"
@@ -2797,19 +2815,19 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 
 // Defines values for GetV1RatingRulesParamsLifecycleState.
 const (
-	Active   GetV1RatingRulesParamsLifecycleState = "active"
-	Archived GetV1RatingRulesParamsLifecycleState = "archived"
-	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
+	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
+	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
+	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
 func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 	switch e {
-	case Active:
+	case GetV1RatingRulesParamsLifecycleStateActive:
 		return true
-	case Archived:
+	case GetV1RatingRulesParamsLifecycleStateArchived:
 		return true
-	case Draft:
+	case GetV1RatingRulesParamsLifecycleStateDraft:
 		return true
 	default:
 		return false
@@ -2915,6 +2933,33 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 	}
 }
 
+// Defines values for GetV1SubscriptionsParamsStatus.
+const (
+	GetV1SubscriptionsParamsStatusActive   GetV1SubscriptionsParamsStatus = "active"
+	GetV1SubscriptionsParamsStatusArchived GetV1SubscriptionsParamsStatus = "archived"
+	GetV1SubscriptionsParamsStatusCanceled GetV1SubscriptionsParamsStatus = "canceled"
+	GetV1SubscriptionsParamsStatusDraft    GetV1SubscriptionsParamsStatus = "draft"
+	GetV1SubscriptionsParamsStatusTrialing GetV1SubscriptionsParamsStatus = "trialing"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsStatus enum.
+func (e GetV1SubscriptionsParamsStatus) Valid() bool {
+	switch e {
+	case GetV1SubscriptionsParamsStatusActive:
+		return true
+	case GetV1SubscriptionsParamsStatusArchived:
+		return true
+	case GetV1SubscriptionsParamsStatusCanceled:
+		return true
+	case GetV1SubscriptionsParamsStatusDraft:
+		return true
+	case GetV1SubscriptionsParamsStatusTrialing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1SubscriptionsParamsBilling.
 const (
 	Failing GetV1SubscriptionsParamsBilling = "failing"
@@ -2924,6 +2969,21 @@ const (
 func (e GetV1SubscriptionsParamsBilling) Valid() bool {
 	switch e {
 	case Failing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetV1SubscriptionsParamsCollection.
+const (
+	Paused GetV1SubscriptionsParamsCollection = "paused"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsCollection enum.
+func (e GetV1SubscriptionsParamsCollection) Valid() bool {
+	switch e {
+	case Paused:
 		return true
 	default:
 		return false
@@ -3299,10 +3359,10 @@ type AnalyticsOverview struct {
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
 	DunningActive int `json:"dunning_active"`
 
-	// DunningRecoveryRate Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+	// DunningRecoveryRate Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
 	DunningRecoveryRate float64 `json:"dunning_recovery_rate"`
 
-	// FailedPayments Invoices created in the window whose payment failed. All currencies.
+	// FailedPayments Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
 	FailedPayments int `json:"failed_payments"`
 
 	// FailedPaymentsPrev `failed_payments` for the previous window.
@@ -4509,21 +4569,26 @@ type DunningRunEventState string
 type DunningStats struct {
 	ActiveCount int `json:"active_count"`
 
-	// AtRiskByCurrency Amount due on active and escalated runs, one entry per currency.
-	// `currency` comes first, then the largest amount. Empty when no run
-	// is at risk.
+	// AtRiskByCurrency Amount due on active and escalated runs whose invoice is still
+	// open, one entry per currency. `currency` comes first, then the
+	// largest amount. Empty when no run is at risk.
 	AtRiskByCurrency []struct {
 		AmountCents int64  `json:"amount_cents"`
 		Currency    string `json:"currency"`
 	} `json:"at_risk_by_currency"`
 
-	// AtRiskCents Amount due on active and escalated runs, in `currency` only.
+	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
 	AtRiskCents int64 `json:"at_risk_cents"`
 
 	// Currency The tenant's default currency.
 	Currency       string `json:"currency"`
 	EscalatedCount int    `json:"escalated_count"`
-	ResolvedCount  int    `json:"resolved_count"`
+
+	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered.
+	RecoveredCount int `json:"recovered_count"`
+
+	// ResolvedCount Resolved runs, whatever closed them (a payment, a void or a write-off).
+	ResolvedCount int `json:"resolved_count"`
 }
 
 // Error defines model for Error.
@@ -4929,7 +4994,14 @@ type Invoice struct {
 	// TenantId Owning tenant. Returned for diagnostic clarity but redundant
 	// with the API key (which already determines the tenant).
 	// Omitted when empty.
-	TenantId         string `json:"tenant_id,omitempty"`
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock this invoice's dates follow: the clock its customer
+	// is pinned to, for cycle and one-off invoices alike. Read from the
+	// customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+	// responses may leave it out. Left out for a customer on wall-clock
+	// time, and always in live mode.
+	TestClockId      string `json:"test_clock_id,omitempty"`
 	TotalAmountCents int64  `json:"total_amount_cents"`
 
 	// UncollectibleAt When the invoice was marked uncollectible.
@@ -5640,7 +5712,7 @@ type RecipeDunningPolicy struct {
 	// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
 	FinalInvoiceAction RecipeDunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
 
-	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
 	FinalSubscriptionAction RecipeDunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
 	IntervalsHours          []int                                      `json:"intervals_hours"`
 	MaxRetries              int                                        `json:"max_retries"`
@@ -5651,7 +5723,7 @@ type RecipeDunningPolicy struct {
 // Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
 type RecipeDunningPolicyFinalInvoiceAction string
 
-// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
 type RecipeDunningPolicyFinalSubscriptionAction string
 
 // RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
@@ -6056,12 +6128,30 @@ type SubscriptionItemThreshold struct {
 type SubscriptionPauseCollection struct {
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
-	// ResumesAt When collection resumes. Absent when the pause lasts until it is cleared.
+	// ResumesAt When collection resumes. Absent when the pause lasts until it is
+	// cleared. On a pause set by dunning, it is when Velox recorded the
+	// payment of the invoice the pause was set for.
 	ResumesAt time.Time `json:"resumes_at,omitempty"`
+
+	// SetBy Who paused collection. `operator`: you, through the API or the
+	// dashboard; the pause lasts until you resume it or until
+	// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+	// A dunning pause lifts by itself once the invoice whose dunning
+	// set it is paid, even if another invoice is still owed. Periods
+	// that ended during the pause keep their draft invoices.
+	SetBy SubscriptionPauseCollectionSetBy `json:"set_by,omitempty"`
 }
 
 // SubscriptionPauseCollectionBehavior defines model for SubscriptionPauseCollection.Behavior.
 type SubscriptionPauseCollectionBehavior string
+
+// SubscriptionPauseCollectionSetBy Who paused collection. `operator`: you, through the API or the
+// dashboard; the pause lasts until you resume it or until
+// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+// A dunning pause lifts by itself once the invoice whose dunning
+// set it is paid, even if another invoice is still owed. Periods
+// that ended during the pause keep their draft invoices.
+type SubscriptionPauseCollectionSetBy string
 
 // SubscriptionTimelineEvent defines model for SubscriptionTimelineEvent.
 type SubscriptionTimelineEvent struct {
@@ -7451,7 +7541,7 @@ type GetV1InvoicesParams struct {
 	// Ids Comma-separated invoice IDs to fetch exactly.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default).
+	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
 	Sort   string                 `form:"sort,omitempty" json:"sort,omitempty"`
 	Dir    GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 	Limit  int                    `form:"limit,omitempty" json:"limit,omitempty"`
@@ -8063,12 +8153,22 @@ type GetV1SubscriptionsParams struct {
 
 	// PlanId Filter to subscriptions with a live item on this plan.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
-	Status string `form:"status,omitempty" json:"status,omitempty"`
+
+	// Status Exact status. Any other value is a 400. Paused collection is not
+	// a status: use `collection=paused`.
+	Status GetV1SubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
 	// and those that are parked. Any other value is a 400.
 	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
+
+	// Collection `paused` returns only active and trialing subscriptions whose
+	// `pause_collection` is in force, whether an operator or dunning set
+	// it. A timed pause ends at `resumes_at` (on the subscription's test
+	// clock, if it has one), even while the response still carries it.
+	// Any other value is a 400.
+	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
@@ -8080,8 +8180,14 @@ type GetV1SubscriptionsParams struct {
 	Offset int                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// GetV1SubscriptionsParamsStatus defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsStatus string
+
 // GetV1SubscriptionsParamsBilling defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsBilling string
+
+// GetV1SubscriptionsParamsCollection defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsCollection string
 
 // GetV1SubscriptionsParamsDir defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsDir string
@@ -17158,6 +17264,19 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billing"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billing", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "collection" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "collection", r.URL.Query(), &params.Collection, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "collection"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "collection", Err: err})
 		}
 		return
 	}

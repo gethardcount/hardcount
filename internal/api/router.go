@@ -366,6 +366,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Commit funding at finalize (ADR-078 D2): FinalizeWithDates grants the
 	// commit block in the finalize coordinator tx via credit.Service.
 	invoiceStore.SetCommitFunder(creditSvc)
+	// Paying the invoice a dunning pause was set for lifts the pause in the
+	// paid transaction (ADR-036 amendment 2026-10-22).
+	invoiceStore.SetDunningPauseReleaser(subStore)
 	subH.SetEventDispatcher(eventDispatcher)
 	// Trial-expiry phases (catchup orchestrator + wall-clock cron)
 	// fire subscription.trial_ended via the subscription Service —

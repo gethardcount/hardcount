@@ -437,6 +437,15 @@ type Invoice struct {
 	// or a read-time re-derivation from the (mutable) parent's test_clock_id.
 	// Always false in live mode (test clocks are test-mode only).
 	IsSimulated bool `json:"is_simulated"`
+
+	// TestClockID is the test clock this invoice's dates follow: the clock
+	// its customer is pinned to. The pin is set when the customer is created,
+	// never changes, and every subscription inherits it (ADR-027), so it
+	// covers cycle and one-off invoices alike. Read from the customer, never
+	// stored on the invoice. The list and get reads fill it; empty (left out)
+	// for a wall-clock customer. The dashboard reads "Due in N days" from
+	// this clock.
+	TestClockID string `json:"test_clock_id,omitempty"`
 }
 
 // ItemChangeType classifies per-item proration artifacts so the dedup index

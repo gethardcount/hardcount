@@ -12,6 +12,9 @@ import { useUrlState } from '@/hooks/useUrlState'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant, statusBorderColor } from '@/lib/status'
+import { collectionPausedFlag } from '@/lib/statusLabels'
+import { SUBSCRIPTION_TABS, subscriptionTabEmptyTitle, subscriptionTabParams } from '@/lib/subscriptionListFilters'
+import { StatusBadge } from '@/components/StatusBadge'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { CreateSubscriptionDialog } from '@/components/CreateSubscriptionDialog'
@@ -42,6 +45,7 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { Plus, Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Repeat } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
+import { trialBadgeEndsAt } from '@/lib/statusLabels'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { formatCivilDate } from '@/lib/dates'
 import { nextBillCell, periodLabels } from '@/lib/subscriptionPeriod'
@@ -96,9 +100,9 @@ export default function SubscriptionsPage() {
     const params = new URLSearchParams()
     params.set('limit', String(PAGE_SIZE))
     params.set('offset', String((page - 1) * PAGE_SIZE))
-    // 'billing_failing' is its own server filter, not a status.
-    if (filterStatus === 'billing_failing') params.set('billing', 'failing')
-    else if (filterStatus) params.set('status', filterStatus)
+    // Paused collection and failing billing are their own server filters,
+    // not statuses (lib/subscriptionListFilters).
+    for (const [k, v] of Object.entries(subscriptionTabParams(filterStatus))) params.set(k, v)
     if (debouncedSearch) params.set('search', debouncedSearch)
     if (sortKey) params.set('sort', sortKey)
     if (sortDir) params.set('dir', sortDir)
@@ -205,14 +209,7 @@ export default function SubscriptionsPage() {
           )}
           {(total > 0 || filterStatus) && (
             <div className="flex flex-wrap gap-1 bg-muted rounded-lg p-1">
-              {[
-                { value: '', label: 'All' },
-                { value: 'active', label: 'Active' },
-                { value: 'paused', label: 'Paused' },
-                { value: 'canceled', label: 'Canceled' },
-                { value: 'draft', label: 'Draft' },
-                { value: 'billing_failing', label: 'Billing failing' },
-              ].map(f => (
+              {SUBSCRIPTION_TABS.map(f => (
                 <button
                   key={f.value}
                   onClick={() => setUrlState({ status: f.value, page: '1' })}
@@ -265,9 +262,7 @@ export default function SubscriptionsPage() {
                 title={
                   debouncedSearch
                     ? `No subscriptions match “${debouncedSearch}”`
-                    : filterStatus === 'billing_failing'
-                      ? 'No subscriptions with failing billing'
-                      : `No ${filterStatus} subscriptions`
+                    : subscriptionTabEmptyTitle(filterStatus)
                 }
                 description="Try a different filter to see more results."
                 action={{
@@ -369,13 +364,20 @@ export default function SubscriptionsPage() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge variant={statusBadgeVariant(sub.status)}>{sub.status}</Badge>
+                          {(() => {
+                            const paused = collectionPausedFlag(sub, effectiveNow(sub.test_clock_id ? clockFrozenMap[sub.test_clock_id] : undefined))
+                            return paused && <StatusBadge status={paused} />
+                          })()}
                           {sub.billing_failure && (
                             <Badge variant="destructive">
                               {sub.billing_failure.parked ? 'Billing stopped' : 'Billing failing'}
                             </Badge>
                           )}
+                          {/* Only while the trial runs: trial_end_at stays on
+                              the record after it ends, and an active, paying
+                              subscription read a red "Expired". */}
                           <ExpiryBadge
-                            expiresAt={sub.trial_end_at}
+                            expiresAt={trialBadgeEndsAt(sub)}
                             label="Trial ends"
                             warningDays={3}
                             now={effectiveNow(sub.test_clock_id ? clockFrozenMap[sub.test_clock_id] : undefined)}

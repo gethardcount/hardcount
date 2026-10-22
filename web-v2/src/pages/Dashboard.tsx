@@ -24,7 +24,8 @@ import { claimChecklistAutoOpen, openSetupChecklist, useOnboardingSteps } from '
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { invoiceStatus } from '@/lib/statusLabels'
+import { invoiceStatus, type StatusDisplay, type StatusTone } from '@/lib/statusLabels'
+import { invoiceRowAmount } from '@/lib/invoiceTerminal'
 import { StatusBadge } from '@/components/StatusBadge'
 import { TrendCard } from '@/components/analytics/TrendCard'
 import { TrendCardSkeleton, ChartCardSkeleton } from '@/components/analytics/CardSkeleton'
@@ -108,7 +109,9 @@ export default function DashboardPage() {
       items.push({
         severity: 'danger',
         text: `${overview.failed_payments} failed ${overview.failed_payments === 1 ? 'payment' : 'payments'} in the last ${PERIOD_LABELS[period].toLowerCase()}`,
-        to: '/invoices?payment_status=failed',
+        // Open invoices only, the same set the count is over: a void or a
+        // write-off keeps its last payment_status.
+        to: '/invoices?status=finalized&payment_status=failed',
       })
     }
     if (overview.dunning_active > 0) {
@@ -342,10 +345,12 @@ export default function DashboardPage() {
                     <Link
                       key={inv.id}
                       to={`/invoices/${inv.id}`}
-                      className="flex items-center justify-between px-5 py-3 hover:bg-muted/50 transition-colors"
+                      className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-muted/50 transition-colors"
                     >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <PaymentStatusDot status={inv.payment_status} />
+                      {/* Wraps on a phone: at 390px the badges ran under the
+                          amount ("$99.00 due" over "Simulated"). */}
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
+                        <StatusDot status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
                         <StatusBadge
                           status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))}
@@ -358,7 +363,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center gap-4 shrink-0">
                         <span className="text-sm tabular-nums text-foreground">
-                          {formatCents(inv.amount_due_cents, inv.currency)}
+                          {invoiceRowAmount(inv)}
                         </span>
                         <span className="text-xs text-muted-foreground w-16 text-right">
                           {/* Relative to the invoice's simulated clock when pinned
@@ -409,14 +414,18 @@ function AlertRow({ severity, text, to }: { severity: AlertSeverity; text: strin
   return to ? <Link to={to}>{content}</Link> : content
 }
 
-function PaymentStatusDot({ status }: { status: string }) {
-  const color =
-    status === 'succeeded' ? 'bg-emerald-500'
-    : status === 'failed' ? 'bg-destructive'
-    : status === 'processing' ? 'bg-blue-500'
-    : 'bg-amber-500'
-  return (
-    <span className={cn('w-2 h-2 rounded-full shrink-0', color)} aria-label={`Payment ${status}`} title={status} />
-  )
+// The dot takes the badge's tone, so the two never disagree: it read a raw
+// payment_status, and a voided invoice kept an amber "pending" dot beside its
+// Void badge.
+const DOT_TONE: Record<StatusTone, string> = {
+  neutral: 'bg-muted-foreground/50',
+  info: 'bg-blue-500',
+  success: 'bg-emerald-500',
+  warning: 'bg-amber-500',
+  danger: 'bg-destructive',
+}
+
+function StatusDot({ status }: { status: StatusDisplay }) {
+  return <span className={cn('w-2 h-2 rounded-full shrink-0', DOT_TONE[status.tone])} aria-hidden="true" />
 }
 

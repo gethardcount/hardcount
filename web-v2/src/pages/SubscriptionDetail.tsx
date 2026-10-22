@@ -25,6 +25,8 @@ import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { cn } from '@/lib/utils'
 import { statusBadgeVariant } from '@/lib/status'
+import { invoicePaymentChip, invoiceStatus, trialBadgeEndsAt } from '@/lib/statusLabels'
+import { StatusBadge } from '@/components/StatusBadge'
 import { subscriptionWillAutoCharge, hasUsableCard } from '@/lib/paymentReadiness'
 import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
 
@@ -201,7 +203,6 @@ export default function SubscriptionDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['customer-overview', sub.customer_id] })
       queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', sub.customer_id] })
     }
-    queryClient.invalidateQueries({ queryKey: ['subscriptions-for-test-clock-chip'] })
     // Plan/quantity changes can credit the customer's balance via
     // proration — refresh the balance-bearing families (2026-07-21 audit).
     invalidateMoneySurfaces(queryClient, { customerId: sub?.customer_id })
@@ -420,9 +421,8 @@ export default function SubscriptionDetailPage() {
           : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
       }
       case 'collection_paused': {
-        // Distinct from the hard pause (status=paused): the sub stays active
-        // but invoices generate as drafts and skip finalize/charge/dunning
-        // until resumed. A deliberate state, so the neutral tone.
+        // The sub stays active, but invoices generate as drafts and skip
+        // finalize/charge/dunning until resumed. A deliberate state, so the neutral tone.
         const action = (
           <Button variant="outline" size="sm" onClick={() => resumeCollectionMutation.mutate()} disabled={acting}>
             {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}
@@ -517,9 +517,7 @@ export default function SubscriptionDetailPage() {
             </>
           )}
           <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
-          {sub.status === 'trialing' && sub.trial_end_at && (
-            <ExpiryBadge expiresAt={sub.trial_end_at} label="Trial ends" warningDays={3} now={effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined)} />
-          )}
+          <ExpiryBadge expiresAt={trialBadgeEndsAt(sub)} label="Trial ends" warningDays={3} now={effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined)} />
         </div>
       </div>
 
@@ -1074,17 +1072,19 @@ export default function SubscriptionDetailPage() {
                         {inv.invoice_number}
                       </Link>
                     </TableCell>
-                    <TableCell><Badge variant={statusVariant(inv.status)}>{inv.status}</Badge></TableCell>
+                    {/* The invoice list's badge and chip: a void reads Void
+                        with no payment chip, never "voided" beside the
+                        "pending" it kept. */}
                     <TableCell>
-                      {/* payment_status is meaningless on drafts — no
-                          PaymentIntent exists yet. Hide the pill (Stripe
-                          parity); show an em dash so the column stays
-                          aligned. */}
-                      {inv.status === 'draft' ? (
-                        <span className="text-sm text-muted-foreground">—</span>
-                      ) : (
-                        <Badge variant={statusVariant(inv.payment_status)}>{inv.payment_status}</Badge>
-                      )}
+                      <StatusBadge status={invoiceStatus(inv, effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined))} />
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const chip = invoicePaymentChip(inv)
+                        return chip
+                          ? <StatusBadge status={chip} />
+                          : <span className="text-sm text-muted-foreground">—</span>
+                      })()}
                     </TableCell>
                     <TableCell className="text-right font-medium">{formatCents(inv.total_amount_cents, inv.currency)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatDate(inv.created_at)}</TableCell>

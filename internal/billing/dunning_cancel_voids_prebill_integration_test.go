@@ -372,11 +372,8 @@ func TestDunningFinalCancel_VoidsTheUnusedPrebillUnderItsOwnHold(t *testing.T) {
 // adapters in internal/api/adapters.go give it.
 type finalActionMovers struct{ svc *subscription.Service }
 
-func (m finalActionMovers) PauseCollection(ctx context.Context, tenantID, id string) error {
-	_, err := m.svc.PauseCollection(ctx, tenantID, id, subscription.PauseCollectionInput{
-		Behavior: domain.PauseCollectionKeepAsDraft, TriggeredBy: "dunning",
-	})
-	return err
+func (m finalActionMovers) PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (bool, error) {
+	return m.svc.PauseCollectionForDunning(ctx, tenantID, subID, invoiceID)
 }
 
 func (m finalActionMovers) Cancel(ctx context.Context, tenantID, id string) error {
