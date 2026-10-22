@@ -40,10 +40,10 @@ func (h *BootstrapHandler) Routes() chi.Router {
 	return r
 }
 
-// bootstrapRequest: the token travels in the body or the Authorization
+// BootstrapRequest: the token travels in the body or the Authorization
 // header, NEVER a query string — query strings land in proxy access
 // logs. Owner fields are optional; defaults live in RunBootstrap.
-type bootstrapRequest struct {
+type BootstrapRequest struct {
 	TenantName    string `json:"tenant_name"`
 	Token         string `json:"token"`
 	OwnerEmail    string `json:"owner_email"`
@@ -90,7 +90,7 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req bootstrapRequest
+	var req BootstrapRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	provided := strings.TrimSpace(req.Token)

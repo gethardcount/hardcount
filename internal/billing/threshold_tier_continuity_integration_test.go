@@ -18,7 +18,9 @@ import (
 // [start, T) and the closer bills the rest; a graduated ladder must CONTINUE
 // across them, not restart at tier 0. Ladder: 1,000 units at 10¢, then 2¢.
 // 700 units before the fire (fire = $70), 600 after: the closer owes
-// 300×10¢ + 300×2¢ = $36, not 600×10¢ = $60.
+// 300×10¢ + 300×2¢ = $36, not 600×10¢ = $60. Nothing turns the ladder off:
+// the block usage cap that did (#973: under a 1,000-unit cap the close
+// billed $46.15, so fire + close was $116.15 for F(1300) = $106) is cut.
 //
 // The graduated version is published under the meter's rule key BEFORE the
 // period opened while the meter's binding still pins the flat v1 — so both

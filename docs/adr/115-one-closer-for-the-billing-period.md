@@ -88,6 +88,10 @@ Concretely:
    `usage_billed_once_per_subscription_meter_window`: the same usage instant
    of one (subscription, meter, rating-rule bucket) on two live invoices —
    the money shape the CAS exists to prevent, on the read side, no schema.
+   (2026-10-22: widened to one customer and renamed
+   `usage_billed_once_per_customer_meter_window`, because usage is
+   aggregated per customer and meter; see the
+   [ADR-012 amendment](012-day-grade-calendar-billing.md#amendment-2026-10-22-one-usage-window-for-every-closer).)
    Paired per rating-rule bucket because under ADR-066 §4 one meter can carry
    a sum bucket (billed on the fire) and a max bucket (deferred to the close,
    full window) whose windows legitimately overlap.

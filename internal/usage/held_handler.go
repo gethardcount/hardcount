@@ -82,7 +82,7 @@ func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type releaseHeldRequest struct {
+type ReleaseHeldRequest struct {
 	ExternalCustomerID string `json:"external_customer_id"`
 	// CustomerID releases into a customer whose external_id differs (the
 	// LiteLLM `user` value had a typo). Empty means the customer whose
@@ -93,7 +93,7 @@ type releaseHeldRequest struct {
 // releaseHeld serves POST /v1/usage-events/held/release.
 func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	var req releaseHeldRequest
+	var req ReleaseHeldRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -204,7 +204,7 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, res)
 }
 
-type discardHeldRequest struct {
+type DiscardHeldRequest struct {
 	ExternalCustomerID string `json:"external_customer_id"`
 	// MeterKey limits the discard to one meter. Empty discards every held
 	// row for the external id.
@@ -214,7 +214,7 @@ type discardHeldRequest struct {
 // discardHeld serves POST /v1/usage-events/held/discard.
 func (h *Handler) discardHeld(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	var req discardHeldRequest
+	var req DiscardHeldRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return

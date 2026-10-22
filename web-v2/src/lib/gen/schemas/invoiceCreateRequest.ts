@@ -11,7 +11,7 @@ import type { InvoiceLineItemInput } from './invoiceLineItemInput';
 
 export interface InvoiceCreateRequest {
   customer_id: string;
-  /** Optional. Leave out for a one-off invoice. */
+  /** Optional. Must belong to `customer_id`. Leave out for a one-off invoice. */
   subscription_id?: string;
   /** ISO 4217 code. Defaults to the customer's billing currency, then the tenant default. */
   currency?: string;

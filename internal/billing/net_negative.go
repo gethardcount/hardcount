@@ -25,8 +25,7 @@ import (
 // The rule now, the same in every path that prices usage (period close,
 // cancel final invoice, spend-threshold invoice, preview, live balance,
 // customer usage view): the bucket counts as 0 for that window and the rest
-// of the invoice is built. A block-mode usage cap totals what the invoice
-// bills, so it counts the bucket as 0 too (usageCapFor).
+// of the invoice is built.
 //
 // It is never silent. The preview and the usage view show a warning. Each
 // invoice decision that leaves such a bucket out logs a WARN and writes one

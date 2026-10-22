@@ -21,11 +21,11 @@ meter_id?: string;
  */
 dimensions?: string;
 /**
- * Only events at or after this time (RFC 3339). A value that does not parse is ignored.
+ * Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
  */
 from?: string;
 /**
- * Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
+ * Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
  */
 to?: string;
 limit?: number;

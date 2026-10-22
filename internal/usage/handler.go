@@ -17,6 +17,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/api/respond"
+	"github.com/sagarsuperuser/velox/internal/api/timefilter"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -47,6 +48,9 @@ type Handler struct {
 	customers  CustomerResolver
 	meters     MeterResolver
 	meterModes MeterLister
+	// summaryCustomers is the by-id customer read the usage summary runs
+	// first; see SetSummaryCustomerLookup.
+	summaryCustomers CustomerLookup
 	// Held-usage routes only (#1044); see SetHeldDeps.
 	heldCustomers CustomerLookup
 	heldSubs      SubscriptionLister
@@ -57,6 +61,11 @@ type Handler struct {
 // from. Unwired, every by_meter value is the plain sum with an empty
 // aggregation.
 func (h *Handler) SetMeterLister(l MeterLister) { h.meterModes = l }
+
+// SetSummaryCustomerLookup wires the customer read the usage summary runs
+// before it adds anything up. The events table holds nothing for an unknown
+// id, so without it a typo'd or other-mode id answered 200 with zero totals.
+func (h *Handler) SetSummaryCustomerLookup(c CustomerLookup) { h.summaryCustomers = c }
 
 func NewHandler(svc *Service, customers CustomerResolver, meters MeterResolver) *Handler {
 	return &Handler{svc: svc, customers: customers, meters: meters}
@@ -90,7 +99,7 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 	h.backfill(w, r)
 }
 
-// apiEvent is the public API input — developers send external identifiers.
+// APIEvent is the public API input — developers send external identifiers.
 // Quantity accepts both number (5) and string ("5.5") forms via shopspring's
 // UnmarshalJSON; the response side serializes as a string for precision.
 //
@@ -101,7 +110,7 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 // is the documented v1 field; properties was an internal name leaked
 // into the wire). The two collapse onto the same usage_events.properties
 // column at the storage layer.
-type apiEvent struct {
+type APIEvent struct {
 	ExternalCustomerID string           `json:"external_customer_id"`
 	EventName          string           `json:"event_name"`
 	Quantity           decimal.Decimal  `json:"quantity,omitempty"`
@@ -175,7 +184,7 @@ const missingKeyMessage = "idempotency_key is required — give each event its o
 
 // resolve converts public API identifiers to internal IDs. cache may be nil
 // (single-event doors), in which case every lookup goes to the store.
-func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, cache *resolveCache) (IngestInput, error) {
+func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, cache *resolveCache) (IngestInput, error) {
 	extCust := strings.TrimSpace(evt.ExternalCustomerID)
 	eventName := strings.TrimSpace(evt.EventName)
 
@@ -235,7 +244,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 		cache.putMeter(eventName, meterID)
 	}
 
-	// dimensions takes precedence over properties — see apiEvent doc.
+	// dimensions takes precedence over properties — see APIEvent doc.
 	dims := evt.Dimensions
 	if dims == nil {
 		dims = evt.Properties
@@ -275,7 +284,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var evt apiEvent
+	var evt APIEvent
 	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -353,7 +362,7 @@ func (h *Handler) respondIngestError(w http.ResponseWriter, r *http.Request, ten
 func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var evt apiEvent
+	var evt APIEvent
 	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -384,10 +393,12 @@ func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 // request URL. Both handlers honour customer_id / meter_id / from / to;
 // the list handler additionally reads limit + offset, which Aggregate
 // ignores (the whole point of the aggregate endpoint is the unbounded
-// total). Empty / unparseable values are treated as absent so the
-// frontend can build URLs unconditionally without sending sentinel
-// strings.
-func parseListFilter(r *http.Request) ListFilter {
+// total). Empty values are treated as absent so the frontend can build
+// URLs unconditionally. from / to go through timefilter.ParseRange, the
+// parser the CSV export uses: RFC 3339 or YYYY-MM-DD, anything else is an
+// error the caller answers with 422. Dropping a value it could not read
+// returned all-time totals as if they were filtered.
+func parseListFilter(r *http.Request) (ListFilter, error) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
@@ -409,21 +420,25 @@ func parseListFilter(r *http.Request) ListFilter {
 			filter.AfterID = cur.ID
 		}
 	}
-	if v := q.Get("from"); v != "" {
-		if t, err := parseTimestamp(v); err == nil {
-			filter.From = &t
-		}
+	from, to, err := timefilter.ParseRange(r, "from", "to")
+	if err != nil {
+		return ListFilter{}, err
 	}
-	if v := q.Get("to"); v != "" {
-		if t, err := parseTimestamp(v); err == nil {
-			filter.To = &t
-		}
+	if !from.IsZero() {
+		filter.From = &from
 	}
-	return filter
+	if !to.IsZero() {
+		filter.To = &to
+	}
+	return filter, nil
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	filter := parseListFilter(r)
+	filter, err := parseListFilter(r)
+	if err != nil {
+		respond.FromError(w, r, err, "usage_event")
+		return
+	}
 	dims, err := parseDimensionsParam(r.URL.Query().Get("dimensions"))
 	if err != nil {
 		// Unlike the other list params, a malformed dimension filter is a
@@ -475,7 +490,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 // Unlike list, limit/offset are ignored — Aggregate.TotalEvents is the
 // authoritative count, and ByMeter is the full filtered breakdown.
 func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
-	filter := parseListFilter(r)
+	filter, err := parseListFilter(r)
+	if err != nil {
+		respond.FromError(w, r, err, "usage_event")
+		return
+	}
 	dims, err := parseDimensionsParam(r.URL.Query().Get("dimensions"))
 	if err != nil {
 		// Hard 422 — same rationale as list: a dropped filter shows
@@ -542,7 +561,7 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var events []apiEvent
+	var events []APIEvent
 	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
 		// The router caps request bodies via MaxBytesReader; a too-big
 		// batch must read as "split your batch" (413), not as malformed

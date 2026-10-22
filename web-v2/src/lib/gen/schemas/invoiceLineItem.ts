@@ -65,8 +65,11 @@ export interface InvoiceLineItem {
      */
   commit_granted_cents?: number | null;
   /**
-     * Expiry of the granted commit block. Absent/null = the credits
-     * never expire (the default).
+     * Expiry of the granted commit block. The credit can be drawn up
+     * to and including this instant; a period invoice draws it when
+     * its period ends at or before it. The dashboard sends the local
+     * midnight after the picked day. Absent/null = the credits never
+     * expire (the default).
      * @nullable
      */
   commit_expires_at?: string | null;

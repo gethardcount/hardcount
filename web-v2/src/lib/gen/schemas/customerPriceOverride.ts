@@ -21,8 +21,8 @@ export interface CustomerPriceOverride {
   mode: CustomerPriceOverrideMode;
   /** Per-unit rate in cents, as a decimal string. */
   flat_amount_cents?: string;
-  /** @nullable */
-  graduated_tiers?: CustomerPriceOverrideGraduatedTiersItem[] | null;
+  /** Empty (`[]`) unless `mode` is `graduated`. */
+  graduated_tiers?: CustomerPriceOverrideGraduatedTiersItem[];
   package_size?: number;
   package_amount_cents?: number;
   /** Per-unit overage rate in cents, as a decimal string. */

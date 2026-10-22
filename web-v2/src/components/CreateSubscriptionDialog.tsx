@@ -27,7 +27,6 @@ import {
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -53,8 +52,6 @@ const schema = z.object({
   start_now: z.boolean(),
   billing_time: z.string(),
   trial_days: z.string(),
-  usage_cap_units: z.string(),
-  overage_action: z.string(),
 })
 
 type FormData = z.infer<typeof schema>
@@ -68,8 +65,6 @@ function emptyDefaults(customerId: string): FormData {
     start_now: true,
     billing_time: 'calendar',
     trial_days: '',
-    usage_cap_units: '',
-    overage_action: 'charge',
   }
 }
 
@@ -121,8 +116,6 @@ export function CreateSubscriptionDialog({
       start_now: data.start_now,
       billing_time: data.billing_time,
       ...(data.trial_days ? { trial_days: parseInt(data.trial_days) } : {}),
-      ...(data.usage_cap_units ? { usage_cap_units: parseInt(data.usage_cap_units) } : {}),
-      ...(data.overage_action !== 'charge' ? { overage_action: data.overage_action } : {}),
     }),
     onSuccess: (created, vars) => {
       onCreated(created)
@@ -147,7 +140,7 @@ export function CreateSubscriptionDialog({
       }
     },
     onError: (err) => {
-      applyApiError(form, err, ['code', 'display_name', 'customer_id', 'items', 'billing_time', 'trial_days', 'usage_cap_units', 'overage_action'])
+      applyApiError(form, err, ['code', 'display_name', 'customer_id', 'items', 'billing_time', 'trial_days'])
     },
   })
 
@@ -365,8 +358,9 @@ export function CreateSubscriptionDialog({
                   <FormItem>
                     <FormLabel>Trial period</FormLabel>
                     <FormControl>
-                      <Input type="number" min={0} placeholder="0 days" {...field} />
+                      <Input type="number" min={0} max={730} placeholder="0 days" {...field} />
                     </FormControl>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
@@ -390,43 +384,6 @@ export function CreateSubscriptionDialog({
                 </FormItem>
               )}
             />
-
-            {/* Usage limits */}
-            <Separator />
-            <div className="grid grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="usage_cap_units"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Usage cap</FormLabel>
-                    <FormControl>
-                      <Input type="number" min={0} placeholder="Unlimited" {...field} />
-                    </FormControl>
-                    <FormDescription>Max units per period</FormDescription>
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="overage_action"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Over-limit Action</FormLabel>
-                    <FormControl>
-                      <select
-                        value={field.value}
-                        onChange={field.onChange}
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      >
-                        <option value="charge">Charge overage</option>
-                        <option value="block">Cap at limit</option>
-                      </select>
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </div>
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

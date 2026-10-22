@@ -376,6 +376,10 @@ type mockSubs struct {
 	// defaultIntervals() or explicit rows.
 	intervals    []domain.ItemInterval
 	intervalsErr error
+	// coverageEnds / coverageEndsErr feed ListCustomerMeterCoverageEnds:
+	// other subscriptions' meter coverage ends (the usage floors).
+	coverageEnds    []domain.MeterCoverageEnd
+	coverageEndsErr error
 	// closePeriodErr, when set, makes ClosePeriodTx (the closer's CAS) fail.
 	// closePeriodErrOnCall picks WHICH call fails (1-based; 0 = every call),
 	// so a test can let the first close reach its insert and fail only the
@@ -692,6 +696,12 @@ func (m *mockSubs) ListWithThresholds(_ context.Context, _ bool, _ string, _ int
 	// returns the configured candidate set). Returning empty here keeps
 	// existing tests compatible without exercising the threshold path.
 	return nil, nil
+}
+
+// ListCustomerMeterCoverageEnds: the unit fixtures bill one subscription, so no
+// other subscription's coverage ends inside a window unless a test seeds it.
+func (m *mockSubs) ListCustomerMeterCoverageEnds(_ context.Context, _, _, _ string, _, _ time.Time) ([]domain.MeterCoverageEnd, error) {
+	return m.coverageEnds, m.coverageEndsErr
 }
 
 func (m *mockSubs) ListItemIntervals(_ context.Context, _, subscriptionID string) ([]domain.ItemInterval, error) {

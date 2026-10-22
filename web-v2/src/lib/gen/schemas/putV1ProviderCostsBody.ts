@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { PutV1ProviderCostsBodyCurrency } from './putV1ProviderCostsBodyCurrency';
 
 export type PutV1ProviderCostsBody = {
   provider: string;
@@ -16,5 +17,9 @@ export type PutV1ProviderCostsBody = {
   token_type: string;
   /** Decimal dollars per token (e.g. "0.000003"). */
   cost_per_token: string;
-  currency?: string;
+  /**
+     * Rates are in USD only, the currency LiteLLM reports cost
+     * in. Any other value is 422.
+     */
+  currency?: PutV1ProviderCostsBodyCurrency;
 };

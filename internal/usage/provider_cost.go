@@ -496,10 +496,17 @@ func (h *ProviderCostHandler) upsert(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, errs.Invalid("cost_per_token", "must be zero or positive"), "provider_cost_rate")
 		return
 	}
+	// Rates are dollars only. The cost stamp, the margin report and LiteLLM's
+	// own cost all count in USD, so a rate in another currency was stored and
+	// then read as dollars, putting margin off by the exchange rate.
+	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
 	if in.Currency == "" {
 		in.Currency = "USD"
 	}
-	in.Currency = strings.ToUpper(in.Currency)
+	if in.Currency != "USD" {
+		respond.FromError(w, r, errs.Invalid("currency", "provider cost rates are in USD only"), "provider_cost_rate")
+		return
+	}
 	out, err := h.store.UpsertProviderCostRateAudited(r.Context(), tenantID, in, h.upsertEmission(r.Context()))
 	if err != nil {
 		respond.FromError(w, r, err, "provider_cost_rate")
@@ -588,7 +595,8 @@ func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	}
 	rep, err := h.margin.Get(r.Context(), tenantID, customerID, from, to)
 	if err != nil {
-		respond.FromError(w, r, err, "margin")
+		// The one not-found the report can hit is the customer's.
+		respond.FromError(w, r, err, "customer")
 		return
 	}
 	respond.JSON(w, r, http.StatusOK, rep)

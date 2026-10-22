@@ -155,8 +155,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input CreateInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -290,9 +289,11 @@ func (h *Handler) upsertBillingProfile(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
 
+	// Strict: a dropped `tax_exempt` would leave tax_status at its default
+	// and tax an exempt customer. Read-only fields from a GET are declared on
+	// the type, so a GET body sent back is still accepted.
 	var bp domain.CustomerBillingProfile
-	if err := json.NewDecoder(r.Body).Decode(&bp); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &bp) {
 		return
 	}
 	bp.CustomerID = customerID
@@ -400,6 +401,12 @@ func (h *Handler) listSentEmails(w http.ResponseWriter, r *http.Request) {
 		// wiring bug loud — silent empty list would mask a misconfig.
 		slog.ErrorContext(r.Context(), "list sent emails: lister not wired")
 		respond.InternalError(w, r)
+		return
+	}
+	// The outbox legally holds nothing for an unknown id, so without this
+	// read a typo'd or other-mode id answered 200 with an empty list.
+	if _, err := h.svc.Get(r.Context(), tenantID, id); err != nil {
+		respond.FromError(w, r, err, "customer")
 		return
 	}
 
