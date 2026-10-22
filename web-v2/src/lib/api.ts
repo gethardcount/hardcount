@@ -169,7 +169,7 @@ export const api = {
   // Subscriptions
   listSubscriptions: (params?: string) =>
     apiRequest<{ data: Subscription[]; total: number }>('GET', `/subscriptions${params ? '?' + params : ''}`),
-  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; start_now?: boolean; billing_time?: string; trial_days?: number; usage_cap_units?: number | null; overage_action?: string; test_clock_id?: string }) =>
+  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; start_now?: boolean; billing_time?: string; trial_days?: number }) =>
     apiRequest<Subscription>('POST', '/subscriptions', data),
 
   // Pricing
@@ -797,8 +797,6 @@ export interface Subscription {
   next_billing_at?: string
   trial_start_at?: string
   trial_end_at?: string
-  usage_cap_units?: number | null
-  overage_action?: string
   cancel_at_period_end?: boolean
   // Derived, read-only: the backend's authoritative "when does it actually
   // cancel" (trialing+flag → trial end; active+flag → period end; explicit
@@ -1428,6 +1426,9 @@ export interface TenantSettings {
   // ADR-078: arms the credit.balance_low webhook — a customer's balance
   // crossing below this many cents fires the event. null/absent = off.
   credit_balance_low_threshold_cents?: number | null
+  // The number the next invoice in the current mode gets, before the
+  // prefix. Returned by GET and PUT; not a setting, so sending it does nothing.
+  next_invoice_sequence: number
 }
 
 export interface StripeProviderCredentials {

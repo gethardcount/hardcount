@@ -10,7 +10,8 @@ import (
 
 // A funding invoice that earlier credit notes have partly credited can take
 // only what is left of its total. When a cancel, an immediate plan swap or an
-// item change owes more than that, Velox places what fits and logs the rest.
+// item change owes more than that, Velox places what fits and records the rest
+// on the change as uncredited_cents (ADR-118 amendment 2026-10-22).
 // Before, a cancel or swap gave nothing and an item change answered 500.
 //
 // Two real ways to get there, both driven over the real server and Postgres:
@@ -22,17 +23,11 @@ import (
 // Fixture (lagRig): plan A 3000c plus add-on C 1000c, monthly, in advance,
 // period [Apr 1, May 1). The first invoice is 4000c, with no tax.
 //
-// Mutation seams:
-//   - restore `return nil, errHeadroomExhausted` for an all-paid set in
-//     billing.allocateUnusedAcrossFunding → the cancel and swap tests get no
-//     relief note;
-//   - restore the remainder error in subscription.resolveClawbackPieces →
-//     the item removal answers 500;
-//   - drop the per-invoice cap (netCaps = totalUnused) AND the net→gross
-//     clamp to grossCaps → the cancel arm credits more than the invoice
-//     total. Dropping the cap alone survives here: with one funding invoice
-//     the clamp still holds the credit to its room
-//     (TestSettleUnusedAcrossFunding_HeadroomSpill catches that one).
+// Mutation seams (domain.AllocateUnusedCredit, shared by every path):
+//   - return no shares when anything is unplaced → the cancel, swap and
+//     removal tests get no relief note;
+//   - drop the per-invoice room (grossCap = total) AND the net→gross clamp →
+//     the cancel arm credits more than the invoice total.
 
 var reliefCancelAt = lagP0.AddDate(0, 0, 15) // Apr 16: 15 of 30 days unused
 
@@ -142,6 +137,9 @@ func TestE2E_RemoveItemAfterPartialCredit_GivesBackWhatFits(t *testing.T) {
 	if n, sum := r.creditNotesOn(invID), r.creditNoteTotalOn(invID); n != 2 || sum != 4000 {
 		t.Errorf("%d notes summing to %dc, want 2 summing to 4000c (the 3600c note and a 400c credit)", n, sum)
 	}
+	if got := r.auditInt(string(domain.AuditActionUpdate), "uncredited_cents"); got != 267 {
+		t.Errorf("removal audit uncredited_cents = %d, want 267 (667c owed, 400c fit)", got)
+	}
 }
 
 // TestE2E_CrossIntervalSwapAfterPartialCredit_GivesBackWhatFits: plan A
@@ -160,6 +158,9 @@ func TestE2E_CrossIntervalSwapAfterPartialCredit_GivesBackWhatFits(t *testing.T)
 		map[string]any{"new_plan_id": r.planY, "immediate": true}, http.StatusOK)
 	if n, sum := r.creditNotesOn(invID), r.creditNoteTotalOn(invID); n != 2 || sum != 3000 {
 		t.Errorf("%d notes summing to %dc on April's invoice, want 2 summing to 3000c (the 2500c note and a 500c relief)", n, sum)
+	}
+	if got := r.auditInt(domain.AuditActionSubscriptionItemUpdated, "uncredited_cents"); got != 1000 {
+		t.Errorf("swap audit uncredited_cents = %d, want 1000 (1500c owed, 500c fit)", got)
 	}
 }
 

@@ -110,3 +110,7 @@ threshold scan used the pricing-rules path — `preview.go` even *claimed*
 - API contract change: `flat_amount_cents` / graduated-tier
   `unit_amount_cents` on rating rules are now JSON **strings**. Pre-launch,
   the only consumer is web-v2 (updated in the same change).
+
+## Amendment 2026-10-22
+
+The block usage cap is cut (#973), so decision 3's cap-scaling of rule buckets, and the preview's warning about it, no longer exist.

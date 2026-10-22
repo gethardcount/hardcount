@@ -80,7 +80,7 @@ var requestBodies = map[string]requestBody{
 	"PATCH /v1/plans/{id}":                                              {body: pricing.UpdatePlanInput{}},
 	"POST /v1/rating-rules":                                             {body: pricing.CreateRatingRuleInput{}},
 	"POST /v1/price-overrides":                                          {body: pricing.CreateOverrideInput{}},
-	"POST /v1/subscriptions":                                            {body: subscription.CreateInput{}, undocumented: usageCapCut},
+	"POST /v1/subscriptions":                                            {body: subscription.CreateInput{}},
 	"POST /v1/subscriptions/{id}/schedule-cancel":                       {body: subscription.ScheduleCancelInput{}},
 	"PUT /v1/subscriptions/{id}/pause-collection":                       {body: subscription.PauseCollectionInput{}},
 	"POST /v1/subscriptions/{id}/extend-trial":                          {body: subscription.ExtendTrialInput{}},
@@ -124,13 +124,6 @@ var requestBodies = map[string]requestBody{
 // dunningPolicyReadOnly: set-default moves is_default, and an edit clears
 // seeded (ADR-123). Neither is taken from the body.
 var dunningPolicyReadOnly = readOnly("id", "tenant_id", "is_default", "seeded", "created_at", "updated_at")
-
-// usageCapCut: the usage cap is being cut (#973), so the create body does not
-// document it. Remove this entry when the fields leave CreateInput.
-var usageCapCut = map[string]string{
-	"usage_cap_units": "Being cut with the usage cap (#973).",
-	"overage_action":  "Being cut with the usage cap (#973).",
-}
 
 // providerBody is why the inbound webhook bodies are not checked.
 const providerBody = "The provider defines this body, not Velox. The handler reads the few fields it needs from it."

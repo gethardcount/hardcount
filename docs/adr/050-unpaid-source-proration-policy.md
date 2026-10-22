@@ -1,7 +1,7 @@
 # ADR-050: Unpaid-source proration — block charges, adjust credits
 
 **Date:** 2026-06-08
-**Status:** Accepted (amended 2026-10-12)
+**Status:** Accepted (amended 2026-10-12; amended 2026-10-22: the net-credit side uses the one crediting rule of ADR-118)
 
 ## Summary
 
@@ -185,3 +185,25 @@ proration charge invoice (upgrade).
   `TestUpdateItem_Upgrade_UnpaidSource_Blocked`,
   `TestBillOnPlanSwapImmediate` (unpaid-adjustment subtest),
   `TestBillOnCancel_UnpaidPrebillRelief`
+
+## Amendment 2026-10-22: the net-credit side uses the one crediting rule
+
+The **block** on a net charge is unchanged: it still reads the period's base
+invoice (`FindBaseInvoiceForPeriod`, a routing gate only), and an unpaid base
+refuses the change with `unpaid_invoice_blocks_change`. An in-flight base is
+not unpaid, so the charge goes ahead.
+
+The **net-credit** side no longer reads the base invoice. It credits through
+`domain.AllocateUnusedCredit` over every funding invoice of the period, the
+same rule as a cancel or swap (ADR-118 amendment 2026-10-22): the invoices
+that charged the item, newest first. An unpaid invoice's share is still an
+adjustment that reduces what it asks for, capped at amount due plus credits
+applied (and at total − already credited); a paid invoice's share is still a
+balance credit. Before, an unpaid
+base sent the whole credit to the base invoice alone
+(`settleUnpaidSourceProration`, now deleted), so an upgrade invoice paid
+while an async base charge was processing was never credited when that charge
+later failed. `ProrationDetail.Type` is `"credit"` when any share goes to
+the balance (a paid invoice, or one whose charge is in flight, which normally
+succeeds), otherwise `"adjustment"`. A credit that went both ways records the
+open-invoice part as `adjusted_cents`, and the timeline shows both parts.

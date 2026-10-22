@@ -9,6 +9,6 @@
  */
 
 export type ExtendSubscriptionTrialBody = {
-  /** The new trial end. Must be in the future and after the current `trial_end_at`. */
+  /** The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`. */
   trial_end: string;
 };

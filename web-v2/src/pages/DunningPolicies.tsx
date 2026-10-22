@@ -71,7 +71,7 @@ const INVOICE_ACTION_OPTIONS = [
 function outcomeSentence(sub: string, inv: string): string {
   const subPart =
     sub === 'cancel' ? 'The subscription is canceled.'
-    : sub === 'pause' ? 'Automatic charging stops; the cycle keeps drafting invoices until you resume.'
+    : sub === 'pause' ? 'Invoices created while collection is paused stay drafts, so nothing charges them. Retries already running on other unpaid invoices continue.'
     : 'The subscription keeps billing as normal.'
   const invPart =
     inv === 'mark_uncollectible'

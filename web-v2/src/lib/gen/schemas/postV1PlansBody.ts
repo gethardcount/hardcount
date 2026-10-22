@@ -9,6 +9,7 @@
  */
 import type { PostV1PlansBodyBaseBillTiming } from './postV1PlansBodyBaseBillTiming';
 import type { PostV1PlansBodyBillingInterval } from './postV1PlansBodyBillingInterval';
+import type { PostV1PlansBodyStatus } from './postV1PlansBodyStatus';
 
 export type PostV1PlansBody = {
   code: string;
@@ -23,6 +24,8 @@ export type PostV1PlansBody = {
      */
   base_bill_timing?: PostV1PlansBodyBaseBillTiming;
   meter_ids?: string[];
+  /** Optional. A plan is created active; archive it with PATCH. */
+  status?: PostV1PlansBodyStatus;
   /**
      * Stripe product tax code for the base fee, such as
      * `txcd_10103001`. Empty or omitted means the tenant's

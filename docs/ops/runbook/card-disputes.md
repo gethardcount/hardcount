@@ -78,12 +78,22 @@ The status tells you where the dispute is:
 
    **If the invoice bought prepaid credit**, the customer can still spend
    that credit, and Velox refuses an ordinary credit note on the invoice.
-   Retire the credit with commit relief instead: `POST /v1/credit-notes`
-   with `"commit_relief": {"retire_all": true}` and the relief amount as
-   `out_of_band_amount_cents`. If the amount you send is wrong, the answer
-   names the right one. Relief pays back at most what the customer paid
-   for the unspent credit, so record the rest of the loss in your own
-   books. If the credit is all spent, there is nothing to retire: bill
+   Retire the credit with commit relief instead. The relief amount goes
+   inside `commit_relief`, as `out_of_band_amount_cents`:
+
+   ```http
+   POST /v1/credit-notes
+   {
+     "invoice_id": "inv_…",
+     "reason": "Lost card dispute",
+     "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}
+   }
+   ```
+
+   Sent at the top level, the amount is refused with a 422. If the amount
+   you send is wrong, the answer names the right one. Relief pays back at
+   most what the customer paid for the unspent credit, so record the rest
+   of the loss in your own books. If the credit is all spent, there is nothing to retire: bill
    again or write it off.
 
    **If the invoice also shows "Payment needs review"** (for example, a
