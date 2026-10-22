@@ -177,8 +177,12 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		}
 	case domain.SubAuditCollectionResumed:
 		l.Kind, l.Title = kindCollectionResumed, "Collection resumed"
-		if metaString(meta, "triggered_by") == "schedule" {
+		switch metaString(meta, "triggered_by") {
+		case "schedule":
 			l.Detail = append(l.Detail, activity.Text("On its scheduled date"))
+		case "payment":
+			// Dunning paused it, and the invoice it paused for was paid.
+			l.Detail = append(l.Detail, activity.Text("The overdue invoice was paid"))
 		}
 	case domain.SubAuditTrialEnded:
 		// B2: the three schedule writers mark the row triggered_by=schedule;

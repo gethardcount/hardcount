@@ -1754,6 +1754,24 @@ func (e SubscriptionPauseCollectionBehavior) Valid() bool {
 	}
 }
 
+// Defines values for SubscriptionPauseCollectionSetBy.
+const (
+	Dunning  SubscriptionPauseCollectionSetBy = "dunning"
+	Operator SubscriptionPauseCollectionSetBy = "operator"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionPauseCollectionSetBy enum.
+func (e SubscriptionPauseCollectionSetBy) Valid() bool {
+	switch e {
+	case Dunning:
+		return true
+	case Operator:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubscriptionTimelineEventSource.
 const (
 	Audit SubscriptionTimelineEventSource = "audit"
@@ -5616,7 +5634,7 @@ type RecipeDunningPolicy struct {
 	// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
 	FinalInvoiceAction RecipeDunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
 
-	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
 	FinalSubscriptionAction RecipeDunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
 	IntervalsHours          []int                                      `json:"intervals_hours"`
 	MaxRetries              int                                        `json:"max_retries"`
@@ -5627,7 +5645,7 @@ type RecipeDunningPolicy struct {
 // Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
 type RecipeDunningPolicyFinalInvoiceAction string
 
-// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
 type RecipeDunningPolicyFinalSubscriptionAction string
 
 // RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
@@ -6032,12 +6050,30 @@ type SubscriptionItemThreshold struct {
 type SubscriptionPauseCollection struct {
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
-	// ResumesAt When collection resumes. Absent when the pause lasts until it is cleared.
+	// ResumesAt When collection resumes. Absent when the pause lasts until it is
+	// cleared. On a pause set by dunning, it is when Velox recorded the
+	// payment of the invoice the pause was set for.
 	ResumesAt time.Time `json:"resumes_at,omitempty"`
+
+	// SetBy Who paused collection. `operator`: you, through the API or the
+	// dashboard; the pause lasts until you resume it or until
+	// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+	// A dunning pause lifts by itself once the invoice whose dunning
+	// set it is paid, even if another invoice is still owed. Periods
+	// that ended during the pause keep their draft invoices.
+	SetBy SubscriptionPauseCollectionSetBy `json:"set_by,omitempty"`
 }
 
 // SubscriptionPauseCollectionBehavior defines model for SubscriptionPauseCollection.Behavior.
 type SubscriptionPauseCollectionBehavior string
+
+// SubscriptionPauseCollectionSetBy Who paused collection. `operator`: you, through the API or the
+// dashboard; the pause lasts until you resume it or until
+// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+// A dunning pause lifts by itself once the invoice whose dunning
+// set it is paid, even if another invoice is still owed. Periods
+// that ended during the pause keep their draft invoices.
+type SubscriptionPauseCollectionSetBy string
 
 // SubscriptionTimelineEvent defines model for SubscriptionTimelineEvent.
 type SubscriptionTimelineEvent struct {

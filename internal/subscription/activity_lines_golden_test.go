@@ -387,6 +387,7 @@ func goldenActionCases(t *testing.T) []actionCase {
 		case domain.SubAuditCollectionResumed:
 			add(name+"/on schedule", parent, m(map[string]any{"triggered_by": "schedule", "resumed_at": at(30)}))
 			add(name+"/by hand", parent, m(map[string]any{"triggered_by": "operator"}))
+			add(name+"/by payment", parent, m(map[string]any{"triggered_by": "payment", "resumed_at": at(30)}))
 		case domain.SubAuditTrialEnded:
 			add(name+"/on schedule", parent, m(map[string]any{"triggered_by": "schedule", "trial_end_at": at(0)}))
 			add(name+"/by hand", parent, m(map[string]any{}))

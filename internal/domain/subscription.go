@@ -336,20 +336,37 @@ const (
 	PauseCollectionKeepAsDraft PauseCollectionBehavior = "keep_as_draft"
 )
 
+// PauseCollectionSetBy says who set a collection pause, and so what lifts
+// it. The store derives it from pause_collection_invoice_id: a dunning pause
+// records the invoice whose dunning set it, an operator's pause none.
+type PauseCollectionSetBy string
+
+const (
+	// PauseSetByOperator: the API or the dashboard. The pause lifts when the
+	// operator resumes collection, or at resumes_at.
+	PauseSetByOperator PauseCollectionSetBy = "operator"
+	// PauseSetByDunning: a dunning policy's pause final action. The pause
+	// lifts when the invoice whose dunning set it is paid: that payment
+	// stamps resumes_at, and the scheduled resumer clears it.
+	PauseSetByDunning PauseCollectionSetBy = "dunning"
+)
+
 // PauseCollection is the per-subscription collection-pause state. The
 // pointer-on-Subscription form mirrors Stripe's nullable subscription.
 // pause_collection — nil = running normally, non-nil = paused.
 type PauseCollection struct {
 	Behavior  PauseCollectionBehavior `json:"behavior"`
 	ResumesAt *time.Time              `json:"resumes_at,omitempty"`
+	SetBy     PauseCollectionSetBy    `json:"set_by"`
 }
 
 // InForceAt reports whether collection was paused at instant t. A pause
-// with no resumes_at holds until an operator resumes it; a timed pause
-// holds strictly before resumes_at, so a period ending exactly at
-// resumes_at bills as resumed. The scheduled resumers leave the pause
-// set until every period ending before resumes_at is closed, so this
-// stays answerable from the row.
+// with no resumes_at holds until something sets one or clears the pause:
+// the operator resuming, or, for a dunning pause, the payment of the
+// invoice whose dunning set it. A timed pause holds strictly before
+// resumes_at, so a period ending exactly at resumes_at bills as resumed.
+// The scheduled resumers leave the pause set until every period ending
+// before resumes_at is closed, so this stays answerable from the row.
 func (p *PauseCollection) InForceAt(t time.Time) bool {
 	return p != nil && (p.ResumesAt == nil || p.ResumesAt.After(t))
 }

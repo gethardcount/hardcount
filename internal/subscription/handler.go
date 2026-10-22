@@ -686,12 +686,6 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// triggered_by tag distinguishes operator-driven pauses from
-	// dunning-driven pauses in the Activity timeline. The audit write
-	// itself now happens inside Service.PauseCollection so the dunning
-	// adapter path (which bypasses this handler) also produces an entry.
-	input.TriggeredBy = "operator"
-
 	sub, err := h.svc.PauseCollection(r.Context(), tenantID, id, input)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")

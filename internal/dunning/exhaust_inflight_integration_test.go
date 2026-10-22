@@ -42,11 +42,8 @@ import (
 // subscription ports, the same calls internal/api/adapters.go makes.
 type dunningMovers struct{ svc *subscription.Service }
 
-func (m dunningMovers) PauseCollection(ctx context.Context, tenantID, id string) error {
-	_, err := m.svc.PauseCollection(ctx, tenantID, id, subscription.PauseCollectionInput{
-		Behavior: domain.PauseCollectionKeepAsDraft, TriggeredBy: "dunning",
-	})
-	return err
+func (m dunningMovers) PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (bool, error) {
+	return m.svc.PauseCollectionForDunning(ctx, tenantID, subID, invoiceID)
 }
 
 func (m dunningMovers) Cancel(ctx context.Context, tenantID, id string) error {
