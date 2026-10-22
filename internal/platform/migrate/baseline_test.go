@@ -8,13 +8,12 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// The generated baseline keeps the properties migration 180 relies on.
-// scripts/gen-baseline.sh enforces them when it writes the file; this
-// catches a hand edit. Equality with the v0.8.1 history is the migrations
-// CI job's (scripts/ci/migration-convergence.sh).
+// The baseline keeps the properties migration 180 relies on, so an edit
+// cannot break them. That it applies under each role setup is the
+// migrations CI job's (scripts/ci/migrations-fresh-install.sh).
 func TestBaselineFile(t *testing.T) {
-	if !strings.HasPrefix(baselineSQL, "-- Velox's schema at migration 180") {
-		t.Fatal("the baseline lost its header: regenerate it with scripts/gen-baseline.sh")
+	if !strings.HasPrefix(baselineSQL, "-- The starting schema: migration 180.") {
+		t.Fatal("the baseline lost its header")
 	}
 	var sets int
 	for i, line := range strings.Split(baselineSQL, "\n") {

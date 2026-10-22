@@ -114,10 +114,9 @@ func cleanDB(t *testing.T, pool *sql.DB) {
 	}
 }
 
-// cleanDBErr truncates every public base table except the two migration
-// records (goose_db_version, and schema_migrations on a database taken
-// over from v0.8), in ONE statement, with the table list derived from the
-// catalog at call time.
+// cleanDBErr truncates every public base table except the migration
+// record (goose_db_version), in ONE statement, with the table list derived
+// from the catalog at call time.
 //
 // Why derived, and why no EXCEPTION handler: the previous hand-maintained
 // list was wrapped in `EXCEPTION WHEN undefined_table THEN NULL`. When
@@ -126,7 +125,7 @@ func cleanDB(t *testing.T, pool *sql.DB) {
 // an entire run (commit 9f08e52b, 2026-05-17). A derived list cannot go
 // stale, and an error here is a real error and must surface.
 //
-// Why the records are excluded: truncating them leaves the schema in place
+// Why the record is excluded: truncating it leaves the schema in place
 // with no record; the next process's migrate.Up then runs the baseline on
 // a full database, fails on its first CREATE, and runMigrations drops and
 // rebuilds everything — a slower route to the same silent-no-op class.
@@ -146,7 +145,7 @@ func cleanDBErr(pool *sql.DB) error {
 			  INTO tbls
 			  FROM pg_tables
 			 WHERE schemaname = 'public'
-			   AND tablename NOT IN ('goose_db_version', 'schema_migrations');
+			   AND tablename <> 'goose_db_version';
 			IF tbls IS NULL THEN
 				RAISE EXCEPTION 'testutil.cleanDB: no public tables found — migrations not applied?';
 			END IF;
@@ -204,10 +203,9 @@ func runMigrations(t *testing.T, adminURL string) {
 		if err := migrate.Up(adminURL); err == nil {
 			return
 		}
-		// A state migrate.Up refuses or cannot continue from — a v0.8
-		// record that is not a clean 180, or a version from another
-		// branch, common after switching branches. Drop everything and
-		// retry.
+		// A state migrate.Up cannot continue from — tables with no goose
+		// record, or a version from another branch, common after
+		// switching branches. Drop everything and retry.
 		nukePool, err := sql.Open("pgx", adminURL)
 		if err != nil {
 			migrateErr = err
@@ -226,7 +224,7 @@ func runMigrations(t *testing.T, adminURL string) {
 }
 
 // dropAllTablesErr drops every object in public that no extension owns:
-// tables (both migration records with them), views, sequences, functions,
+// tables (the migration record with them), views, sequences, functions,
 // procedures and types. The baseline creates its functions and types with
 // plain CREATE, so anything left behind would fail it.
 func dropAllTablesErr(pool *sql.DB) error {

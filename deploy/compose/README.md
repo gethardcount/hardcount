@@ -35,7 +35,7 @@ To upgrade a stack built from source, run these in `deploy/compose`. This exampl
    docker compose run --rm velox-api migrate status
    ```
 
-   **You see:** the plan. If it says `refused`, stop and follow the message. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again.
+   **You see:** the plan. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again.
 
 4. Start the new build. It applies the database upgrades as it starts.
 
@@ -101,7 +101,7 @@ If the user does not exist at all, create it with the SQL in [Postgres requireme
 **The API exits with `role can BYPASS row-level security`.**
 `APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `velox_app`.
 
-**The API exits with `migration … failed`, or names `schema_migrations` or `goose_db_version`.**
+**The API exits with `migration … failed`, or names `goose_db_version`.**
 A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop velox-api`. Fix the cause the error names, then start it with `docker compose up -d velox-api`. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
 
 **`/health/ready` shows `scheduler: degraded`.**

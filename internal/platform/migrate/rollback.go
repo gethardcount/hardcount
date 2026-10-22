@@ -33,11 +33,7 @@ func down(ctx context.Context, dsn string, fsys fs.FS, to int64) (int64, error) 
 	if err != nil {
 		return 0, fmt.Errorf("read migration state: %w", err)
 	}
-	d := decide(st)
-	if err := d.refusal(); err != nil {
-		return 0, err
-	}
-	if d.act != actNormal {
+	if decide(st) != actNormal {
 		return 0, ErrNothingToRollBack
 	}
 	p, err := newProvider(db, fsys, true)

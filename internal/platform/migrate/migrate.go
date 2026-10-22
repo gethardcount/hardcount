@@ -1,11 +1,10 @@
 // Package migrate applies Velox's database migrations with goose
 // (ADR-125).
 //
-// Migration 180 is a Go migration: on an empty database it runs the
-// v0.8.1 baseline, and on a v0.8.0, v0.8.1 or v0.8.2 database it takes the
-// golang-migrate record over without changing a table (baseline.go). Files
-// after it live in sql/ as NNNNN_name.sql. A read-only state check runs
-// before every command (state.go).
+// Migration 180 is a Go migration that runs the baseline, the starting
+// schema, on an empty database (baseline.go). Files after it live in sql/
+// as NNNNN_name.sql. Each command first reads goose's record, read-only
+// (state.go).
 package migrate
 
 import (
@@ -39,7 +38,7 @@ const versionTable = "public.goose_db_version"
 
 // How long a command waits for another process's migration lock: goose
 // polls pg_try_advisory_lock every lockWaitPeriod seconds, lockWaitPolls
-// times. 30 minutes, the same total wait as v0.8.1. Polling, not a
+// times: 30 minutes. Polling, not a
 // blocking pg_advisory_lock: a blocked lock statement holds a snapshot,
 // and an index build CONCURRENTLY in the other process waits for every
 // older snapshot, so the two would wait on each other (ADR-125, E3).
@@ -130,10 +129,8 @@ func newProvider(db *sql.DB, fsys fs.FS, locked bool) (*goose.Provider, error) {
 //     a later file that says CREATE TABLE x must put x in public too, not
 //     in a schema the admin user's search_path lists first (its own
 //     schema, under Postgres's default "$user", public), where velox_app
-//     would not find it. readState has already read with the operator's
-//     search_path, which is how it finds a v0.8 install outside public
-//     (M3). The pool is closed after the command, so the setting goes
-//     with it.
+//     would not find it. The pool is closed after the command, so the
+//     setting goes with it.
 //   - goose's "failed to acquire lock" becomes a LockWaitError. goose
 //     wraps the locker's error with %w, so errors.As finds it.
 type migrationSession struct{ lock.SessionLocker }
@@ -171,9 +168,6 @@ func up(ctx context.Context, dsn string, fsys fs.FS) error {
 	st, err := readState(ctx, db)
 	if err != nil {
 		return fmt.Errorf("read migration state: %w", err)
-	}
-	if err := decide(st).refusal(); err != nil {
-		return err
 	}
 	p, err := newProvider(db, fsys, true)
 	if err != nil {
@@ -229,17 +223,10 @@ func upError(err error, fsys fs.FS, st state, applied []*goose.MigrationResult) 
 	if !errors.As(err, &partial) {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
-	var refused *V08Error
-	if errors.As(partial.Err, &refused) {
-		return refused
-	}
 	src := partial.Failed.Source
 	noTx := src.Type == goose.TypeSQL && isNoTxFile(fsys, src.Path)
 	if !noTx && isLockTimeout(partial.Err) {
 		prev := st.gooseVersion()
-		if prev == 0 && st.v08.clean180() {
-			prev = baselineVersion // a v0.8 database migration 180 was taking over
-		}
 		if len(applied) > 0 {
 			prev = applied[len(applied)-1].Source.Version
 		}

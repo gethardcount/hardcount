@@ -443,7 +443,7 @@ func runMigrate() {
 // release's, the state, the files still to apply and whether a migration
 // is running now. It reads only, takes no lock and creates nothing, so it
 // is safe to run with the new release before an upgrade. It exits 0 when
-// it could read the state, refused states included.
+// it could read the state.
 func runMigrateStatus() {
 	p, err := migrate.ReadPlan(loadDSN())
 	if err != nil {
@@ -457,8 +457,7 @@ func runMigrateStatus() {
 // The stub stays for one release, so a script or habit that still runs it
 // gets a pointer instead of "unknown subcommand".
 const migrateForceRemoved = `velox migrate force was removed in v0.9.0: goose leaves no half-applied state, so there is nothing to force.
-After a failed upgrade, fix the cause and run "velox migrate" again. Steps: ` + migrate.RunbookPath + `
-For a dirty v0.8.x database, repair it with Velox v0.8.1: https://github.com/getvelox/velox/blob/v0.8.1/docs/ops/runbook/migration-failed-midway.md`
+After a failed upgrade, fix the cause and run "velox migrate" again. Steps: ` + migrate.RunbookPath
 
 func runMigrateForce() {
 	fmt.Fprintln(os.Stderr, migrateForceRemoved)
@@ -471,7 +470,7 @@ Rolling back in staging or production loses data the newer release wrote. To go 
 
 // runMigrateRollback undoes the latest migration, one step, on a local
 // database: the loop for writing a new migration. Migration 180, the
-// v0.8.1 baseline, never rolls back.
+// baseline, never rolls back.
 func runMigrateRollback() {
 	if config.AppEnv() != "local" {
 		fmt.Fprintln(os.Stderr, rollbackRefused)
@@ -494,7 +493,7 @@ Commands:
   migrate status       Show the upgrade plan: the database's version, the
                        migrations still to apply, and whether one is running
   migrate rollback     Undo the latest migration (APP_ENV=local only; never
-                       below 180, the v0.8.1 baseline)
+                       below 180, the baseline)
   version              Print version
   help                 Show this help
 

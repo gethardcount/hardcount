@@ -37,6 +37,8 @@ A migration is a versioned script that changes the database schema. Velox applie
 
 ## Upgrading
 
+Upgrading from Velox 0.8.x is not supported; install fresh.
+
 Read the changelog notes and take a backup first. Then follow [Upgrade on one VM](production-one-vm.md#upgrade-to-a-new-release) or [Upgrade two or more copies](ops/high-availability.md#upgrades).
 
 ## Settings
