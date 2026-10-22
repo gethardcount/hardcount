@@ -56,6 +56,17 @@ func TestClassify_AmountBelowMinimum(t *testing.T) {
 			if !strings.Contains(att.Detail, "next invoice") {
 				t.Errorf("detail %q does not say how to bill it on the next invoice", att.Detail)
 			}
+			// Collect payment applies a credit balance before it charges, so
+			// it can still pay the invoice: the detail says so.
+			if !strings.Contains(att.Detail, "credit balance") {
+				t.Errorf("detail %q does not say Collect payment applies a credit balance", att.Detail)
+			}
+			// The minimum depends on the account's settlement currency, so
+			// Velox names no figure; Stripe's sentence in provider_response
+			// does.
+			if strings.Contains(att.Detail, "$0.50") {
+				t.Errorf("detail %q names a minimum; it is true only for an account that settles in USD", att.Detail)
+			}
 		})
 	}
 

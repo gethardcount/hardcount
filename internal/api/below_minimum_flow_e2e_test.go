@@ -119,9 +119,14 @@ func (s *minChargeStripe) count(call string) int {
 //     open and unpaid, the auto-charge queue drops it, no payment recovery
 //     starts, the customer gets no email, and the notice tells the operator
 //     what to do;
-//   - Collect payment gets the same answer and changes nothing;
-//   - the hosted page offers no Pay button, and a Pay click Stripe refuses
-//     frees the payment page at once instead of holding charges for an hour;
+//   - Collect payment answers with the refusal without asking Stripe again,
+//     and pays the invoice from a credit balance that covers it;
+//   - the payment timeline shows the refusal once, as a warning, not as a
+//     failed payment;
+//   - the hosted page offers no Pay button; for a customer with no card a
+//     Pay click is the first charge, and Stripe's refusal of it is recorded
+//     like a charge's: the payment page is freed at once instead of holding
+//     charges for an hour, and the no-card payment recovery ends (B);
 //   - a payment recovery already running ends when its charge gets this
 //     answer, without a warning email to the customer: started with no card
 //     and ended by the auto-charge sweep once a card is saved (C), or
@@ -250,18 +255,37 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		t.Errorf("payment-failure emails for invoice A: %d, want none", n)
 	}
 
-	// Collect payment asks Stripe again and gets the same answer: a 409 the
-	// dashboard can name, and nothing else changes.
+	// Collect payment with no credit to apply answers with the refusal, a
+	// 409 the dashboard can name, without asking Stripe again: Stripe already
+	// answered for this amount, and an open invoice's amount only goes down.
 	collect := call("POST", "/v1/invoices/"+invA+"/collect", flowReq{})
 	if collect.status != 409 || collect.errCode() != "amount_below_minimum" {
 		t.Errorf("collect: status %d code %q, want 409 amount_below_minimum; body %s", collect.status, collect.errCode(), collect.raw)
 	}
-	if n := stripe.count("POST /v1/payment_intents"); n != 2 {
-		t.Errorf("charges sent after Collect: %d, want 2", n)
+	if n := stripe.count("POST /v1/payment_intents"); n != 1 {
+		t.Errorf("charges sent after Collect: %d, want 1 (Collect does not ask Stripe again)", n)
 	}
 	belowMinimum("after collect", getInvoice(invA))
 	if runs := runsOf(invA); len(runs) != 0 {
 		t.Errorf("payment recovery runs on invoice A after Collect: %v, want none", runs)
+	}
+	// The payment timeline shows the refusal once, as a warning that nothing
+	// was charged, never as a failed payment.
+	lineKinds := func(id string) map[string][]map[string]any {
+		t.Helper()
+		out := map[string][]map[string]any{}
+		for _, e := range flowList(call("GET", "/v1/invoices/"+id+"/payment-timeline", flowReq{}).want(t, 200, "payment timeline").body, "events") {
+			l := flowObj(e, "line")
+			out[flowStr(l, "kind")] = append(out[flowStr(l, "kind")], l)
+		}
+		return out
+	}
+	kindsA := lineKinds(invA)
+	if rows := kindsA["payment.failed"]; len(rows) != 0 {
+		t.Errorf("invoice A timeline shows %d 'Payment failed' rows, want none: %v", len(rows), rows)
+	}
+	if rows := kindsA["payment.below_minimum"]; len(rows) != 1 || flowStr(rows[0], "tone") != "warning" {
+		t.Errorf("invoice A timeline below-minimum rows %v, want exactly one warning row", rows)
 	}
 
 	// The hosted page has no Pay button for it, and a direct POST is refused
@@ -283,12 +307,31 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		t.Errorf("hosted Pay on A asked Stripe for a session (%d calls, was %d)", n, sessionsBefore)
 	}
 
+	// With a credit balance, Collect payment applies it, and a credit that
+	// covers the amount pays the invoice with no charge.
+	call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
+		"customer_id": custA, "amount_cents": 50, "description": "Goodwill",
+	}}).want(t, 201, "grant credit A")
+	call("POST", "/v1/invoices/"+invA+"/collect", flowReq{}).want(t, 200, "collect A with credit")
+	if inv := getInvoice(invA); flowStr(inv, "status") != "paid" || flowInt(inv, "amount_due_cents") != 0 {
+		t.Errorf("invoice A after Collect with credit: status %v amount due %v, want paid and 0", inv["status"], inv["amount_due_cents"])
+	}
+	if n := stripe.count("POST /v1/payment_intents"); n != 1 {
+		t.Errorf("charges sent after Collect with credit: %d, want 1 (the credit paid it)", n)
+	}
+
 	// B: a customer with no card. Velox has never charged the invoice, so
 	// only the hosted Pay click learns the amount is too small. Stripe
-	// refuses the session; the page says why, and the claim is released, so
-	// nothing holds charges on the invoice and a second click asks again.
+	// refuses the session, and Velox records the refusal as it does for a
+	// charge: the claim is released, the invoice reads as below the minimum,
+	// the page has no Pay button, and the payment recovery the card-less
+	// finalize started ends, so no reminder or final action follows. A
+	// second click is refused before Stripe is asked.
 	custB := newCustomer("b", "")
 	invB := newInvoice(custB, "One-off")
+	if runs := runsOf(invB); len(runs) != 1 || flowStr(runs[0], "state") != "active" {
+		t.Fatalf("invoice B runs after a card-less finalize: %v, want one active run", runs)
+	}
 	tokenB := flowStr(getInvoice(invB), "public_token")
 	for i := 1; i <= 2; i++ {
 		res := flowDo(t, ts, "POST", "/v1/public/invoices/"+tokenB+"/checkout", flowReq{})
@@ -298,12 +341,20 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		if n := flowCount(t, db, `SELECT count(*) FROM checkout_sessions WHERE invoice_id = $1 AND status = 'open'`, invB); n != 0 {
 			t.Errorf("click %d: %d open payment-page claims on invoice B, want 0", i, n)
 		}
-		if code := flowStr(getInvoice(invB), "attention", "code"); code == "payment.page_open" {
-			t.Errorf("click %d: invoice B reads as having its payment page open", i)
-		}
+		belowMinimum(fmt.Sprintf("invoice B after Pay click %d", i), getInvoice(invB))
 	}
-	if n := stripe.count("POST /v1/checkout/sessions") - sessionsBefore; n != 2 {
-		t.Errorf("payment-mode sessions asked of Stripe for B: %d, want 2 (one per click)", n)
+	if n := stripe.count("POST /v1/checkout/sessions") - sessionsBefore; n != 1 {
+		t.Errorf("payment-mode sessions asked of Stripe for B: %d, want 1 (the second click is refused before Stripe)", n)
+	}
+	pageB := flowDo(t, ts, "GET", "/v1/public/invoices/"+tokenB, flowReq{}).want(t, 200, "hosted page B").body
+	if pageB["pay_enabled"] != false || flowStr(pageB, "pay_unavailable_reason") != "amount_below_minimum" {
+		t.Errorf("hosted page B: pay_enabled=%v reason=%q, want false and amount_below_minimum", pageB["pay_enabled"], flowStr(pageB, "pay_unavailable_reason"))
+	}
+	if runs := runsOf(invB); len(runs) != 1 || flowStr(runs[0], "state") != "resolved" || flowStr(runs[0], "resolution") != "amount_below_minimum" {
+		t.Errorf("invoice B run after the refused Pay click: %v, want resolved with amount_below_minimum", runs)
+	}
+	if n := customerEmails(invB); n != 0 {
+		t.Errorf("payment-failure emails for invoice B: %d, want none", n)
 	}
 
 	// C: payment recovery already running. The customer on a test clock had
@@ -380,5 +431,19 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	}
 	if n := flowCount(t, db, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = 'dunning_warning'`, tenantID) - warningsBefore; n != 0 {
 		t.Errorf("dunning warning emails on D's advance: %d, want none", n)
+	}
+	// The retry's own row tells the refusal; the charge is not shown again
+	// as a failed payment beside it.
+	kindsD := lineKinds(idD)
+	if rows := kindsD["payment_recovery.retry_refused"]; len(rows) != 1 {
+		t.Errorf("invoice D timeline retry-refused rows %v, want one", rows)
+	}
+	if rows := kindsD["payment.below_minimum"]; len(rows) != 0 {
+		t.Errorf("invoice D timeline shows the retry's refusal again as its own row: %v", rows)
+	}
+	for _, l := range kindsD["payment.failed"] {
+		if strings.Contains(flowStr(l, "problem"), "at least $0.50") {
+			t.Errorf("invoice D timeline shows the below-minimum refusal as a failed payment: %v", l)
+		}
 	}
 }
