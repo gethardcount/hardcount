@@ -40,8 +40,16 @@ func TestClassify(t *testing.T) {
 	may := OpenPeriod{Start: opMay, End: opJun, Floor: opAt(opApr.AddDate(0, -1, 0)), Meters: meters("m"), NextMeters: meters("m")}
 	withTrial := may
 	withTrial.Floor = opAt(opApr.AddDate(0, 0, 14))
+	// A threshold fire billed May 1 to 20, and its invoice is paid.
 	watermark := may
 	watermark.BilledThrough = opAt(opMay.AddDate(0, 0, 19))
+	watermark.PaidThrough = watermark.BilledThrough
+	// The same fire, its invoice not paid yet.
+	unpaid := watermark
+	unpaid.PaidThrough = nil
+	// Two fires, May 1 to 10 paid and May 10 to 20 not paid yet.
+	partPaid := watermark
+	partPaid.PaidThrough = opAt(opMay.AddDate(0, 0, 9))
 	ending := may
 	ending.NextMeters = nil
 	pendingDrop := may
@@ -75,6 +83,15 @@ func TestClassify(t *testing.T) {
 		{"before the watermark, max (deferred)", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{watermark}, max, InOpen},
 		{"before the watermark, last_ever", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{watermark}, MeterBuckets{Additive: true, LastEver: true}, InOpen},
 		{"after the watermark", opMay.AddDate(0, 0, 25), "m", []OpenPeriod{watermark}, sum, InOpen},
+		// Review finding 1 on #1350: an unpaid threshold invoice can still be
+		// voided or written off, and then the close bills from the start.
+		{"before an unpaid watermark, sum", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{unpaid}, sum, Unsettled},
+		{"before an unpaid watermark, max", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{unpaid}, max, InOpen},
+		{"before the paid fire of two", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{partPaid}, sum, AfterClose},
+		{"after the paid fire, before the unpaid one", opMay.AddDate(0, 0, 12), "m", []OpenPeriod{partPaid}, sum, Unsettled},
+		{"after both fires", opMay.AddDate(0, 0, 22), "m", []OpenPeriod{partPaid}, sum, InOpen},
+		{"before the watermark, meter not priced", opMay.AddDate(0, 0, 5), "x", []OpenPeriod{watermark}, sum, NotOnPlan},
+		{"unsettled here, open in another subscription", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{unpaid, {Start: opMay, End: opJun, Floor: opAt(opApr), Meters: meters("m")}}, sum, InOpen},
 		{"grace: next period", opJun.Add(10 * time.Minute), "m", []OpenPeriod{may}, sum, InOpen},
 		{"grace: ends at the period end", opJun.Add(10 * time.Minute), "m", []OpenPeriod{ending}, sum, Outside},
 		{"grace: next plan drops the meter", opJun.Add(10 * time.Minute), "m", []OpenPeriod{pendingDrop}, sum, NotOnPlan},
@@ -112,42 +129,47 @@ func TestOpenPeriodOf(t *testing.T) {
 		Status: domain.SubscriptionActive, StartedAt: opAt(opApr), CurrentBillingPeriodStart: opAt(opMay), CurrentBillingPeriodEnd: opAt(opJun),
 		Items: []domain.SubscriptionItem{{PlanID: "pA"}},
 	}
-	p, ok := OpenPeriodOf(base, plans, nil)
+	p, ok := OpenPeriodOf(base, plans, ThresholdWatermark{})
 	if !ok || !p.Meters["m"] || !p.NextMeters["m"] || p.Floor == nil || !p.Floor.Equal(opApr) {
 		t.Fatalf("plain: %+v %v", p, ok)
 	}
 
 	pending := base
 	pending.Items = []domain.SubscriptionItem{{PlanID: "pA", PendingPlanID: "pB", PendingPlanEffectiveAt: opAt(opJun)}}
-	if p, _ := OpenPeriodOf(pending, plans, nil); !p.Meters["m"] || p.NextMeters["m"] || !p.NextMeters["n"] {
+	if p, _ := OpenPeriodOf(pending, plans, ThresholdWatermark{}); !p.Meters["m"] || p.NextMeters["m"] || !p.NextMeters["n"] {
 		t.Errorf("pending change at the end: meters %v next %v, want m now and n next", p.Meters, p.NextMeters)
 	}
 	later := base
 	later.Items = []domain.SubscriptionItem{{PlanID: "pA", PendingPlanID: "pB", PendingPlanEffectiveAt: opAt(opJun.AddDate(0, 1, 0))}}
-	if p, _ := OpenPeriodOf(later, plans, nil); !p.NextMeters["m"] || p.NextMeters["n"] {
+	if p, _ := OpenPeriodOf(later, plans, ThresholdWatermark{}); !p.NextMeters["m"] || p.NextMeters["n"] {
 		t.Errorf("pending change after the end: next %v, want m", p.NextMeters)
 	}
 
 	atEnd := base
 	atEnd.CancelAtPeriodEnd = true
-	if p, _ := OpenPeriodOf(atEnd, plans, nil); p.NextMeters != nil {
+	if p, _ := OpenPeriodOf(atEnd, plans, ThresholdWatermark{}); p.NextMeters != nil {
 		t.Errorf("cancel at period end: next %v, want nil", p.NextMeters)
 	}
 	cancelAt := base
 	cancelAt.CancelAt = opAt(opJun)
-	if p, _ := OpenPeriodOf(cancelAt, plans, nil); p.NextMeters != nil {
+	if p, _ := OpenPeriodOf(cancelAt, plans, ThresholdWatermark{}); p.NextMeters != nil {
 		t.Errorf("cancel_at at the end: next %v, want nil", p.NextMeters)
 	}
 
 	trial := base
 	trial.TrialEndAt = opAt(opApr.AddDate(0, 0, 14))
-	if p, _ := OpenPeriodOf(trial, plans, nil); p.Floor == nil || !p.Floor.Equal(*trial.TrialEndAt) {
+	if p, _ := OpenPeriodOf(trial, plans, ThresholdWatermark{}); p.Floor == nil || !p.Floor.Equal(*trial.TrialEndAt) {
 		t.Errorf("trial: floor %v, want the trial end", p.Floor)
+	}
+
+	wm := ThresholdWatermark{BilledThrough: opAt(opMay.AddDate(0, 0, 19)), PaidThrough: opAt(opMay.AddDate(0, 0, 9))}
+	if p, _ := OpenPeriodOf(base, plans, wm); p.BilledThrough != wm.BilledThrough || p.PaidThrough != wm.PaidThrough {
+		t.Errorf("watermarks: %+v, want %+v", p.ThresholdWatermark, wm)
 	}
 
 	canceled := base
 	canceled.Status = domain.SubscriptionCanceled
-	if _, ok := OpenPeriodOf(canceled, plans, nil); ok {
+	if _, ok := OpenPeriodOf(canceled, plans, ThresholdWatermark{}); ok {
 		t.Errorf("a canceled subscription has no open period")
 	}
 }

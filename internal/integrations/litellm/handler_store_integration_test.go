@@ -116,7 +116,7 @@ func TestSpend_HeldThenReleasedOnce_RealStore(t *testing.T) {
 	res, err := svc.Release(ctx, tenantID, usage.ReleaseInput{
 		ExternalCustomerID: "cus_not_yet", CustomerID: customerID,
 		MeterIDs: map[string]string{MeterKeyTokens: meterID},
-	}, nil, nil)
+	})
 	if err != nil {
 		t.Fatalf("release: %v", err)
 	}

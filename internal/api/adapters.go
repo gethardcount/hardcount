@@ -1702,13 +1702,15 @@ type usageMeterReader interface {
 }
 
 type usageThresholdReader interface {
-	ThresholdBilledThrough(ctx context.Context, sub domain.Subscription) (*time.Time, error)
+	ThresholdWatermarks(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (billedThrough, paidThrough *time.Time, err error)
 }
 
 // OpenPeriods reads every active and trialing subscription of the customer
 // with the meters of its plans, current and pending (one transaction), and
-// the threshold watermark of those with a threshold. A deleted plan prices
-// nothing.
+// the threshold watermarks of each one's current period. The watermarks
+// are read whether or not the subscription still has thresholds: the close
+// keys them on the period's threshold invoices, not on the setting. A
+// deleted plan prices nothing.
 func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
 	subs, planMeters, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
 	if err != nil {
@@ -1720,15 +1722,14 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 	}
 	out := make([]usage.OpenPeriod, 0, len(subs))
 	for _, sub := range subs {
-		var billedThrough *time.Time
-		if sub.BillingThresholds != nil {
-			bt, err := a.thresholds.ThresholdBilledThrough(ctx, sub)
+		var wm usage.ThresholdWatermark
+		if sub.CurrentBillingPeriodStart != nil && sub.CurrentBillingPeriodEnd != nil {
+			wm.BilledThrough, wm.PaidThrough, err = a.thresholds.ThresholdWatermarks(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
 			if err != nil {
-				return nil, fmt.Errorf("threshold watermark of %s: %w", sub.ID, err)
+				return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
 			}
-			billedThrough = bt
 		}
-		if p, ok := usage.OpenPeriodOf(sub, plans, billedThrough); ok {
+		if p, ok := usage.OpenPeriodOf(sub, plans, wm); ok {
 			out = append(out, p)
 		}
 	}

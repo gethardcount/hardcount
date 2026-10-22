@@ -53,8 +53,6 @@ type Handler struct {
 	summaryCustomers CustomerLookup
 	// Held-usage routes only (#1044); see SetHeldDeps.
 	heldCustomers CustomerLookup
-	heldSubs      SubscriptionLister
-	heldPlans     PlanReader
 }
 
 // SetMeterLister wires the meter list the aggregate endpoint reads modes

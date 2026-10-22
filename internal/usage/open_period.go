@@ -26,6 +26,12 @@ import (
 // the read shows the window frozen, it was frozen before this event existed,
 // and nothing counted it. A close that commits between the read and the
 // write is not seen: that event goes unflagged, never wrongly flagged.
+//
+// A threshold invoice that is not paid can still be voided or written off,
+// and then the period's close bills usage from the period start again
+// (#243). So only a paid threshold invoice's watermark flags: a paid invoice
+// can be neither voided nor written off. An event before the watermark of a
+// threshold invoice still unpaid is Unsettled and not flagged.
 
 // BillingStatusAfterClose is UsageEvent.BillingStatus for an event that
 // arrived after its period was invoiced.
@@ -46,6 +52,10 @@ const (
 	// NotOnPlan: the time falls in a subscription's open period, but none of
 	// its plans prices the meter.
 	NotOnPlan
+	// Unsettled: a threshold invoice that is not paid billed the row's time.
+	// If that invoice is paid, no invoice counts the row. If it is voided or
+	// written off before the period closes, the period's invoice counts it.
+	Unsettled
 	// InOpen: an open period's invoice counts it.
 	InOpen
 )
@@ -65,10 +75,25 @@ type OpenPeriod struct {
 	// change pending at or before End. Nil when the subscription ends at End
 	// (cancel at period end, or cancel_at at or before End).
 	NextMeters map[string]bool
-	// BilledThrough is the threshold watermark: a threshold fire with no
-	// reset billed the period's sum and count buckets up to it. Nil when
-	// none fired.
+	// BilledThrough and PaidThrough are the subscription's threshold
+	// watermarks (ThresholdWatermark).
+	ThresholdWatermark
+}
+
+// ThresholdWatermark is how far the threshold fires (with no reset) of a
+// subscription's current period billed its sum and count buckets. Read
+// from the period's threshold invoices for every subscription, whether or
+// not it still has thresholds: the close keys the watermark on the
+// invoices, not on the setting.
+type ThresholdWatermark struct {
+	// BilledThrough is the close's watermark: the latest end of a threshold
+	// invoice that is not voided or written off. The close bills sum and
+	// count buckets from it. Nil when none.
 	BilledThrough *time.Time
+	// PaidThrough is the latest end of a paid threshold invoice, at or
+	// before BilledThrough. A paid invoice can be neither voided nor written
+	// off, so the close never bills those buckets before it. Nil when none.
+	PaidThrough *time.Time
 }
 
 // MeterBuckets is what classify needs from the meter itself.
@@ -88,7 +113,7 @@ type MeterBuckets struct {
 // items and of their pending changes; a plan missing from it prices
 // nothing. ok is false when sub is not active or trialing or has no current
 // period.
-func OpenPeriodOf(sub domain.Subscription, plans map[string]domain.Plan, billedThrough *time.Time) (OpenPeriod, bool) {
+func OpenPeriodOf(sub domain.Subscription, plans map[string]domain.Plan, wm ThresholdWatermark) (OpenPeriod, bool) {
 	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
 		return OpenPeriod{}, false
 	}
@@ -96,10 +121,10 @@ func OpenPeriodOf(sub domain.Subscription, plans map[string]domain.Plan, billedT
 		return OpenPeriod{}, false
 	}
 	p := OpenPeriod{
-		Start:         *sub.CurrentBillingPeriodStart,
-		End:           *sub.CurrentBillingPeriodEnd,
-		Meters:        map[string]bool{},
-		BilledThrough: billedThrough,
+		Start:              *sub.CurrentBillingPeriodStart,
+		End:                *sub.CurrentBillingPeriodEnd,
+		Meters:             map[string]bool{},
+		ThresholdWatermark: wm,
 	}
 	switch {
 	case sub.TrialEndAt != nil:
@@ -154,8 +179,9 @@ func BucketsOf(meter domain.Meter, rules []domain.MeterPricingRule) MeterBuckets
 //     the next period counts it if the subscription continues and prices the
 //     meter from End on. Never AfterClose: the next close bills it.
 //   - Start <= at < End: InOpen if a current plan prices the meter, else
-//     NotOnPlan. Before a threshold watermark it is AfterClose, when the
-//     meter is additive and has no last_ever rule and at is past the floor.
+//     NotOnPlan. When the meter is additive and has no last_ever rule and
+//     at is past the floor: before PaidThrough it is AfterClose, and before
+//     BilledThrough (a threshold invoice not paid yet) it is Unsettled.
 //   - at < Start: AfterClose when a current plan prices the meter, at is at
 //     or past the floor, and the meter has no last_ever rule. Else Outside.
 //
@@ -195,7 +221,10 @@ func classify(at time.Time, meterID string, periods []OpenPeriod, meter func() (
 						return Outside, err
 					}
 					if b.Additive && !b.LastEver {
-						c = AfterClose
+						c = Unsettled
+						if p.PaidThrough != nil && at.Before(*p.PaidThrough) {
+							c = AfterClose
+						}
 					}
 				}
 			}
@@ -215,9 +244,9 @@ func classify(at time.Time, meterID string, periods []OpenPeriod, meter func() (
 	return best, nil
 }
 
-// OpenPeriodReader reads what ingest classifies against. Implemented in
-// internal/api from the subscription store, the pricing service and the
-// billing engine (the threshold watermark).
+// OpenPeriodReader reads what ingest and the held-usage release classify
+// against. Implemented in internal/api from the subscription store, the
+// pricing service and the invoice store (the threshold watermarks).
 type OpenPeriodReader interface {
 	// OpenPeriods returns the OpenPeriod of every active and trialing
 	// subscription of the customer.
