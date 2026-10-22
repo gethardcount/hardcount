@@ -10,8 +10,9 @@ your first invoice](../first-invoice.md).
 ## Before you start
 
 Set these up before LiteLLM sends its first call. Usage that arrives
-before the customer or the meter exists is held, and once released it is
-usually not invoiced, because it predates the subscription
+before the customer or the meter exists is held. Once released, usage for a
+customer created after the calls is usually not invoiced, because it
+predates the subscription
 ([held usage](#usage-for-a-customer-velox-does-not-know-yet)).
 
 1. **Velox running, and a secret API key.** A publishable key cannot send

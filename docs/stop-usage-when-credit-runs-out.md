@@ -118,9 +118,11 @@ customer again straight after a top-up and update your cache.
 - Each subscription counted over its own billing period, when a customer has
   more than one.
 
-**A grant has passed its expiry date.** It is not counted, even before the
-expiry run writes it to the ledger, so `balance_cents` here can be lower than
-`GET /v1/credits/balance/{customer_id}`.
+**A grant that has passed its expiry date is not counted**, even before the
+expiry run writes the expiry to the ledger. That run waits while a close or
+a period invoice that ends before the expiry can still draw on the grant.
+Until that close or invoice is settled, `balance_cents` here is lower than
+the balance `GET /v1/credits/balance/{customer_id}` returns.
 
 ## What the figure leaves out
 
@@ -140,6 +142,15 @@ has left, because these are not subtracted:
   until its expiry date. If the period's invoice is issued after that date,
   the invoice cannot draw on it.
 
+It can read lower than the truth in one case:
+
+- **A period has ended and its invoice is not built yet.** This lasts
+  through `INVOICE_GRACE_PERIOD`, or longer while a failed close waits for
+  its next attempt. The estimate subtracts that period's usage but no
+  longer counts credit that expired after the period ended. That period's
+  invoice still draws on that credit
+  ([ADR-071](adr/071-credit-expiry-retires-the-block.md)).
+
 If a customer is billed in more than one currency, the amounts are added
 together as plain cents.
 
@@ -152,7 +163,7 @@ rather than at zero.
 <details>
 <summary><strong>Edge cases</strong></summary>
 
-Four cases are handled so that nothing is counted twice or wrongly:
+Three cases are handled so that nothing is counted twice or wrongly:
 
 - **A billing threshold invoiced part of the period early.** That usage has
   been paid for from credit already, so only the usage since that invoice is
@@ -166,21 +177,6 @@ Four cases are handled so that nothing is counted twice or wrongly:
 - **The plan changed in the middle of the period.** Each meter is counted for
   the time a plan that carries it was on the subscription, as the invoice
   bills it. Usage on the old plan's meter before the change still counts.
-- **A grant has passed its expiry date.** It is no longer counted, even if
-  the expiry run has not yet written the expiry to the ledger. The run
-  waits while a close or a period invoice that ends before the expiry can
-  still draw on the grant. Until a close or an uncollected period invoice
-  that ends before the expiry is settled, `balance_cents` here is lower than
-  the balance `GET /v1/credits/balance/{customer_id}` returns.
-
-It can read lower than the truth in one case:
-
-- **A period has ended and its invoice is not built yet.** This lasts
-  through `INVOICE_GRACE_PERIOD`, or longer while a failed close waits for
-  its next attempt. The estimate subtracts that period's usage but no
-  longer counts credit that expired after the period ended. That period's
-  invoice still draws on that credit
-  ([ADR-071](adr/071-credit-expiry-retires-the-block.md)).
 
 </details>
 

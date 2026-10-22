@@ -43,9 +43,10 @@ project is ahead, [How Velox compares](comparison.md) says so.
    retries, credit notes, refunds, invoice previews and the audit log are
    all in it.
 
-5. **They are heavy to run yourself.** Some default setups run nine or
-   eleven services, including Kafka and ClickHouse
-   ([service counts](comparison.md)).
+5. **They are heavy to run yourself.** Flexprice's default setup runs nine
+   services, including Kafka and ClickHouse
+   ([docker-compose.yml](https://github.com/flexprice/flexprice/blob/1ede2d98c81e9e565c087cc373aaf18bfd6d8d4f/docker-compose.yml)).
+   OpenMeter's runs eleven ([service counts](comparison.md)).
    **Velox instead:** one server program plus Postgres and Redis, with a web
    dashboard.
 

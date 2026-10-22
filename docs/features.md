@@ -11,7 +11,7 @@ labels on a usage event, such as `model` or `token_type`.
 | Feature | What it does for you | Learn more |
 |---|---|---|
 | Meters with dimensions | One meter can have many prices. Each usage event carries labels, such as `model`, that pick its price. So one Tokens meter prices every model and token type. | [How Velox works](how-velox-works.md) |
-| Pricing recipes | One call creates a meter, prices and a plan for a common pricing shape (`anthropic_style`, `openai_style` or `replicate_style`), plus a payment-retry policy and a webhook endpoint that stays off until you set its URL. | [AI pricing](ai-pricing.md) |
+| Pricing recipes | One call creates a meter, prices and a plan for a common pricing shape: `anthropic_style`, `openai_style` or `replicate_style`. It also adds a payment-retry policy, and a webhook endpoint that stays off until you give it your URL and turn it on. | [AI pricing](ai-pricing.md) |
 | LiteLLM | Point LiteLLM's spend callback at Velox, and each AI call becomes token usage, labelled with `model` and `provider`. A resent call is counted once. No SDK (client library) is needed. | [LiteLLM guide](integrations/litellm.md) |
 | Prepaid commits | Sell "pay $9k, get $10k of usage" as a line on a one-off invoice. The credit is added when that invoice is finalized, in the same step and before it is paid. Each later invoice uses it up when Velox collects it, free (promotional) credit first. | [AI pricing](ai-pricing.md#sell-prepaid-credit-a-prepaid-commit) |
 | Margin per customer | Enter what each AI provider charges you per token, once. Velox then shows each customer's usage revenue next to what it cost you. Covers usage only: base fees, credits and taxes are left out. | [AI pricing](ai-pricing.md#see-your-margin) |
@@ -59,11 +59,11 @@ starts a new one. It is checked on each billing run.
 |---|---|---|
 | Safe retries | Send an `Idempotency-Key` header on a POST, PUT or PATCH, and a retry within 24 hours gets the first answer instead of running again. A server error is saved too (except on usage routes, where each event's own key stops double counting), so a retry cannot repeat a charge that may have gone through. | [The Velox API](api-surface.md#sending-usage-safely) |
 | Careful card charges | When Velox cannot tell whether a charge went through, it asks Stripe instead of charging again. Only one charge runs on an invoice at a time, and a second payment that gets through is flagged for you to refund. | [Card payment failure handling](payments.md) |
-| Webhooks that are not lost | Every webhook is queued in the database and retried. The events marked *always sent* are saved with the change, so a crash cannot drop them. | [Webhooks](webhooks.md#three-rules-for-your-receiver) |
+| Webhooks kept in the database | Every webhook is queued in the database and retried. The events marked *always sent* are saved with the change, so a crash cannot drop them. A crash just after a change can drop one of the others. | [Webhooks](webhooks.md#three-rules-for-your-receiver) |
 | Signed webhooks | Every webhook is signed. When you rotate the secret, both the old and the new secret sign each message for 72 hours. | [Webhooks](webhooks.md#verifying-signatures) |
 | Live webhook log | Watch webhooks as they go out, with every delivery attempt. | [Webhooks](webhooks.md#retries) |
 | [Test clocks](glossary.md#testing-with-simulated-time) | Move a test customer's clock forward, and months of billing happen in seconds. | [First invoice](first-invoice.md) |
-| Emails are not lost | Customer emails wait in a queue in the database, and a send that fails is retried. | [Email setup](ops/email-setup.md) |
+| Emails kept in a queue | Customer emails wait in a queue in the database, and a send that fails is retried. Payment receipts, failed-payment and dunning emails are saved with the change. Others, such as the invoice email, are queued just after it, so a crash at that moment can drop one. | [Email setup](ops/email-setup.md) |
 
 Everything shipped, by date: [CHANGELOG](../CHANGELOG.md).
 

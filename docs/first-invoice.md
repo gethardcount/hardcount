@@ -174,10 +174,10 @@ variable into the JSON for you.
        -d @-
    ```
 
-   **You see:** `{"accepted":2,"deduplicated":0,"held":0,"skipped":0,"cache_hits":0,"after_close":0}`. That is two
+   **You see:** `"accepted":2`, and every other count is 0. That is two
    new events: input and output.
 
-   Did 5a first? Then you see `{"accepted":0,"deduplicated":2,"held":0,"skipped":0,"cache_hits":0,"after_close":0}`.
+   Did 5a first? Then you see `"accepted":0,"deduplicated":2`.
    Both ways use the same idempotency keys, so Velox counts the tokens once.
 
    In the dashboard, the **Usage** page lists both events.
