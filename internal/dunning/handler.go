@@ -21,13 +21,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// PaymentCanceler stops an invoice from being payable at Stripe when a
-// dunning resolution voids it (expire live Checkout sessions, then cancel the
-// PI where Stripe allows). Satisfied by *payment.Stripe.
-type PaymentCanceler interface {
-	StopCollection(ctx context.Context, tenantID string, inv domain.Invoice)
-}
-
 // InvoiceVoider routes dunning resolution outcomes through the invoice
 // SERVICE (not the raw store), so they inherit the service's status guards,
 // the in-flight payment guard, the tax reversal, and the single-writer
@@ -57,7 +50,6 @@ type EventLiner interface {
 type Handler struct {
 	svc           *Service
 	invoiceVoider InvoiceVoider
-	paymentCancel PaymentCanceler
 	auditLogger   AuditWriter
 	resolver      clock.Resolver
 	eventLiner    EventLiner
@@ -97,20 +89,8 @@ func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
 // after the dunning handler), mirroring SetInvoiceUncollectibleMarker.
 func (h *Handler) SetInvoiceVoider(v InvoiceVoider) { h.invoiceVoider = v }
 
-// SetPaymentCanceler wires the collection-stop seam (lazy: the payment
-// service is built after this handler).
-func (h *Handler) SetPaymentCanceler(p PaymentCanceler) { h.paymentCancel = p }
-
-type HandlerDeps struct {
-	PaymentCancel PaymentCanceler
-}
-
-func NewHandler(svc *Service, deps ...HandlerDeps) *Handler {
-	h := &Handler{svc: svc}
-	if len(deps) > 0 {
-		h.paymentCancel = deps[0].PaymentCancel
-	}
-	return h
+func NewHandler(svc *Service) *Handler {
+	return &Handler{svc: svc}
 }
 
 func (h *Handler) Routes() chi.Router {
@@ -484,8 +464,7 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 
 // applyResolutionToInvoice carries an operator's dunning resolution to the
 // invoice: payment_recovered records an offline payment, invoice_voided
-// voids it (and then stops collection at Stripe). invoice_not_collectible
-// is written by ResolveRun itself. An unwired writer is a known-degraded
+// voids it. invoice_not_collectible is written by ResolveRun itself. An unwired writer is a known-degraded
 // construction and skips with a warning; a writer ERROR is returned.
 func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error {
 	if invoiceID == "" {
@@ -523,25 +502,19 @@ func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoic
 			return fmt.Errorf("record the recovered payment: %w", err)
 		}
 	case domain.ResolutionInvoiceVoided:
-		// Void through the invoice SERVICE (single void writer): status flip
-		// + atomic consumed-credit reversal + tax reversal + in-flight guard
-		// + single-writer invoice.voided event. The PI-cancel below is gated
-		// on the void SUCCEEDING — otherwise an in-flight invoice (which the
-		// service's guard refuses to void) would still get its live PI
-		// canceled, defeating the guard. It runs only after a confirmed void.
+		// Void through the invoice SERVICE, the one void path: the in-flight
+		// guard, the status flip with the credit reversal, then every void's
+		// post-commit legs (AfterVoid): stop collection at Stripe, reverse
+		// the tax, send invoice.voided, and resolve this run. A refused void
+		// runs none of them, so a charge in flight keeps its PaymentIntent.
+		// ResolveRun below then loses the resolve CAS and returns the run
+		// the void resolved.
 		if h.invoiceVoider == nil {
 			slog.WarnContext(ctx, "invoice voider unwired; skipping dunning manual-resolve void", "invoice_id", invoiceID)
 			return nil
 		}
-		voided, err := h.invoiceVoider.Void(ctx, tenantID, invoiceID)
-		if err != nil {
+		if _, err := h.invoiceVoider.Void(ctx, tenantID, invoiceID); err != nil {
 			return fmt.Errorf("void the invoice: %w", err)
-		}
-		// Stop collection at Stripe (only after a confirmed void):
-		// expire live Checkout sessions, then cancel the PI where
-		// cancelable. Credit reversal already happened inside Void.
-		if h.paymentCancel != nil {
-			h.paymentCancel.StopCollection(ctx, tenantID, voided)
 		}
 	}
 	return nil

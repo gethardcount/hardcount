@@ -417,8 +417,9 @@ type CreditGranter interface {
 // InvoiceVoider annuls a finalized, unpaid invoice inside a cancel or plan-swap
 // transaction: the relief for an in_advance prebill the customer never used any
 // of (#22). VoidUnchangedTx voids on the caller's tx and refuses if the invoice
-// changed since the engine read it; AfterVoid runs the post-commit tax reversal
-// and webhook. Implemented by *invoice.Service. Narrow on purpose so billing
+// changed since the engine read it; AfterVoid runs every void's post-commit
+// legs (stop collection at Stripe, tax reversal, webhook, close the dunning
+// run). Implemented by *invoice.Service. Narrow on purpose so billing
 // keeps coordinating through a domain-typed interface, not an invoice import.
 type InvoiceVoider interface {
 	VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID string, snapshot domain.Invoice) (domain.Invoice, error)
@@ -5066,7 +5067,9 @@ func unpaidRelief(src domain.Invoice, net int64) int64 {
 
 // FinishRelief runs a committed Relief's post-commit legs: issue the
 // credit-note drafts (Stripe tax reversal + customer-balance grant, or the
-// amount_due reduction) and the voids' tax reversal and webhook. Best-effort:
+// amount_due reduction) and each void's AfterVoid, the same legs an operator
+// void runs (stop collection at Stripe, tax reversal, webhook, close the
+// dunning run). Best-effort:
 // every leg is already durable and recovered by its own sweep, so a failure
 // here is logged, never returned.
 func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) {

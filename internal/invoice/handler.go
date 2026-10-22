@@ -114,7 +114,8 @@ type Collector interface {
 // PaymentCanceler stops an invoice from being payable at Stripe when it is
 // voided: expire any live Checkout session, then cancel the PaymentIntent if
 // Stripe allows it (it refuses for Checkout-owned PIs — the session expiry is
-// what stops those). Satisfied by *payment.Stripe.
+// what stops those). Every void runs it from Service.AfterVoid. Satisfied by
+// *payment.Stripe.
 type PaymentCanceler interface {
 	StopCollection(ctx context.Context, tenantID string, inv domain.Invoice)
 }
@@ -124,7 +125,9 @@ type BillingProfileGetter interface {
 	GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
 }
 
-// DunningResolver resolves active dunning runs when an invoice is voided or paid.
+// DunningResolver resolves active dunning runs when an invoice is voided or
+// paid: Service.AfterVoid on every void, and this handler on a write-off or
+// an offline payment.
 type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
@@ -251,7 +254,6 @@ type Handler struct {
 	creditNotes     CreditNoteLister
 	charger         PaymentCharger
 	paymentSetups   PaymentSetupGetter
-	paymentCancel   PaymentCanceler
 	dunning         DunningResolver
 	emailEvents     EmailEventLister
 	dunningTimeline DunningTimelineFetcher
@@ -282,7 +284,6 @@ type HandlerDeps struct {
 	CreditNotes     CreditNoteLister
 	Charger         PaymentCharger
 	PaymentSetups   PaymentSetupGetter
-	PaymentCancel   PaymentCanceler
 	Dunning         DunningResolver
 	EmailEvents     EmailEventLister
 	DunningTimeline DunningTimelineFetcher
@@ -295,7 +296,6 @@ func NewHandler(svc *Service, customers CustomerGetter, settings SettingsGetter,
 		h.creditNotes = deps[0].CreditNotes
 		h.charger = deps[0].Charger
 		h.paymentSetups = deps[0].PaymentSetups
-		h.paymentCancel = deps[0].PaymentCancel
 		h.dunning = deps[0].Dunning
 		h.emailEvents = deps[0].EmailEvents
 		h.dunningTimeline = deps[0].DunningTimeline
@@ -635,38 +635,15 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
+	// Service.Void is the whole void: the status flip, the credit reversal
+	// and the audit row in one transaction, then AfterVoid's legs (stop
+	// collection at Stripe, tax reversal, invoice.voided, close the dunning
+	// run), the same for every void path.
 	inv, err := h.svc.Void(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "invoice")
 		return
 	}
-
-	// Stop collection at Stripe: expire live Checkout sessions, then cancel
-	// the PI where cancelable. Best-effort by design (see StopCollection).
-	if h.paymentCancel != nil {
-		h.paymentCancel.StopCollection(r.Context(), tenantID, inv)
-	}
-
-	// Consumed-credit reversal now happens atomically inside svc.Void (status
-	// flip + reversal in one tx) — single-writer, no separate best-effort step.
-
-	// Resolve any active dunning runs for this invoice. The resolution names
-	// the outcome — this path voids, so the run records invoice_voided (0170).
-	if h.dunning != nil {
-		if err := h.dunning.ResolveByInvoice(r.Context(), tenantID, id, domain.ResolutionInvoiceVoided); err != nil {
-			slog.WarnContext(r.Context(), "failed to resolve dunning on void", "invoice_id", id, "error", err)
-		} else {
-			slog.InfoContext(r.Context(), "dunning resolved on invoice void", "invoice_id", id)
-		}
-	}
-
-	// The void audit row rides the void transaction itself (ADR-090,
-	// Service.Void emission — one canonical row for this endpoint AND
-	// engine-triggered voids, which previously left no trail).
-
-	// invoice.voided is emitted by service.Void (single-writer — covers
-	// this endpoint AND engine-triggered voids via InvoiceVoider).
-
 	respond.JSON(w, r, http.StatusOK, inv)
 }
 

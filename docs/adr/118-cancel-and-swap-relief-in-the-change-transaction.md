@@ -282,3 +282,49 @@ charge settles or the draft is finalized.
 - `internal/subscription/relief_before_collect_test.go` checks the order on
   all three callers, and that both legs still run on a live context when
   the caller's context ends right after the commit.
+
+## Amendment 2026-10-22: a relief void runs every void's post-commit legs
+
+**What was wrong.** A void has four legs after its transaction commits:
+
+1. Stop collection at Stripe: expire the invoice's live Checkout sessions,
+   then cancel its PaymentIntent.
+2. Reverse the tax.
+3. Send `invoice.voided`.
+4. Resolve the invoice's dunning run as `invoice_voided`.
+
+`AfterVoid` ran only
+the tax reversal and the webhook. The other two legs ran in the two HTTP
+handlers (the invoice void and the dunning resolve), so the relief's void
+(`VoidUnchangedTx`, then `FinishRelief`) skipped them.
+
+The trigger: a flat in_advance renewal, its day-1 charge fails and dunning
+starts, and the operator cancels or swaps the plan that day. The cancel
+voids the prebill. Its dunning run stayed active until the run's next due
+tick, up to the grace period (days) later. A hosted-page Checkout session
+stayed payable for up to an hour, with the paid-on-voided anomaly (ADR-068)
+as the only catch.
+
+**What changed.** `invoice.Service.AfterVoid` runs all four legs, in that
+order, on a context the caller cannot cancel. Every void reaches it: `Void`
+calls it, and so does `FinishRelief` after a relief void. The two handlers
+no longer run legs of their own. The dunning handler voids, and its
+`ResolveRun` then loses the resolve CAS and returns the run the void
+resolved, so the run gets one resolved row and one `dunning.resolved`.
+
+**Consequence for dunning's final cancel.** When the final action cancels
+the subscription and the cancel voids the run's own invoice, the run now
+ends resolved as `invoice_voided` under either final invoice action, with no
+escalation and no escalation email. With `mark_uncollectible` it already
+ended that way (the re-read before the write-off). With `none` it used to
+escalate over the voided invoice. The case needs the last retry to fall on
+the period's first day.
+
+**The risk bullet above** ("Its following write-off then fails once on the
+voided invoice") no longer holds. The void resolves the run. The re-read
+before the write-off stays as the fallback if that resolve fails.
+
+**Tests.** `internal/billing/dunning_cancel_voids_prebill_integration_test.go`
+(cancel, same-day cross-interval swap, dunning's final cancel under both
+invoice actions), `internal/invoice/void_effects_integration_test.go` and
+`internal/dunning/resolve_void_integration_test.go`, on real Postgres.

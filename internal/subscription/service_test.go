@@ -211,6 +211,26 @@ func (m *memStore) CancelAtomic(ctx context.Context, tenantID, id string) (domai
 	return s, nil
 }
 
+// retireLiveOnlyState mirrors the store's retireLiveOnlyStateTx: the last
+// write of every cancel writer clears the schedule, the pause and the items'
+// pending plan changes.
+func (m *memStore) retireLiveOnlyState(id string) domain.Subscription {
+	s := m.subs[id]
+	s.CancelAt = nil
+	s.CancelAtPeriodEnd = false
+	s.PauseCollection = nil
+	m.subs[id] = s
+	for itemID, it := range m.items {
+		if it.SubscriptionID == id && it.PendingPlanID != "" {
+			it.PendingPlanID = ""
+			it.PendingPlanEffectiveAt = nil
+			m.items[itemID] = it
+		}
+	}
+	s.Items = m.hydrateItems(id)
+	return s
+}
+
 func (m *memStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	prev, existed := m.subs[id]
 	canceled, err := m.CancelAtomic(ctx, tenantID, id)
@@ -226,7 +246,7 @@ func (m *memStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string
 			return domain.Subscription{}, err
 		}
 	}
-	return canceled, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
 func (m *memStore) ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error) {
@@ -278,8 +298,7 @@ func (m *memStore) FireScheduledCancellationTx(_ context.Context, _ *sql.Tx, ten
 	s.CancelAtPeriodEnd = false
 	s.UpdatedAt = at
 	m.subs[id] = s
-	s.Items = m.hydrateItems(id)
-	return s, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
 func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
@@ -307,7 +326,7 @@ func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenant
 		}
 	}
 	m.subs[id] = s
-	return s, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
 func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error) {
@@ -3954,8 +3973,7 @@ func (m *memStore) CancelAtTrialEnd(ctx context.Context, tenantID, id string, ob
 	s.CancelAtPeriodEnd = false
 	s.UpdatedAt = clock.Now(ctx)
 	m.subs[id] = s
-	s.Items = m.hydrateItems(id)
-	return s, nil
+	return m.retireLiveOnlyState(id), nil
 }
 
 // CustomerSubPlanCurrencies (ADR-100 pin) — the fake has no plan table, so

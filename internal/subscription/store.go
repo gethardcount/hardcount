@@ -113,6 +113,11 @@ type Store interface {
 	// across two transactions. When the source state does not match, a
 	// re-query distinguishes not-found from a stale-status conflict and
 	// surfaces the current status in the error message.
+	//
+	// Every cancel writer (this, CancelAtomicWithBill, CancelAtTrialEnd and
+	// both FireScheduledCancellation methods) stores and returns the canceled
+	// row with no cancel schedule, no collection pause and no pending plan
+	// change on its items (retireLiveOnlyStateTx).
 	CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// CancelAtomicWithBill cancels the subscription AND runs billFn (the
