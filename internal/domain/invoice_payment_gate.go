@@ -305,12 +305,10 @@ func RecoveryWarnsOnOfflinePayment(inv Invoice, unreliefedClawbackCents int64) *
 			Message: "This invoice's tax was reversed with the tax provider when it was written off. Recording this payment does not re-report it, so the tax collected here will not appear in your provider's records — correct it with your provider.",
 		}
 	}
-	if inv.BillingReason == BillingReasonThreshold {
-		return &PaymentBlock{
-			Code:    "recovery_superseded",
-			Message: "This invoice was billed on a usage threshold, and writing it off did not stop that usage being re-billed on a later invoice. Check that this payment is not settling usage the customer has already been billed for.",
-		}
-	}
+	// No threshold case. A written-off threshold invoice keeps its window
+	// billed (ADR-066 amendment 2026-10-23): no later invoice bills that
+	// usage again, so a payment on it settles the window once. The
+	// recovery_superseded warning that said otherwise is gone.
 	if unreliefedClawbackCents > 0 {
 		return &PaymentBlock{
 			Code: "relief_not_reissued",

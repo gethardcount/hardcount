@@ -51,8 +51,8 @@ export interface HeldUsageReleaseResult {
   /**
      * Released rows of a sum or count meter stamped before the end of
      * this period's spend-threshold invoice, while that invoice is not
-     * paid. If it is paid, no invoice counts them. If it is voided or
-     * written off before the period closes, the period's invoice
+     * paid. If it is paid or written off, no invoice counts them. If
+     * it is voided before the period closes, the period's invoice
      * counts them.
      */
   pending_threshold_invoice: number;

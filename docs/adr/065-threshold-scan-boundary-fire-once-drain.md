@@ -165,3 +165,14 @@ boundary-observed crossing on the full-fidelity `billOnePeriod` path. The
 fire-once probe likewise stays a probe; the reset=false fire now takes the row
 lock too (a verify-only `ClosePeriodTx`), so two concurrent fires serialize on
 the row before the partial index ever sees the second.
+
+## Amendment 2026-10-23 (ADR-066 amendment): the probe reads every status
+
+The probe read the threshold watermark (first `LatestThresholdPeriodEnd`,
+then `GetLatestThresholdInvoiceForCycle` for the ADR-066 heal), and so
+skipped a voided or written-off threshold invoice. The partial unique index holds the
+cycle's one slot whatever the status, so after a void or a write-off every
+tick re-evaluated the crossing and ran a paid tax calculation before the
+index refused the insert: the burn this decision exists to stop. The probe
+now reads `GetThresholdInvoiceForCycleAnyStatus`, which is never a
+watermark. Locked by `TestThresholdScan_FireOnceProbe_SeesWrittenOffAndVoided`.

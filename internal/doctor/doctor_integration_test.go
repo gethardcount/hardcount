@@ -157,6 +157,23 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	seedInvoice("vlx_inv_doc_zb_c", "vlx_sub_doc_zb", "subscription_cycle", p0, p1)
 	seedUsageLine("vlx_inv_doc_za_f", "mtr_doc_z", "rrv_doc_sum", p0, t1)
 	seedUsageLine("vlx_inv_doc_zb_c", "mtr_doc_z", "rrv_doc_sum2", p0, p1)
+	// A written-off threshold invoice keeps its window billed (ADR-066
+	// amendment 2026-10-23), so a cycle invoice billing the same window
+	// again is the double charge: flagged (doc_wo). A voided one billed
+	// nothing, so the cycle invoice re-billing its window is correct: NOT
+	// flagged (doc_vd).
+	seedSub("vlx_sub_doc_wo")
+	seedInvoice("vlx_inv_doc_wo_t", "vlx_sub_doc_wo", "threshold", p0, t1)
+	seedInvoice("vlx_inv_doc_wo_c", "vlx_sub_doc_wo", "subscription_cycle", p0, p1)
+	seedUsageLine("vlx_inv_doc_wo_t", "mtr_doc_wo", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_wo_c", "mtr_doc_wo", "rrv_doc_sum", p0, p1)
+	mustExec(`UPDATE invoices SET status = 'uncollectible', uncollectible_at = now() WHERE id = 'vlx_inv_doc_wo_t'`)
+	seedSub("vlx_sub_doc_vd")
+	seedInvoice("vlx_inv_doc_vd_t", "vlx_sub_doc_vd", "threshold", p0, t1)
+	seedInvoice("vlx_inv_doc_vd_c", "vlx_sub_doc_vd", "subscription_cycle", p0, p1)
+	seedUsageLine("vlx_inv_doc_vd_t", "mtr_doc_vd", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_vd_c", "mtr_doc_vd", "rrv_doc_sum", p0, p1)
+	mustExec(`UPDATE invoices SET status = 'voided', voided_at = now() WHERE id = 'vlx_inv_doc_vd_t'`)
 
 	// SB-1: an active run with no next action is invisible to both due-run
 	// pickers forever — flagged. Control: an escalated run with no next action
@@ -221,7 +238,7 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 		"usage_billed_once_per_customer_meter_window": false,
 		"dunning_active_run_without_next_action":      false,
 	}
-	crossSub, crossSubOtherBucket := false, false
+	crossSub, crossSubOtherBucket, writtenOff := false, false, false
 	for _, v := range res.Violations {
 		if _, ok := want[v.Check.Name]; ok && strings.Contains(v.RowID+v.Detail, "doc1") {
 			want[v.Check.Name] = true
@@ -242,6 +259,10 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 				crossSub = true
 			case strings.Contains(v.RowID, "doc_za"):
 				crossSubOtherBucket = true
+			case strings.Contains(v.RowID, "doc_wo"):
+				writtenOff = true
+			case strings.Contains(v.RowID+v.Detail, "doc_vd"):
+				t.Errorf("false positive: a cycle invoice re-billing a VOIDED threshold invoice's window is flagged — a void billed nothing: %s %s", v.RowID, v.Detail)
 			case strings.Contains(v.RowID+v.Detail, "doc_y"):
 				t.Errorf("false positive: a recreated subscription that starts where its predecessor ended is flagged: %s %s", v.RowID, v.Detail)
 			case strings.Contains(v.RowID+v.Detail, "doc_res"):
@@ -253,6 +274,9 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	}
 	if !crossSub {
 		t.Error("two subscriptions of one customer billing the same usage instant of a meter are NOT caught by usage_billed_once_per_customer_meter_window: the check pairs invoices of one subscription only")
+	}
+	if !writtenOff {
+		t.Error("a cycle invoice billing a WRITTEN-OFF threshold invoice's window again is NOT caught by usage_billed_once_per_customer_meter_window: a write-off keeps its window billed")
 	}
 	if !crossSubOtherBucket {
 		t.Error("two subscriptions of one customer billing the same usage instant of a meter under different rule versions are NOT caught: the same-bucket requirement must apply within one subscription only")
