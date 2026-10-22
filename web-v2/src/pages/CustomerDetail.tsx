@@ -1712,12 +1712,11 @@ function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onCl
 
 /* ─── One-off Invoice Composer ────────────────────────────────── */
 
-// Fixed catalog of line types the operator can pick from. Mirrors the DB
-// CHECK on invoice_line_items.line_type. tax/discount are intentionally
-// disabled in the composer — those flow through tax provider + coupon
-// surfaces, not the manual line editor.
+// Fixed catalog of line types the operator can pick from: the only line
+// types the API accepts. Tax is computed at finalize, so it is never a line
+// an operator adds.
 const COMPOSER_LINE_TYPES: { value: string; label: string }[] = [
-  { value: 'add_on', label: 'Add-on / one-off charge' },
+  { value: 'add_on', label: 'Add-on' },
   { value: 'base_fee', label: 'Base fee' },
   { value: 'usage', label: 'Usage' },
 ]

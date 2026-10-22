@@ -8653,7 +8653,7 @@ export interface components {
              * @description Defaults to `add_on`.
              * @enum {string}
              */
-            line_type?: "base_fee" | "usage" | "add_on" | "discount" | "tax";
+            line_type?: "base_fee" | "usage" | "add_on";
             /** Format: int64 */
             quantity: number;
             /** Format: int64 */
@@ -8677,7 +8677,7 @@ export interface components {
         };
         InvoiceCreateRequest: {
             customer_id: string;
-            /** @description Optional. Leave out for a one-off invoice. */
+            /** @description Optional. Must belong to `customer_id`. Leave out for a one-off invoice. */
             subscription_id?: string;
             /**
              * @description ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.

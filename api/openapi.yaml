@@ -2699,7 +2699,7 @@ components:
           type: string
         line_type:
           type: string
-          enum: [base_fee, usage, add_on, discount, tax]
+          enum: [base_fee, usage, add_on]
           description: Defaults to `add_on`.
         quantity:
           type: integer
@@ -2736,7 +2736,7 @@ components:
           type: string
         subscription_id:
           type: string
-          description: Optional. Leave out for a one-off invoice.
+          description: Optional. Must belong to `customer_id`. Leave out for a one-off invoice.
         currency:
           type: string
           description: ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
