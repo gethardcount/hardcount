@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"log/slog"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -98,14 +99,21 @@ var pricingPageClaudeIDs = map[string]string{
 }
 
 func TestCanonicalModel_PricingPageIDs(t *testing.T) {
+	dated := regexp.MustCompile(`-(\d{8})$`)
 	for id, want := range pricingPageClaudeIDs {
+		// Google Cloud names a dated model id@date, and a dateless one
+		// id@default (LiteLLM's Vertex keys).
+		vertex := id + "@default"
+		if dated.MatchString(id) {
+			vertex = dated.ReplaceAllString(id, "@$1")
+		}
 		for _, form := range []string{
 			id,
 			"anthropic/" + id,
 			"bedrock/global.anthropic." + id,
 			"bedrock/converse/us.anthropic." + id,
 			"jp.anthropic." + id,
-			"vertex_ai/" + id + "@default",
+			"vertex_ai/" + vertex,
 			"azure_ai/" + id,
 		} {
 			if got := canonicalModel(form); got != want {
