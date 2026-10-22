@@ -9,6 +9,8 @@
  */
 
 export type PostV1CreditNotesBodyLinesItem = {
+  /** Optional. The invoice line this credit line reverses. */
+  invoice_line_item_id?: string;
   description?: string;
   quantity?: number;
   unit_amount_cents?: number;

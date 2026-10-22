@@ -2210,7 +2210,7 @@ components:
         balance_after:
           type: integer
           format: int64
-          description: Customer's credit balance after this entry.
+          description: Customer's credit balance after this entry, in cents.
         description:
           type: string
         invoice_id:
@@ -5041,6 +5041,9 @@ paths:
                   maxItems: 10
                   items:
                     type: string
+                test_clock_id:
+                  type: string
+                  description: Test mode only. Attaches the customer to a test clock.
       responses:
         "201":
           description: Customer created
@@ -6672,6 +6675,9 @@ paths:
                   items:
                     type: object
                     properties:
+                      invoice_line_item_id:
+                        type: string
+                        description: Optional. The invoice line this credit line reverses.
                       description:
                         type: string
                       quantity:
@@ -6684,12 +6690,25 @@ paths:
                   type: integer
                 out_of_band_amount_cents:
                   type: integer
+                refund_type:
+                  type: string
+                  enum: [refund, credit]
+                  description: |
+                    Older single-channel form. On a paid invoice whose three
+                    `*_amount_cents` fields are all 0, `refund` or `credit`
+                    puts the whole note in that channel.
                 auto_issue:
                   type: boolean
                 commit_relief:
                   type: object
                   description: Mutually exclusive with lines/credit_amount_cents.
                   properties:
+                    invoice_id:
+                      type: string
+                      description: Optional. Defaults to the top-level invoice_id.
+                    reason:
+                      type: string
+                      description: Optional. Defaults to the top-level reason.
                     retire_cents:
                       type: integer
                       description: Commit credits to retire (1..remaining).
@@ -8994,6 +9013,7 @@ paths:
                 properties:
                   type: object
                   additionalProperties: true
+                  description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                 idempotency_key:
                   type: string
                   maxLength: 255
@@ -9151,6 +9171,10 @@ paths:
                   dimensions:
                     type: object
                     additionalProperties: true
+                  properties:
+                    type: object
+                    additionalProperties: true
+                    description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                   idempotency_key:
                     type: string
                     maxLength: 255

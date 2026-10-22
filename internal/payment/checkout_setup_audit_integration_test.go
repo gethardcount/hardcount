@@ -110,7 +110,7 @@ func TestCheckoutSetupAudit_SharedFate(t *testing.T) {
 		c := seed(t, "cus_setup_ok")
 		h := &CheckoutHandler{store: store, audit: logger}
 
-		req := setupRequest{CustomerID: c.ID, CustomerName: "Checkout Co"}
+		req := SetupRequest{CustomerID: c.ID, CustomerName: "Checkout Co"}
 		if err := h.persistStripeMapping(ctx, tenantID, req, "cus_stripe_ok"); err != nil {
 			t.Fatalf("persist stripe mapping: %v", err)
 		}
@@ -148,7 +148,7 @@ func TestCheckoutSetupAudit_SharedFate(t *testing.T) {
 		emitter := &failingCheckoutEmitter{inner: logger}
 		h := &CheckoutHandler{store: store, audit: emitter}
 
-		req := setupRequest{CustomerID: c.ID, CustomerName: "Checkout Co"}
+		req := SetupRequest{CustomerID: c.ID, CustomerName: "Checkout Co"}
 		err := h.persistStripeMapping(ctx, tenantID, req, "cus_stripe_rollback")
 		if err == nil {
 			t.Fatal("the mapping write must fail when its audit emission fails (shared fate)")
@@ -173,7 +173,7 @@ func TestCheckoutSetupAudit_SharedFate(t *testing.T) {
 		counting := &countingCheckoutEmitter{inner: logger}
 		h := &CheckoutHandler{store: store, audit: counting}
 
-		req := setupRequest{CustomerID: ghostID, CustomerName: "Ghost Co"}
+		req := SetupRequest{CustomerID: ghostID, CustomerName: "Ghost Co"}
 		err := h.persistStripeMapping(ctx, tenantID, req, "cus_stripe_ghost")
 		if !errors.Is(err, errs.ErrNotFound) {
 			t.Fatalf("a setup for a customer that does not exist must fail not-found, got %v", err)

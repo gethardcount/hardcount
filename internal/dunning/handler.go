@@ -396,7 +396,7 @@ type runEvent struct {
 // assignment; mutation goes through PATCH /v1/customers/{id} on the
 // customer handler.
 
-type resolveInput struct {
+type ResolveInput struct {
 	Resolution string `json:"resolution"`
 }
 
@@ -404,7 +404,7 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var input resolveInput
+	var input ResolveInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return

@@ -770,6 +770,11 @@ func (h *Handler) retryBilling(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ExtendTrialInput is the POST /v1/subscriptions/{id}/extend-trial body.
+type ExtendTrialInput struct {
+	TrialEnd time.Time `json:"trial_end"`
+}
+
 // extendTrial pushes a trialing subscription's trial_end_at later. Body:
 // {trial_end:<RFC3339>}. Returns 422 if the new value is in the past or
 // not strictly after the current trial_end_at, or the sub is not in
@@ -779,9 +784,7 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var body struct {
-		TrialEnd time.Time `json:"trial_end"`
-	}
+	var body ExtendTrialInput
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
