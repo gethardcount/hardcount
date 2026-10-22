@@ -1428,6 +1428,13 @@ func hostedInvoiceCheckoutParams(
 		// id as the idempotency key, and Stripe rejects a replayed key whose
 		// params changed, so a clock-relative expiry broke every retry.
 		ExpiresAt: stripe.Int64(checkoutSessionExpiry(claim).Unix()),
+		// Charge in the invoice's own currency. Unset, Stripe applies the account's
+		// Adaptive Pricing setting and may preselect the buyer's local currency with a
+		// 2-4% conversion fee, so the bank statement no longer matches the invoice and
+		// receipt (USD 10.29 charged as INR 1,010.68).
+		AdaptivePricing: &stripe.CheckoutSessionCreateAdaptivePricingParams{
+			Enabled: stripe.Bool(false),
+		},
 		Params: stripe.Params{
 			Metadata: meta,
 			// The claim id: every re-drive for this claim converges on the

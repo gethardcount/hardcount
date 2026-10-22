@@ -37,6 +37,7 @@ clean.
 - [ ] Charge: the first invoice of a subscription whose base fee bills in advance is charged to `4242`, Velox shows it paid, and the Stripe dashboard shows the same amount.
 - [ ] Webhook: `stripe listen` shows `payment_intent.succeeded` answered with 200.
 - [ ] Hosted invoice page: Pay with `4242` → "Paid" banner within seconds, and the card appears on the customer.
+- [ ] Hosted invoice currency: for a customer whose email has `+location_IN`, open the hosted invoice page and Pay → Checkout shows only the invoice's currency, with no option to pay in INR. After paying with `4242`, the PaymentIntent shows the invoice's amount and currency and has no `presentment_details`.
 - [ ] 3-D Secure: Pay with `4000 0027 6000 3184`, fail the challenge → the invoice stays unpaid; pass it → paid.
 - [ ] Refund: a credit note with "Refund to card" → `refund_status=succeeded`, and the refund shows in the Stripe dashboard.
 - [ ] Key in use: start two `stripe payment_intents create -d amount=2000 -d currency=usd -d payment_method=pm_card_visa -d "payment_method_types[]=card" -d confirm=true -i <key>` at once with one new key. Repeat with a fresh key until one answers HTTP 409 with code `idempotency_key_in_use` (identical replies are a replay) → write its error `type` in the comment on `stripe409KeyInUse` in `internal/payment/stripe_409_test.go`. Velox treats every 409 as unclear, whatever the type ([#976](https://github.com/getvelox/velox/issues/976)).
