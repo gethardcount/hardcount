@@ -23,8 +23,10 @@ type Store interface {
 	// made the default in the same tx when makeDefault is set (a card saved
 	// through a setup flow becomes the default, ADR-021), when the customer
 	// has no active default, or when the bank refused the current default
-	// for good (ADR-126).
-	Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool) (PaymentMethod, error)
+	// for good (ADR-126). replacedDefault reports that another card was the
+	// default and this one took its place. A card already removed (detached)
+	// stays removed: the row is returned unchanged.
+	Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool) (out PaymentMethod, replacedDefault bool, err error)
 
 	// SetDefault atomically clears any existing default for (customerID)
 	// and flags pmID as the new default. Fails with ErrNotFound if pmID is
@@ -175,6 +177,19 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, pmID string) (Payment
 // out. A working default is not replaced: a card saved by paying on the
 // hosted page, or by a SetupIntent Velox did not create, is added beside it.
 //
+// A card already removed stays removed. A late webhook (Stripe redelivers
+// setup_intent.succeeded after a failed first delivery, for up to three
+// days) can name a card the operator has since removed, or an older copy of
+// a card the dedupe below replaced. Stripe does not let a detached
+// PaymentMethod be used or attached again, so the row is returned unchanged
+// and nothing else is touched: bringing it back, above all as the default,
+// would point every retry at a card Stripe refuses.
+//
+// replacedDefault is true when another card was the customer's default and
+// this attach moved the default to this card (a setup flow, or a refused
+// default replaced). The first card, a card added beside, a same-card
+// dedupe and a redelivery of the current default report false.
+//
 // Dedupe-by-fingerprint (ADR-0099): when a customer re-runs Add and
 // produces a new pm_xxx with a fingerprint that already exists as an
 // active row for this customer, the old row is detached in the same
@@ -185,10 +200,10 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, pmID string) (Payment
 // twice (or more) and the default-PM semantics drift across the
 // duplicates. Skipped when fingerprint is empty (legacy rows /
 // non-card types) — those keep current behavior.
-func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool) (PaymentMethod, error) {
+func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentMethod, makeDefault bool) (PaymentMethod, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return PaymentMethod{}, err
+		return PaymentMethod{}, false, err
 	}
 	defer postgres.Rollback(tx)
 
@@ -204,7 +219,22 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 	// lock is a different key.
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
 		"payment_methods:"+tenantID+":"+pm.CustomerID); err != nil {
-		return PaymentMethod{}, fmt.Errorf("acquire payment method attach lock: %w", err)
+		return PaymentMethod{}, false, fmt.Errorf("acquire payment method attach lock: %w", err)
+	}
+
+	// A card already removed stays removed (see above). Read under the lock,
+	// so a removal committed before this attach is seen.
+	var removed PaymentMethod
+	switch err := scanPM(tx.QueryRowContext(ctx, `
+		SELECT `+pmSelectCols+` FROM payment_methods
+		WHERE tenant_id = $1 AND stripe_payment_method_id = $2
+		  AND detached_at IS NOT NULL`,
+		tenantID, pm.StripePaymentMethodID), &removed); {
+	case err == nil:
+		return removed, false, tx.Commit()
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return PaymentMethod{}, false, fmt.Errorf("check removed card: %w", err)
 	}
 
 	// Dedupe-by-fingerprint: detach any active row for this customer
@@ -231,13 +261,13 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 				UPDATE payment_methods
 				SET detached_at = now(), is_default = false, updated_at = now()
 				WHERE tenant_id = $1 AND id = $2`, tenantID, oldID); err != nil {
-				return PaymentMethod{}, fmt.Errorf("dedupe-detach: %w", err)
+				return PaymentMethod{}, false, fmt.Errorf("dedupe-detach: %w", err)
 			}
 			carryDefault = oldDefault
 		case errors.Is(err, sql.ErrNoRows):
 			// No prior row with this fingerprint — clean path.
 		default:
-			return PaymentMethod{}, fmt.Errorf("dedupe lookup: %w", err)
+			return PaymentMethod{}, false, fmt.Errorf("dedupe lookup: %w", err)
 		}
 	}
 
@@ -250,7 +280,7 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 			WHERE tenant_id = $1 AND customer_id = $2
 			  AND is_default = true AND detached_at IS NULL
 		)`, tenantID, pm.CustomerID).Scan(&hasDefault); err != nil {
-		return PaymentMethod{}, fmt.Errorf("check default: %w", err)
+		return PaymentMethod{}, false, fmt.Errorf("check default: %w", err)
 	}
 	promote := !hasDefault || carryDefault
 
@@ -271,21 +301,28 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 				  AND a.decline_code = ANY($4::text[]))`,
 			tenantID, pm.CustomerID, pm.StripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
 		).Scan(&replaceRefused); err != nil {
-			return PaymentMethod{}, fmt.Errorf("check refused default: %w", err)
+			return PaymentMethod{}, false, fmt.Errorf("check refused default: %w", err)
 		}
 	}
 	// This card takes the default: clear the others first, in this tx, so
 	// the one-default-per-customer index never sees two.
 	force := makeDefault || replaceRefused
+	replacedDefault := false
 	if force {
-		if _, err := tx.ExecContext(ctx, `
+		res, err := tx.ExecContext(ctx, `
 			UPDATE payment_methods SET is_default = false, updated_at = now()
 			WHERE tenant_id = $1 AND customer_id = $2
 			  AND is_default = true AND detached_at IS NULL
 			  AND stripe_payment_method_id <> $3`,
-			tenantID, pm.CustomerID, pm.StripePaymentMethodID); err != nil {
-			return PaymentMethod{}, fmt.Errorf("clear other default: %w", err)
+			tenantID, pm.CustomerID, pm.StripePaymentMethodID)
+		if err != nil {
+			return PaymentMethod{}, false, fmt.Errorf("clear other default: %w", err)
 		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return PaymentMethod{}, false, fmt.Errorf("clear other default: %w", err)
+		}
+		replacedDefault = n > 0
 		promote = true
 	}
 
@@ -310,17 +347,27 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 		    -- above, so this row must take its place or the customer would be
 		    -- left with none.
 		    is_default       = payment_methods.is_default OR $11,
-		    detached_at      = NULL,
 		    updated_at       = now()
+		-- A removal that committed after the removed-card check above (the
+		-- operator's Remove does not take the attach lock) leaves no row to
+		-- update: the attach fails and rolls back, and the webhook's retry
+		-- finds the card removed.
+		WHERE payment_methods.detached_at IS NULL
 		RETURNING `+pmSelectCols,
 		tenantID, pm.CustomerID, pm.StripePaymentMethodID, defaultString(pm.Type, "card"),
 		pm.CardBrand, pm.CardLast4, pm.CardExpMonth, pm.CardExpYear,
 		pm.CardFingerprint,
 		promote, force), &out); err != nil {
-		return PaymentMethod{}, fmt.Errorf("upsert payment method: %w", err)
+		if errors.Is(err, sql.ErrNoRows) {
+			return PaymentMethod{}, false, fmt.Errorf("upsert payment method: card %s was removed while it was being saved", pm.StripePaymentMethodID)
+		}
+		return PaymentMethod{}, false, fmt.Errorf("upsert payment method: %w", err)
 	}
 
-	return out, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return PaymentMethod{}, false, err
+	}
+	return out, replacedDefault, nil
 }
 
 // SetDefault does the atomic swap inside one tx so RLS + partial unique

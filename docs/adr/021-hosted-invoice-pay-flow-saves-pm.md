@@ -221,14 +221,42 @@ the active-fingerprint unique index, and when that was the setup flow's
 attach, the card stayed beside the old default until Stripe redelivered. The
 attach now takes a per-customer advisory lock first.
 
+**A removed card stays removed.** Stripe redelivers an event whose first
+delivery failed, for up to three days, so `setup_intent.succeeded` can arrive
+after the operator removed the card it names. Before, the attach brought the
+row back; with this amendment it would also have made it the default, and
+every retry would charge a PaymentMethod no longer attached to the Stripe
+customer while the working card sat unused. Stripe does not allow that:
+"Detachment is permanent and irreversible — once detached, a PaymentMethod
+can no longer be used for payments or re-attached to a Customer"
+([Detach a PaymentMethod](https://docs.stripe.com/api/payment_methods/detach), read 2026-10-22).
+Live-mode retries run "for up to three days with an exponential backoff"
+([Webhooks, automatic retries](https://docs.stripe.com/webhooks#automatic-retries), read 2026-10-22).
+The attach now leaves a removed row untouched and changes no default. The same
+holds for an older copy of a card that dedupe-by-fingerprint replaced.
+
+**The audit log shows the change.** When an attach moves the default from
+another card, a `default_changed` row (trigger `setup_link`, or
+`replaced_refused_default` for ADR-126) follows the `attached` row, as
+**Set as default** and Remove's auto-promote write. The `attached` row's
+`is_default` says whether the card is the default after the attach.
+
 **Behavior change.** An operator's **Add payment method** link now replaces
 a working default. Before, the card was added beside it.
 
 **Left as they are.**
 
-- A late redelivery of `setup_intent.succeeded` after the operator's **Set
-  as default** makes the setup card the default again. Stripe's event-id
-  dedup makes this rare.
+- A `setup_intent.succeeded` whose first delivery failed, redelivered after
+  a later default choice (the operator's **Set as default**, or a second
+  link's card), makes its card the default again. Event-id dedup does not
+  help: it only skips a redelivery after a success. It takes a delivery
+  that failed for this event alone and a default change inside Stripe's
+  retry window, and the card charged is one the customer gave through a
+  link and that is still attached. Ordering by when the default was set
+  would need a new column, and Stripe warns against ordering by the
+  event's `created` ("Don't use `created` to determine event order",
+  [Webhooks, event ordering](https://docs.stripe.com/webhooks#event-ordering),
+  read 2026-10-22). Not built until this is seen.
 - A **Set as default** that runs during a setup attach can fail on the
   one-default index. It fails loudly; there are never two defaults.
 - No retry runs when the card is saved. The next scheduled retry, or

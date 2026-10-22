@@ -60,13 +60,23 @@ func (m *memStore) Get(_ context.Context, tenantID, pmID string) (PaymentMethod,
 	return pm, nil
 }
 
-func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, makeDefault bool) (PaymentMethod, error) {
+func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, makeDefault bool) (PaymentMethod, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// A card already removed stays removed, untouched (as the Postgres
+	// store returns it before any write).
+	for _, existing := range m.rows {
+		if existing.TenantID == tenantID && existing.StripePaymentMethodID == in.StripePaymentMethodID &&
+			existing.DetachedAt != nil {
+			return existing, false, nil
+		}
+	}
 
 	// makeDefault: this card takes the default, so every other active
 	// default of the customer is cleared first, on the insert and the
 	// conflict path alike (as the Postgres store does in its tx).
+	replaced := false
 	if makeDefault {
 		for id, row := range m.rows {
 			if row.TenantID == tenantID && row.CustomerID == in.CustomerID && row.IsDefault &&
@@ -74,6 +84,7 @@ func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, 
 				row.IsDefault = false
 				row.UpdatedAt = time.Now().UTC()
 				m.rows[id] = row
+				replaced = true
 			}
 		}
 	}
@@ -82,11 +93,10 @@ func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, 
 		if existing.TenantID == tenantID && existing.StripePaymentMethodID == in.StripePaymentMethodID {
 			existing.CardBrand, existing.CardLast4 = in.CardBrand, in.CardLast4
 			existing.CardExpMonth, existing.CardExpYear = in.CardExpMonth, in.CardExpYear
-			existing.DetachedAt = nil
 			existing.IsDefault = existing.IsDefault || makeDefault
 			existing.UpdatedAt = time.Now().UTC()
 			m.rows[id] = existing
-			return existing, nil
+			return existing, replaced, nil
 		}
 	}
 
@@ -117,7 +127,7 @@ func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, 
 		UpdatedAt:             now,
 	}
 	m.rows[id] = row
-	return row, nil
+	return row, replaced, nil
 }
 
 func (m *memStore) SetDefault(_ context.Context, tenantID, customerID, pmID string) (PaymentMethod, error) {
@@ -340,7 +350,7 @@ func TestAttach_SecondDoesNotStealDefault(t *testing.T) {
 
 // A card saved through a Velox setup flow (makeDefault) becomes the default
 // beside a working one: exactly one default, the new card, and Stripe's copy
-// is pointed at it. The attach audit row records set_default.
+// is pointed at it. The audit log records the attach and the default change.
 func TestAttach_MakeDefaultTakesTheDefaultAndSyncsStripe(t *testing.T) {
 	store := newMemStore()
 	stripe := &fakeStripe{}
@@ -373,12 +383,22 @@ func TestAttach_MakeDefaultTakesTheDefaultAndSyncsStripe(t *testing.T) {
 	if stripe.setDefaultCalls != 1 || stripe.setDefaultPMID != "pm_new" {
 		t.Fatalf("Stripe default sync: calls=%d pm=%q, want once with pm_new", stripe.setDefaultCalls, stripe.setDefaultPMID)
 	}
-	row := audit.logs[len(audit.logs)-1]
-	if row.meta["action"] != "attached" || row.meta["set_default"] != true {
-		t.Fatalf("audit row meta = %v, want action=attached set_default=true", row.meta)
+	// The attach writes the attached row, then a default_changed row: the
+	// card Velox charges changed.
+	if len(audit.logs) < 2 {
+		t.Fatalf("audit rows = %v, want attached then default_changed", audit.logs)
 	}
-	if _, ok := row.meta["stripe_sync_error"]; ok {
-		t.Fatalf("audit row must not carry stripe_sync_error on the happy path: %v", row.meta)
+	attached, changed := audit.logs[len(audit.logs)-2], audit.logs[len(audit.logs)-1]
+	if attached.meta["action"] != "attached" || attached.meta["is_default"] != true {
+		t.Fatalf("attached row meta = %v, want action=attached is_default=true", attached.meta)
+	}
+	if changed.action != "update" || changed.meta["action"] != "default_changed" || changed.meta["trigger"] != "setup_link" {
+		t.Fatalf("default_changed row = %+v, want update/default_changed with trigger setup_link", changed)
+	}
+	for _, row := range []fakeAuditRow{attached, changed} {
+		if _, ok := row.meta["stripe_sync_error"]; ok {
+			t.Fatalf("audit row must not carry stripe_sync_error on the happy path: %v", row.meta)
+		}
 	}
 }
 
@@ -465,8 +485,8 @@ func TestAttach_BesideMakesNoStripeCall(t *testing.T) {
 	if stripe.setDefaultCalls != 0 {
 		t.Fatalf("Stripe SetDefaultPaymentMethod calls = %d, want 0", stripe.setDefaultCalls)
 	}
-	if row := audit.logs[len(audit.logs)-1]; row.meta["set_default"] != false {
-		t.Fatalf("audit row meta = %v, want set_default=false", row.meta)
+	if row := audit.logs[len(audit.logs)-1]; row.meta["action"] != "attached" || row.meta["is_default"] != false {
+		t.Fatalf("audit row meta = %v, want the attached row with is_default=false and no default_changed after it", row.meta)
 	}
 }
 

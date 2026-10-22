@@ -214,7 +214,7 @@ func (r *setupDefaultRig) customer(key string) string {
 
 func (r *setupDefaultRig) upsert(custID, pm, fingerprint string, makeDefault bool) paymentmethods.PaymentMethod {
 	r.t.Helper()
-	got, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
+	got, _, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
 		CustomerID: custID, StripePaymentMethodID: pm, Type: "card",
 		CardBrand: "visa", CardLast4: "4242", CardExpMonth: 12, CardExpYear: 2034, CardFingerprint: fingerprint,
 	}, makeDefault)
@@ -345,7 +345,7 @@ func TestUpsert_MakeDefault_ConcurrentWithBeside_RealStore(t *testing.T) {
 			go func(makeDefault bool) {
 				defer wg.Done()
 				<-start
-				_, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
+				_, _, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
 					CustomerID: c, StripePaymentMethodID: pmB, Type: "card",
 					CardBrand: "visa", CardLast4: "4242", CardExpMonth: 12, CardExpYear: 2034, CardFingerprint: fpB,
 				}, makeDefault)

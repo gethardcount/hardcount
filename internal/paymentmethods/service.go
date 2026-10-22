@@ -391,12 +391,18 @@ func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, st
 // Best-effort and cosmetic, as in SetDefault: charges read Velox's default
 // (ADR-053), so a Stripe failure logs, lands as stripe_sync_error on the
 // audit row, and never fails the attach (or the webhook behind it).
+//
+// A card already removed stays removed (a late webhook, see
+// PostgresStore.Upsert): the removed row is returned, and no Stripe call or
+// audit row follows. When the attach moved the default from another card,
+// a default_changed audit row follows the attached one, as Set as default
+// and Remove's auto-promote write, so the log shows the charged card changed.
 func (s *Service) AttachFromSetupIntent(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (PaymentMethod, error) {
 	card, err := s.stripe.FetchPaymentMethodCard(ctx, stripePaymentMethodID)
 	if err != nil {
 		return PaymentMethod{}, fmt.Errorf("fetch card metadata: %w", err)
 	}
-	pm, err := s.store.Upsert(ctx, tenantID, PaymentMethod{
+	pm, replacedDefault, err := s.store.Upsert(ctx, tenantID, PaymentMethod{
 		CustomerID:            customerID,
 		StripePaymentMethodID: stripePaymentMethodID,
 		Type:                  "card",
@@ -408,6 +414,12 @@ func (s *Service) AttachFromSetupIntent(ctx context.Context, tenantID, customerI
 	}, makeDefault)
 	if err != nil {
 		return PaymentMethod{}, err
+	}
+	if !pm.IsActive() {
+		slog.InfoContext(ctx, "card already removed; the late attach leaves it removed",
+			"tenant_id", tenantID, "customer_id", customerID,
+			"stripe_payment_method_id", stripePaymentMethodID)
+		return pm, nil
 	}
 
 	stripeSyncErr := ""
@@ -426,12 +438,30 @@ func (s *Service) AttachFromSetupIntent(ctx context.Context, tenantID, customerI
 			"customer_id": customerID,
 			"card_brand":  card.Brand,
 			"card_last4":  card.Last4,
-			"set_default": makeDefault,
+			"is_default":  pm.IsDefault,
 		}
 		if stripeSyncErr != "" {
 			meta["stripe_sync_error"] = stripeSyncErr
 		}
 		_ = s.auditLogger.Log(ctx, tenantID, "create", "payment_method", pm.ID, pmLabel(pm), meta)
+
+		if replacedDefault {
+			trigger := "replaced_refused_default"
+			if makeDefault {
+				trigger = "setup_link"
+			}
+			changed := map[string]any{
+				"action":      "default_changed",
+				"customer_id": customerID,
+				"card_brand":  pm.CardBrand,
+				"card_last4":  pm.CardLast4,
+				"trigger":     trigger,
+			}
+			if stripeSyncErr != "" {
+				changed["stripe_sync_error"] = stripeSyncErr
+			}
+			_ = s.auditLogger.Log(ctx, tenantID, "update", "payment_method", pm.ID, pmLabel(pm), changed)
+		}
 	}
 	return pm, nil
 }
