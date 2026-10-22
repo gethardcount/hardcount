@@ -106,6 +106,32 @@ func TestRefundHandler_DefaultAmountPassthrough(t *testing.T) {
 	}
 }
 
+// A refund with no amount_cents refunds everything still refundable, so a
+// misspelled amount key (Stripe's `amount`) was a 201 full card refund. The
+// unknown key is now a 422 naming it, and nothing is refunded.
+func TestRefundHandler_RefusesUnknownField(t *testing.T) {
+	t.Parallel()
+	issuer := &fakeRefundIssuer{}
+	h := newRefundTestHandler(issuer)
+
+	rec := postRefund(t, h, map[string]any{"amount": 500, "reason": "requested_by_customer"})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status: got %d, want 422 — body=%s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Error struct {
+			Param string `json:"param"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if env.Error.Param != "amount" {
+		t.Errorf("param: got %q, want amount", env.Error.Param)
+	}
+	if issuer.called {
+		t.Error("IssueRefund must not be called for an unknown field")
+	}
+}
+
 func TestRefundHandler_RejectsUnknownReason(t *testing.T) {
 	t.Parallel()
 	issuer := &fakeRefundIssuer{}

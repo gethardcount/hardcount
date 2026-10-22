@@ -56,6 +56,7 @@ import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
+import { COMPANY_EMAIL_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -160,6 +161,12 @@ export default function SettingsPage() {
   const [error, setError] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
+  // The number the next invoice in this mode gets, for the prefix preview.
+  // Not a form field: the server counts it, and a save does not change it.
+  const [nextInvoiceSeq, setNextInvoiceSeq] = useState<number | null>(null)
+  const { user } = useAuth()
+  const livemode = user?.livemode ?? false
+  const sharedNotice = sharedSettingsNotice(livemode)
 
   const formMethods = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -213,6 +220,7 @@ export default function SettingsPage() {
           : '',
       }
       reset(f)
+      setNextInvoiceSeq(s.next_invoice_sequence)
       setLoading(false)
     }).catch(err => { setError(err ?? new Error('Failed to load settings')); setLoading(false) })
   }
@@ -277,6 +285,7 @@ export default function SettingsPage() {
           : '',
       }
       reset(f)
+      setNextInvoiceSeq(updated.next_invoice_sequence)
       if (updated.default_currency) setActiveCurrency(updated.default_currency)
       // Synchronously reseed the module-scoped tenant TZ so the very
       // next render of any page (including a navigation that happens
@@ -380,6 +389,7 @@ export default function SettingsPage() {
               (timezone). "Business" was misleading — timezone affects
               every formatDate in the dashboard, not just invoicing. */}
           <TabsContent value="general" className="space-y-6">
+            {sharedNotice && <Callout>{sharedNotice}</Callout>}
             <Card>
               <CardContent className="p-6">
                 <div className="mb-5">
@@ -403,7 +413,7 @@ export default function SettingsPage() {
                       className={cn('mt-1', formErrors.company_email && 'border-destructive')} />
                     {formErrors.company_email
                       ? <p className="text-xs text-destructive mt-1">{formErrors.company_email.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Reply-to address on invoice emails</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">{COMPANY_EMAIL_HINT}</p>}
                   </div>
                   <div>
                     <Label htmlFor="settings-company-phone">Phone</Label>
@@ -559,6 +569,7 @@ export default function SettingsPage() {
 
           {/* Invoicing: numbering, currency, locale, footer */}
           <TabsContent value="invoicing" className="space-y-6">
+            {sharedNotice && <Callout>{sharedNotice}</Callout>}
             <Card>
               <CardContent className="p-6">
                 <div className="mb-5">
@@ -587,8 +598,8 @@ export default function SettingsPage() {
                       placeholder="INV" />
                     {formErrors.invoice_prefix
                       ? <p className="text-xs text-destructive mt-1">{formErrors.invoice_prefix.message}</p>
-                      : form.invoice_prefix
-                        ? <p className="text-xs text-muted-foreground mt-1 font-mono">Preview: {form.invoice_prefix}-000001</p>
+                      : form.invoice_prefix && nextInvoiceSeq != null
+                        ? <p className="text-xs text-muted-foreground mt-1">{invoiceNumberPreview(form.invoice_prefix, nextInvoiceSeq, livemode)}</p>
                         : <p className="text-xs text-muted-foreground mt-1">Letters, numbers, and hyphens only</p>}
                   </div>
                   <div>
@@ -661,6 +672,7 @@ export default function SettingsPage() {
 
           {/* Tax: tax ID, provider selection, rate (manual) or default tax code (stripe_tax) */}
           <TabsContent value="tax" className="space-y-6">
+            {sharedNotice && <Callout>{sharedNotice}</Callout>}
             <Card>
               <CardContent className="p-6">
                 <div className="mb-5">

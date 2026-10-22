@@ -158,7 +158,7 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
-type loginReq struct {
+type LoginReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
@@ -176,7 +176,7 @@ type loginResp struct {
 // constant-time bcrypt check on the not-found path so we don't leak
 // account existence via response timing.
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	var req loginReq
+	var req LoginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -291,7 +291,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type setModeReq struct {
+type SetModeReq struct {
 	Livemode bool `json:"livemode"`
 }
 
@@ -305,7 +305,7 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req setModeReq
+	var req SetModeReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -407,7 +407,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type requestResetReq struct {
+type RequestResetReq struct {
 	Email string `json:"email"`
 }
 
@@ -416,7 +416,7 @@ type requestResetReq struct {
 // a generic message — never confirms whether the email matched a
 // user, to avoid account enumeration.
 func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
-	var req requestResetReq
+	var req RequestResetReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -508,7 +508,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type confirmResetReq struct {
+type ConfirmResetReq struct {
 	Token    string `json:"token"`
 	Password string `json:"password"`
 }
@@ -541,7 +541,7 @@ func (h *Handler) checkPasswordResetToken(w http.ResponseWriter, r *http.Request
 // characters") so the dashboard can highlight the field; collapse
 // token failures into a single 422.
 func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
-	var req confirmResetReq
+	var req ConfirmResetReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return

@@ -49,7 +49,7 @@ func (c *recordingCanceler) StopCollection(_ context.Context, _ string, _ domain
 
 func resolveManually(t *testing.T, h *Handler, runID string) {
 	t.Helper()
-	body, _ := json.Marshal(resolveInput{Resolution: string(domain.ResolutionInvoiceVoided)})
+	body, _ := json.Marshal(ResolveInput{Resolution: string(domain.ResolutionInvoiceVoided)})
 	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", runID)
@@ -125,7 +125,7 @@ func TestResolveRun_RejectsUnknownResolution(t *testing.T) {
 	h := NewHandler(svc, HandlerDeps{})
 
 	for _, bad := range []string{"payment_received", "retries_exhausted", "action_failed", "", "whatever"} {
-		body, _ := json.Marshal(resolveInput{Resolution: bad})
+		body, _ := json.Marshal(ResolveInput{Resolution: bad})
 		r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", run.ID)
@@ -165,7 +165,7 @@ func TestResolveRun_PaymentRecovered_RoutesThroughOfflinePaymentWriter(t *testin
 	h := NewHandler(svc, HandlerDeps{})
 	h.SetInvoiceVoider(voider)
 
-	body, _ := json.Marshal(resolveInput{Resolution: string(domain.ResolutionPaymentRecovered)})
+	body, _ := json.Marshal(ResolveInput{Resolution: string(domain.ResolutionPaymentRecovered)})
 	r := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", run.ID)

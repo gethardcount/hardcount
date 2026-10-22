@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { ProviderCostRateCurrency } from './providerCostRateCurrency';
 
 export interface ProviderCostRate {
   id: string;
@@ -16,7 +17,8 @@ export interface ProviderCostRate {
   token_type: string;
   /** Decimal dollars per token. */
   cost_per_token: string;
-  currency: string;
+  /** Always USD. Cost and margin count every rate in dollars. */
+  currency: ProviderCostRateCurrency;
   created_at?: string;
   updated_at?: string;
 }

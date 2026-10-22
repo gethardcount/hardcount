@@ -634,10 +634,6 @@ func (m *mockStore) RetryFromFailed(_ context.Context, _, id string) (domain.Tes
 	return c, nil
 }
 
-func (m *mockStore) ListSubscriptionsOnClock(_ context.Context, _, clockID string) ([]domain.Subscription, error) {
-	return m.subsOnClock[clockID], nil
-}
-
 func (m *mockStore) ListAllAdvancing(_ context.Context) ([]domain.TestClock, error) {
 	var out []domain.TestClock
 	for _, c := range m.clocks {

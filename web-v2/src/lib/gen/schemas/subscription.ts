@@ -46,10 +46,6 @@ export interface Subscription {
   next_billing_at?: string;
   /** Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
   billing_anchor_day?: number;
-  /** Most usage units per billing period. Absent means no cap. */
-  usage_cap_units?: number;
-  /** `block` or `charge` (the default). */
-  overage_action?: string;
   test_clock_id?: string;
   billing_failure?: BillingFailure;
   created_at: string;

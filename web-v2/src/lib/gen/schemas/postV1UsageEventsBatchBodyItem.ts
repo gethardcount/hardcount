@@ -8,6 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { PostV1UsageEventsBatchBodyItemDimensions } from './postV1UsageEventsBatchBodyItemDimensions';
+import type { PostV1UsageEventsBatchBodyItemProperties } from './postV1UsageEventsBatchBodyItemProperties';
 
 export type PostV1UsageEventsBatchBodyItem = {
   /** The customer's external_id (your identifier), not the internal vlx_cus_ id. */
@@ -17,6 +18,8 @@ export type PostV1UsageEventsBatchBodyItem = {
   /** Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
   quantity: number | string;
   dimensions?: PostV1UsageEventsBatchBodyItemDimensions;
+  /** Older name for `dimensions`. When both are sent, `dimensions` wins. */
+  properties?: PostV1UsageEventsBatchBodyItemProperties;
   /**
      * Your unique ID for this event. Pick it once, before the
      * first send, and send the same key on every retry of the

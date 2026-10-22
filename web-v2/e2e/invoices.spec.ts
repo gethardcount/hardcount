@@ -314,7 +314,7 @@ test('closing an unpaid invoice: void gives back the credit it used, write-off c
   await expect(pause).not.toBeChecked()
   await pause.click()
   await expect(pause).toBeChecked()
-  await expect(writeOffDialog).toContainText('nothing is charged until you resume it')
+  await expect(writeOffDialog).toContainText('they stay drafts and nothing charges them. Retries already running on its other unpaid invoices continue.')
   await writeOffDialog.getByLabel(/^Type WRITE OFF to confirm/).fill('WRITE OFF')
   await writeOffDialog.getByRole('button', { name: 'Mark uncollectible' }).click()
   await expect(writeOffDialog).toBeHidden()

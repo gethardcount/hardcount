@@ -53,7 +53,7 @@ func TestRequestPasswordReset_SendsWithCanonicalLivemode(t *testing.T) {
 		session.DefaultCookieConfig("local"), email, "https://app.example.com", true)
 	h.SetAuditLogger(&recordingAuditRecorder{})
 
-	body, _ := json.Marshal(requestResetReq{Email: "op@acme.com"})
+	body, _ := json.Marshal(RequestResetReq{Email: "op@acme.com"})
 	req := httptest.NewRequest(http.MethodPost, "/password-reset/request", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rr, req)
