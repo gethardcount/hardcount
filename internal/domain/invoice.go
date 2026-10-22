@@ -355,9 +355,11 @@ type Invoice struct {
 	// BelowMinimumAt is when Stripe last refused to charge this invoice
 	// because its amount is below Stripe's minimum charge (ErrBelowMinimumCharge).
 	// The charge path stamps it with payment_status 'pending' and the
-	// auto-charge queue cleared, in one write. It stays set: an open invoice's
-	// amount due only goes down, so the fact stays true. The attention notice
-	// and the hosted page read it. Internal: the notice is the API's view.
+	// auto-charge queue cleared, in one write. It is Stripe's latest answer,
+	// not a permanent fact (the minimum of a converted charge follows the
+	// account's settlement currency): the next charge outcome clears it.
+	// Readers check Invoice.BelowStripeMinimum. Internal: the notice is the
+	// API's view.
 	BelowMinimumAt *time.Time `json:"-"`
 	// ChargeAttemptSeq seeds the Stripe charge idempotency key
 	// (payment.ChargeIdempotencyKey). It moves ONLY when a charge attempt

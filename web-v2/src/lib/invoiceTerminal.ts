@@ -152,8 +152,9 @@ export function invoiceCanCollect(inv: InvoiceMoneyInput): boolean {
 /**
  * Whether the invoice page offers Collect payment. A charge needs a card, so
  * with none it is hidden; except on an invoice Stripe refused as below its
- * minimum charge. Collect charges no card there: it applies the customer's
- * credit balance and pays the invoice when that covers it.
+ * minimum charge. Collect applies the customer's credit balance there first
+ * and pays the invoice when that covers it, which needs no card (with a card
+ * it then asks Stripe again).
  */
 export function invoiceShowsCollect(inv: InvoiceMoneyInput, hasPaymentMethod: boolean, attentionReason?: string): boolean {
   return invoiceCanCollect(inv) && (hasPaymentMethod || attentionReason === 'amount_below_minimum')

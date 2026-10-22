@@ -1077,9 +1077,10 @@ func (s *Stripe) markBelowMinimum(ctx context.Context, tenantID string, inv doma
 
 	if endRecovery && s.dunningResolver != nil {
 		if derr := s.dunningResolver.ResolveByInvoice(ctx, tenantID, inv.ID, domain.ResolutionAmountBelowMinimum); derr != nil {
-			// A retry that charges gets the same refusal and ends the run
-			// then; a card-less run keeps running until a card is saved.
-			slog.ErrorContext(ctx, "could not end the invoice's payment recovery after a below-minimum refusal; it keeps running until a retry's charge gets the same answer",
+			// The stamp above is committed, and dunning reads it at the
+			// run's next tick (domain.Invoice.BelowStripeMinimum) and ends
+			// the run there, before any retry or final action.
+			slog.ErrorContext(ctx, "could not end the invoice's payment recovery after a below-minimum refusal; its next dunning tick ends it",
 				"invoice_id", inv.ID, "error", derr)
 		}
 	}

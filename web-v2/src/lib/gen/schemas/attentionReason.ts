@@ -50,7 +50,10 @@
  * charged again automatically, dunning does not start (a run already
  * open ends), and the customer is not emailed. The operator voids it
  * or records a payment; Collect payment applies the customer's credit
- * balance and pays it if that covers the amount (2026-10-23).
+ * balance and pays it if that covers the amount, and otherwise asks
+ * Stripe again. Stripe's answer can change (for a converted charge the
+ * minimum is the settlement currency's), and a different answer ends
+ * this reason (2026-10-23).
  */
 export type AttentionReason = typeof AttentionReason[keyof typeof AttentionReason];
 

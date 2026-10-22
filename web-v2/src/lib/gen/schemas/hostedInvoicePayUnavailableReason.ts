@@ -12,7 +12,8 @@
  * Sent only when money is owed but can't be paid online:
  * `online_payment_unavailable` when the seller has no payment
  * provider connected for this mode, `amount_below_minimum` when
- * Stripe refused the amount as below its minimum charge.
+ * Stripe's latest answer refused the amount as below its minimum
+ * charge.
  */
 export type HostedInvoicePayUnavailableReason = typeof HostedInvoicePayUnavailableReason[keyof typeof HostedInvoicePayUnavailableReason];
 

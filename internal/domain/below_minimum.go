@@ -27,3 +27,17 @@ const BelowMinimumCode = "amount_below_minimum"
 // An InvalidState with BelowMinimumCode, so the API answers 409 with that
 // code. payment.BelowMinimumError wraps it with Stripe's sentence.
 var ErrBelowMinimumCharge = errs.InvalidState("the amount is below Stripe's minimum charge, so it can't be charged by card").WithCode(BelowMinimumCode)
+
+// BelowStripeMinimum reports whether Stripe's latest answer to a charge of
+// this open invoice was ErrBelowMinimumCharge: the invoice is finalized and
+// unpaid, and below_minimum_at is set. It is what every reader of the fact
+// checks: the attention notice, the hosted page's Pay, and dunning, which
+// ends a run on such an invoice at its next tick (the resolve that follows
+// the stamp is a separate call that can be lost). The stamp is Stripe's
+// answer, not a permanent fact: Stripe applies the minimum of the account's
+// settlement currency to a converted charge, so a change to the account, or
+// the exchange rate, can change it. The next charge outcome Stripe gives
+// clears it (StampChargeOutcome, MarkPaymentFailedReportingTransition).
+func (inv Invoice) BelowStripeMinimum() bool {
+	return inv.Status == InvoiceFinalized && inv.PaymentStatus == PaymentPending && inv.BelowMinimumAt != nil
+}

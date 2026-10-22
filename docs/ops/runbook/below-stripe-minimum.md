@@ -27,13 +27,19 @@ One of these:
   finalized with `payment_status` `pending`. Velox does not charge it again
   automatically, starts no payment recovery, and does not email the
   customer about it. A payment recovery already running on the invoice ends
-  with resolution `amount_below_minimum`, so its final action (by default,
-  pausing the subscription) does not run.
+  with resolution `amount_below_minimum`, at once or at its next scheduled
+  step, so its final action (by default, pausing the subscription) does not
+  run.
 - **Velox learns the minimum from Stripe's answer**, so the invoice is first
   charged once. For a customer with no card on file, Velox learns it when
   the customer clicks Pay on the hosted page, or when a card is saved and
   charged. Until then the invoice is handled like any card-less invoice
   (payment-method reminders, then the policy's final action).
+- **Stripe's answer can change.** For a converted charge the minimum is your
+  settlement currency's, so a bank account in the invoice's currency, or a
+  move in the exchange rate, can bring the amount over it. Collect payment
+  asks Stripe again, and once Stripe gives a different answer the invoice
+  no longer reads as below the minimum.
 
 ## Check
 
@@ -74,11 +80,13 @@ Choose one for each invoice:
 
 - **Pay it from credit.** If the customer has a credit balance, or you grant
   one, **Collect payment** applies it and pays the invoice when it covers the
-  amount. With too little credit, Collect answers `amount_below_minimum`
-  without asking Stripe again; any credit it applied stays applied.
+  amount. With too little credit and a card on file, Collect asks Stripe
+  again: if Stripe still refuses, it answers `amount_below_minimum` and
+  nothing is charged. Any credit it applied stays applied.
 
 The hosted page has no Pay button for this invoice, so don't ask the
-customer to pay there.
+customer to pay there. Pay comes back once Collect payment gets a different
+answer from Stripe, which needs a card on file.
 
 ## Verify
 

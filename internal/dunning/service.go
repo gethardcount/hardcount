@@ -672,6 +672,16 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 			case inv.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(inv.Status), nil)
 				return rerr
+			// Stripe refused the amount as below its minimum charge. The
+			// charge path ends the run itself, but in a separate call after
+			// the stamp commits, which can be lost (a DB blip, the hosted
+			// request's context ending, a restart; on the final retry, a
+			// crash after the exhaustion lease). A card-less or refused-card
+			// retry never asks Stripe again, so without this the run went on
+			// to its reminders and final action.
+			case inv.BelowStripeMinimum():
+				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), nil)
+				return rerr
 			}
 		}
 	}
@@ -1091,6 +1101,12 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 				return rerr
 			case loaded.Status == domain.InvoiceUncollectible:
 				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceNotCollectible, "invoice_"+string(loaded.Status), nil)
+				return rerr
+			// Stamped below Stripe's minimum during the final retry (a
+			// hosted Pay click Stripe refused) and its resolve lost: no
+			// final action over an amount Stripe won't charge.
+			case loaded.BelowStripeMinimum():
+				_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionAmountBelowMinimum, string(domain.ResolutionAmountBelowMinimum), nil)
 				return rerr
 			case loaded.PaymentInFlight():
 				// A payment that may still take money: neither final action

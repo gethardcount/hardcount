@@ -1158,15 +1158,6 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		respond.JSON(w, r, http.StatusOK, settled)
 		return
 	}
-	if inv.BelowMinimumAt != nil {
-		// Stripe already refused this invoice's amount as below its minimum
-		// charge, and an open invoice's amount only goes down, so a charge
-		// would get the same answer. Refused before Stripe, with the code the
-		// hosted page's Pay uses. The credit applied above stays applied.
-		h.releaseCollectHold(r.Context(), tenantID, id, hold)
-		respond.FromError(w, r, domain.ErrBelowMinimumCharge, "invoice")
-		return
-	}
 
 	ps, err := h.paymentSetups.GetPaymentSetup(r.Context(), tenantID, inv.CustomerID)
 	if err != nil || ps.SetupStatus != domain.PaymentSetupReady || ps.StripeCustomerID == "" {
@@ -1588,18 +1579,19 @@ func piFromEventMetadata(meta map[string]any) string {
 //   - a dunning retry's below-minimum attempt defers to the retry's own
 //     row ("Payment retry N refused by Stripe"). Stripe made no
 //     PaymentIntent to key on, but a run ends at its one below-minimum
-//     retry, so the invoice has at most one such row, and the attempt
-//     still renders when that row is missing.
+//     retry, so each run has at most one such row and one such attempt:
+//     as many of these attempts are absorbed as there are rows, and one
+//     renders for each row that is missing.
 //
 // `pending` attempts never render (in flight; the attention banner owns
 // that), and a succeeded attempt on a NOT-paid invoice does render —
 // that shape is an anomaly worth seeing.
 func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceChargeAttempt, inv domain.Invoice) []timelineEvent {
 	dunningIdxByPI := recoveryRowsByPI(events)
-	retryRefusedRow := false
+	retryRefusedRows := 0
 	for _, e := range events {
 		if e.Line.Kind == kindRetryRefused {
-			retryRefusedRow = true
+			retryRefusedRows++
 		}
 	}
 	sawSucceeded := false
@@ -1610,7 +1602,8 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 		switch a.Outcome {
 		case domain.ChargeAttemptFailed, domain.ChargeAttemptUnknown:
 		case domain.ChargeAttemptBelowMinimum:
-			if a.Trigger == domain.ChargeTriggerDunningRetry && retryRefusedRow {
+			if a.Trigger == domain.ChargeTriggerDunningRetry && retryRefusedRows > 0 {
+				retryRefusedRows--
 				continue
 			}
 		case domain.ChargeAttemptSucceeded:

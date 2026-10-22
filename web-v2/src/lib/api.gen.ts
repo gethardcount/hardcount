@@ -7422,7 +7422,10 @@ export interface components {
          *     charged again automatically, dunning does not start (a run already
          *     open ends), and the customer is not emailed. The operator voids it
          *     or records a payment; Collect payment applies the customer's credit
-         *     balance and pays it if that covers the amount (2026-10-23).
+         *     balance and pays it if that covers the amount, and otherwise asks
+         *     Stripe again. Stripe's answer can change (for a converted charge the
+         *     minimum is the settlement currency's), and a different answer ends
+         *     this reason (2026-10-23).
          * @enum {string}
          */
         AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost" | "amount_below_minimum";
@@ -10178,15 +10181,17 @@ export interface components {
             /**
              * @description True when the customer can pay online now: the invoice is
              *     finalized, something is owed, no payment is in progress, the
-             *     seller has Stripe connected for the invoice's mode, and Stripe
-             *     has not refused the amount as below its minimum charge.
+             *     seller has Stripe connected for the invoice's mode, and Stripe's
+             *     latest answer for the amount was not that it is below its
+             *     minimum charge.
              */
             pay_enabled: boolean;
             /**
              * @description Sent only when money is owed but can't be paid online:
              *     `online_payment_unavailable` when the seller has no payment
              *     provider connected for this mode, `amount_below_minimum` when
-             *     Stripe refused the amount as below its minimum charge.
+             *     Stripe's latest answer refused the amount as below its minimum
+             *     charge.
              * @enum {string}
              */
             pay_unavailable_reason?: "online_payment_unavailable" | "amount_below_minimum";
@@ -11429,9 +11434,9 @@ export interface operations {
              *     payment status is `processing` or `unknown`.
              *     `payment_in_progress` when another payment for it has started.
              *     `online_payment_unavailable` when the seller has no Stripe keys
-             *     for the invoice's mode. `amount_below_minimum` when the amount is
-             *     below Stripe's minimum charge, so Stripe refuses a payment page
-             *     for it.
+             *     for the invoice's mode. `amount_below_minimum` when Stripe's
+             *     latest answer for the amount was that it is below Stripe's
+             *     minimum charge, so no payment page is made for it.
              */
             409: {
                 headers: {
@@ -14397,10 +14402,10 @@ export interface operations {
              *     as usual if none has appeared 24 hours after that charge. Code
              *     `amount_below_minimum`: the amount is below Stripe's minimum
              *     charge, so nothing was charged; the invoice stays open with
-             *     `payment_status` `pending`, and no dunning starts. Once Stripe
-             *     has refused an invoice this way, Collect applies the credit
-             *     balance and, if anything is still owed, answers with this code
-             *     without asking Stripe again.
+             *     `payment_status` `pending`, and no dunning starts. Collect
+             *     applies the credit balance first and asks Stripe each time
+             *     anything is still owed: for a converted charge, Stripe's minimum
+             *     follows the account's settlement currency.
              */
             409: {
                 headers: {

@@ -353,7 +353,7 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 
 	owed := payEnabled(inv)
 	online := owed && h.onlinePaymentReady(r.Context(), inv)
-	belowMinimum := inv.BelowMinimumAt != nil
+	belowMinimum := inv.BelowStripeMinimum()
 	respond.JSON(w, r, http.StatusOK, hostedInvoicePayload{
 		Invoice:              toViewInvoice(inv),
 		LineItems:            toViewLineItems(items),
@@ -384,11 +384,12 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 			"invoice is not in a payable state")
 		return
 	}
-	if inv.BelowMinimumAt != nil {
-		// Stripe already refused this amount as below its minimum charge, so
-		// a Checkout Session for it would be refused too. The page hides Pay
-		// in this state; a direct POST gets the same answer the session
-		// create would.
+	if inv.BelowStripeMinimum() {
+		// Stripe's latest answer for this amount was that it is below its
+		// minimum charge, so a Checkout Session would most likely be refused
+		// too. The page hides Pay in this state; a direct POST gets the same
+		// answer the session create would. The operator's Collect payment
+		// asks Stripe again, and a different answer clears the stamp.
 		respond.FromError(w, r, domain.ErrBelowMinimumCharge, "invoice")
 		return
 	}

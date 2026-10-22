@@ -655,7 +655,7 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	// Before every pending state: Stripe refused this amount, so the
 	// no-card, scheduled and awaiting notices would each promise a charge
 	// that cannot happen.
-	case inv.Status == InvoiceFinalized && inv.PaymentStatus == PaymentPending && inv.BelowMinimumAt != nil:
+	case inv.BelowStripeMinimum():
 		return classifyAmountBelowMinimum(inv)
 	// no_payment_method beats payment_scheduled: when both flags are
 	// set (engine queued for retry but PM is still missing), the
@@ -687,8 +687,9 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 // automatic step will ever collect it, so it waits on the operator. Void is
 // the one button; Record offline payment is already in the page's menu, and
 // Collect payment stays on the page: it applies the customer's credit
-// balance first and pays the invoice when that covers it, and otherwise
-// answers with this refusal without asking Stripe again. Stripe's sentence,
+// balance first and pays the invoice when that covers it, and otherwise asks
+// Stripe again (its answer can change with the account's settlement
+// currency; it answers at once and charges nothing if not). Stripe's sentence,
 // which names the minimum, goes in ProviderResponse; the detail names no
 // figure, because the minimum depends on the account's settlement currency.
 func classifyAmountBelowMinimum(inv Invoice) *Attention {
@@ -700,8 +701,8 @@ func classifyAmountBelowMinimum(inv Invoice) *Attention {
 		Message:  "This amount is below Stripe's minimum charge, so Velox won't charge it; void the invoice or record a payment made another way.",
 		Detail: "Stripe won't charge this amount because it is below Stripe's minimum, which depends on the currency your Stripe account settles in; " +
 			"Stripe's reply under Provider response names it. Nothing was charged. " +
-			"Velox doesn't retry it, doesn't start payment recovery, and doesn't email the customer about it. " +
-			"Collect payment applies the customer's credit balance and pays the invoice if that covers it. " +
+			"Velox doesn't retry it on its own, ends any payment recovery on it, and doesn't email the customer about it. " +
+			"Collect payment applies the customer's credit balance and pays the invoice if that covers it; otherwise it asks Stripe again. " +
 			"To collect it later, add the amount to the customer's next invoice by hand, then void this one. Record offline payment is in the ⋯ menu.",
 		DocURL:           docURL("amount-below-minimum"),
 		Actions:          []AttentionActionItem{{Code: AttentionActionVoidInvoice, Label: "Void invoice"}},

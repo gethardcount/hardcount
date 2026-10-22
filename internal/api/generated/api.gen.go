@@ -3595,7 +3595,10 @@ type Attention struct {
 	// charged again automatically, dunning does not start (a run already
 	// open ends), and the customer is not emailed. The operator voids it
 	// or records a payment; Collect payment applies the customer's credit
-	// balance and pays it if that covers the amount (2026-10-23).
+	// balance and pays it if that covers the amount, and otherwise asks
+	// Stripe again. Stripe's answer can change (for a converted charge the
+	// minimum is the settlement currency's), and a different answer ends
+	// this reason (2026-10-23).
 	Reason AttentionReason `json:"reason"`
 
 	// Severity Urgency of an Attention surface. Operators sort/filter on this
@@ -3695,7 +3698,10 @@ type AttentionActionItem struct {
 // charged again automatically, dunning does not start (a run already
 // open ends), and the customer is not emailed. The operator voids it
 // or records a payment; Collect payment applies the customer's credit
-// balance and pays it if that covers the amount (2026-10-23).
+// balance and pays it if that covers the amount, and otherwise asks
+// Stripe again. Stripe's answer can change (for a converted charge the
+// minimum is the settlement currency's), and a different answer ends
+// this reason (2026-10-23).
 type AttentionReason string
 
 // AttentionSeverity Urgency of an Attention surface. Operators sort/filter on this
@@ -4844,21 +4850,24 @@ type HostedInvoice struct {
 
 	// PayEnabled True when the customer can pay online now: the invoice is
 	// finalized, something is owed, no payment is in progress, the
-	// seller has Stripe connected for the invoice's mode, and Stripe
-	// has not refused the amount as below its minimum charge.
+	// seller has Stripe connected for the invoice's mode, and Stripe's
+	// latest answer for the amount was not that it is below its
+	// minimum charge.
 	PayEnabled bool `json:"pay_enabled"`
 
 	// PayUnavailableReason Sent only when money is owed but can't be paid online:
 	// `online_payment_unavailable` when the seller has no payment
 	// provider connected for this mode, `amount_below_minimum` when
-	// Stripe refused the amount as below its minimum charge.
+	// Stripe's latest answer refused the amount as below its minimum
+	// charge.
 	PayUnavailableReason HostedInvoicePayUnavailableReason `json:"pay_unavailable_reason,omitempty"`
 }
 
 // HostedInvoicePayUnavailableReason Sent only when money is owed but can't be paid online:
 // `online_payment_unavailable` when the seller has no payment
 // provider connected for this mode, `amount_below_minimum` when
-// Stripe refused the amount as below its minimum charge.
+// Stripe's latest answer refused the amount as below its minimum
+// charge.
 type HostedInvoicePayUnavailableReason string
 
 // Invoice A Velox invoice. Returned from create, finalize, void, list, get,

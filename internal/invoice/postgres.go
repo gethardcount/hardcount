@@ -886,6 +886,9 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 // back into "unknown", and with no PaymentIntent id that parked the invoice
 // for good.
 //
+// It clears below_minimum_at: this answer from Stripe replaces an earlier
+// below-minimum one (StampBelowMinimum).
+//
 // attemptSeq is the charge_attempt_seq the attempt read — the value its
 // Stripe idempotency key was built from. Every writer that records an outcome
 // bumps the column in the same statement (TestChargeAttemptSeqBumpedByEveryPIStamp),
@@ -933,7 +936,7 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 	applied := true
 	err = tx.QueryRowContext(ctx, `
 		UPDATE invoices SET payment_status = $1, stripe_payment_intent_id = $2,
-			last_payment_error = $3, updated_at = $4,
+			last_payment_error = $3, updated_at = $4, below_minimum_at = NULL,
 			charge_attempt_seq = charge_attempt_seq + 1
 		WHERE id = $5 AND charge_attempt_seq = $6
 		RETURNING `+invCols,
@@ -967,8 +970,10 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 // the same write:
 //   - auto_charge_pending is cleared, so the auto-charge sweep does not ask
 //     Stripe again every tick;
-//   - below_minimum_at is stamped, which the attention notice and the hosted
-//     page read;
+//   - below_minimum_at is stamped, which the attention notice, the hosted
+//     page and dunning read (domain.Invoice.BelowStripeMinimum); the next
+//     charge outcome Stripe gives clears it (StampChargeOutcome, and
+//     MarkPaymentFailedReportingTransition when it moves the invoice);
 //   - last_payment_error keeps Stripe's sentence, which names the minimum;
 //   - stripe_payment_intent_id is cleared and charge_attempt_seq bumped, as
 //     for any attempt outcome with no PaymentIntent (StampChargeOutcome): the
@@ -1122,6 +1127,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 				stripe_payment_intent_id = $1,
 				last_payment_error = $2,
 				failure_notified_pi = $1,
+				below_minimum_at = NULL,
 				charge_attempt_seq = charge_attempt_seq + 1,
 				updated_at = $3
 			WHERE id = $4
