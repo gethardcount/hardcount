@@ -90,3 +90,39 @@ func TestValidateSettings_CreditNotePrefix(t *testing.T) {
 		}
 	}
 }
+
+// Both prefixes are stored in capitals. Numbers were always printed in
+// capitals (NextInvoiceNumberTx, NextCreditNoteNumberTx), and the Settings form
+// shows and types them in capitals, but the API stored "acme-cn" as sent. The
+// form then loaded a value its own check refused, so every Settings save failed
+// on a field that looked right.
+func TestValidateSettings_PrefixesStoredInCapitals(t *testing.T) {
+	ts := &domain.TenantSettings{InvoicePrefix: "acme", CreditNotePrefix: "acme-cn"}
+	if err := validateSettings(ts); err != nil {
+		t.Fatalf("lowercase prefixes refused: %v", err)
+	}
+	if ts.InvoicePrefix != "ACME" || ts.CreditNotePrefix != "ACME-CN" {
+		t.Errorf("stored invoice_prefix %q, credit_note_prefix %q; want ACME and ACME-CN", ts.InvoicePrefix, ts.CreditNotePrefix)
+	}
+}
+
+// A credit note prefix equal to the invoice prefix makes VLX-000040 both an
+// invoice and a credit note: the two counts are separate, so the same number
+// comes up in each. The check ignores case, because numbers are printed in
+// capitals.
+func TestValidateSettings_CreditNotePrefixDiffersFromInvoicePrefix(t *testing.T) {
+	for _, tc := range []struct{ inv, cn string }{
+		{"VLX", "VLX"},
+		{"ACME", "acme"},
+		{"", "VLX"}, // an empty invoice prefix is the default VLX
+		{"CN", ""},  // an empty credit note prefix is the default CN
+	} {
+		err := validateSettings(&domain.TenantSettings{InvoicePrefix: tc.inv, CreditNotePrefix: tc.cn})
+		if err == nil || errs.Field(err) != "credit_note_prefix" || err.Error() != "must differ from the invoice prefix" {
+			t.Errorf("invoice %q, credit note %q: got %v (field %q), want a credit_note_prefix refusal", tc.inv, tc.cn, err, errs.Field(err))
+		}
+	}
+	if err := validateSettings(&domain.TenantSettings{InvoicePrefix: "ACME", CreditNotePrefix: "ACME-CN"}); err != nil {
+		t.Errorf("distinct prefixes refused: %v", err)
+	}
+}

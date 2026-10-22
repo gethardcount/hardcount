@@ -9,7 +9,7 @@
 // guards how the page words what the server sent.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { creditNoteStatFigures, type CreditNoteStats } from '../src/lib/creditNoteStats.ts'
+import { creditNoteStatFigures, creditNotesListView, type CreditNoteStats } from '../src/lib/creditNoteStats.ts'
 
 const usd = (over: Partial<CreditNoteStats['by_currency'][number]> = {}) => ({
   currency: 'USD',
@@ -57,4 +57,38 @@ test('pending and failed refund legs are named apart from money refunded', () =>
   assert.equal(f.refunded, '$10.00')
   assert.equal(f.refundPending, '$5.00')
   assert.equal(f.refundFailed, '$20.00')
+})
+
+// The Dashboard links to the list filtered to refunds that need attention. The
+// server counts notes by status only, so under that filter the tab counts
+// described notes the list did not show ("Issued 200" over 3 rows), and an
+// empty list said "No credit notes yet" under "250 total".
+const counts = { all: 250, draft: 10, issued: 200, voided: 40 }
+
+test('under the refund filter the tabs show no counts and the empty list names the filter', () => {
+  const v = creditNotesListView(counts, '', 'needs_attention')
+  assert.equal(v.tabCounts, null)
+  assert.equal(v.tabTotal, null)
+  assert.deepEqual(v.empty, {
+    title: 'No refunds need attention',
+    description: 'Every refund has gone through. Clear the filter to see all credit notes.',
+    clear: 'refund_status',
+  })
+})
+
+test('under a status tab the counts stay and the empty list names the status', () => {
+  const v = creditNotesListView(counts, 'draft', '')
+  assert.deepEqual(v.tabCounts, counts)
+  assert.equal(v.tabTotal, 10)
+  assert.deepEqual(v.empty, {
+    title: 'No draft credit notes',
+    description: 'Try a different filter to see more results.',
+    clear: 'status',
+  })
+})
+
+test('with no filter an empty list is the first-use state', () => {
+  const v = creditNotesListView(counts, '', '')
+  assert.equal(v.tabTotal, 250)
+  assert.equal(v.empty, null)
 })

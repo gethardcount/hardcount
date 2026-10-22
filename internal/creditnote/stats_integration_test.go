@@ -26,6 +26,9 @@ import (
 // note is an instruction to move cash, and only refund_status says whether
 // cash moved (observed live 2026-08-03: failed legs shown as returned money).
 //
+// "Pending" counts every refund that has neither succeeded nor failed, so no
+// refund money is left out of all three refund figures.
+//
 // Mutation-verify: add LIMIT 100 to the count query — draft_count reads 100;
 // drop the currency GROUP BY — the EUR figures land in USD.
 func TestStats_CountsEveryNoteAndKeepsCurrenciesApart(t *testing.T) {
@@ -96,6 +99,11 @@ func TestStats_CountsEveryNoteAndKeepsCurrenciesApart(t *testing.T) {
 	mkNote(usd, domain.CreditNoteIssued, domain.RefundFailed, 200, 0, 0)
 	mkNote(usd, domain.CreditNoteIssued, domain.RefundPending, 300, 0, 0)
 	mkNote(usd, domain.CreditNoteIssued, domain.RefundNone, 0, 400, 50)
+	// Refunds whose result is not confirmed: Stripe gave no clear answer
+	// (unknown), or the result was never recorded (still none). They count
+	// as pending, so every refund amount is in exactly one refund figure.
+	mkNote(usd, domain.CreditNoteIssued, domain.RefundUnknown, 60, 0, 0)
+	mkNote(usd, domain.CreditNoteIssued, domain.RefundNone, 40, 0, 0)
 	// A note split two ways: its credit leg settled at issue, its card leg
 	// failed. Each leg lands in its own figure.
 	mkNote(usd, domain.CreditNoteIssued, domain.RefundFailed, 100, 150, 0)
@@ -112,13 +120,13 @@ func TestStats_CountsEveryNoteAndKeepsCurrenciesApart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
-	if got.DraftCount != 101 || got.IssuedCount != 7 || got.VoidedCount != 1 {
-		t.Errorf("counts = draft %d, issued %d, voided %d; want 101, 7, 1 (every note, not the first 100)",
+	if got.DraftCount != 101 || got.IssuedCount != 9 || got.VoidedCount != 1 {
+		t.Errorf("counts = draft %d, issued %d, voided %d; want 101, 9, 1 (every note, not the first 100)",
 			got.DraftCount, got.IssuedCount, got.VoidedCount)
 	}
 
 	want := map[string]creditnote.CurrencyStats{
-		"USD": {Currency: "USD", TotalCents: 2200, RefundedCents: 1000, RefundPendingCents: 300, RefundFailedCents: 300, CreditedCents: 550, OutOfBandCents: 50},
+		"USD": {Currency: "USD", TotalCents: 2300, RefundedCents: 1000, RefundPendingCents: 400, RefundFailedCents: 300, CreditedCents: 550, OutOfBandCents: 50},
 		"EUR": {Currency: "EUR", TotalCents: 790, RefundedCents: 700, CreditedCents: 90},
 	}
 	if len(got.ByCurrency) != len(want) {

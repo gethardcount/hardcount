@@ -64,19 +64,21 @@ func TestSettings_CreditNotePrefix(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("set prefix: status %d body=%v", code, body)
 	}
-	if body["credit_note_prefix"] != "acme-cn" {
-		t.Errorf("PUT answered credit_note_prefix=%v, want acme-cn", body["credit_note_prefix"])
+	// Stored in capitals, as the number prints it and the Settings form
+	// shows it: a stored "acme-cn" failed the form's own check on every save.
+	if body["credit_note_prefix"] != "ACME-CN" {
+		t.Errorf("PUT answered credit_note_prefix=%v, want ACME-CN", body["credit_note_prefix"])
 	}
-	if got, _ := store.Get(ctx, tenantID); got.CreditNotePrefix != "acme-cn" {
-		t.Errorf("GET credit_note_prefix = %q, want acme-cn", got.CreditNotePrefix)
+	if got, _ := store.Get(ctx, tenantID); got.CreditNotePrefix != "ACME-CN" {
+		t.Errorf("GET credit_note_prefix = %q, want ACME-CN", got.CreditNotePrefix)
 	}
 	if n := nextNumber(); n != "ACME-CN-000002" {
 		t.Errorf("number after the change = %q, want ACME-CN-000002 (new prefix, same sequence)", n)
 	}
 
 	// A save that leaves the field out keeps it.
-	if code, body := put(`{"tax_name":"VAT"}`); code != http.StatusOK || body["credit_note_prefix"] != "acme-cn" {
-		t.Errorf("partial save: status %d credit_note_prefix=%v, want 200 and acme-cn kept", code, body["credit_note_prefix"])
+	if code, body := put(`{"tax_name":"VAT"}`); code != http.StatusOK || body["credit_note_prefix"] != "ACME-CN" {
+		t.Errorf("partial save: status %d credit_note_prefix=%v, want 200 and ACME-CN kept", code, body["credit_note_prefix"])
 	}
 
 	// A bad value is refused on its own field and changes nothing.
@@ -87,8 +89,15 @@ func TestSettings_CreditNotePrefix(t *testing.T) {
 	if errObj, _ := body["error"].(map[string]any); errObj == nil || errObj["param"] != "credit_note_prefix" {
 		t.Errorf("bad prefix: error %v, want it on credit_note_prefix", body["error"])
 	}
-	if got, _ := store.Get(ctx, tenantID); got.CreditNotePrefix != "acme-cn" {
-		t.Errorf("after a refused save credit_note_prefix = %q, want acme-cn", got.CreditNotePrefix)
+	if got, _ := store.Get(ctx, tenantID); got.CreditNotePrefix != "ACME-CN" {
+		t.Errorf("after a refused save credit_note_prefix = %q, want ACME-CN", got.CreditNotePrefix)
+	}
+
+	// The stored invoice prefix (the default VLX) is checked too: the same
+	// prefix would give an invoice and a credit note the same number.
+	code, body = put(`{"credit_note_prefix":"vlx"}`)
+	if errObj, _ := body["error"].(map[string]any); code != http.StatusUnprocessableEntity || errObj == nil || errObj["param"] != "credit_note_prefix" {
+		t.Errorf("prefix equal to the invoice prefix: status %d error %v, want 422 on credit_note_prefix", code, body["error"])
 	}
 
 	// An empty value goes back to the default.
