@@ -589,8 +589,11 @@ func TestCycleClose_GrantValidThroughTheLastDay_PaysThePeriodInvoice(t *testing.
 		`SELECT created_at FROM customer_credit_ledger WHERE invoice_id = $1 AND entry_type = 'usage'`, inv.ID).Scan(&drawnAt); err != nil {
 		t.Fatalf("read usage entry: %v", err)
 	}
-	if !drawnAt.Equal(x.clock.Now(x.ctx)) {
-		t.Errorf("usage entry created_at = %v, want the collection instant %v", drawnAt, x.clock.Now(x.ctx))
+	// The close collects inline on its own instant, the period end (billing
+	// rebinds the context's clock to the cycle close), so the draw is stamped
+	// there, not at the tick an hour later.
+	if !drawnAt.Equal(x.periodEnd) {
+		t.Errorf("usage entry created_at = %v, want the close's collection instant %v", drawnAt, x.periodEnd)
 	}
 
 	oldInv := x.periodInvoice(t, oldSub.ID)
