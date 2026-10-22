@@ -85,6 +85,9 @@ type heldMemStore struct {
 	// callLegacy makes IngestCallResolvingHeld report that it wrote the
 	// call's pre-split mapping.
 	callLegacy bool
+	// callWritten, when set, is the indices IngestCallResolvingHeld reports
+	// it wrote (the rest deduplicated); nil means every row of the mapping.
+	callWritten []int
 }
 
 func (h *heldMemStore) Hold(_ context.Context, _ string, ev domain.HeldUsageEvent) (domain.HeldUsageEvent, error) {
@@ -107,10 +110,17 @@ func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string,
 	return h.Ingest(ctx, tenantID, ev)
 }
 func (h *heldMemStore) IngestCallResolvingHeld(_ context.Context, _ string, call StoreCall) (CallResult, error) {
+	evs := call.Events
 	if h.callLegacy {
-		return CallResult{Inserted: len(call.Legacy), Legacy: true}, nil
+		evs = call.Legacy
 	}
-	return CallResult{Inserted: len(call.Events)}, nil
+	written := h.callWritten
+	if written == nil {
+		for i := range evs {
+			written = append(written, i)
+		}
+	}
+	return CallResult{Inserted: len(written), Deduplicated: len(evs) - len(written), Legacy: h.callLegacy, Written: written}, nil
 }
 func (h *heldMemStore) HoldCall(_ context.Context, _ string, call HeldCall) (CallResult, error) {
 	h.held = append(h.held, call.Events...)

@@ -303,3 +303,91 @@ func TestIngest_OpenPeriodReadFailureIs503(t *testing.T) {
 		})
 	}
 }
+
+// TestIngestCall_AfterCloseCountsWrittenRowsOnly: a LiteLLM call arrives as
+// two mappings, of which the store writes one, and in it some rows may be
+// deduplicated. Only the rows the store newly wrote, in the mapping it
+// wrote, count as after_close: 4 for the split written whole, 1 for the
+// pre-split mapping with :input already stored, 0 for a replay.
+//
+// Mutation checks: count every after-close row of the written mapping
+// (ignore Written) → 2 and 4 instead of 1 and 0; count both mappings → 6.
+func TestIngestCall_AfterCloseCountsWrittenRowsOnly(t *testing.T) {
+	ts := opApr.AddDate(0, 0, 20)
+	ev := func(key string, q int64) CallEvent {
+		return CallEvent{Quantity: dec(q), IdempotencyKey: key, Timestamp: &ts}
+	}
+	in := CallInput{
+		CustomerID: "cus_1", MeterID: "mtr_1",
+		Events:    []CallEvent{ev("c:input", 1000), ev("c:cache_write_5m", 40000), ev("c:cache_write_1h", 60000), ev("c:output", 500)},
+		Legacy:    []CallEvent{ev("c:input", 101000), ev("c:output", 500)},
+		LegacyKey: "c:input",
+	}
+	c := afterCloseEvents.WithLabelValues(string(domain.UsageOriginAPI))
+	for _, tc := range []struct {
+		name    string
+		legacy  bool
+		written []int
+		want    int
+	}{
+		{"split, written whole", false, nil, 4},
+		{"pre-split, :input already stored", true, []int{1}, 1},
+		{"replay", false, []int{}, 0},
+	} {
+		store := &heldMemStore{memStore: newMemStore(), callLegacy: tc.legacy, callWritten: tc.written}
+		svc := NewService(store)
+		svc.SetOpenPeriodReader(&orderReader{log: &stepLog{}})
+		before := testutil.ToFloat64(c)
+		res, err := svc.IngestCall(context.Background(), "t1", in)
+		if err != nil {
+			t.Fatalf("%s: ingest call: %v", tc.name, err)
+		}
+		if res.AfterClose != tc.want {
+			t.Errorf("%s: after_close = %d, want %d", tc.name, res.AfterClose, tc.want)
+		}
+		if got := testutil.ToFloat64(c) - before; got != float64(tc.want) {
+			t.Errorf("%s: counter moved by %v, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestIngestCall_ReadsOpenPeriodsBeforeTheWrite: as for the other doors, the
+// read comes first, and a failed read writes nothing.
+//
+// Mutation checks: classify after IngestCallResolvingHeld → the order test
+// fails; ignore the read error → the call is written.
+func TestIngestCall_ReadsOpenPeriodsBeforeTheWrite(t *testing.T) {
+	ts := opApr.AddDate(0, 0, 20)
+	in := CallInput{CustomerID: "cus_1", MeterID: "mtr_1", Events: []CallEvent{{Quantity: dec(1), IdempotencyKey: "o:input", Timestamp: &ts}}}
+
+	log := &stepLog{}
+	svc := NewService(&callOrderStore{heldMemStore: &heldMemStore{memStore: newMemStore()}, log: log})
+	svc.SetOpenPeriodReader(&orderReader{log: log})
+	if _, err := svc.IngestCall(context.Background(), "t1", in); err != nil {
+		t.Fatalf("ingest call: %v", err)
+	}
+	if strings.Join(log.steps, " ") != "read write" {
+		t.Errorf("call order = %v, want [read write]", log.steps)
+	}
+
+	log = &stepLog{}
+	svc = NewService(&callOrderStore{heldMemStore: &heldMemStore{memStore: newMemStore()}, log: log})
+	svc.SetOpenPeriodReader(&orderReader{log: log, err: errLookupInfra})
+	if _, err := svc.IngestCall(context.Background(), "t1", in); !errors.Is(err, errIngestUnavailable) {
+		t.Fatalf("ingest call with a failed read: %v, want errIngestUnavailable", err)
+	}
+	if strings.Contains(strings.Join(log.steps, " "), "write") {
+		t.Errorf("call order = %v, want no write after a failed read", log.steps)
+	}
+}
+
+// callOrderStore logs IngestCallResolvingHeld.
+type callOrderStore struct {
+	*heldMemStore
+	log *stepLog
+}
+
+func (s *callOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
+	s.log.steps = append(s.log.steps, "write")
+	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call)
+}
