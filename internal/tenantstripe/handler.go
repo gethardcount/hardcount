@@ -98,6 +98,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]any{"data": creds})
 }
 
+// SetWebhookInput is the PATCH /v1/settings/stripe/{mode}/webhook body.
+type SetWebhookInput struct {
+	WebhookSecret string `json:"webhook_secret"`
+}
+
 func (h *Handler) setWebhook(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
@@ -112,9 +117,7 @@ func (h *Handler) setWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var in struct {
-		WebhookSecret string `json:"webhook_secret"`
-	}
+	var in SetWebhookInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return

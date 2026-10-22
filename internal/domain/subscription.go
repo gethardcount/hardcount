@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -392,14 +393,16 @@ type BillingThresholds struct {
 // its own pending-plan-change state so upgrades and downgrades can schedule
 // independently per line.
 type SubscriptionItem struct {
-	ID                     string     `json:"id"`
-	TenantID               string     `json:"tenant_id,omitempty"`
-	SubscriptionID         string     `json:"subscription_id"`
-	PlanID                 string     `json:"plan_id"`
-	Quantity               int64      `json:"quantity"`
-	Metadata               []byte     `json:"metadata,omitempty"` // raw JSONB
-	PendingPlanID          string     `json:"pending_plan_id,omitempty"`
-	PendingPlanEffectiveAt *time.Time `json:"pending_plan_effective_at,omitempty"`
+	ID             string `json:"id"`
+	TenantID       string `json:"tenant_id,omitempty"`
+	SubscriptionID string `json:"subscription_id"`
+	PlanID         string `json:"plan_id"`
+	Quantity       int64  `json:"quantity"`
+	// Metadata is the item's stored JSON object. Nil when the object is
+	// empty, so the field is left out.
+	Metadata               json.RawMessage `json:"metadata,omitempty"`
+	PendingPlanID          string          `json:"pending_plan_id,omitempty"`
+	PendingPlanEffectiveAt *time.Time      `json:"pending_plan_effective_at,omitempty"`
 	// PlanChangedAt stamps the last immediate plan swap on this item. Feeds the
 	// per-item proration dedup key (invoices.source_plan_changed_at plus
 	// source_subscription_item_id) so retries of the same change converge on
@@ -521,9 +524,7 @@ type Subscription struct {
 	// bills in the one org timezone (default UTC), resolved live from tenant
 	// settings at compute time and denormalized onto the INVOICE at issue for
 	// historical stability (ADR-077, superseding the ADR-074 per-sub snapshot).
-	UsageCapUnits *int64 `json:"usage_cap_units,omitempty"` // Max usage units per billing period (nil = unlimited)
-	OverageAction string `json:"overage_action,omitempty"`  // "block" or "charge" (default: charge)
-	TestClockID   string `json:"test_clock_id,omitempty"`   // Test mode only — attached simulator clock
+	TestClockID string `json:"test_clock_id,omitempty"` // Test mode only — attached simulator clock
 	// BillingFailure is set while the billing run is failing on the work
 	// this subscription has due now, and nil otherwise (ADR-119). Composed at
 	// the store's row scan; never written through this struct.

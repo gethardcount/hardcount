@@ -146,7 +146,7 @@ type CustomerPriceOverride struct {
 	RatingRuleVersionID    string          `json:"rating_rule_version_id"`
 	Mode                   PricingMode     `json:"mode"`
 	FlatAmountCents        decimal.Decimal `json:"flat_amount_cents"`
-	GraduatedTiers         []RatingTier    `json:"graduated_tiers"`
+	GraduatedTiers         RatingTiers     `json:"graduated_tiers"`
 	PackageSize            int64           `json:"package_size"`
 	PackageAmountCents     int64           `json:"package_amount_cents"`
 	OverageUnitAmountCents decimal.Decimal `json:"overage_unit_amount_cents"`

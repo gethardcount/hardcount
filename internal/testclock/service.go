@@ -88,6 +88,14 @@ type CustomerReader interface {
 	ListByTestClockID(ctx context.Context, tenantID, clockID string) ([]domain.Customer, error)
 }
 
+// SubscriptionLister returns the subscriptions pinned to a clock in the same
+// shape as every other subscription read (name, billing time, items and the
+// rest). Implemented by the subscription store; the clock's own narrow scan
+// left most fields empty.
+type SubscriptionLister interface {
+	ListByTestClock(ctx context.Context, tenantID, clockID string) ([]domain.Subscription, error)
+}
+
 // TrialExpirer is the narrow hook the catchup orchestrator uses to
 // flip trialing subs whose `trial_end_at` has elapsed in sim time to
 // active — at `trial_end_at`, not at the later cycle close.
@@ -163,6 +171,7 @@ type Service struct {
 	billing       BillingRunner
 	queue         CatchupQueue
 	customers     CustomerReader
+	subs          SubscriptionLister
 	trialExpirer  TrialExpirer
 	pauseResumer  PauseResumer
 	taxRetry      TaxRetrier
@@ -183,6 +192,12 @@ func NewService(store Store) *Service {
 // production producer always sets a real reader.
 func (s *Service) SetCustomerReader(r CustomerReader) {
 	s.customers = r
+}
+
+// SetSubscriptionLister wires the subscription read behind
+// GET /v1/test-clocks/{id}/subscriptions.
+func (s *Service) SetSubscriptionLister(l SubscriptionLister) {
+	s.subs = l
 }
 
 // SetBillingRunner wires the billing catchup hook. Kept as a setter rather
@@ -299,7 +314,10 @@ func (s *Service) ListSubscriptions(ctx context.Context, tenantID, clockID strin
 	if _, err := s.store.Get(ctx, tenantID, clockID); err != nil {
 		return nil, err
 	}
-	return s.store.ListSubscriptionsOnClock(ctx, tenantID, clockID)
+	if s.subs == nil {
+		return nil, fmt.Errorf("testclock: subscription lister not wired")
+	}
+	return s.subs.ListByTestClock(ctx, tenantID, clockID)
 }
 
 // ListAttachedCustomers returns customers pinned to this clock —

@@ -413,13 +413,6 @@ components:
         billing_anchor_day:
           type: integer
           description: Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions.
-        usage_cap_units:
-          type: integer
-          format: int64
-          description: Most usage units per billing period. Absent means no cap.
-        overage_action:
-          type: string
-          description: "`block` or `charge` (the default)."
         test_clock_id:
           type: string
         billing_failure:
@@ -652,8 +645,10 @@ components:
         without collecting (2026-07-22). `collection_paused` reports an
         invoice that is queued for auto-charge but whose subscription
         has `pause_collection` set, so the charge sweeps deliberately
-        skip it — it will not be charged automatically until
-        collection resumes (2026-07-28). `commit_exposure` reports an
+        skip it (2026-07-28). A dunning run already open on the invoice
+        keeps retrying it through the pause, and `message` then says so;
+        with no open run it is not charged automatically until
+        collection resumes. `commit_exposure` reports an
         unpaid invoice that funded a prepaid commit whose credit is
         already spendable (ADR-078 funds commits at issue, not at
         payment) — note this reason is only returned when no other
@@ -1317,6 +1312,8 @@ components:
           description: Decimal dollars per token.
         currency:
           type: string
+          enum: [USD]
+          description: Always USD. Cost and margin count every rate in dollars.
         created_at:
           type: string
           format: date-time
@@ -2211,7 +2208,7 @@ components:
         balance_after:
           type: integer
           format: int64
-          description: Customer's credit balance after this entry.
+          description: Customer's credit balance after this entry, in cents.
         description:
           type: string
         invoice_id:
@@ -2277,9 +2274,9 @@ components:
           type: integer
           format: int64
         metadata:
-          type: string
-          format: byte
-          description: The item's stored metadata JSON, base64-encoded. Absent when empty.
+          type: object
+          additionalProperties: true
+          description: The item's stored metadata. Absent when empty.
         pending_plan_id:
           type: string
           description: Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled.
@@ -2301,8 +2298,8 @@ components:
       type: object
       required: [behavior]
       description: |
-        Present on a subscription while collection is paused. Invoices are
-        still created, but stay drafts and are not charged.
+        Present on a subscription while collection is paused. New invoices
+        are still created, but stay drafts and are not charged.
       properties:
         behavior:
           type: string
@@ -3444,7 +3441,7 @@ components:
           description: Per-unit rate in cents, as a decimal string.
         graduated_tiers:
           type: array
-          nullable: true
+          description: Empty (`[]`) unless `mode` is `graduated`.
           items:
             type: object
             properties:
@@ -4045,10 +4042,18 @@ components:
       allOf:
         - $ref: "#/components/schemas/TenantSettingsInput"
         - type: object
-          required: [tenant_id, default_currency, timezone, invoice_prefix, net_payment_terms, tax_provider, tax_rate, tax_inclusive, created_at, updated_at]
+          required: [tenant_id, default_currency, timezone, invoice_prefix, net_payment_terms, tax_provider, tax_rate, tax_inclusive, next_invoice_sequence, created_at, updated_at]
           properties:
             tenant_id:
               type: string
+            next_invoice_sequence:
+              type: integer
+              description: |
+                The number the next invoice in this mode (test or live) gets,
+                before the prefix: 43 means the next invoice is
+                `<invoice_prefix>-000043`. Test and live count separately, and
+                changing `invoice_prefix` keeps the count. Not a setting:
+                sending it on `PUT` does nothing.
             created_at:
               type: string
               format: date-time
@@ -5054,6 +5059,9 @@ paths:
                   maxItems: 10
                   items:
                     type: string
+                test_clock_id:
+                  type: string
+                  description: Test mode only. Attaches the customer to a test clock.
       responses:
         "201":
           description: Customer created
@@ -5063,6 +5071,15 @@ paths:
                 $ref: "#/components/schemas/Customer"
         "409":
           description: Customer already exists
+        "422":
+          description: |
+            A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+            `dunning_policy_id` is not a create field: assign a policy with
+            `PATCH /v1/customers/{id}`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Customers]
       summary: List customers
@@ -5339,7 +5356,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: A field failed validation (`param` names it).
+          description: |
+            A field failed validation, or the body has a key the profile does
+            not have, such as `tax_exempt` (set `tax_status` instead). `param`
+            names the field. A body read back from GET is accepted.
           content:
             application/json:
               schema:
@@ -5379,8 +5399,7 @@ paths:
         days, newest first: invoice, payment receipt, payment failed,
         payment setup request, dunning, and credit note emails. Emails
         not tied to an invoice (such as a setup link sent from the
-        payment-methods page) are not listed. No paging. An unknown
-        customer ID returns an empty list, not 404.
+        payment-methods page) are not listed. No paging.
       operationId: listCustomerSentEmails
       parameters:
         - name: id
@@ -5401,6 +5420,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SentEmail"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/customers/{id}/usage:
     get:
@@ -5940,9 +5965,7 @@ paths:
         An older route the dashboard no longer uses. Prefer
         `GET /v1/customers/{customer_id}/payment-methods`.
 
-        Any read error, an unknown customer included, returns 200 with
-        `setup_status: missing` and zero timestamps. Needs the
-        `customer:write` permission.
+        An unknown customer is 404. Needs the `customer:write` permission.
       parameters:
         - name: customerID
           in: path
@@ -5956,6 +5979,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerPaymentSetup"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/public/cost-dashboard/{token}:
     get:
@@ -6447,8 +6476,7 @@ paths:
       description: |
         Every pricing rule on the meter, highest priority first, then oldest
         first. At billing time each usage event is billed by the first rule
-        in this order whose `dimension_match` it matches. The meter id is
-        not checked: an unknown id returns an empty list.
+        in this order whose `dimension_match` it matches.
       operationId: listMeterPricingRules
       parameters:
         - name: meter_id
@@ -6469,6 +6497,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/MeterPricingRule"
+        "404":
+          description: No meter with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     post:
       tags: [Pricing]
       summary: Create or update a meter pricing rule
@@ -6671,6 +6705,9 @@ paths:
                   items:
                     type: object
                     properties:
+                      invoice_line_item_id:
+                        type: string
+                        description: Optional. The invoice line this credit line reverses.
                       description:
                         type: string
                       quantity:
@@ -6679,16 +6716,36 @@ paths:
                         type: integer
                 refund_amount_cents:
                   type: integer
+                  description: Not with commit_relief; put the relief's split inside commit_relief.
                 credit_amount_cents:
                   type: integer
                 out_of_band_amount_cents:
                   type: integer
+                  description: Not with commit_relief; put the relief's split inside commit_relief.
+                refund_type:
+                  type: string
+                  enum: [refund, credit]
+                  description: |
+                    Older single-channel form. On a paid invoice whose three
+                    `*_amount_cents` fields are all 0, `refund` or `credit`
+                    puts the whole note in that channel. Not with commit_relief.
                 auto_issue:
                   type: boolean
                 commit_relief:
                   type: object
-                  description: Mutually exclusive with lines/credit_amount_cents.
+                  description: |
+                    Mutually exclusive with lines and credit_amount_cents. The
+                    relief's split goes in here, not at the top level: a top-level
+                    `refund_amount_cents`, `out_of_band_amount_cents` or
+                    `refund_type` is a 422. Example after a lost dispute:
+                    `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
                   properties:
+                    invoice_id:
+                      type: string
+                      description: Optional. Defaults to the top-level invoice_id.
+                    reason:
+                      type: string
+                      description: Optional. Defaults to the top-level reason.
                     retire_cents:
                       type: integer
                       description: Commit credits to retire (1..remaining).
@@ -6710,7 +6767,7 @@ paths:
         "409":
           description: State gate (unpaid commit → void; fully-consumed commit; in-flight charge)
         "422":
-          description: Validation (over-retire with live remaining; allocation mismatch; zero-cash slice)
+          description: Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here)
 
     get:
       tags: [CreditNotes]
@@ -6811,6 +6868,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditGrants"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credits/adjust:
     post:
@@ -6864,7 +6927,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Validation failed (see description).
+          description: Validation failed (see description), or an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -6901,8 +6964,7 @@ paths:
       description: |
         Ledger entries for one customer. `balance_after` is the running
         balance in time order over the whole ledger, so it stays right
-        when you filter by `entry_type`. An unknown customer returns an
-        empty list, not 404.
+        when you filter by `entry_type`.
       operationId: listCreditLedgerEntries
       parameters:
         - name: customer_id
@@ -6950,6 +7012,12 @@ paths:
                       $ref: "#/components/schemas/CreditLedgerEntry"
                   total:
                     type: integer
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/webhook-endpoints/endpoints:
     post:
@@ -7603,6 +7671,10 @@ paths:
                   type: array
                   items:
                     type: string
+                status:
+                  type: string
+                  enum: [active]
+                  description: Optional. A plan is created active; archive it with PATCH.
                 tax_code:
                   type: string
                   description: |
@@ -7616,6 +7688,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Plan"
+        "422":
+          description: |
+            A field failed validation, `status` is set to anything but
+            `active` (a plan is created active; archive it with PATCH), or
+            the body has an unknown field (`param` names it; the body must use only the fields listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Pricing]
       summary: List plans
@@ -7823,6 +7904,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RatingRule"
+        "400":
+          description: The body is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            A field failed validation, or the body has an unknown field at
+            any depth (`param` names it; the body must use only the fields
+            listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Pricing]
       summary: List rating rules
@@ -7920,6 +8016,8 @@ paths:
                   default: calendar
                 trial_days:
                   type: integer
+                  minimum: 0
+                  maximum: 730
                 start_now:
                   type: boolean
       responses:
@@ -7929,6 +8027,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+        "422":
+          description: |
+            A field failed validation (`param` names it), for example
+            `trial_days` outside 0 to 730, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Subscriptions]
       summary: List subscriptions
@@ -8241,6 +8347,7 @@ paths:
             Code `validation_error`: neither or both of `at_period_end` and
             `cancel_at` are set, or `cancel_at` is in the past or breaks the
             date rules above.
+            Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -8297,6 +8404,10 @@ paths:
         period still closes and its invoice is created, but the invoice
         stays a draft. Velox does not finalize it, charge it or start
         dunning (automatic payment retries).
+
+        Invoices finalized before the pause are not drafts. Payment retries
+        already under way for them continue, as in Stripe. To stop them,
+        void the invoice or mark it uncollectible.
 
         Only `behavior: keep_as_draft` is supported. With `resumes_at`,
         periods that end before that instant bill as drafts, and later
@@ -8359,6 +8470,7 @@ paths:
           description: |
             Code `validation_error`: `behavior` is missing or not
             `keep_as_draft`, or `resumes_at` is not in the future.
+            Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -8471,7 +8583,7 @@ paths:
                 trial_end:
                   type: string
                   format: date-time
-                  description: The new trial end. Must be in the future and after the current `trial_end_at`.
+                  description: The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
       responses:
         "200":
           description: The subscription with the new `trial_end_at`.
@@ -8502,8 +8614,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `trial_end` is missing, in the past, or not after the current
-            `trial_end_at`.
+            `trial_end` is missing, in the past, not after the current
+            `trial_end_at`, or more than 730 days after `trial_start_at`.
           content:
             application/json:
               schema:
@@ -8592,6 +8704,7 @@ paths:
             not on this subscription; a `usage_gte` is not a number or is
             negative; or the subscription's plans use more than one
             currency.
+            Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -8703,6 +8816,7 @@ paths:
             Code `validation_error`: `plan_id` is missing or not found,
             `quantity` is less than 1, or the plan's billing interval
             differs from the other items'.
+            Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -8815,6 +8929,7 @@ paths:
             `new_plan_id` are set; the value equals the current one;
             `quantity` is less than 1; the new plan is not found; or the new
             plan's billing timing or interval does not fit the subscription.
+            Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -8982,6 +9097,7 @@ paths:
                 properties:
                   type: object
                   additionalProperties: true
+                  description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                 idempotency_key:
                   type: string
                   maxLength: 255
@@ -9048,16 +9164,14 @@ paths:
             type: string
         - name: from
           in: query
-          description: Only events at or after this time (RFC 3339). A value that does not parse is ignored.
+          description: Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
           schema:
             type: string
-            format: date-time
         - name: to
           in: query
-          description: Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
+          description: Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
           schema:
             type: string
-            format: date-time
         - name: limit
           in: query
           schema:
@@ -9094,7 +9208,11 @@ paths:
                     type: string
                     description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
         "422":
-          description: Malformed dimensions filter
+          description: "`validation_error`: a malformed `dimensions` pair, or a `from` or `to` that cannot be parsed, or `to` before `from` (param names the field)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/usage-events/batch:
     post:
@@ -9137,6 +9255,10 @@ paths:
                   dimensions:
                     type: object
                     additionalProperties: true
+                  properties:
+                    type: object
+                    additionalProperties: true
+                    description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                   idempotency_key:
                     type: string
                     maxLength: 255
@@ -9436,8 +9558,7 @@ paths:
         customer's latest reading (Latest value), added across customers.
         `total` stays the plain sum of reported quantities. `total_units`
         adds quantities across all meters whatever their units, and is kept
-        for compatibility only. A `from` or `to` value that is not RFC 3339
-        is ignored, not rejected.
+        for compatibility only.
       operationId: aggregateUsageEvents
       parameters:
         - name: customer_id
@@ -9450,16 +9571,14 @@ paths:
             type: string
         - name: from
           in: query
-          description: Events at or after this time (RFC 3339).
+          description: Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
           schema:
             type: string
-            format: date-time
         - name: to
           in: query
-          description: Events before this time (RFC 3339).
+          description: Events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
           schema:
             type: string
-            format: date-time
         - name: dimensions
           in: query
           description: |
@@ -9483,7 +9602,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UsageAggregate"
         "422":
-          description: "`validation_error`: a malformed `dimensions` pair or an unknown `tz`."
+          description: "`validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`."
           content:
             application/json:
               schema:
@@ -9497,8 +9616,7 @@ paths:
         Per-meter quantity totals and the event count for one customer over
         a window. Without `from` and `to` the window is the current calendar
         month in UTC (the test clock's month when the customer is on one).
-        Quantities are plain sums, whatever the meter's aggregation. An
-        unknown customer id returns zero totals, not 404.
+        Quantities are plain sums, whatever the meter's aggregation.
       operationId: getUsageSummary
       parameters:
         - name: customer_id
@@ -9524,6 +9642,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UsageSummary"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: "`validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field)."
           content:
@@ -9691,8 +9815,9 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            Validation error: missing `customer_id`, unsupported currency, or
-            an invalid line item (the message names the line number).
+            Validation error: missing `customer_id`, unsupported currency,
+            an invalid line item (the message names the line number), or
+            an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -9721,9 +9846,7 @@ paths:
         trial-end invoice when a plan bills in advance, otherwise the close
         of the first paid period, prorated the same way. With an
         explicit `period`, it is a flat estimate over that window and warns
-        when a mid-period change makes the invoice differ. Neither applies
-        usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
-        says the invoice can be lower. Composes across customer / subscription / pricing;
+        when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
         registered as a sibling of `/v1/invoices` (chi picks the more
         specific pattern, otherwise `/{id}` would capture
         `create_preview` as an invoice ID). See
@@ -9934,8 +10057,9 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            Validation error: the invoice is not a draft, or a line field is
-            invalid (for example a quantity of 0, or a second commit line).
+            Validation error: the invoice is not a draft, a line field is
+            invalid (for example a quantity of 0, or a second commit line), or
+            the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -10332,8 +10456,10 @@ paths:
         "422":
           description: |
             Validation error: missing or unknown `reason`, a negative
-            amount, an amount above what is left to refund, or refunds are
-            not configured.
+            amount, an amount above what is left to refund, refunds are
+            not configured, or an unknown field (`param` names it; the body
+            must use only the fields listed here). A misspelled amount such
+            as `amount` is refused rather than read as a full refund.
           content:
             application/json:
               schema:
@@ -11417,7 +11543,11 @@ paths:
                   description: Decimal dollars per token (e.g. "0.000003").
                 currency:
                   type: string
+                  enum: [USD]
                   default: USD
+                  description: |
+                    Rates are in USD only, the currency LiteLLM reports cost
+                    in. Any other value is 422.
       responses:
         "200":
           description: Upserted rate
@@ -11425,6 +11555,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderCostRate"
+        "422":
+          description: "`validation_error`: a required field is missing, `cost_per_token` is negative, or `currency` is not USD (param names the field)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/provider-costs/{id}:
     delete:
@@ -11547,6 +11683,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditLedgerEntry"
+        "422":
+          description: |
+            A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credits/balance/{customer_id}:
     get:
@@ -11565,6 +11708,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditBalance"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credits/balance/{customer_id}/live:
     get:
@@ -11583,8 +11732,7 @@ paths:
         A top-up shows on the next read.
 
         Not included, so the figure can read high: tax, base fees billed at
-        period end, and amounts due on unpaid invoices. A subscription with a
-        blocking usage cap can read low. Requires a secret key.
+        period end, and amounts due on unpaid invoices. Requires a secret key.
       parameters:
         - name: customer_id
           in: path
@@ -12887,9 +13035,10 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `validation_error`: a missing field, an unknown rating rule, or a
+            `validation_error`: a missing field, an unknown rating rule, a
             price shape that cannot be billed (negative rate, bad tier table,
-            package size of 0).
+            package size of 0), or an unknown field at any depth (`param`
+            names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:

@@ -21,8 +21,10 @@
  * without collecting (2026-07-22). `collection_paused` reports an
  * invoice that is queued for auto-charge but whose subscription
  * has `pause_collection` set, so the charge sweeps deliberately
- * skip it — it will not be charged automatically until
- * collection resumes (2026-07-28). `commit_exposure` reports an
+ * skip it (2026-07-28). A dunning run already open on the invoice
+ * keeps retrying it through the pause, and `message` then says so;
+ * with no open run it is not charged automatically until
+ * collection resumes. `commit_exposure` reports an
  * unpaid invoice that funded a prepaid commit whose credit is
  * already spendable (ADR-078 funds commits at issue, not at
  * payment) — note this reason is only returned when no other
