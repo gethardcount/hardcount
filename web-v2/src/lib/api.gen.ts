@@ -7890,7 +7890,7 @@ export interface components {
             max_retries: number;
             intervals_hours: number[];
             /**
-             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once a payment leaves the subscription owing nothing; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
              * @enum {string}
              */
             final_subscription_action: "none" | "pause" | "cancel";
@@ -8274,17 +8274,17 @@ export interface components {
             /**
              * Format: date-time
              * @description When collection resumes. Absent when the pause lasts until it is
-             *     cleared. On a pause set by dunning, it is the time of the payment
-             *     that left the subscription owing nothing.
+             *     cleared. On a pause set by dunning, it is when Velox recorded the
+             *     payment of the invoice the pause was set for.
              */
             resumes_at?: string;
             /**
              * @description Who paused collection. `operator`: you, through the API or the
              *     dashboard; the pause lasts until you resume it or until
              *     `resumes_at`. `dunning`: a dunning policy's `pause` final action.
-             *     A dunning pause lifts by itself once a payment leaves the
-             *     subscription with no finalized or written-off invoice still owed.
-             *     Periods that ended during the pause keep their draft invoices.
+             *     A dunning pause lifts by itself once the invoice whose dunning
+             *     set it is paid, even if another invoice is still owed. Periods
+             *     that ended during the pause keep their draft invoices.
              * @enum {string}
              */
             readonly set_by: "operator" | "dunning";

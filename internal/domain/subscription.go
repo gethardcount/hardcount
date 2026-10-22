@@ -336,8 +336,9 @@ const (
 	PauseCollectionKeepAsDraft PauseCollectionBehavior = "keep_as_draft"
 )
 
-// PauseCollectionSetBy records who set a collection pause, and so what lifts
-// it.
+// PauseCollectionSetBy says who set a collection pause, and so what lifts
+// it. The store derives it from pause_collection_invoice_id: a dunning pause
+// records the invoice whose dunning set it, an operator's pause none.
 type PauseCollectionSetBy string
 
 const (
@@ -345,8 +346,8 @@ const (
 	// operator resumes collection, or at resumes_at.
 	PauseSetByOperator PauseCollectionSetBy = "operator"
 	// PauseSetByDunning: a dunning policy's pause final action. The pause
-	// lifts once a payment leaves the subscription owing nothing: the
-	// payment stamps resumes_at, and the scheduled resumer clears it.
+	// lifts when the invoice whose dunning set it is paid: that payment
+	// stamps resumes_at, and the scheduled resumer clears it.
 	PauseSetByDunning PauseCollectionSetBy = "dunning"
 )
 
@@ -361,8 +362,8 @@ type PauseCollection struct {
 
 // InForceAt reports whether collection was paused at instant t. A pause
 // with no resumes_at holds until something sets one or clears the pause:
-// the operator resuming, or, for a dunning pause, the payment that leaves
-// the subscription owing nothing. A timed pause holds strictly before
+// the operator resuming, or, for a dunning pause, the payment of the
+// invoice whose dunning set it. A timed pause holds strictly before
 // resumes_at, so a period ending exactly at resumes_at bills as resumed.
 // The scheduled resumers leave the pause set until every period ending
 // before resumes_at is closed, so this stays answerable from the row.

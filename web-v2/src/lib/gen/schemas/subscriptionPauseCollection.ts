@@ -18,17 +18,17 @@ export interface SubscriptionPauseCollection {
   behavior: SubscriptionPauseCollectionBehavior;
   /**
      * When collection resumes. Absent when the pause lasts until it is
-     * cleared. On a pause set by dunning, it is the time of the payment
-     * that left the subscription owing nothing.
+     * cleared. On a pause set by dunning, it is when Velox recorded the
+     * payment of the invoice the pause was set for.
      */
   resumes_at?: string;
   /**
      * Who paused collection. `operator`: you, through the API or the
      * dashboard; the pause lasts until you resume it or until
      * `resumes_at`. `dunning`: a dunning policy's `pause` final action.
-     * A dunning pause lifts by itself once a payment leaves the
-     * subscription with no finalized or written-off invoice still owed.
-     * Periods that ended during the pause keep their draft invoices.
+     * A dunning pause lifts by itself once the invoice whose dunning
+     * set it is paid, even if another invoice is still owed. Periods
+     * that ended during the pause keep their draft invoices.
      */
   readonly set_by: SubscriptionPauseCollectionSetBy;
 }

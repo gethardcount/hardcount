@@ -175,7 +175,7 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		case "schedule":
 			l.Detail = append(l.Detail, activity.Text("On its scheduled date"))
 		case "payment":
-			// Dunning paused it, and a payment left nothing owed.
+			// Dunning paused it, and the invoice it paused for was paid.
 			l.Detail = append(l.Detail, activity.Text("The overdue invoice was paid"))
 		}
 	case domain.SubAuditTrialEnded:

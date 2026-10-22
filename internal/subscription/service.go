@@ -2681,14 +2681,14 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 // PauseCollectionForDunning is dunning's pause final action for the unpaid
 // invoice invoiceID. applied reports whether collection is paused when it
 // returns: true when this call paused it, and when a pause was already in
-// force (the operator's, which it leaves as it is, or this run's earlier
-// attempt). It is false when the invoice was paid before the pause could
+// force (the operator's, which it leaves as it is, this run's earlier
+// attempt, or another invoice's dunning pause). It is false when the invoice was paid before the pause could
 // land; nothing is paused then. The "Collection paused" row is written only
 // when this call paused collection, so a re-attempted exhaustion writes no
 // second row.
 //
-// The pause lifts when a payment leaves the subscription owing nothing
-// (ADR-036 amendment 2026-10-22, PostgresStore.ReleaseDunningPauseTx).
+// The pause lifts when invoiceID is paid (ADR-036 amendment 2026-10-22,
+// PostgresStore.ReleaseDunningPauseTx).
 func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, invoiceID string) (bool, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	// The ended period's invoice follows the pause state at its end, as
@@ -3197,7 +3197,7 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 
 // scheduledResumeTrigger names what lifted a pause the scheduled resumer
 // clears: "payment" for a dunning pause, whose resumes_at only the payment
-// that left the subscription owing nothing sets (ReleaseDunningPauseTx);
+// of the invoice it was set for sets (ReleaseDunningPauseTx);
 // "schedule" for an operator's timed pause.
 func scheduledResumeTrigger(listed domain.Subscription) string {
 	if listed.PauseCollection != nil && listed.PauseCollection.SetBy == domain.PauseSetByDunning {

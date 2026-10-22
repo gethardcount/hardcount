@@ -23,7 +23,8 @@ const (
 	// DunningPauseWritten: this call paused collection.
 	DunningPauseWritten DunningPauseOutcome = iota + 1
 	// DunningPauseAlreadyHeld: a pause was already in force (the
-	// operator's, or this run's earlier attempt), and was left as it is.
+	// operator's, this run's earlier attempt, or another invoice's
+	// dunning), and was left as it is.
 	DunningPauseAlreadyHeld
 	// DunningPauseInvoiceSettled: the invoice was no longer owed, so
 	// nothing was paused.

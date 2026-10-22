@@ -571,7 +571,7 @@ func TestHeldTimedPause_DoesNotBlockOtherInvoicesPastResumesAt(t *testing.T) {
 	// The sweep reads the database clock, so the pause is stamped against
 	// it. next_billing_at before resumes_at is the shape of a close still
 	// owed (a parked billing failure): the resumer must keep the pause.
-	r.exec(t, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_set_by = 'operator',
+	r.exec(t, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft',
 		pause_collection_resumes_at = now() - interval '1 hour', next_billing_at = now() - interval '2 hours' WHERE id = $1`, r.f.subID)
 	r.resumeExpired(t, time.Now().UTC())
 	if sub := r.sub(t); sub.PauseCollection == nil {

@@ -12,9 +12,9 @@
  * Who paused collection. `operator`: you, through the API or the
  * dashboard; the pause lasts until you resume it or until
  * `resumes_at`. `dunning`: a dunning policy's `pause` final action.
- * A dunning pause lifts by itself once a payment leaves the
- * subscription with no finalized or written-off invoice still owed.
- * Periods that ended during the pause keep their draft invoices.
+ * A dunning pause lifts by itself once the invoice whose dunning
+ * set it is paid, even if another invoice is still owed. Periods
+ * that ended during the pause keep their draft invoices.
  */
 export type SubscriptionPauseCollectionSetBy = typeof SubscriptionPauseCollectionSetBy[keyof typeof SubscriptionPauseCollectionSetBy];
 

@@ -9,7 +9,8 @@ import (
 	"testing/fstest"
 )
 
-// pauseInvoiceVersion is 00193_subscription_pause_invoice.sql.
+// pauseInvoiceVersion is 00193_subscription_pause_invoice.sql; 00194
+// validates its CHECK.
 const pauseInvoiceVersion = 193
 
 // filesBefore is the embedded migration set without version v and later.
@@ -81,6 +82,13 @@ func TestPauseInvoice_UpAndRollback(t *testing.T) {
 	}
 	if inv.Valid {
 		t.Errorf("a pause set before the migration has invoice %q, want none: it stays the operator's", inv.String)
+	}
+	var validated bool
+	if err := db.QueryRow(`SELECT convalidated FROM pg_constraint WHERE conname = 'subscriptions_pause_collection_invoice_id_check'`).Scan(&validated); err != nil {
+		t.Fatal(err)
+	}
+	if !validated {
+		t.Error("00194 left the CHECK not validated")
 	}
 	if err := execErr(`UPDATE subscriptions SET pause_collection_invoice_id = 'inv_x' WHERE id = 'sub_running'`); err == nil {
 		t.Error("an invoice on a subscription with no pause was accepted, want the CHECK to refuse it")

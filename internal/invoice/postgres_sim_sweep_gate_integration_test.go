@@ -169,7 +169,7 @@ func pauseSubscriptionOf(t *testing.T, ctx context.Context, db *postgres.DB, inv
 		t.Fatalf("begin pause tx: %v", err)
 	}
 	res, err := tx.ExecContext(ctx, `
-		UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_set_by = 'operator'
+		UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft'
 		 WHERE id = (SELECT subscription_id FROM invoices WHERE id = $1)`, invoiceID)
 	if err != nil {
 		t.Fatalf("pause subscription: %v", err)

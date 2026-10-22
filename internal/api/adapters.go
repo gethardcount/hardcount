@@ -563,8 +563,7 @@ func (a *dunningStarterAdapter) StartDunning(ctx context.Context, tenantID, invo
 
 // subscriptionPauserAdapter bridges subscription.Service →
 // dunning.SubscriptionPauser: a keep_as_draft pause marked as dunning's,
-// which a payment that leaves the subscription owing nothing lifts
-// (ADR-036 amendments).
+// which paying the invoice it was set for lifts (ADR-036 amendments).
 type subscriptionPauserAdapter struct {
 	svc *subscription.Service
 }

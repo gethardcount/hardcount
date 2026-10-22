@@ -258,7 +258,7 @@ func (r *pauseRig) assertReleasedBy(subID, paidInvoiceID string) {
 	}
 	resumes, _ := pc["resumes_at"].(string)
 	if resumes == "" {
-		r.t.Fatalf("pause_collection = %v after the payment left nothing owed, want resumes_at set to the payment's instant", pc)
+		r.t.Fatalf("pause_collection = %v after the invoice it was set for was paid, want resumes_at set to the payment's instant", pc)
 	}
 	ra, err := time.Parse(time.RFC3339Nano, resumes)
 	if err != nil {
@@ -282,12 +282,12 @@ func (r *pauseRig) assertResumedByPayment(subID string) {
 	if pc := r.pause(subID); pc != nil {
 		r.t.Fatalf("pause_collection = %v after the resumer, want none", pc)
 	}
-	var setBy sql.NullString
-	if err := r.admin.QueryRow(`SELECT pause_collection_set_by FROM subscriptions WHERE id = $1`, subID).Scan(&setBy); err != nil {
-		r.t.Fatalf("read set_by: %v", err)
+	var pauseInvoice sql.NullString
+	if err := r.admin.QueryRow(`SELECT pause_collection_invoice_id FROM subscriptions WHERE id = $1`, subID).Scan(&pauseInvoice); err != nil {
+		r.t.Fatalf("read pause_collection_invoice_id: %v", err)
 	}
-	if setBy.Valid {
-		r.t.Errorf("pause_collection_set_by = %q after the resume, want NULL", setBy.String)
+	if pauseInvoice.Valid {
+		r.t.Errorf("pause_collection_invoice_id = %q after the resume, want NULL", pauseInvoice.String)
 	}
 	resumed := r.auditMetas(subID, domain.SubAuditCollectionResumed)
 	if len(resumed) != 1 || resumed[0]["triggered_by"] != "payment" {
