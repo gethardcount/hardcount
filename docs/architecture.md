@@ -54,7 +54,7 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
 ## Design rules
 
 - **Per-domain packages.** Each domain owns its store, service, and handler. No peer domain touches another's internals. The imports that legitimately cross domains are listed edge by edge in an allowlist, enforced by an [architecture test](../internal/arch/boundaries_test.go).
-- **Row-Level Security (RLS).** Tenant-scoped work runs inside a transaction where Postgres enforces tenant isolation (`postgres.TxTenant`). A tenant is one account's data in the shared database. Integration tests prove it.
+- **Row-Level Security (RLS).** Most tenant-scoped work runs inside a transaction where Postgres enforces tenant isolation (`postgres.TxTenant`). A tenant is one account's data in the shared database. Integration tests prove it. Some work runs under `postgres.TxBypass`, where RLS does not apply: background jobs, public links such as the hosted invoice page, and login. Those queries must filter by tenant themselves.
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
 - **Append-only records for money.** Every change to a credit balance is a new ledger entry, and the database refuses any change or delete in the audit log.

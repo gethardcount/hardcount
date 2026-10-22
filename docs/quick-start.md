@@ -2,7 +2,7 @@
 
 This page starts Velox on your own computer and runs its demo. The demo bills
 one test customer for a month of AI token usage, so you can see the whole
-flow: usage in, invoice out. It takes about five minutes.
+flow: usage in, invoice out.
 
 ## Words on this page
 

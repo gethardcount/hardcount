@@ -26,10 +26,10 @@ labels on a usage event, such as `model` or `token_type`.
 | One program to run | Velox is a single Go program. Background jobs run inside it, so there is no queue, worker fleet or separate scheduler to run. The Compose file adds Postgres, Redis (for rate limits only), the dashboard and nginx in front: five containers, one of them Velox. | [Self-host](self-host.md) |
 | Nothing held back, nothing sent home | MIT with no licence key or paid tier. No telemetry; data goes only to services you set up, such as Stripe, your email server and your tracing collector. Billing data lives in your own Postgres. | [Why Velox](why-velox.md) |
 | Audit log that cannot be edited | A log of who changed what in your account. The database refuses to change or delete any entry in it. | [Architecture](architecture.md) |
-| Data kept apart | Each account's data, and its test and live data, are kept apart by Postgres Row-Level Security as well as by the application code. | [Postgres requirements](ops/postgres-requirements.md#the-two-database-users) |
+| Data kept apart | Each account's data, and its test and live data, are kept apart by Postgres Row-Level Security as well as by the application code. With `APP_ENV` set to `staging` or `production`, Velox will not start without RLS. | [Postgres requirements](ops/postgres-requirements.md#the-two-database-users) |
 
-Velox has no SSO, and no roles: every team member has full access
-([Roadmap](roadmap.md#not-planned-for-now)).
+Velox has no SSO. It has no roles either: every team member has full
+access ([Roadmap](roadmap.md#not-planned-for-now)).
 
 ## Subscriptions and invoices
 
@@ -43,7 +43,9 @@ Velox has no SSO, and no roles: every team member has full access
 | Billing thresholds | Set a spend or usage level, and Velox makes an invoice early once the period's total reaches it. It bills earlier; it does not stop usage. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
 
 A threshold fires at most once per period, unless `reset_billing_cycle`
-starts a new one. It is checked on each billing run. Without
+starts a new one. It is checked on each scheduled billing run: every hour,
+or every 5 minutes with `APP_ENV=local`. `POST /v1/billing/run` does not
+check it. Without
 `reset_billing_cycle`, the period's own invoice does not bill again what the
 threshold invoice billed, even after you write the threshold invoice off.
 Voiding it before the period's invoice is built does: that invoice then

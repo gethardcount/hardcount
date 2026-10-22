@@ -175,8 +175,10 @@ Words used in the Velox docs and dashboard. For the big picture, read
   [More](adr/107-unknown-is-terminal-until-a-human.md)
 - **parked invoice**: An invoice whose charge result is unknown and that has
   no PaymentIntent ID recorded, so Velox cannot yet tell if the customer
-  paid. Nothing charges it. Velox lists the customer's payments in Stripe
-  on every billing run: a payment that appears is recorded, and if none has appeared
+  paid. Nothing charges it. On every scheduled billing run (every hour, or
+  every 5 minutes with `APP_ENV=local`, but not `POST /v1/billing/run`),
+  Velox lists the customer's payments in Stripe. A payment that appears is
+  recorded, and if none has appeared
   24 hours after the charge, the invoice is charged again as usual. An
   operator can write it off meanwhile.
   [More](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)

@@ -17,6 +17,21 @@ Every call needs three things:
   key from your server. See [API keys](api-keys.md).
 - **`Content-Type: application/json`** on calls that send a body.
 
+Create a test customer:
+
+```bash
+export VELOX=http://localhost:8080
+export VELOX_KEY=vlx_secret_test_…   # your test key
+
+curl -s -X POST "$VELOX/v1/customers" \
+  -H "Authorization: Bearer $VELOX_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"external_id": "cust_123", "display_name": "Acme Inc"}'
+```
+
+**You see:** status `201` and the new customer as JSON, with an `id` such as
+`vlx_cus_…`. The `external_id` is your own ID for the customer.
+
 For a worked sequence of calls, see [first invoice](first-invoice.md#steps).
 
 ## The full reference

@@ -518,8 +518,13 @@ the customer.
 
 The margin covers usage only: base fees, credits and taxes are left out.
 Revenue Velox cannot match to a model is shown apart, in
-`unattributed_revenue_cents`. While any of the window's usage has no cost,
-`unresolved_events` counts it and `margin_bps` is left out.
+`unattributed_revenue_cents`. A token event that names its `provider`,
+`token_type` and `model` but matches no cost rate is counted in
+`unresolved_events`, and while any such event is in the window,
+`margin_bps` is left out. An event sent through the usage API without one
+of those three labels, such as usage on a meter that is not for tokens,
+gets no cost and is not counted. Its price is still in `revenue_cents`, so
+`margin_bps` reads higher than your real margin.
 
 Without `from` and `to`, the margin covers the last 30 days of the
 customer's time. On a test clock, that is the clock's time. The
