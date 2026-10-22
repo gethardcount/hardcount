@@ -768,7 +768,8 @@ func writesBilledInInput(ctx context.Context, tx *sql.Tx, tenantID, inputKey str
 // it serves). Billing is guarded where the write rows would be written:
 // ReleaseHeld and IngestCallResolvingHeld read the stored :input and bill
 // no write row on top of it. Only a release run by the previous release's
-// code would; the CHANGELOG says not to roll back while such rows are held.
+// code would; the CHANGELOG says not to release held LiteLLM usage while
+// copies of the previous release serve.
 //
 // HoldCall takes no row locks (its inserts wait only on an uncommitted
 // insert of the same key, and every hold of a call inserts :input first),

@@ -192,8 +192,9 @@ write costs from your [provider cost rates](../ai-pricing.md#see-your-margin) in
 LiteLLM 1.83.9's figures do not price the 1-hour writes correctly.
 
 A call sent again that Velox first saved before this split (as one `input`
-event with the writes inside) is saved the old way again, so its writes are
-not billed twice.
+event with the writes inside) is saved the old way again, and a cache-write
+row of it that Velox was holding is not billed when released, so its writes
+are not billed twice.
 
 **Calls that bill nothing.** A call LiteLLM reports as failed (`status`
 `failure`) and a call LiteLLM answered from its own response cache
