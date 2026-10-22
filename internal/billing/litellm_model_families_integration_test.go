@@ -1,0 +1,316 @@
+package billing_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/shopspring/decimal"
+
+	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/customer"
+	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/dunning"
+	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
+	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/pricing"
+	"github.com/sagarsuperuser/velox/internal/recipe"
+	"github.com/sagarsuperuser/velox/internal/subscription"
+	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
+	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/sagarsuperuser/velox/internal/usage"
+	"github.com/sagarsuperuser/velox/internal/webhook"
+)
+
+// recipeTenant is one tenant with the anthropic_style recipe installed and
+// one customer subscribed to its plan over April 2026, an elapsed period.
+type recipeTenant struct {
+	t            *testing.T
+	db           *postgres.DB
+	ctx, authCtx context.Context
+	tenantID     string
+	customerID   string
+	subID        string
+	meterID      string
+	pricingSvc   *pricing.Service
+	usageSvc     *usage.Service
+	usageStore   *usage.PostgresStore
+	invoiceStore *invoice.PostgresStore
+	handler      *litellm.Handler
+	periodStart  time.Time
+	periodEnd    time.Time
+}
+
+func newRecipeTenant(t *testing.T, db *postgres.DB, name string) *recipeTenant {
+	t.Helper()
+	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling, leader.RoleDunning)
+	customerStore := customer.NewPostgresStore(db)
+	pricingStore := pricing.NewPostgresStore(db)
+	pricingSvc := pricing.NewService(pricingStore)
+	usageStore := usage.NewPostgresStore(db)
+	usageSvc := usage.NewService(usageStore)
+	tenantID := testutil.CreateTestTenant(t, db, name)
+
+	registry, err := recipe.Load()
+	if err != nil {
+		t.Fatalf("load recipes: %v", err)
+	}
+	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry,
+		pricingSvc, dunning.NewService(dunning.NewPostgresStore(db), nil, nil),
+		webhook.NewService(webhook.NewPostgresStore(db), nil, "local"))
+	if _, err := recipeSvc.Instantiate(ctx, tenantID, "anthropic_style", nil, recipe.InstantiateOptions{}); err != nil {
+		t.Fatalf("instantiate anthropic_style: %v", err)
+	}
+	plans, err := pricingStore.ListPlans(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("list plans: %v", err)
+	}
+	var plan domain.Plan
+	for _, p := range plans {
+		if p.Code == "ai_api_pro" {
+			plan = p
+		}
+	}
+	if plan.ID == "" || len(plan.MeterIDs) != 1 {
+		t.Fatalf("recipe plan not found or not on one meter: %+v", plan)
+	}
+	cust, err := customerStore.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_fam", DisplayName: "Families"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	sub, err := subscription.NewPostgresStore(db).Create(ctx, tenantID, domain.Subscription{
+		Code: "sub-fam", DisplayName: "Families", CustomerID: cust.ID,
+		Items:  []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
+		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+		StartedAt:                 &periodStart,
+		CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: bivPE(periodStart),
+	})
+	if err != nil {
+		t.Fatalf("create sub: %v", err)
+	}
+	subscriptiontest.SetBillingCycle(t, ctx, db, tenantID, sub.ID, periodStart, periodEnd, periodEnd, 0)
+
+	return &recipeTenant{
+		t: t, db: db, ctx: ctx, authCtx: auth.WithTenantID(ctx, tenantID),
+		tenantID: tenantID, customerID: cust.ID, subID: sub.ID, meterID: plan.MeterIDs[0],
+		pricingSvc: pricingSvc, usageSvc: usageSvc, usageStore: usageStore,
+		invoiceStore: invoice.NewPostgresStore(db),
+		handler:      litellm.New(customerStore, pricingSvc, usageSvc, usageSvc),
+		periodStart:  periodStart, periodEnd: periodEnd,
+	}
+}
+
+// spend posts one LiteLLM 1.83.9-shaped record (top-level counts, end_user,
+// the usage object under metadata) through the real handler, mid-period.
+func (rt *recipeTenant) spend(id, model string, prompt, cached, output int64) string {
+	rt.t.Helper()
+	body := fmt.Sprintf(`{
+		"id":%q,"call_type":"acompletion","status":"success","model":%q,"custom_llm_provider":"anthropic",
+		"end_user":"cus_fam","prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d,
+		"metadata":{"usage_object":{"prompt_tokens":%d,"completion_tokens":%d,"total_tokens":%d,
+			"cache_read_input_tokens":%d,"prompt_tokens_details":{"cached_tokens":%d}}},
+		"endTime":%d}`,
+		id, model, prompt, output, prompt+output, prompt, output, prompt+output, cached, cached,
+		rt.periodStart.Add(15*24*time.Hour).Unix())
+	req := httptest.NewRequest(http.MethodPost, "/spend", strings.NewReader(body)).WithContext(rt.authCtx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	rt.handler.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		rt.t.Fatalf("/spend %s: status %d, body %s", id, rec.Code, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
+// priceRule makes a new rating rule and a pricing rule on the tokens meter.
+func (rt *recipeTenant) priceRule(key, cents string, match map[string]any, priority int) {
+	rt.t.Helper()
+	rr, err := rt.pricingSvc.CreateRatingRule(rt.ctx, rt.tenantID, pricing.CreateRatingRuleInput{
+		RuleKey: key, Name: key, Mode: domain.PricingFlat, Currency: "USD",
+		FlatAmountCents: decimal.RequireFromString(cents),
+	})
+	if err != nil {
+		rt.t.Fatalf("create rating rule %s: %v", key, err)
+	}
+	if _, err := rt.pricingSvc.UpsertMeterPricingRule(rt.ctx, rt.tenantID, pricing.UpsertMeterPricingRuleInput{
+		MeterID: rt.meterID, RatingRuleVersionID: rr.ID, DimensionMatch: match,
+		AggregationMode: domain.AggSum, Priority: priority,
+	}); err != nil {
+		rt.t.Fatalf("pricing rule %s: %v", key, err)
+	}
+}
+
+// storeOldRow writes one event as the release before this change stored it.
+func (rt *recipeTenant) storeOldRow(key string, qty int64, dims map[string]any) {
+	rt.t.Helper()
+	ts := rt.periodStart.Add(10 * 24 * time.Hour)
+	if _, err := rt.usageSvc.Ingest(rt.ctx, rt.tenantID, usage.IngestInput{
+		CustomerID: rt.customerID, MeterID: rt.meterID, Quantity: decimal.NewFromInt(qty),
+		Dimensions: dims, IdempotencyKey: key, Timestamp: &ts,
+	}); err != nil {
+		rt.t.Fatalf("store old row %s: %v", key, err)
+	}
+}
+
+// close runs the cycle and returns the period's invoice lines by description.
+func (rt *recipeTenant) close() (int64, map[string]int64) {
+	rt.t.Helper()
+	engine := newRealEngine(rt.db, clock.NewFake(rt.periodEnd.Add(time.Nanosecond)))
+	if _, errs := engine.RunCycle(rt.ctx, 50, nil); len(errs) > 0 {
+		rt.t.Fatalf("RunCycle: %v", errs)
+	}
+	invs, _, err := rt.invoiceStore.List(rt.ctx, invoice.ListFilter{TenantID: rt.tenantID})
+	if err != nil {
+		rt.t.Fatalf("list invoices: %v", err)
+	}
+	for _, inv := range invs {
+		if inv.SubscriptionID != rt.subID {
+			continue
+		}
+		items, err := rt.invoiceStore.ListLineItems(rt.ctx, rt.tenantID, inv.ID)
+		if err != nil {
+			rt.t.Fatalf("list lines: %v", err)
+		}
+		lines := map[string]int64{}
+		for _, it := range items {
+			lines[it.Description] += it.AmountCents
+		}
+		return inv.SubtotalCents, lines
+	}
+	rt.t.Fatal("no invoice for the subscription")
+	return 0, nil
+}
+
+func dumpLines(lines map[string]int64) string {
+	keys := make([]string, 0, len(lines))
+	for k := range lines {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&b, "\n  %s = %d¢", k, lines[k])
+	}
+	return b.String()
+}
+
+// TestLiteLLM_ModelFamiliesE2E: spend logs for the new Claude models and the
+// cloud-platform name forms go through the real handler, the cycle closes,
+// and every line bills at the anthropic_style 6.0.0 list price (Anthropic's
+// pricing page, checked 2026-10-22). Quantities are chosen so each line is
+// whole cents.
+func TestLiteLLM_ModelFamiliesE2E(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	rt := newRecipeTenant(t, db, "Model Families Corp")
+
+	// A call stored by the previous release, which priced Opus 5.5 as
+	// Opus 5, then sent again: it dedups to the stored row and keeps
+	// billing as stored (one row, one bill).
+	rt.storeOldRow("fam_old_opus55:input", 1_000_000, map[string]any{
+		"model": "claude-opus-5", "model_raw": "claude-opus-5-5", "provider": "anthropic", "token_type": "input",
+	})
+	if got := rt.spend("fam_old_opus55", "claude-opus-5-5", 1_000_000, 0, 0); !strings.Contains(got, `"deduplicated":1`) || !strings.Contains(got, `"accepted":0`) {
+		t.Fatalf("resend of a stored call: %s, want accepted 0, deduplicated 1", got)
+	}
+
+	rt.spend("fam_opus55", "claude-opus-5-5", 1_000_000, 0, 100_000)
+	rt.spend("fam_sonnet55", "anthropic/claude-sonnet-5-5", 2_000_000, 1_000_000, 100_000)
+	rt.spend("fam_sonnet5", "claude-sonnet-5", 1_000_000, 0, 100_000)
+	rt.spend("fam_fable51", "bedrock/global.anthropic.claude-fable-5-1", 2_000_000, 1_000_000, 100_000)
+	rt.spend("fam_haiku_std", "claude-haiku-5-5", 100_000, 0, 100_000)
+	rt.spend("fam_haiku_long", "us.anthropic.claude-haiku-5-5", 1_000_000, 800_000, 100_000)
+	rt.spend("fam_vertex_opus46", "vertex_ai/claude-opus-4-6@default", 1_000_000, 0, 100_000)
+	rt.spend("fam_converse_sonnet46", "bedrock/converse/us.anthropic.claude-sonnet-4-6", 1_000_000, 0, 100_000)
+
+	// Decision 2: an unknown version keeps its raw name and has no price...
+	rt.spend("fam_unknown", "claude-opus-4-9", 1_000_000, 0, 0)
+	evs, _, err := rt.usageStore.List(rt.ctx, usage.ListFilter{
+		TenantID: rt.tenantID, Dimensions: map[string]any{"model_raw": "claude-opus-4-9"}, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(evs) != 1 || evs[0].Dimensions["model"] != "claude-opus-4-9" {
+		t.Errorf("unknown model's events: %+v, want one with model = the raw name", evs)
+	}
+	// ...until a price is added before the invoice is made.
+	rt.priceRule("opus49_input_by_hand", "0.0001", map[string]any{"model_raw": "claude-opus-4-9", "token_type": "input"}, 101)
+
+	subtotal, lines := rt.close()
+	want := map[string]int64{
+		"Tokens (claude-opus-5 · input)":                            500, // the stored old row
+		"Tokens (claude-opus-5.5 · input)":                          400,
+		"Tokens (claude-opus-5.5 · output)":                         200,
+		"Tokens (claude-sonnet-5.5 · input)":                        200,
+		"Tokens (claude-sonnet-5.5 · cache_read)":                   10,
+		"Tokens (claude-sonnet-5.5 · output)":                       100,
+		"Tokens (claude-sonnet-5 · input)":                          200,
+		"Tokens (claude-sonnet-5 · output)":                         100,
+		"Tokens (claude-fable-5.1 · input)":                         1000,
+		"Tokens (claude-fable-5.1 · cache_read)":                    25,
+		"Tokens (claude-fable-5.1 · output)":                        500,
+		"Tokens (prompt_up_to_100k · claude-haiku-5.5 · input)":     1,
+		"Tokens (prompt_up_to_100k · claude-haiku-5.5 · output)":    5,
+		"Tokens (prompt_over_100k · claude-haiku-5.5 · input)":      10,
+		"Tokens (prompt_over_100k · claude-haiku-5.5 · cache_read)": 4,
+		"Tokens (prompt_over_100k · claude-haiku-5.5 · output)":     25,
+		"Tokens (claude-opus-4.6 · input)":                          500,
+		"Tokens (claude-opus-4.6 · output)":                         250,
+		"Tokens (claude-sonnet-4.6 · input)":                        300,
+		"Tokens (claude-sonnet-4.6 · output)":                       150,
+		"Tokens (claude-opus-4-9 · input)":                          100,
+	}
+	var wantTotal int64
+	for desc, cents := range want {
+		wantTotal += cents
+		if lines[desc] != cents {
+			t.Errorf("line %q = %d¢, want %d¢", desc, lines[desc], cents)
+		}
+	}
+	if subtotal != wantTotal {
+		t.Errorf("subtotal %d¢, want %d¢. Lines:%s", subtotal, wantTotal, dumpLines(lines))
+	}
+}
+
+// TestLiteLLM_StoredRowRepricedByModelRaw pins the docs' remedy for usage
+// stored before the upgrade (review F1): a Vertex Opus 4.6 call stored as
+// claude-opus-4 bills at Opus 4 prices unless a pricing rule on model_raw
+// claims it, and that rule must outrank the recipe's (priority 101). At
+// equal priority the older rule, the recipe's, wins.
+func TestLiteLLM_StoredRowRepricedByModelRaw(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	for _, tc := range []struct {
+		priority  int
+		wantCents int64
+		wantDesc  string
+	}{
+		{101, 500, "Tokens (vertex_ai/claude-opus-4-6@default · input)"},
+		{100, 1500, "Tokens (claude-opus-4 · input)"},
+	} {
+		t.Run(fmt.Sprintf("priority_%d", tc.priority), func(t *testing.T) {
+			rt := newRecipeTenant(t, db, fmt.Sprintf("Stored Row Corp %d", tc.priority))
+			rt.storeOldRow("old_vertex:input", 1_000_000, map[string]any{
+				"model": "claude-opus-4", "model_raw": "vertex_ai/claude-opus-4-6@default",
+				"provider": "vertex_ai", "token_type": "input",
+			})
+			rt.priceRule("opus46_input_stored_vertex", "0.0005", map[string]any{
+				"model_raw": "vertex_ai/claude-opus-4-6@default", "token_type": "input",
+			}, tc.priority)
+			subtotal, lines := rt.close()
+			if subtotal != tc.wantCents || lines[tc.wantDesc] != tc.wantCents {
+				t.Errorf("subtotal %d¢, want %d¢ on %q. Lines:%s", subtotal, tc.wantCents, tc.wantDesc, dumpLines(lines))
+			}
+		})
+	}
+}

@@ -83,7 +83,7 @@ type Mapping struct {
 // (dashed) API form; the recipe token is whatever the recipe rule uses (note
 // anthropic_style keys "claude-3.5-sonnet" with a DOT). Keep in sync with the
 // anthropic_style / openai_style recipe `dimension_match.model` values.
-var modelFamilies = []struct{ prefix, recipeToken string }{
+var modelFamilies = []modelFamily{
 	// Current Anthropic lineup (5 generation + the Opus 4.x line; dated ids
 	// like claude-opus-4-8-20260301 match via the prefix+"-" rule, and
 	// longest-prefix keeps claude-opus-4-8 ahead of claude-opus-4).
@@ -152,28 +152,74 @@ var modelFamilies = []struct{ prefix, recipeToken string }{
 	{"text-embedding-ada-002", "text-embedding-ada-002"},
 }
 
+// modelFamily is one entry of modelFamilies: the model's id in API form and
+// the token the recipes key their rules on.
+type modelFamily struct {
+	id, recipeToken string
+}
+
+// promptTiers lists, by recipe token, the models whose price depends on the
+// prompt's length. Their events carry context_tier.
+var promptTiers = map[string]promptTier{}
+
+// promptTier is a model's two prices by prompt length. A prompt counts
+// input, cache reads and cache writes (Anthropic's pricing page, "Long
+// context pricing").
+type promptTier struct {
+	// over: a prompt of more tokens than this takes the higher price.
+	over int64
+	// upTo and above are the context_tier values of the two tiers.
+	upTo, above string
+}
+
+// The context_tier dimension: set on the events of a model whose price
+// depends on the prompt's length.
+const (
+	DimContextTier      = "context_tier"
+	ContextTierUpTo100k = "prompt_up_to_100k"
+	ContextTierOver100k = "prompt_over_100k"
+)
+
 // providerPrefixes are stripped before family matching — LiteLLM prepends the
 // routing provider to the model string for non-OpenAI deployments.
 var providerPrefixes = []string{"azure/", "bedrock/", "vertex_ai/", "openai/", "anthropic/", "anthropic.", "us.", "eu.", "apac."}
 
-// canonicalModel resolves a raw LiteLLM model string to its canonical recipe
-// family token, or "" if no known family matches (caller keeps the raw string
-// and logs loudly — we never invent a family, which would mis-price). Match is
-// longest-prefix so gpt-4o-mini-* beats gpt-4o-*.
-func canonicalModel(raw string) string {
+// normalizeModel lower-cases the raw model string and strips provider
+// prefixes.
+func normalizeModel(raw string) string {
 	s := strings.ToLower(strings.TrimSpace(raw))
 	for _, p := range providerPrefixes {
 		s = strings.TrimPrefix(s, p)
 	}
-	best := ""
-	bestToken := ""
+	return s
+}
+
+// matchesFamily reports whether the normalized id s belongs to family f.
+func matchesFamily(f modelFamily, s string) bool {
+	return s == f.id || strings.HasPrefix(s, f.id+"-")
+}
+
+// lookupFamily resolves a raw LiteLLM model string to its family, or false
+// if no known family matches. Match is longest-prefix so gpt-4o-mini-* beats
+// gpt-4o-*.
+func lookupFamily(raw string) (modelFamily, bool) {
+	s := normalizeModel(raw)
+	var best modelFamily
+	found := false
 	for _, f := range modelFamilies {
-		if (s == f.prefix || strings.HasPrefix(s, f.prefix+"-")) && len(f.prefix) > len(best) {
-			best = f.prefix
-			bestToken = f.recipeToken
+		if matchesFamily(f, s) && len(f.id) > len(best.id) {
+			best, found = f, true
 		}
 	}
-	return bestToken
+	return best, found
+}
+
+// canonicalModel resolves a raw LiteLLM model string to its canonical recipe
+// family token, or "" if no known family matches (caller keeps the raw string
+// and logs loudly — we never invent a family, which would mis-price).
+func canonicalModel(raw string) string {
+	f, _ := lookupFamily(raw)
+	return f.recipeToken
 }
 
 // MapPayload converts a single LiteLLM StandardLoggingPayload into the
