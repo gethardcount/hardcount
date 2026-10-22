@@ -12,6 +12,7 @@ import {
   dunningAmountDue,
   formatCents,
   formatCentsBare,
+  formatCompactCents,
   getCurrencySymbol,
   outstandingText,
   prorationText,
@@ -165,4 +166,14 @@ test('proration toasts use the subscription currency', () => {
   assert.equal(prorationText({ type: 'invoice', amount_cents: 1200 }, 'USD'), 'Proration invoice created for $12.00')
   assert.equal(prorationText({ type: 'adjustment', amount_cents: -1200 }, 'EUR'), 'Open invoice reduced by €12.00')
   assert.equal(prorationText({ type: 'credit', amount_cents: -1200 }, 'GBP'), '£12.00 credited to customer balance')
+})
+
+// The Home revenue chart's Y axis wrote a literal "$": a GBP workspace read
+// "$5.0K" on the axis beside a "£5,000.00" tooltip and an "in GBP only" hint.
+test('a compact chart amount names its currency', () => {
+  assert.equal(formatCompactCents(500000, 'GBP'), '£5.0K')
+  assert.equal(formatCompactCents(25000000, 'EUR'), '€250K')
+  assert.equal(formatCompactCents(4200, 'USD'), '$42')
+  assert.equal(formatCompactCents(-500000, 'GBP'), '-£5.0K')
+  assert.equal(formatCompactCents(0, 'CAD'), 'CA$0')
 })

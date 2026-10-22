@@ -24,7 +24,8 @@ import (
 // newest invoice, then the workspace default.
 //
 // Mutation-verify: drop any arm of customerCurrencySQL and the matching
-// customer below reads the next arm's currency → red.
+// customer below reads the next arm's currency → red. Read the oldest
+// invoice instead of the newest and the invoiced customer reads EUR → red.
 func TestBalances_CarryTheCustomersCurrency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -97,10 +98,13 @@ func TestBalances_CarryTheCustomersCurrency(t *testing.T) {
 	subscribe(subscribed, "canceled", "USD")
 	subscribe(subscribed, "active", "CAD")
 	createOpenInvoice(t, ctx, invoices, tenantID, subscribed, 500) // a USD invoice
-	// No profile, no live subscription: the newest invoice.
+	// No profile, no live subscription: the newest invoice, not an older
+	// one in the currency the customer used to be billed in.
 	invoiced := newCustomer("invoiced")
 	subscribe(invoiced, "canceled", "CAD")
-	createOpenInvoice(t, ctx, invoices, tenantID, invoiced, 500) // USD
+	older := createOpenInvoice(t, ctx, invoices, tenantID, invoiced, 500)
+	exec(`UPDATE invoices SET currency = 'EUR', created_at = created_at - interval '60 days' WHERE id = $1`, older.ID)
+	createOpenInvoice(t, ctx, invoices, tenantID, invoiced, 500) // USD, newer
 	// Nothing at all: the workspace default.
 	bare := newCustomer("bare")
 
