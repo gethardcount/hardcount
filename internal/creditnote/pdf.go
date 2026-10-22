@@ -31,6 +31,9 @@ type CompanyInfo struct {
 	// TaxID is the seller's VAT/GSTIN/EIN/ABN, required on legally
 	// compliant credit notes (EU VAT Directive, UK VATA, India GST).
 	TaxID string
+	// SupportURL is the tenant's support link, printed at the foot of the
+	// credit note. Branding: always the current setting (ADR-109).
+	SupportURL string
 }
 
 // BillToInfo holds the buyer's address and tax id. Required on EU VAT
@@ -626,6 +629,16 @@ func RenderPDF(
 			textAt(margin, y, "DRAFT — not yet issued.")
 		default:
 			textAt(margin, y, "This credit note reduces the taxable supply originally invoiced above. Retain for your records.")
+		}
+
+		if url := strings.TrimSpace(company.SupportURL); url != "" {
+			setFont(false, 8)
+			setColor(120, 120, 120)
+			y += 6
+			for _, line := range wrap("Need help? "+url, contentW) {
+				y += 11
+				textAt(margin, y, line)
+			}
 		}
 
 		y += 24

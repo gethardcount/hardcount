@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast } from '@/lib/subscriptionCopy'
-import { api, formatCents, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
+import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
 import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
@@ -844,7 +844,7 @@ export default function SubscriptionDetailPage() {
                 <div className="flex items-center justify-between px-6 py-3">
                   <span className="text-sm text-muted-foreground w-40 shrink-0">Period total</span>
                   <span className="text-sm text-foreground">
-                    {formatCents(sub.billing_thresholds.amount_gte, items[0] ? planById(items[0].plan_id)?.currency : undefined)}
+                    {firstItemPlan ? formatCents(sub.billing_thresholds.amount_gte, firstItemPlan.currency) : formatCentsBare(sub.billing_thresholds.amount_gte)}
                     <span className="text-xs text-muted-foreground ml-2">
                       ({sub.billing_thresholds.reset_billing_cycle ? 'starts a new billing period' : 'keeps the billing period'})
                     </span>

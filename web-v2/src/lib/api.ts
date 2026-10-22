@@ -1095,6 +1095,9 @@ export interface CreditBalance {
   // an operator deducted. granted = used + expired + retired + deducted + balance.
   total_retired: number
   total_deducted: number
+  // The currency the customer is billed in. The ledger has none of its own
+  // (ADR-100), so the balance and every ledger row read in this one.
+  currency: string
 }
 
 // Per-grant burndown row (commit/promo drawdown surfaces, 2026-07-06).
@@ -1577,10 +1580,10 @@ export interface DunningStats {
   resolved_count: number
   at_risk_cents: number
   // The currency at_risk_cents is in (the tenant default).
-  currency?: string
+  currency: string
   // The at-risk amount in every currency with active or escalated runs,
   // default first. What the card shows.
-  at_risk_by_currency?: { currency: string; amount_cents: number }[]
+  at_risk_by_currency: { currency: string; amount_cents: number }[]
 }
 
 export interface CreditNote {
@@ -1876,7 +1879,7 @@ export async function downloadCreditNotePDF(creditNoteId: string, creditNoteNumb
 
 // Money formatting lives in lib/money (dependency-free, so the unit tests can
 // import it); re-exported here so every existing call site keeps working.
-export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, amountsByCurrencyText, prorationText } from './money'
+export { setActiveCurrency, getActiveCurrency, getCurrencySymbol, formatCents, formatCentsBare, amountsByCurrencyText, prorationText } from './money'
 
 // formatTaxRate renders a tax-rate percent (without the % sign) at up to 4
 // decimal places, trailing zeros trimmed: 8.875 → "8.875", 18 → "18",
@@ -1897,8 +1900,17 @@ export function formatTaxRate(rate: number): string {
 // of the rate survives; we keep a minimum of 2 fractional digits and never
 // round a nonzero rate down to "$0.00". Invoice line amounts and totals stay
 // whole cents (formatCents).
-export function formatRate(cents: string | number, currency?: string): string {
-  const symbol = getCurrencySymbol(currency)
+export function formatRate(cents: string | number, currency: string): string {
+  return rateWithSymbol(cents, getCurrencySymbol(currency))
+}
+
+// formatRateBare is a rate with no currency symbol, for a figure whose
+// currency was never recorded (see formatCentsBare).
+export function formatRateBare(cents: string | number): string {
+  return rateWithSymbol(cents, '')
+}
+
+function rateWithSymbol(cents: string | number, symbol: string): string {
   let s = (typeof cents === 'number' ? String(cents) : cents).trim()
   const neg = s.startsWith('-')
   if (neg) s = s.slice(1)

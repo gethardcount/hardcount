@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import path from 'node:path'
 import { test, expect, type Locator } from '@playwright/test'
 import { env, seedFile } from './fixtures/env'
 import { api, usd, uniq } from './fixtures/api'
@@ -513,6 +514,108 @@ test('grant credits and see the balance', async ({ page }) => {
   const balance = await api<{ balance_cents: number }>('GET', `/credits/balance/${customer.id}`)
   expect(balance.balance_cents).toBe(2500)
   await expect(page.getByText('Credit balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
+})
+
+// A credit expiry picked as a day is valid through that day: the dashboard
+// sends the midnight that starts the next day in the workspace zone (the
+// instant a period ending that night issues its invoice, so the credit pays
+// it), and shows the stored instant as the picked day, "Valid through". An
+// instant that is not a workspace midnight (an API grant) reads "Expires"
+// with its time instead.
+// ADR-071 §2, amended 2026-10-22. The screenshots go with the activity shots,
+// which CI uploads on every run.
+const VALID_THROUGH_SHOTS = path.join(import.meta.dirname, '..', 'activity-shots')
+
+async function workspaceZone(): Promise<string> {
+  return (await api<{ timezone?: string }>('GET', '/settings')).timezone || 'UTC'
+}
+
+// A yyyy-mm-dd civil date 40 days from now in the zone: always a future day.
+function pickedDay(timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone }).format(new Date(Date.now() + 40 * 86_400_000))
+}
+
+// The picked day as the dashboard prints a date: "Nov 30, 2026".
+function printedDay(yyyymmdd: string): string {
+  const [y, m, d] = yyyymmdd.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' })
+}
+
+// sent must be 00:00:00.000 in the zone, on the day after picked.
+function expectNextMidnight(sent: string, picked: string, timeZone: string) {
+  const parts = (at: Date) => new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZone,
+  }).format(at)
+  const at = new Date(sent)
+  expect(at.getUTCMilliseconds(), `${sent} has no milliseconds`).toBe(0)
+  const [y, m, d] = picked.split('-').map(Number)
+  const next = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10)
+  expect(parts(at), `${sent} is the midnight that starts the day after ${picked} in ${timeZone}`).toBe(`${next}, 00:00:00`)
+}
+
+test('a credit grant valid through a picked day is sent as the next midnight and reads "Valid through" that day', async ({ page }) => {
+  const customer = await createCustomer()
+  const zone = await workspaceZone()
+  const picked = pickedDay(zone)
+  await page.goto(`/customers/${customer.id}`)
+  await page.getByRole('link', { name: /Credit balance/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: customer.display_name, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Grant', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Grant credits' })
+  await dialog.getByLabel(/^Amount/).fill('30.00')
+  await dialog.getByLabel('Description').fill('E2E valid-through credit')
+  await expect(dialog.getByText('Valid through', { exact: true })).toBeVisible()
+  await dialog.getByPlaceholder('Never expires').fill(picked)
+  await dialog.getByPlaceholder('Never expires').press('Enter')
+  await dialog.getByRole('button', { name: 'Grant credits' }).click()
+  const granting = page.waitForRequest(r => r.method() === 'POST' && new URL(r.url()).pathname === '/v1/credits/grant')
+  await page.getByRole('alertdialog', { name: 'Confirm credit grant' }).getByRole('button', { name: 'Grant credits' }).click()
+  const sent = (await granting).postDataJSON() as { expires_at: string }
+  expectNextMidnight(sent.expires_at, picked, zone)
+
+  const row = page.getByRole('row').filter({ hasText: 'E2E valid-through credit' })
+  await expect(row).toContainText(`Valid through ${printedDay(picked)}`)
+  await row.screenshot({ path: path.join(VALID_THROUGH_SHOTS, 'credit-valid-through-ledger.png'), animations: 'disabled' })
+})
+
+test('a commit line valid through a picked day is sent as the next midnight and the grant reads that day', async ({ page }) => {
+  const customer = await createCustomer()
+  const zone = await workspaceZone()
+  const picked = pickedDay(zone)
+  await page.goto(`/customers/${customer.id}`)
+  await page.getByRole('button', { name: 'New invoice' }).click()
+  const composer = page.getByRole('dialog', { name: 'New invoice' })
+  await composer.getByPlaceholder('Implementation services').fill(`E2E prepaid commit ${uniq()}`)
+  await composer.getByPlaceholder('2500', { exact: true }).fill('5000')
+  await composer.getByText('This line sells prepaid credits').click()
+  await composer.getByLabel('Line 1 credits granted in cents').fill('5000')
+  await expect(composer.getByText('Valid through', { exact: true })).toBeVisible()
+  await composer.getByLabel('Line 1 credits valid through').fill(picked)
+  const creating = page.waitForRequest(r => r.method() === 'POST' && new URL(r.url()).pathname === '/v1/invoices')
+  await composer.getByRole('button', { name: 'Save & send' }).click()
+  const body = (await creating).postDataJSON() as { line_items: { commit_expires_at?: string }[] }
+  expectNextMidnight(body.line_items[0].commit_expires_at!, picked, zone)
+  await expect(composer).toBeHidden()
+
+  const grants = await api<{ grants: { grant_kind?: string; expires_at?: string }[] }>('GET', `/credits/grants/${customer.id}?include_exhausted=true`)
+  const commit = grants.grants.find(g => g.grant_kind === 'commit')
+  expect(commit?.expires_at && Date.parse(commit.expires_at)).toBe(Date.parse(body.line_items[0].commit_expires_at!))
+
+  // An API grant that stops at 17:17 UTC, a midnight in no zone.
+  const midDay = new Date(Date.now() + 50 * 86_400_000)
+  midDay.setUTCHours(17, 17, 0, 0)
+  await api('POST', '/credits/grant', { customer_id: customer.id, amount_cents: 1000, description: 'E2E mid-day expiry', expires_at: midDay.toISOString() })
+
+  // A fresh load reads the grant the finalize just wrote.
+  await page.reload()
+  const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
+  await expect(credits.getByRole('columnheader', { name: 'Expiry' })).toBeVisible()
+  const row = credits.getByRole('row').filter({ hasText: 'Commit' })
+  await expect(row).toContainText(`Valid through ${printedDay(picked)}`)
+  const midDayRow = credits.getByRole('row').filter({ hasText: 'E2E mid-day expiry' })
+  await expect(midDayRow).toContainText('Expires ')
+  await expect(midDayRow).not.toContainText('Valid through')
+  await credits.screenshot({ path: path.join(VALID_THROUGH_SHOTS, 'credit-valid-through-commit.png'), animations: 'disabled' })
 })
 
 test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => {

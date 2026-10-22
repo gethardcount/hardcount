@@ -404,7 +404,7 @@ export default function SettingsPage() {
                       className={cn('mt-1', formErrors.company_name && 'border-destructive')} />
                     {formErrors.company_name
                       ? <p className="text-xs text-destructive mt-1">{formErrors.company_name.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Displayed on invoice headers</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">Printed on invoices and credit notes, and the sender name on emails</p>}
                   </div>
                   <div>
                     <Label htmlFor="settings-company-email">Email</Label>
@@ -429,7 +429,7 @@ export default function SettingsPage() {
                       className={cn('mt-1', formErrors.support_url && 'border-destructive')} />
                     {formErrors.support_url
                       ? <p className="text-xs text-destructive mt-1">{formErrors.support_url.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Shown in invoice footers so customers can find help</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">Linked in emails and on the payment page, and printed on invoice and credit-note PDFs</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-logo-url">Logo URL</Label>
@@ -440,7 +440,7 @@ export default function SettingsPage() {
                       ? <p className="text-xs text-destructive mt-1">{formErrors.logo_url.message}</p>
                       : form.logo_url && /^https?:\/\//i.test(form.logo_url)
                         ? <LogoPreview key={form.logo_url} url={form.logo_url} />
-                        : <p className="text-xs text-muted-foreground mt-1">Public HTTPS URL — e.g. Cloudinary, S3 public object, or your CDN. Rendered at the top of invoice PDFs.</p>}
+                        : <p className="text-xs text-muted-foreground mt-1">Public HTTPS URL — e.g. Cloudinary, S3 public object, or your CDN. Shown in emails and on the payment page.</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-brand-color">Brand color</Label>
@@ -661,7 +661,7 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between mt-1">
                       {formErrors.invoice_footer
                         ? <p className="text-xs text-destructive">{formErrors.invoice_footer.message}</p>
-                        : <p className="text-xs text-muted-foreground">Default footer on every invoice. Per-invoice overrides take precedence.</p>}
+                        : <p className="text-xs text-muted-foreground">Printed on invoice PDFs and the payment page. Each invoice keeps the footer it was issued with.</p>}
                       <p className="text-xs text-muted-foreground tabular-nums">{(form.invoice_footer || '').length}/1000</p>
                     </div>
                   </div>

@@ -47,6 +47,16 @@ An adversarial panel (three lenses: legitimate-flow breakage, completeness, blas
 - **Zero-decimal currency support** (amount semantics per currency at Stripe boundary + renderers). Trigger: first JPY/KRW-pricing DP.
 - **TOCTOU serialization locks** as above.
 
+## Amendment 2026-10-22: a credit balance reads in the customer's currency
+
+The ledger still has no currency column (see Deferred). Without one, the dashboard printed every credit amount with the workspace symbol: a EUR customer's €20 read "$20.00", and the Credits page added it into one dollar total.
+
+A credit balance from `GET /v1/credits/balances` and `GET /v1/credits/balance/{customer_id}` now carries `currency`, read at query time and never stored. The live balance (`/balance/{customer_id}/live`) does not: it is a stop-serving gate in plain cents, and its guide says so. It is the first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default. The first two are the order the engine stamps an invoice's currency in, so a balance reads in the currency the next invoice uses. The customer page resolves the same order in the browser (`web-v2/src/lib/customerCurrency.ts`).
+
+The dashboard has no default currency any more: `formatCents` and `getCurrencySymbol` require one, so every amount names the currency of its record. A symbol typed into the markup is invisible to the type checker, so `web-v2/tests/noHardCodedCurrency.test.ts` fails on a literal `$` before an amount. A figure the server scoped to the default (Home's MRR and Revenue) says "in USD only".
+
+This changes no money path. Credit still drains 1:1 into whatever invoice it pays; the Deferred entry stands.
+
 ## References
 
 - Guards: `internal/pricing/currency_coherence.go`, `internal/subscription/service.go` (`rejectCurrencyMismatch`), `internal/customer/service.go`, `internal/payment/stripe.go` (tripwire)

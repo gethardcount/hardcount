@@ -34,5 +34,6 @@ export type HostedInvoiceInvoice = {
   /** The time zone to show the dates in, so they match the PDF. */
   billing_timezone?: string;
   memo?: string;
+  /** The footer this invoice was issued with. */
   footer?: string;
 };
