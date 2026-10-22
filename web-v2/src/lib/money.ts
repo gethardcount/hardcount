@@ -1,10 +1,13 @@
 // Money formatting. Dependency-free so the unit tests can import it directly;
 // lib/api re-exports these for the rest of the dashboard.
 //
-// The one rule worth repeating: an amount that belongs to an invoice is shown
-// in THAT invoice's currency. formatCents(cents) with no currency falls back to
-// the workspace default, which is right only for figures the server already
-// scoped to the default currency (dashboard KPIs, credit balances).
+// The one rule worth repeating: an amount is shown in the currency of the
+// record it belongs to (the invoice, the credit note, the customer). There is
+// no default: formatCents and getCurrencySymbol require a currency, so the
+// type checker lists any call that would guess. A figure the server scoped
+// to the workspace default (the Home KPIs) passes the currency the server
+// returned with it. An amount whose currency was never recorded (a credit
+// row in the audit log) is shown bare, with formatCentsBare.
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', JPY: '¥', CNY: '¥',
@@ -26,27 +29,36 @@ export function getActiveCurrency(): string {
   return _activeCurrency
 }
 
-export function getCurrencySymbol(code?: string): string {
-  return CURRENCY_SYMBOLS[(code || _activeCurrency).toUpperCase()] || (code || _activeCurrency) + ' '
+export function getCurrencySymbol(code: string): string {
+  return CURRENCY_SYMBOLS[code.toUpperCase()] || code.toUpperCase() + ' '
 }
 
-export function formatCents(cents: number, currency?: string): string {
+export function formatCents(cents: number, currency: string): string {
+  return centsWithSymbol(cents, getCurrencySymbol(currency))
+}
+
+// formatCentsBare is an amount with no currency symbol, for a figure whose
+// currency was never recorded. Never a guessed symbol.
+export function formatCentsBare(cents: number): string {
+  return centsWithSymbol(cents, '')
+}
+
+function centsWithSymbol(cents: number, symbol: string): string {
   const sign = cents < 0 ? '-' : ''
   const abs = Math.abs(cents)
-  const symbol = getCurrencySymbol(currency)
   return `${sign}${symbol}${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`
 }
 
-// formatCompactCents is the short form for a chart axis: $1.2K, $15K, $1.5M.
-// The symbol comes from the same table as formatCents, so a currency reads the
-// same on the axis as in the tooltip. It replaced a Home-only formatter that
-// divided by 100 * 100 instead of 100 * 1000 ($1,200 read "$12.0K") and always
-// printed "$" (sweep E4).
-export function formatCompactCents(cents: number, currency?: string): string {
+// formatCompactCents is a chart-axis amount: "£5.0K" from £1,000 up, whole
+// units below. Same currency rule as formatCents. A thousand is 1_000_00
+// cents; the Home axis once divided by 100_00 and read $5,000 as "$50.0K".
+export function formatCompactCents(cents: number, currency: string): string {
   const sign = cents < 0 ? '-' : ''
-  const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
-    .format(Math.abs(cents) / 100)
-  return `${sign}${getCurrencySymbol(currency)}${compact}`
+  const abs = Math.abs(cents)
+  const symbol = getCurrencySymbol(currency)
+  if (abs >= 100_000_00) return `${sign}${symbol}${Math.round(abs / 1_000_00)}K`
+  if (abs >= 1_000_00) return `${sign}${symbol}${(abs / 1_000_00).toFixed(1)}K`
+  return `${sign}${symbol}${Math.round(abs / 100)}`
 }
 
 // amountInputToCents turns what an operator typed in an amount field into the
@@ -59,6 +71,20 @@ export function amountInputToCents(input: string): number {
 }
 
 export interface CurrencyAmount { currency: string; amount_cents: number }
+
+// sumByCurrency adds amounts per currency, never across: one entry per
+// currency (codes compared uppercase), zero totals dropped, largest first.
+export function sumByCurrency(amounts: readonly CurrencyAmount[]): CurrencyAmount[] {
+  const totals = new Map<string, number>()
+  for (const a of amounts) {
+    const c = a.currency.toUpperCase()
+    totals.set(c, (totals.get(c) ?? 0) + a.amount_cents)
+  }
+  return [...totals]
+    .filter(([, cents]) => cents !== 0)
+    .map(([currency, amount_cents]) => ({ currency, amount_cents }))
+    .sort((a, b) => b.amount_cents - a.amount_cents || a.currency.localeCompare(b.currency))
+}
 
 // amountsByCurrencyText renders an aggregate over invoices in several
 // currencies: one figure per currency, joined with "+", never one sum that adds
@@ -89,26 +115,24 @@ export function outstandingText(
 // atRiskText is the Dunning "At risk" card's figure. at_risk_by_currency names
 // every currency with active or escalated runs; at_risk_cents alone covers only
 // the workspace default, so after the default changed it read CA$0.00 while
-// USD runs were active. The fallback serves a server that predates the list.
+// USD runs were active. Nothing at risk is zero in the default currency.
 export function atRiskText(stats: {
   at_risk_cents: number
-  currency?: string
-  at_risk_by_currency?: readonly CurrencyAmount[]
+  currency: string
+  at_risk_by_currency: readonly CurrencyAmount[]
 }): string {
-  if (stats.at_risk_by_currency) {
-    return amountsByCurrencyText(stats.at_risk_by_currency) ?? formatCents(0, stats.currency)
-  }
-  return formatCents(stats.at_risk_cents, stats.currency)
+  return amountsByCurrencyText(stats.at_risk_by_currency) ?? formatCents(0, stats.currency)
 }
 
 // prorationText is the toast after a subscription item change that prorated.
 // The amount is in the subscription's currency (the plans' currency), never
-// the workspace default.
+// the workspace default; with the plan not loaded, it has no symbol.
 export function prorationText(
   p: { type: 'invoice' | 'credit' | 'adjustment'; amount_cents: number },
   currency: string | undefined,
 ): string {
-  const amount = formatCents(Math.abs(p.amount_cents), currency)
+  const abs = Math.abs(p.amount_cents)
+  const amount = currency ? formatCents(abs, currency) : formatCentsBare(abs)
   if (p.type === 'invoice') return `Proration invoice created for ${amount}`
   if (p.type === 'adjustment') return `Open invoice reduced by ${amount}`
   return `${amount} credited to customer balance`

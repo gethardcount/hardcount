@@ -111,6 +111,12 @@ type CreditBalance struct {
 	// + BalanceCents.
 	TotalRetired  int64 `json:"total_retired"`
 	TotalDeducted int64 `json:"total_deducted"`
+	// Currency is the currency the customer is billed in. The ledger has
+	// none of its own (ADR-100): credit is drawn 1:1 against the customer's
+	// invoices, so its amounts read in theirs. Read, not stored; the order is
+	// the engine's (billing profile, then the plan of the live subscription),
+	// then the newest invoice, then the workspace default.
+	Currency string `json:"currency"`
 }
 
 // CreditLiveBalance is a customer's credit position right now (issue #1019):

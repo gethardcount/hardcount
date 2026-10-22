@@ -60,3 +60,11 @@ export function subscriptionsHint(o: HomeOverviewCounts): string {
 function subscriptions(n: number, kind: string): string {
   return `${n} ${kind} ${n === 1 ? 'subscription' : 'subscriptions'}`
 }
+
+// MRR, ARR, Revenue and the paid-invoice count cover the workspace default
+// currency only (internal/analytics/overview.go): a sum across currencies
+// would mean nothing. The hint says so, or a tenant with EUR customers reads
+// a USD figure that leaves them out without a word.
+export function currencyScopedHint(hint: string, currency: string): string {
+  return `${hint} · in ${currency.toUpperCase()} only`
+}

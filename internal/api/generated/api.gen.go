@@ -3708,8 +3708,11 @@ type BootstrapResult struct {
 
 // CreditBalance A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
 type CreditBalance struct {
-	BalanceCents int64  `json:"balance_cents"`
-	CustomerId   string `json:"customer_id"`
+	BalanceCents int64 `json:"balance_cents"`
+
+	// Currency The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default.
+	Currency   string `json:"currency"`
+	CustomerId string `json:"customer_id"`
 
 	// TotalDeducted Credit an operator deducted (a negative adjustment).
 	TotalDeducted int64 `json:"total_deducted"`

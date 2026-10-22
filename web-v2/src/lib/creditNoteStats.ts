@@ -13,8 +13,11 @@
 // conservative (a failed-locally refund may still exist at Stripe). A ceiling
 // errs toward counting; a "money returned" stat must be true.
 
+import { sumByCurrency, type CurrencyAmount } from './money.ts'
+
 export interface CreditNoteStatsInput {
   status: string
+  currency: string
   refund_status?: string | null
   refund_amount_cents: number
   credit_amount_cents: number
@@ -22,34 +25,38 @@ export interface CreditNoteStatsInput {
   total_cents: number
 }
 
+// Every money stat is one amount per currency (sumByCurrency): a EUR note
+// added into a USD total read €50 + $30 as "$80.00".
 export interface CreditNoteStats {
   draft: number
   issued: number
   voided: number
-  totalCredited: number
+  totalCredited: CurrencyAmount[]
   /** Succeeded card legs only — cash that actually went back. */
-  totalRefunded: number
+  totalRefunded: CurrencyAmount[]
   /** Card legs still in flight at the provider (allocated, outcome unknown). */
-  refundPendingCents: number
+  refundPendingCents: CurrencyAmount[]
   /** Card legs whose provider leg failed (allocated, no cash moved). */
-  refundFailedCents: number
-  totalOutOfBand: number
-  totalAmount: number
+  refundFailedCents: CurrencyAmount[]
+  totalOutOfBand: CurrencyAmount[]
+  totalAmount: CurrencyAmount[]
 }
 
 export function creditNoteStats(notes: CreditNoteStatsInput[]): CreditNoteStats {
   const issued = notes.filter(n => n.status === 'issued')
   const refundLeg = (n: CreditNoteStatsInput, status: string) =>
     n.refund_amount_cents > 0 && n.refund_status === status ? n.refund_amount_cents : 0
+  const sum = (cents: (n: CreditNoteStatsInput) => number) =>
+    sumByCurrency(issued.map(n => ({ currency: n.currency, amount_cents: cents(n) })))
   return {
     draft: notes.filter(n => n.status === 'draft').length,
     issued: issued.length,
     voided: notes.filter(n => n.status === 'voided').length,
-    totalCredited: issued.reduce((sum, n) => sum + n.credit_amount_cents, 0),
-    totalRefunded: issued.reduce((sum, n) => sum + refundLeg(n, 'succeeded'), 0),
-    refundPendingCents: issued.reduce((sum, n) => sum + refundLeg(n, 'pending'), 0),
-    refundFailedCents: issued.reduce((sum, n) => sum + refundLeg(n, 'failed'), 0),
-    totalOutOfBand: issued.reduce((sum, n) => sum + (n.out_of_band_amount_cents ?? 0), 0),
-    totalAmount: issued.reduce((sum, n) => sum + n.total_cents, 0),
+    totalCredited: sum(n => n.credit_amount_cents),
+    totalRefunded: sum(n => refundLeg(n, 'succeeded')),
+    refundPendingCents: sum(n => refundLeg(n, 'pending')),
+    refundFailedCents: sum(n => refundLeg(n, 'failed')),
+    totalOutOfBand: sum(n => n.out_of_band_amount_cents ?? 0),
+    totalAmount: sum(n => n.total_cents),
   }
 }
