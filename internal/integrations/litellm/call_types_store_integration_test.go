@@ -3,6 +3,7 @@ package litellm
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"testing"
 	"unicode/utf8"
@@ -100,14 +101,41 @@ func TestSpend_NewCallTypes_RealStore(t *testing.T) {
 		}
 	})
 
-	t.Run("two calls sharing a client-chosen id both bill", func(t *testing.T) {
+	t.Run("a replay from LiteLLM's spend log fills only the gap", func(t *testing.T) {
+		// docs/ops/runbook/litellm-spend-gap.md: after an outage the operator
+		// replays LiteLLM_SpendLogs, whose times keep only milliseconds
+		// (TIMESTAMP(3)). The call already stored must deduplicate, and the
+		// one lost in the outage must bill.
+		stored := proxyRecord(t, "messages-split")
+		stored.ID, stored.EndUser = "replay-stored", "cus_replay"
+		lost := stored
+		lost.ID = "replay-lost"
+		cus := newCustomer(t, stored.EndUser)
+		if r := spend(t, stored); r.Accepted != 5 {
+			t.Fatalf("live delivery %+v, want 5 accepted", r)
+		}
+		fromLog := func(p StandardLoggingPayload) StandardLoggingPayload {
+			p.StartTime = math.Round(p.StartTime*1000) / 1000
+			p.EndTime = math.Round(p.EndTime*1000) / 1000
+			return p
+		}
+		if r := spend(t, fromLog(stored), fromLog(lost)); r.Accepted != 5 || r.Deduplicated != 5 {
+			t.Fatalf("replay %+v, want 5 accepted (the lost call) and 5 deduplicated (the stored one)", r)
+		}
+		if n := len(rows(t, cus)); n != 10 {
+			t.Fatalf("%d rows, want 10 (two calls of 5)", n)
+		}
+	})
+
+	t.Run("two calls sharing a client-chosen id store one (open decision D6)", func(t *testing.T) {
+		// The same as LiteLLM's own spend log, whose primary key is the id.
 		recs := proxyRecords(t, "messages-same-call-id")
 		a, b := newCustomer(t, recs[0].EndUser), newCustomer(t, recs[1].EndUser)
-		if r := spend(t, recs...); r.Accepted != 6 || r.Deduplicated != 0 {
-			t.Fatalf("delivery %+v, want 6 accepted (3 per call) and none deduplicated", r)
+		if r := spend(t, recs...); r.Accepted != 3 || r.Deduplicated != 3 {
+			t.Fatalf("delivery %+v, want 3 accepted and 3 deduplicated", r)
 		}
-		if na, nb := len(rows(t, a)), len(rows(t, b)); na != 3 || nb != 3 {
-			t.Fatalf("rows %d and %d, want 3 each", na, nb)
+		if na, nb := len(rows(t, a)), len(rows(t, b)); na != 3 || nb != 0 {
+			t.Fatalf("rows %d and %d, want 3 and 0", na, nb)
 		}
 	})
 

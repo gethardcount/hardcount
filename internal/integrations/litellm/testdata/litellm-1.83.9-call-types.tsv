@@ -15,7 +15,7 @@ acancel_responses	skip	route	proxy/common_request_processing.py
 acancel_run	skip	route	proxy/common_request_processing.py
 acompact_responses	bill	route	proxy/common_request_processing.py
 acompletion	bill	enum	types/utils.py
-acreate	skip	client	vector_stores/main.py
+acreate	bill	client	vector_stores/main.py
 acreate_assistants	skip	enum	types/utils.py
 acreate_batch	skip	enum	types/utils.py
 acreate_container	skip	enum	types/utils.py
@@ -33,6 +33,7 @@ add_message	skip	enum	types/utils.py
 adelete	skip	client	vector_stores/main.py
 adelete_assistant	skip	enum	types/utils.py
 adelete_container	skip	enum	types/utils.py
+adelete_container_file	skip	json	containers/endpoints.json
 adelete_eval	skip	route	proxy/common_request_processing.py
 adelete_interaction	skip	route	proxy/common_request_processing.py
 adelete_responses	skip	route	proxy/common_request_processing.py
@@ -80,6 +81,8 @@ aresponses	bill	enum	types/utils.py
 aretrieve	skip	client	vector_stores/main.py
 aretrieve_batch	skip	enum	types/utils.py
 aretrieve_container	skip	enum	types/utils.py
+aretrieve_container_file	skip	json	containers/endpoints.json
+aretrieve_container_file_content	skip	json	containers/endpoints.json
 aretrieve_content	skip	client	vector_store_files/main.py
 aretrieve_fine_tuning_job	skip	enum	types/utils.py
 arun_thread	skip	enum	types/utils.py
@@ -88,6 +91,7 @@ asearch	skip	enum	types/utils.py
 asend_message	skip	enum	types/utils.py
 asend_message_streaming	skip	keyword	a2a_protocol/main.py
 aspeech	skip	enum	types/utils.py
+async_endpoint_func	skip	client	containers/endpoint_factory.py
 async_get_available_deployment	skip	keyword	router.py
 atext_completion	bill	enum	types/utils.py
 atranscription	skip	enum	types/utils.py
@@ -131,7 +135,7 @@ compact_responses	bill	client	responses/main.py
 completion	bill	enum	types/utils.py
 connect	skip	keyword	proxy/utils.py
 container_file_content	skip	keyword	proxy/container_endpoints/handler_factory.py
-create	skip	client	vector_stores/main.py
+create	bill	client	vector_stores/main.py
 create_assistants	skip	enum	types/utils.py
 create_batch	skip	enum	types/utils.py
 create_container	skip	enum	types/utils.py
@@ -146,6 +150,7 @@ create_video	skip	enum	types/utils.py
 delete	skip	client	vector_stores/main.py
 delete_assistant	skip	enum	types/utils.py
 delete_container	skip	enum	types/utils.py
+delete_container_file	skip	json	containers/endpoints.json
 delete_data	skip	keyword	proxy/utils.py
 delete_eval	skip	client	evals/main.py
 delete_interaction	skip	keyword	router.py
@@ -155,6 +160,7 @@ delete_skill	skip	client	skills/main.py
 disconnect	skip	keyword	proxy/utils.py
 discovery	skip	keyword	proxy/pass_through_endpoints/llm_passthrough_endpoints.py
 embedding	bill	enum	types/utils.py
+endpoint_func	skip	client	containers/endpoint_factory.py
 file_content	skip	enum	types/utils.py
 file_delete	skip	enum	types/utils.py
 file_list	skip	enum	types/utils.py
@@ -206,6 +212,8 @@ responses	bill	enum	types/utils.py
 retrieve	skip	client	vector_stores/main.py
 retrieve_batch	skip	enum	types/utils.py
 retrieve_container	skip	enum	types/utils.py
+retrieve_container_file	skip	json	containers/endpoints.json
+retrieve_container_file_content	skip	json	containers/endpoints.json
 retrieve_content	skip	client	vector_store_files/main.py
 retrieve_fine_tuning_job	skip	enum	types/utils.py
 run_thread	skip	enum	types/utils.py

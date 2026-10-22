@@ -8,8 +8,11 @@ Sources, each printed with the first place it was found:
   literal    values of CallTypesLiteral (types/utils.py)
   route      values of the proxy's route_type Literal
              (proxy/common_request_processing.py)
-  client     names of functions decorated with @client (the wrapper sets
-             call_type to the function name)
+  client     names of functions decorated with @client, at any indent (the
+             wrapper sets call_type to the function name)
+  json       the sync and async names of the container-file endpoints in
+             containers/endpoints.json: the proxy passes the async name as
+             the route type, and the SDK registers both names
   setup      function_setup(original_function="...") literals
   keyword    call_type="..." keyword literals (Logging(...),
              update_environment_variables(...), kwargs dicts)
@@ -18,6 +21,7 @@ testdata/litellm-1.83.9-call-types.tsv holds these strings with Velox's
 verdict for each. TestCallTypeInventory fails when the two disagree, so a
 LiteLLM upgrade shows its new call types until each is classified.
 """
+import json
 import os
 import re
 import sys
@@ -55,9 +59,13 @@ for value in literal_block(types_utils, r"CallTypesLiteral = Literal\["):
 for value in literal_block(read("proxy/common_request_processing.py"), r"route_type: Literal\["):
     add(value, "route", "proxy/common_request_processing.py")
 
-client_re = re.compile(r"^@client\s*\n(?:@.*\n)*\s*(?:async\s+)?def\s+(\w+)", re.M)
+client_re = re.compile(r"^[ \t]*@client\s*\n(?:[ \t]*@.*\n)*[ \t]*(?:async\s+)?def\s+(\w+)", re.M)
 setup_re = re.compile(r'original_function\s*=\s*"([A-Za-z_]\w*)"')
 keyword_re = re.compile(r'\bcall_type\s*=\s*"([A-Za-z_]\w*)"')
+for endpoint in json.loads(read("containers/endpoints.json"))["endpoints"]:
+    add(endpoint["name"], "json", "containers/endpoints.json")
+    add(endpoint["async_name"], "json", "containers/endpoints.json")
+
 for dirpath, _, files in os.walk(ROOT):
     for name in sorted(files):
         if not name.endswith(".py"):

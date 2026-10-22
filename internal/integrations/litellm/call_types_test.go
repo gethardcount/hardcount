@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"math"
 	"os"
-	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -78,8 +78,8 @@ func inventory(t *testing.T) map[string]string {
 // until every new call type is classified.
 func TestCallTypeInventory(t *testing.T) {
 	rows := inventory(t)
-	if len(rows) != 246 {
-		t.Errorf("inventory has %d call types, want the 246 LiteLLM 1.83.9 can send", len(rows))
+	if len(rows) != 254 {
+		t.Errorf("inventory has %d call types, want the 254 LiteLLM 1.83.9 can send", len(rows))
 	}
 	for ct, verdict := range rows {
 		_, skip := nonTokenCallTypes[ct]
@@ -99,13 +99,22 @@ func TestCallTypeInventory(t *testing.T) {
 	// edit to the inventory cannot quietly drop one.
 	for _, ct := range []string{"anthropic_messages", "responses", "aresponses", "generate_content",
 		"agenerate_content", "generate_content_stream", "agenerate_content_stream", "pass_through_endpoint",
-		"llm_passthrough_route", "allm_passthrough_route"} {
+		"llm_passthrough_route", "allm_passthrough_route",
+		// Google Interactions through the SDK: litellm.interactions.acreate.
+		// Vector stores use the same names, and their records carry no
+		// tokens, so they skip as no_tokens.
+		"acreate", "create"} {
 		if rows[ct] != "bill" {
 			t.Errorf("%s: verdict %q, want bill", ct, rows[ct])
 		}
 	}
 	for _, ct := range []string{"aimage_generation", "atranscription", "_arealtime", "aretrieve_batch",
-		"aget_responses", "asend_message", "asend_message_streaming", "batch_retrieve", "container_file_content"} {
+		"aget_responses", "asend_message", "asend_message_streaming", "batch_retrieve", "container_file_content",
+		// Container-file endpoints, named in containers/endpoints.json, and
+		// the SDK functions they become.
+		"aretrieve_container_file", "adelete_container_file", "aretrieve_container_file_content",
+		"retrieve_container_file", "delete_container_file", "retrieve_container_file_content",
+		"endpoint_func", "async_endpoint_func"} {
 		if rows[ct] != "skip" {
 			t.Errorf("%s: verdict %q, want skip", ct, rows[ct])
 		}
@@ -193,6 +202,13 @@ func TestMapPayload_CheckOrder(t *testing.T) {
 			t.Fatalf("skip=%q err=%v events=%d, want %q, no error, no events", m.Skip, err, len(m.Events), SkipNoTokens)
 		}
 	})
+	t.Run("a vector-store create record (acreate, no tokens) is skipped as no tokens", func(t *testing.T) {
+		p := StandardLoggingPayload{ID: "vs_1", CallType: "acreate", EndUser: "cus_x"}
+		m, err := MapPayload(p)
+		if err != nil || m.Skip != SkipNoTokens || len(m.Events) != 0 {
+			t.Fatalf("skip=%q err=%v events=%d, want %q, no error, no events", m.Skip, err, len(m.Events), SkipNoTokens)
+		}
+	})
 	t.Run("a record with tokens and no user is still refused", func(t *testing.T) {
 		p := StandardLoggingPayload{ID: "u_1", CallType: "anthropic_messages", PromptTokens: 10}
 		if _, err := MapPayload(p); err != ErrMissingUser {
@@ -226,13 +242,13 @@ func TestMapPayload_VertexLiveSkipped(t *testing.T) {
 	}
 }
 
-// TestMapPayload_KeyShape pins the idempotency keys. The call types billed
-// before 2026-10-22 keep <id>:<role>, so a record stored before the upgrade
-// dedups if it is ever sent again. Every other call type keys on
-// <id>@<startTime>:<role>: on a streamed /v1/messages or Gemini stream the
-// id is the client's x-litellm-call-id, so two calls can share it, but not
-// LiteLLM's start time. A prefix too long for the 255-character key limit is
-// replaced by its SHA-256.
+// TestMapPayload_KeyShape pins the idempotency keys: <id>:<role>, the id
+// being LiteLLM's call id, which is also the request_id its own spend log
+// keys on. So a record rebuilt from that spend log, whose times keep only
+// milliseconds, gets the keys of the record Velox already stored, and the
+// replay in docs/ops/runbook/litellm-spend-gap.md fills only the gap. For a
+// call type billed only since 2026-10-22, an id too long for the
+// 255-character key limit is replaced by its SHA-256.
 func TestMapPayload_KeyShape(t *testing.T) {
 	keys := func(t *testing.T, p StandardLoggingPayload) []string {
 		t.Helper()
@@ -250,32 +266,41 @@ func TestMapPayload_KeyShape(t *testing.T) {
 		CompletionTokens: 5, StartTime: 1792685793.255407}
 
 	for _, ct := range []string{"completion", "acompletion", "chat", "chat.completion", "embedding",
-		"aembedding", "text_completion", "atext_completion"} {
+		"aembedding", "text_completion", "atext_completion", "anthropic_messages", "aresponses",
+		"agenerate_content", "pass_through_endpoint"} {
 		p := base
 		p.CallType = ct
 		if got := keys(t, p)[0]; got != "call_k:input" {
-			t.Errorf("%s: key %q, want call_k:input (unchanged)", ct, got)
+			t.Errorf("%s: key %q, want call_k:input", ct, got)
 		}
 	}
 
-	p := base
-	p.CallType = "anthropic_messages"
-	if got := keys(t, p)[0]; got != "call_k@1792685793.255407:input" {
-		t.Errorf("anthropic_messages: key %q, want call_k@1792685793.255407:input", got)
-	}
-	p.StartTime = 0
-	if got := keys(t, p)[0]; got != "call_k:input" {
-		t.Errorf("no startTime: key %q, want call_k:input", got)
-	}
-
-	t.Run("two streamed calls with the same client-chosen id bill twice", func(t *testing.T) {
+	t.Run("a record rebuilt from LiteLLM's spend log keys like the live record", func(t *testing.T) {
+		// LiteLLM_SpendLogs keeps startTime and endTime as TIMESTAMP(3):
+		// milliseconds, rounded or cut. The live record has microseconds.
+		for _, name := range []string{"messages-split", "messages-stream-delta-cumulative", "responses",
+			"responses-stream", "generate-content", "generate-content-stream", "passthrough-messages"} {
+			live := proxyRecord(t, name)
+			for _, ms := range []func(float64) float64{math.Round, math.Floor} {
+				replay := live
+				replay.StartTime = ms(live.StartTime*1000) / 1000
+				replay.EndTime = ms(live.EndTime*1000) / 1000
+				if a, b := keys(t, live), keys(t, replay); strings.Join(a, ",") != strings.Join(b, ",") {
+					t.Errorf("%s: the replay keys %v, the live record %v: the replay would bill the call again", name, b, a)
+				}
+			}
+		}
+	})
+	t.Run("two streamed calls with the same client-chosen id share keys (open decision D6)", func(t *testing.T) {
+		// LiteLLM 1.83.9 gives both records the client's x-litellm-call-id.
+		// Its own spend log keeps only the first (request_id is its primary
+		// key). Velox does the same: the second deduplicates.
 		recs := proxyRecords(t, "messages-same-call-id")
 		if len(recs) != 2 || recs[0].ID != recs[1].ID {
 			t.Fatalf("fixture: want two records with one id")
 		}
-		a, b := keys(t, recs[0]), keys(t, recs[1])
-		if a[0] == b[0] {
-			t.Fatalf("both calls key on %q: the second would deduplicate unbilled", a[0])
+		if a, b := keys(t, recs[0]), keys(t, recs[1]); a[0] != b[0] {
+			t.Fatalf("keys %q and %q, want one key: LiteLLM's id", a[0], b[0])
 		}
 	})
 	t.Run("two copies of one record dedup", func(t *testing.T) {
@@ -302,16 +327,38 @@ func TestMapPayload_KeyShape(t *testing.T) {
 		if again := keys(t, p); strings.Join(again, ",") != strings.Join(first, ",") {
 			t.Errorf("a resend keys differently: %v vs %v", first, again)
 		}
-		later := p
-		later.StartTime += 1
-		if keys(t, later)[0] == first[0] {
-			t.Error("a call with the same id and another start time got the same key")
+		other := p
+		other.ID = p.ID[:len(p.ID)-1] + "x"
+		if keys(t, other)[0] == first[0] {
+			t.Error("two ids hashed to one key")
+		}
+	})
+	t.Run("the longest id kept as is still fits the longest role", func(t *testing.T) {
+		// 255 characters less ":cache_write_5m" is the longest id kept as
+		// is; one more character and it is hashed. Either way every key of a
+		// call with both cache-write roles fits, so HoldCall accepts it.
+		rec := proxyRecord(t, "messages-split")
+		limit := usage.MaxIdempotencyKeyLen - len(":"+TokenTypeCacheWrite5m)
+		for _, n := range []int{limit, limit + 1} {
+			p := rec
+			p.ID = strings.Repeat("r", n)
+			ks := keys(t, p)
+			if len(ks) != 5 {
+				t.Fatalf("id of %d: %d keys, want 5 (every role)", n, len(ks))
+			}
+			for _, k := range ks {
+				if utf8.RuneCountInString(k) > usage.MaxIdempotencyKeyLen {
+					t.Errorf("id of %d: key of %d characters, over %d", n, utf8.RuneCountInString(k), usage.MaxIdempotencyKeyLen)
+				}
+			}
+			if hashed := strings.HasPrefix(ks[0], "sha256-"); hashed != (n > limit) {
+				t.Errorf("id of %d: hashed=%v, want %v", n, hashed, n > limit)
+			}
 		}
 	})
 	t.Run("embeddings keep the id LiteLLM sent (open decision D8)", func(t *testing.T) {
 		// LiteLLM 1.83.9 gives an embedding record the client's
-		// x-litellm-call-id; both captured calls carry it. Their keys stay
-		// <id>:<role> in this change.
+		// x-litellm-call-id; both captured calls carry it.
 		recs := proxyRecords(t, "embedding-same-call-id")
 		for _, r := range recs {
 			if got := keys(t, r)[0]; got != r.ID+":input" {
@@ -361,7 +408,6 @@ func TestMapPayload_ProxyFixtures(t *testing.T) {
 			if got := quantities(t, m.Events); !sameQuantities(got, tc.want) {
 				t.Fatalf("quantities %v, want %v", got, tc.want)
 			}
-			start := strconv.FormatFloat(p.StartTime, 'f', -1, 64)
 			for _, e := range m.Events {
 				if e.ExternalCustomerID != tc.customer {
 					t.Errorf("customer %q, want %q", e.ExternalCustomerID, tc.customer)
@@ -370,8 +416,8 @@ func TestMapPayload_ProxyFixtures(t *testing.T) {
 					t.Errorf("dims model=%v model_raw=%v provider=%v, want %s, %s, %s", e.Dimensions["model"],
 						e.Dimensions["model_raw"], e.Dimensions["provider"], tc.model, p.Model, tc.provider)
 				}
-				if !strings.HasPrefix(e.IdempotencyKey, p.ID+"@"+start+":") && !strings.HasPrefix(e.IdempotencyKey, "sha256-") {
-					t.Errorf("key %q, want <id>@<startTime>:<role>", e.IdempotencyKey)
+				if !strings.HasPrefix(e.IdempotencyKey, p.ID+":") && !strings.HasPrefix(e.IdempotencyKey, "sha256-") {
+					t.Errorf("key %q, want <id>:<role>", e.IdempotencyKey)
 				}
 			}
 			if tc.unsplitReason != "" {
@@ -443,5 +489,49 @@ func TestSpend_SkippedRecordWithTokensIsLogged(t *testing.T) {
 	out := logs.String()
 	if !strings.Contains(out, "call_type=aimage_generation") || !strings.Contains(out, "velox_litellm_skipped_with_tokens_total") {
 		t.Fatalf("no WARN naming the skipped call type; log:\n%s", out)
+	}
+}
+
+// TestMapPayload_ClaudeOnNewCallTypes: Claude Code on Google Cloud sends
+// /v1/messages with model names such as vertex_ai/claude-opus-4-5@20251101.
+// Each must reach its own model, never an older one (Opus 4 is 3 times the
+// Opus 4.5 price), and a version Velox does not know keeps its raw name and
+// is unpriced (decision 2 of 2026-10-22). The expected values agree with
+// #1351's golden list (testdata/litellm-1.83.9-claude-model-ids.tsv there).
+func TestMapPayload_ClaudeOnNewCallTypes(t *testing.T) {
+	cases := map[string]string{
+		"vertex_ai/claude-opus-4-5@20251101":            "claude-opus-4.5",
+		"vertex_ai/claude-opus-4-6@default":             "claude-opus-4.6",
+		"vertex_ai/claude-sonnet-4-5@20250929":          "claude-sonnet-4.5",
+		"vertex_ai/claude-opus-4-1@20250805":            "claude-opus-4.1",
+		"vertex_ai/claude-opus-4@20250514":              "claude-opus-4",
+		"vertex_ai/claude-3-5-sonnet-v2@20241022":       "claude-3.5-sonnet",
+		"claude-opus-4-0":                               "claude-opus-4",
+		"anthropic.claude-3-5-sonnet-20241022-v2:0:51k": "claude-3.5-sonnet",
+		"claude-sonnet-4-5-20250929":                    "claude-sonnet-4.5",
+		// Unknown versions: raw name, no price.
+		"claude-opus-4-9":                    "",
+		"vertex_ai/claude-opus-4-9@20270101": "",
+		"claude-sonnet-4-5-thinking":         "",
+	}
+	for model, want := range cases {
+		if got := canonicalModel(model); got != want {
+			t.Errorf("canonicalModel(%q) = %q, want %q", model, got, want)
+		}
+		p := StandardLoggingPayload{ID: "msg_1", CallType: "anthropic_messages", Model: model, EndUser: "cus_x",
+			PromptTokens: 10, CompletionTokens: 5}
+		m, err := MapPayload(p)
+		if err != nil || len(m.Events) == 0 {
+			t.Fatalf("%s: events=%d err=%v", model, len(m.Events), err)
+		}
+		dim := want
+		if dim == "" {
+			dim = model
+		}
+		for _, e := range m.Events {
+			if e.Dimensions["model"] != dim {
+				t.Errorf("%s: model dimension %v, want %q", model, e.Dimensions["model"], dim)
+			}
+		}
 	}
 }
