@@ -23,7 +23,7 @@ import (
 // cannot: Postgres 16 skips ANALYZE on a table the role does not own, with
 // only a WARNING. Without statistics every candidate index costs the same
 // on these small fixtures, and the planner breaks the tie by index creation
-// order — which the v0.8.1 baseline (ADR-125) creates by name, not in
+// order — which the baseline (ADR-125) creates by name, not in
 // migration order. With statistics the plan follows the costs.
 func analyze(t *testing.T, _ *postgres.DB, ctx context.Context, _ string) {
 	t.Helper()

@@ -18,13 +18,12 @@ original text.
 
 ## [Unreleased]
 
-**Before upgrading:**
+**There is no upgrade path from Velox 0.8.x: install fresh ([#1354](https://github.com/getvelox/velox/pull/1354)).** Pointed at a v0.8.x database, `velox migrate status` says `no migration record`, and `velox migrate` and start-up stop without changing anything.
 
-- **Upgrade from v0.8.0, v0.8.1 or v0.8.2.** This release takes over a database at migration 180 and changes no table. Older databases upgrade to v0.8.1 first. A dirty v0.8 database is repaired with v0.8.1.
-- **With `RUN_MIGRATIONS_ON_BOOT=false`, run `velox migrate` once before you start this release.** It changes no table, so v0.8.x copies keep serving meanwhile. Until it has run, this release refuses to start.
+**Before upgrading** an install that ran a build of `main` from the switch to goose on ([#1198](https://github.com/getvelox/velox/pull/1198)), which these notes call "the previous release":
+
 - **`velox migrate status` prints a plan now.** A script that reads its old `version: N, dirty: …` line must change.
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade. The restore loses everything written after the backup ([Going back](docs/production-one-vm.md#going-back)).
-- **A v0.8.x backup restores into an empty database only.** Restored over an upgraded database, the restore stops and changes nothing (from migration 185, whose new table refers to backed-up tables), or Velox refuses to start and says why.
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).
 - **If you price LiteLLM traffic with your own rules, add `cache_write_5m` and `cache_write_1h` prices for each Anthropic model before you upgrade ([#1349](https://github.com/getvelox/velox/pull/1349)).** Cache writes billed as `input`; they now bill under those token types, and with no rule they bill $0 and show as unmatched usage. The `anthropic_style` recipe already has them.
 - **Don't release held LiteLLM usage while copies of the previous release are serving: during the rolling deploy, or after rolling back ([#1349](https://github.com/getvelox/velox/pull/1349)).** A release run by the previous release's code does not know a call's cache writes may already be billed inside its `input` row, and can bill them twice.
@@ -109,6 +108,7 @@ original text.
 
 ### Removed
 
+- **The v0.8.x upgrade path (2026-10-23, [#1354](https://github.com/getvelox/velox/pull/1354)).** Velox no longer takes over a v0.8.0, v0.8.1 or v0.8.2 database, and `velox migrate status` no longer says `ready to move` or `refused`. The baseline is now ordinary source, and the migrations CI job checks a fresh install under each role setup.
 - **The block usage cap: `usage_cap_units` and `overage_action` on subscriptions (2026-10-22, [#1327](https://github.com/getvelox/velox/pull/1327); the usage-cap half of [#973](https://github.com/getvelox/velox/issues/973)).** With `overage_action: block`, the cap added up the units of every meter on an invoice and scaled each meter's billed quantity down to fit; usage was still recorded. No billing engine we compared does this, the threshold invoice ignored the cap, and a capped close after a threshold invoice could bill more than the usage cost. Subscriptions that had a cap now bill all usage. API responses and webhooks no longer carry `usage_cap_units` or `overage_action`, and a create that sends either gets a 422. The dashboard's **Usage limits** fields are gone. To invoice before a bill grows too large, use a spend threshold.
 - **The Stripe Search sweep for parked invoices, and its metric `velox_parked_search_errors_total` ([#1307](https://github.com/getvelox/velox/pull/1307)).** Parked invoices are checked through Stripe's List API instead (see Fixed). Remove alerts on the metric.
 - **`velox migrate force` and `velox-migrate-safety` (2026-10-18).** goose leaves no half-applied state, so there is nothing to force; the command now prints where to go instead. The safety tool replayed the old migration files, which no longer ship.

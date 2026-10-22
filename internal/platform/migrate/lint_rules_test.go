@@ -14,7 +14,7 @@ import (
 // must fail it, and the valid shapes must pass, so the gate is neither
 // vacuous nor stricter than docs/dev/migrations.md says.
 
-// fixtureBaseline stands in for the v0.8.1 baseline: one table with a
+// fixtureBaseline stands in for the baseline: one table with a
 // primary key and one plain index, written the way pg_dump writes them.
 const fixtureBaseline = `
 CREATE TABLE public.invoices (

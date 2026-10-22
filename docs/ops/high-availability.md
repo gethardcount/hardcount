@@ -78,7 +78,7 @@ Read the upgrade notes in the [changelog](../../CHANGELOG.md) first. Then take a
 
 - **A release whose notes say it has migrations:** stop every old copy, run `velox migrate` once (or start one new copy with `RUN_MIGRATIONS_ON_BOOT=true`), then start the other new copies.
 - **A release with no migrations:** upgrade one copy at a time.
-- **From v0.8.x to v0.9.0:** run v0.9.0's `velox migrate` once first. It adds goose's record (`goose_db_version`, at version 180) and changes none of Velox's tables, so the v0.8.x copies keep serving while it runs. Then upgrade the copies one at a time. With `RUN_MIGRATIONS_ON_BOOT=false`, a v0.9.0 copy started before that step refuses to start, and its log says `1 migration to apply`.
+- Upgrading from Velox 0.8.x is not supported; install fresh.
 
 Run `velox migrate status` with the new release first to see the plan. Never roll a migration back in production; see [Self-host](../self-host.md#database-upgrades-migrations).
 
