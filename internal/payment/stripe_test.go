@@ -940,11 +940,15 @@ type recordingAttacher struct {
 	// customer-driven attaches carry the customer actor and operator ones
 	// stay system.
 	actorType, actorID string
+	// makeDefault is what the caller asked of the attach: true only for a
+	// card saved through a Velox setup flow (ADR-021).
+	makeDefault bool
 }
 
-func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string) error {
+func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool) error {
 	r.called++
 	r.tenantID, r.customerID, r.pmID = tenantID, customerID, pmID
+	r.makeDefault = makeDefault
 	r.actorType, r.actorID = audit.ResolveActor(ctx)
 	return r.err
 }
@@ -990,6 +994,11 @@ func TestHandleWebhook_SetupIntentSucceeded(t *testing.T) {
 	if attacher.actorType != "system" {
 		t.Errorf("purpose-less attach must resolve to system actor, got %q/%q", attacher.actorType, attacher.actorID)
 	}
+	// velox_customer_id on the SetupIntent: Velox created it (legacy
+	// POST /v1/checkout/setup sets no purpose), so its card becomes the default.
+	if !attacher.makeDefault {
+		t.Error("a SetupIntent carrying velox_customer_id must attach its card as the default")
+	}
 }
 
 // TestHandleWebhook_SetupIntent_CustomerActor — an attach whose SetupIntent
@@ -1027,6 +1036,9 @@ func TestHandleWebhook_SetupIntent_CustomerActor(t *testing.T) {
 		t.Errorf("customer-driven attach must resolve to customer actor cus_local_7, got %q/%q",
 			attacher.actorType, attacher.actorID)
 	}
+	if !attacher.makeDefault {
+		t.Error("the payment-update link's card must be attached as the default")
+	}
 }
 
 // TestHandleWebhook_SetupIntent_OperatorPurposeStaysSystem — the operator
@@ -1061,6 +1073,9 @@ func TestHandleWebhook_SetupIntent_OperatorPurposeStaysSystem(t *testing.T) {
 	}
 	if attacher.actorType != "system" {
 		t.Errorf("operator-purpose attach must stay system, got %q/%q", attacher.actorType, attacher.actorID)
+	}
+	if !attacher.makeDefault {
+		t.Error("the operator's Add payment method card must be attached as the default")
 	}
 }
 
@@ -1207,6 +1222,11 @@ func TestHandleWebhook_SetupIntent_ResolvesCustomerByStripeID(t *testing.T) {
 	if attacher.customerID != "cus_local_7" || attacher.pmID != "pm_stripe_77" {
 		t.Fatalf("attacher got wrong args: customer=%q pm=%q", attacher.customerID, attacher.pmID)
 	}
+	// No velox_customer_id: Velox did not create this SetupIntent, so its
+	// card is added beside the default, not made the default.
+	if attacher.makeDefault {
+		t.Error("a SetupIntent matched only by its Stripe customer must not take the default")
+	}
 }
 
 // TestHandleWebhook_SetupIntent_MetadataWinsOverResolver — when the SetupIntent
@@ -1266,6 +1286,54 @@ func TestHandleWebhook_SetupIntent_ResolverTransientErrorRedelivers(t *testing.T
 	}
 	if attacher.called != 0 {
 		t.Fatalf("attacher must not run when customer resolution failed")
+	}
+}
+
+// fixedCardFetcher answers FetchCardDetails with one card, as Stripe does
+// after a Checkout session saved it (the newest card on the customer).
+type fixedCardFetcher struct{ card CardDetails }
+
+func (f fixedCardFetcher) FetchCardDetails(context.Context, string) (CardDetails, error) {
+	return f.card, nil
+}
+func (f fixedCardFetcher) FetchCardForPaymentIntent(context.Context, string) (CardDetails, error) {
+	return f.card, nil
+}
+
+// checkout.session.completed records its card through RecordCheckoutCard,
+// which picks the newest card on the Stripe customer: a guess. It never asks
+// for the default, in setup mode or payment mode. In setup mode the
+// SetupIntent's own event, which names the exact card, is the one writer
+// that makes it the default.
+func TestHandleWebhook_CheckoutCompleted_NeverAsksForTheDefault(t *testing.T) {
+	for _, tc := range []struct{ name, mode, purpose string }{
+		{"setup mode, operator link", "setup", "portal_add_payment_method"},
+		{"setup mode, payment-update link", "setup", "payment_update_token"},
+		{"payment mode, hosted pay", "payment", PurposeHostedInvoicePay},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStripe(nil, nil, newMockWebhookStore(), nopSetups{})
+			s.SetCardFetcher(fixedCardFetcher{card: CardDetails{PaymentMethodID: "pm_saved", Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2034}})
+			attacher := &recordingAttacher{}
+			s.SetPaymentMethodAttacher(attacher)
+
+			raw := `{"id": "evt_cs_` + tc.mode + `", "type": "checkout.session.completed", "data": {"object": {
+				"id": "cs_1", "mode": "` + tc.mode + `", "customer": "cus_stripe_1",
+				"metadata": {"velox_customer_id": "cus_local_1", "velox_purpose": "` + tc.purpose + `"}}}}`
+			if err := s.HandleWebhook(context.Background(), "tnt_x", domain.StripeWebhookEvent{
+				StripeEventID: "evt_cs_" + tc.mode + tc.purpose, EventType: "checkout.session.completed",
+				Payload: map[string]any{"raw": raw},
+			}); err != nil {
+				t.Fatalf("HandleWebhook: %v", err)
+			}
+			if attacher.called != 1 || attacher.pmID != "pm_saved" || attacher.customerID != "cus_local_1" {
+				t.Fatalf("attacher: called=%d pm=%q customer=%q, want one attach of pm_saved for cus_local_1",
+					attacher.called, attacher.pmID, attacher.customerID)
+			}
+			if attacher.makeDefault {
+				t.Error("checkout.session.completed must not attach its card as the default")
+			}
+		})
 	}
 }
 
