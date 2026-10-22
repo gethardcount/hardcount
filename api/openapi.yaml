@@ -513,6 +513,19 @@ components:
             cost rates), `observed` (the cost the sender reported), or
             `not_applicable` (the meter has no costed dimensions). Absent when
             the cost is unknown.
+        billing_status:
+          type: string
+          enum: [after_close]
+          description: |
+            Sent only on the 201 that wrote the event. `after_close`: a
+            subscription that prices this meter already invoiced the
+            event's time, so the event is stored but billed on no invoice,
+            now or later. Bill it with a one-off invoice if it should be
+            charged. A spend-threshold invoice counts only once it is paid:
+            until then it can be voided or written off, and then the
+            period's invoice bills the event. Absent otherwise, which is not
+            a promise that the event will be billed. Never sent on a replay
+            or a read.
 
     DocumentBillTo:
       type: object
@@ -3922,7 +3935,7 @@ components:
 
     HeldUsageReleaseResult:
       type: object
-      required: [customer_id, released, deduplicated, still_held, more_to_release, in_open_period, not_on_plan, outside_open_period]
+      required: [customer_id, released, deduplicated, still_held, more_to_release, in_open_period, not_on_plan, pending_threshold_invoice, outside_open_period]
       properties:
         customer_id:
           type: string
@@ -3953,25 +3966,39 @@ components:
           description: |
             Released rows inside an active subscription's current billing
             period whose meter the subscription's plan prices. That period's
-            invoice counts them.
+            invoice counts them. A row after the period end, released before
+            that period's invoice is built, counts here when the subscription
+            continues and its plan from then on prices the meter. Rows of a
+            sum or count meter stamped before the end of this period's
+            spend-threshold invoice are not counted here: see
+            `pending_threshold_invoice` and `outside_open_period`.
         not_on_plan:
           type: integer
           description: |
             Released rows inside an active subscription's current billing
             period whose meter no plan on that subscription prices. No
             invoice charges them.
+        pending_threshold_invoice:
+          type: integer
+          description: |
+            Released rows of a sum or count meter stamped before the end of
+            this period's spend-threshold invoice, while that invoice is not
+            paid. If it is paid, no invoice counts them. If it is voided or
+            written off before the period closes, the period's invoice
+            counts them.
         outside_open_period:
           type: integer
           description: |
             Released rows outside every current billing period: before the
-            subscription started, or in an earlier period. A subscription
-            invoice does not count them unless that period's invoice has not
-            been built yet. Bill them with a one-off invoice if they should
-            be charged.
+            subscription started, or in an earlier period. Also rows of a
+            sum or count meter stamped before the end of this period's paid
+            spend-threshold invoice. A subscription invoice does not count
+            them unless that period's invoice has not been built yet. Bill
+            them with a one-off invoice if they should be charged.
 
     LitellmSpendResult:
       type: object
-      required: [accepted, deduplicated, held, skipped, cache_hits]
+      required: [accepted, deduplicated, held, skipped, cache_hits, after_close]
       properties:
         accepted:
           type: integer
@@ -3991,6 +4018,12 @@ components:
         cache_hits:
           type: integer
           description: The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0.
+        after_close:
+          type: integer
+          description: |
+            Of `accepted`, the events whose period a subscription already
+            invoiced: stored, billed on no invoice. A replay never counts
+            here.
         errors:
           type: array
           description: One entry per record that was not recorded. A record's events are recorded together or not at all.
@@ -9288,7 +9321,10 @@ paths:
                   format: date-time
       responses:
         "201":
-          description: Event ingested
+          description: |
+            Event ingested. `billing_status: after_close` means its period
+            was already invoiced: the event is stored but billed on no
+            invoice.
           content:
             application/json:
               schema:
@@ -9308,6 +9344,15 @@ paths:
             field: `idempotency_key` when it is missing, blank or longer
             than 255 characters, `external_customer_id` or `event_name` for
             an unknown customer or meter, `timestamp` for a malformed one.
+        "503":
+          description: |
+            `ingest_unavailable`: a customer or meter lookup, or the read of
+            the customer's billing periods, could not be answered. Nothing
+            was recorded; retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     get:
       tags: [Usage]
       summary: List usage events
@@ -9461,6 +9506,12 @@ paths:
                   deduplicated:
                     type: integer
                     description: Idempotency replays — already ingested, counted as success.
+                  after_close:
+                    type: integer
+                    description: |
+                      Of `ingested`, the events whose period a subscription
+                      already invoiced: stored, billed on no invoice. A
+                      replayed event never counts here.
                   total:
                     type: integer
         "422":
@@ -9470,6 +9521,15 @@ paths:
             (`event[i]: reason`); fix them and retry the whole batch.
         "413":
           description: Request body over the 1MB cap — send smaller batches.
+        "503":
+          description: |
+            `ingest_unavailable`: a customer or meter lookup, or the read of
+            the customer's billing periods, could not be answered. Nothing
+            was recorded; retry the whole batch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/usage-events/backfill:
     post:
@@ -9484,8 +9544,9 @@ paths:
 
         The event counts toward the billing period its timestamp falls in
         only if that period's invoice has not been built yet. An event for
-        an already-invoiced period is stored but never billed; bill it with
-        a one-off invoice.
+        an already-invoiced period is stored but never billed, and its 201
+        says so with `billing_status: after_close`; bill it with a one-off
+        invoice.
 
         Shares idempotency keys with live ingest: a repeated
         `idempotency_key` returns 200 with the original event and an
@@ -9544,7 +9605,10 @@ paths:
                   description: RFC 3339. Must not be in the future.
       responses:
         "201":
-          description: Event recorded
+          description: |
+            Event recorded. `billing_status: after_close` means its period
+            was already invoiced: the event is stored but billed on no
+            invoice.
           content:
             application/json:
               schema:
@@ -9580,8 +9644,9 @@ paths:
                 $ref: "#/components/schemas/Error"
         "503":
           description: |
-            `ingest_unavailable`: the customer or meter lookup could not be
-            answered. Nothing was recorded; retry.
+            `ingest_unavailable`: the customer or meter lookup, or the read
+            of the customer's billing periods, could not be answered.
+            Nothing was recorded; retry.
           content:
             application/json:
               schema:

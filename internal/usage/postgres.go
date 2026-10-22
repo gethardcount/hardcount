@@ -72,11 +72,12 @@ func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, even
 //
 // Keyed duplicates (replay of a fully-committed batch, or the same key
 // twice within one batch) are counted in deduped, not errors — matching
-// the LiteLLM door's replay contract.
-func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (inserted, deduped int, err error) {
+// the LiteLLM door's replay contract. inserted lists the indices of the
+// events written, so the caller can tell which rows this batch wrote.
+func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (inserted []int, deduped int, err error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return 0, 0, err
+		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
@@ -86,13 +87,13 @@ func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events
 		case errors.Is(err, errs.ErrDuplicateKey):
 			deduped++
 		case err != nil:
-			return 0, 0, fmt.Errorf("event[%d]: %w", i, err)
+			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)
 		default:
-			inserted++
+			inserted = append(inserted, i)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, 0, err
+		return nil, 0, err
 	}
 	return inserted, deduped, nil
 }

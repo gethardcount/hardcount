@@ -177,14 +177,22 @@ An event counts toward the billing period its `timestamp` falls in.
   hour) has passed after the period ends. An event that arrives within that
   time is on the invoice.
 - After that, the invoice does not change. A later event for that period is
-  stored, but it is not added to that invoice or to any later one, and
-  Velox does not alert you.
+  stored, but it is not added to that invoice or to any later one. The
+  answer says so: `billing_status: "after_close"` on the event's 201
+  (single and backfill), and an `after_close` count on a batch or a
+  LiteLLM delivery. A replay never carries it. No `billing_status` is not
+  a promise that the event will be billed.
 - To bill it, make a one-off invoice: `POST /v1/invoices`, then
   `POST /v1/invoices/{id}/line-items`, then
   `POST /v1/invoices/{id}/finalize`.
 - The same applies after a spend-threshold invoice (an invoice made early
-  because spend crossed a limit). Usage stamped before it that arrives later
-  is not on the period-end invoice either. Bill it the same way.
+  because spend crossed a limit). Usage of a sum or count meter stamped
+  before it that arrives later is not on the period-end invoice either.
+  But if the spend-threshold invoice is voided or written off before the
+  period-end invoice is built, the period-end invoice bills all the
+  period's usage, late events included. So the answer flags such an event
+  only when the spend-threshold invoice is already paid: a paid invoice
+  cannot be voided or written off. Bill a flagged event the same way.
 - These build the ended period's invoice at once, with no grace period:
   - an immediate cancel;
   - any other change to a subscription, through the API or the dashboard
@@ -196,9 +204,11 @@ An event counts toward the billing period its `timestamp` falls in.
 - Dunning's final pause or cancel waits for the grace. When retries run out
   inside it, the run waits until the grace ends, then pauses or cancels.
 
-The metric `velox_usage_late_event_total` counts events, not sent through
-the backfill route, whose `timestamp` is more than 24 hours older than their
-arrival. It does not say whether an event missed an invoice.
+The metric `velox_usage_after_close_total{origin}` counts the events
+flagged `after_close`. Usage on a canceled subscription is not flagged. `velox_usage_late_event_total`
+counts events, not sent through the backfill route, whose `timestamp` is
+more than 24 hours older than their arrival. It does not say whether an
+event missed an invoice.
 
 ## Errors
 

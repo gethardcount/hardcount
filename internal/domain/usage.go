@@ -45,6 +45,13 @@ type UsageEvent struct {
 	// stamped by usage/postgres.go when ObservedCostMicros is set).
 	// Empty = unresolved/pre-feature.
 	ProviderCostSource string `json:"provider_cost_source,omitempty"`
+
+	// BillingStatus is "after_close" on the answer that wrote an event whose
+	// period was already invoiced: stored, billed on no invoice (ADR-120).
+	// Set only on the write's own 201, never stored and never on a replay
+	// or a read: recomputed later it could call a row the close did bill
+	// "after_close". Absent otherwise, which promises nothing.
+	BillingStatus string `json:"billing_status,omitempty"`
 }
 
 type BilledEntrySource string

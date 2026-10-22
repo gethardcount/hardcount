@@ -673,8 +673,10 @@ func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call 
 		}
 	}
 
-	for _, ev := range events {
+	for i, ev := range events {
 		if written[ev.IdempotencyKey] {
+			// The claim: the split :input, written above.
+			res.Written = append(res.Written, i)
 			continue
 		}
 		h, isHeld := held[ev.IdempotencyKey]
@@ -688,6 +690,7 @@ func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call 
 		switch {
 		case err == nil:
 			res.Inserted++
+			res.Written = append(res.Written, i)
 		case errors.Is(err, errs.ErrDuplicateKey):
 			res.Deduplicated++
 		default:

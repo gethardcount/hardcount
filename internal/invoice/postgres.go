@@ -4040,6 +4040,47 @@ func (s *PostgresStore) LatestThresholdPeriodEnd(ctx context.Context, tenantID, 
 	return end.Time, nil
 }
 
+// ThresholdWatermarks returns two instants for the subscription's cycle
+// [periodStart, periodEnd), over the same threshold invoices as
+// LatestThresholdPeriodEnd. Usage ingest reads them before it writes an
+// event (usage.ThresholdWatermark):
+//
+//   - billedThrough is the cycle close's watermark: the latest
+//     billing_period_end of a threshold invoice that is not voided or
+//     uncollectible. Nil when none.
+//   - paidThrough is the latest billing_period_end of a paid one. Nil when
+//     none. It never passes billedThrough, and it never falls back: a paid
+//     invoice can be neither voided nor written off (updateStatusInTx's
+//     allowed sources), so the close's watermark stays at or past it.
+func (s *PostgresStore) ThresholdWatermarks(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (billedThrough, paidThrough *time.Time, err error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	var billed, paid sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+		SELECT MAX(billing_period_end) FILTER (WHERE status NOT IN ('voided', 'uncollectible')),
+		       MAX(billing_period_end) FILTER (WHERE status = 'paid')
+		FROM invoices
+		WHERE subscription_id = $1
+		  AND billing_reason = 'threshold'
+		  AND billing_period_start >= $2
+		  AND billing_period_start < $3
+	`, subscriptionID, periodStart, periodEnd).Scan(&billed, &paid)
+	if err != nil {
+		return nil, nil, err
+	}
+	if billed.Valid {
+		billedThrough = &billed.Time
+	}
+	if paid.Valid {
+		paidThrough = &paid.Time
+	}
+	return billedThrough, paidThrough, nil
+}
+
 // GetLatestThresholdInvoiceForCycle returns the newest non-voided
 // threshold-fired invoice for the cycle window — the same predicate as
 // LatestThresholdPeriodEnd but the full row. The billing engine's fire-once
