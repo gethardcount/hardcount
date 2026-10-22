@@ -2200,23 +2200,42 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 // skip its proration. So every subscription write runs this first, and then
 // acts on the period that is running, as if the billing run had gone first.
 //
-// The close is the billing run's own attempt (BillDueNow): the period CAS,
-// catch-up over several periods and the failure record (ADR-119). Its error
-// is logged here, not returned: the engine has already logged and saved it,
-// and the caller learns the outcome from the returned row (still due or not).
+// The close is the billing run's own attempt (DueBiller.BillDue): the period
+// CAS, catch-up over several periods and the failure record (ADR-119). Its
+// error is logged here, not returned: the engine has already logged and saved
+// it, and the caller learns the outcome from the returned row (still due or
+// not).
+//
+// grace is the invoice grace the close waits for (ADR-120). The operator's
+// writes pass 0: the operator is acting now, so the ended period closes now.
+// Dunning's final pause and cancel pass INVOICE_GRACE_PERIOD (amendment
+// 2026-10-22): periods past their grace are closed, and a period still
+// inside it is left open and answered with *InsideInvoiceGraceError, so the
+// action runs when the grace ends and usage arriving inside the grace is on
+// the invoice. One read of the row and one now decide it, and the close
+// itself honours the same grace, so no period inside its grace is closed
+// however the boundary and this call interleave. A test clock has no grace
+// (ADR-120): its advance decides when usage arrives.
 //
 // Trialing subscriptions are left to the trial scans, as Cancel always has
 // (ADR-069: a trial cancel is free however late it lands). closed reports
 // whether an attempt ran; sub is the row read after it.
-func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string) (sub domain.Subscription, closed bool, err error) {
+func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string, grace time.Duration) (sub domain.Subscription, closed bool, err error) {
 	sub, err = s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Subscription{}, false, err
 	}
-	if s.dueBiller == nil || sub.Status != domain.SubscriptionActive || !domain.BillingDueAt(sub, s.clock.Now(ctx)) {
+	now := s.clock.Now(ctx)
+	if s.dueBiller == nil || sub.Status != domain.SubscriptionActive || !domain.BillingDueAt(sub, now) {
 		return sub, false, nil
 	}
-	if _, billErr := s.dueBiller.BillDue(ctx, tenantID, id, 0); billErr != nil {
+	if sub.TestClockID != "" {
+		grace = 0
+	}
+	if insideInvoiceGrace(sub, now, grace) {
+		return sub, false, graceWait(sub, grace)
+	}
+	if _, billErr := s.dueBiller.BillDue(ctx, tenantID, id, grace); billErr != nil {
 		slog.WarnContext(ctx, "billing the ended period before a subscription write failed",
 			"subscription_id", id, "tenant_id", tenantID, "error", billErr)
 	}
@@ -2224,7 +2243,21 @@ func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string) (s
 	if err != nil {
 		return domain.Subscription{}, true, err
 	}
+	if insideInvoiceGrace(sub, now, grace) {
+		// A catch-up closed the periods past their grace; the newest waits.
+		return sub, true, graceWait(sub, grace)
+	}
 	return sub, true, nil
+}
+
+// insideInvoiceGrace reports whether sub has a due instant that has come at
+// now but whose grace has not passed.
+func insideInvoiceGrace(sub domain.Subscription, now time.Time, grace time.Duration) bool {
+	return grace > 0 && domain.BillingDueAt(sub, now) && !domain.BillingDueAt(sub, now.Add(-grace))
+}
+
+func graceWait(sub domain.Subscription, grace time.Duration) *InsideInvoiceGraceError {
+	return &InsideInvoiceGraceError{Until: domain.DueInstant(sub).Add(grace).Truncate(time.Microsecond)}
 }
 
 // errUnbilledPeriod is the refusal of a write that would act on a period that
@@ -2252,8 +2285,15 @@ func errUnbilledPeriod(sub domain.Subscription) error {
 // add would leave it unbillable for good, and with nothing to bill there is
 // nothing on the ended period a write could change.
 func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+	return s.closeEndedPeriodFirstWithin(ctx, tenantID, id, 0)
+}
+
+// closeEndedPeriodFirstWithin is CloseEndedPeriodFirst waiting for grace (see
+// closeEndedPeriods). A period inside its grace answers
+// *InsideInvoiceGraceError.
+func (s *Service) closeEndedPeriodFirstWithin(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
-	sub, _, err := s.closeEndedPeriods(ctx, tenantID, id)
+	sub, _, err := s.closeEndedPeriods(ctx, tenantID, id, grace)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -2271,16 +2311,22 @@ func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string
 // Prorated credit $X.XX" (industry standard — Stripe / Lago / Chargebee /
 // Orb all surface the credit on the subscription timeline, not just the
 // customer's credit balance).
+//
+// It is the operator's cancel: an ended period is closed now, inside its
+// invoice grace or not. Dunning cancels through CancelForDunning.
 func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
-	return s.cancel(ctx, tenantID, id)
+	return s.cancel(ctx, tenantID, id, 0)
 }
 
-// CancelForDunning is dunning's cancel final action.
+// CancelForDunning is dunning's cancel final action. It is Cancel, except
+// that it does not close a period still inside its invoice grace: it answers
+// *InsideInvoiceGraceError and changes nothing, and dunning runs it again
+// when the grace ends (ADR-120 amendment 2026-10-22).
 func (s *Service) CancelForDunning(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
-	return s.cancel(ctx, tenantID, id)
+	return s.cancel(ctx, tenantID, id, s.invoiceGrace)
 }
 
-func (s *Service) cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
+func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 
 	// A cancel can arrive after the period ended and before the billing run
@@ -2292,7 +2338,7 @@ func (s *Service) cancel(ctx context.Context, tenantID, id string) (domain.Subsc
 	// The attempt's error is not returned: the engine has logged and saved
 	// it, and the final-invoice step below refuses the cancel (code
 	// unbilled_period) for as long as a period is left unbilled.
-	sub, closed, err := s.closeEndedPeriods(ctx, tenantID, id)
+	sub, closed, err := s.closeEndedPeriods(ctx, tenantID, id, grace)
 	if err != nil {
 		return domain.Subscription{}, 0, err
 	}
@@ -2717,8 +2763,11 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, invoiceID string) (bool, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	// The ended period's invoice follows the pause state at its end, as
-	// for an operator's pause.
-	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
+	// for an operator's pause. Unlike the operator's, this close waits for
+	// the invoice grace: inside it nothing is paused, the answer is
+	// *InsideInvoiceGraceError, and dunning pauses when the grace ends
+	// (ADR-120 amendment 2026-10-22).
+	if _, err := s.closeEndedPeriodFirstWithin(ctx, tenantID, id, s.invoiceGrace); err != nil {
 		return false, err
 	}
 	sub, outcome, err := s.store.SetDunningPause(ctx, tenantID, id, invoiceID)

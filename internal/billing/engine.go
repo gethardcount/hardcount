@@ -1026,7 +1026,9 @@ func (e *Engine) SetScheduledCancelExecutor(x ScheduledCancelExecutor) {
 // (immediate cancel, retry-billing, the pre-close of every other
 // subscription write) closes the ended period now, and a test clock closes at
 // the instant it is advanced to: there the operator decides when usage
-// arrives. Unset (0) closes as soon as the period is due.
+// arrives. Dunning's final pause and cancel do wait: they close through
+// BillDue with the same grace (subscription.Service.SetInvoiceGrace, ADR-120
+// amendment 2026-10-22). Unset (0) closes as soon as the period is due.
 func (e *Engine) SetInvoiceGrace(d time.Duration) {
 	e.invoiceGrace = d
 }

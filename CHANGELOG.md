@@ -102,6 +102,7 @@ original text.
 
 ### Fixed
 
+- **Dunning's final pause or cancel now waits for the invoice grace (2026-10-22).** When retries ran out just after a period ended, the pause or cancel built that period's invoice at once, and usage arriving inside `INVOICE_GRACE_PERIOD` was billed on no invoice. The dunning run now waits until the grace ends. Your own subscription changes still close the period at once ([#1348](https://github.com/getvelox/velox/pull/1348)).
 - **Issue credit note on the Credit Notes page now opens the invoice page's dialog (2026-10-22).** Its own form offered only the newest 50 open and 50 paid invoices, showed amounts in the default currency, and allowed more than was left to credit. Its refund option always failed. Now you pick the customer, then the invoice. Written-off invoices no longer offer Issue credit note, which the server refused ([#1339](https://github.com/getvelox/velox/pull/1339)).
 - **A lowercase invoice prefix set through the API no longer blocks saving Settings (2026-10-22).** The form refused the value it loaded. Both prefixes are now stored in capitals, as numbers always printed them; `PUT /v1/settings` answers `ACME` for `acme` ([#1339](https://github.com/getvelox/velox/pull/1339)).
 - **The Credit Notes page's totals and tab counts now cover every note (2026-10-22).** They counted only the 100 notes on screen, and a tab hid the other tabs' counts. They now come from the server, and amounts in two currencies are shown side by side, not added ([#1339](https://github.com/getvelox/velox/pull/1339)).
