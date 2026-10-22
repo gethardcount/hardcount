@@ -877,6 +877,28 @@
     ]
   },
   {
+    "case": "update/collection_resumed/by payment",
+    "line": {
+      "id": "update/collection_resumed/by payment",
+      "kind": "subscription.collection_resumed",
+      "title": "Collection resumed",
+      "detail": [
+        [
+          {
+            "text": "The overdue invoice was paid"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Collection resumed",
+      "meta: The overdue invoice was paid",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "update/trial_ended/on schedule",
     "line": {
       "id": "update/trial_ended/on schedule",

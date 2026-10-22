@@ -137,17 +137,3 @@ export function prorationText(
   if (p.type === 'adjustment') return `Open invoice reduced by ${amount}`
   return `${amount} credited to customer balance`
 }
-
-// dunningAmountDue is the amount a dunning run is chasing, in its invoice's
-// currency. The run carries both from a server-side join; a run whose join came
-// back empty falls back to the invoice loaded on the page (the same invoice).
-export function dunningAmountDue(
-  run: { invoice_amount_due_cents?: number; invoice_currency?: string },
-  inv?: { amount_due_cents: number; currency: string },
-): string | null {
-  const currency = run.invoice_currency || inv?.currency
-  if (run.invoice_amount_due_cents !== undefined && run.invoice_amount_due_cents !== 0 && currency) {
-    return formatCents(run.invoice_amount_due_cents, currency)
-  }
-  return inv ? formatCents(inv.amount_due_cents, inv.currency) : null
-}

@@ -8,8 +8,9 @@ import {
 import { useAuth } from '@/contexts/AuthContext'
 import { allNavItems, isTestMode } from '@/lib/navigation'
 import { invoiceStatus } from '@/lib/statusLabels'
+import { invoiceRowAmount } from '@/lib/invoiceTerminal'
 import { wallClockNow } from '@/lib/effectiveNow'
-import { api, type Customer, type Invoice, type Plan, type Subscription, formatCents } from '@/lib/api'
+import { api, type Customer, type Invoice, type Plan, type Subscription } from '@/lib/api'
 import {
   Command,
   CommandDialog,
@@ -187,7 +188,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   <FileText className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
                     <span>{inv.invoice_number}</span>
-                    <span className="text-xs opacity-60">{invoiceStatus(inv, paletteNow(inv)).label} · {formatCents(inv.amount_due_cents, inv.currency)} due</span>
+                    <span className="text-xs opacity-60">{invoiceStatus(inv, paletteNow(inv)).label} · {invoiceRowAmount(inv)}</span>
                   </div>
                 </CommandItem>
               ))}

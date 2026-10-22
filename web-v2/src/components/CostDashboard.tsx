@@ -40,6 +40,9 @@ import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unp
 import { previewView } from '@/lib/invoicePreview'
 import { invoicePreviewNotes } from '@/lib/invoicePreviewNotes'
 import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/StatusBadge'
+import { invoiceStatus } from '@/lib/statusLabels'
+import { invoiceRowAmount } from '@/lib/invoiceTerminal'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-react'
 
@@ -166,18 +169,18 @@ function UpcomingInvoiceCard({ sub, customerId, effectiveNow }: { sub: Subscript
   const view = previewView(preview, previewError, preview?.totals[0]?.currency ?? 'USD')
   const notes = preview ? invoicePreviewNotes(preview).notes : []
 
-  // Last finalized / paid invoice for this sub. Renders inline as the
-  // rollover-transparency line (Stripe Dashboard pattern). Fetched
-  // separately so a missing-invoice tenant (sub never billed yet)
-  // doesn't block the rest of the card.
+  // Last issued invoice for this sub (newest first, drafts skipped: a draft
+  // has not been sent). Renders inline as the rollover-transparency line
+  // (Stripe Dashboard pattern). Fetched separately so a missing-invoice
+  // tenant (sub never billed yet) doesn't block the rest of the card.
   const { data: lastInvoice } = useQuery({
     queryKey: ['last-invoice', customerId, sub.id],
     queryFn: async () => {
       try {
         const r = await api.listInvoices(
-          `customer_id=${encodeURIComponent(customerId)}&subscription_id=${encodeURIComponent(sub.id)}&limit=1`,
+          `customer_id=${encodeURIComponent(customerId)}&subscription_id=${encodeURIComponent(sub.id)}&limit=${LAST_INVOICE_SCAN}`,
         )
-        return r.data?.[0] ?? null
+        return r.data?.find(inv => inv.status !== 'draft') ?? null
       } catch {
         return null
       }
@@ -301,13 +304,12 @@ function ProjectionBreakdown({ preview }: { preview: InvoicePreview }) {
   )
 }
 
+// How many of the subscription's newest invoices "Last invoice" looks through
+// for one that is not a draft. A subscription's invoice stays a draft only
+// while something holds it, such as paused collection or pending tax.
+const LAST_INVOICE_SCAN = 10
+
 function LastInvoiceLine({ invoice, effectiveNow }: { invoice: Invoice; effectiveNow: EffectiveNow }) {
-  const tone =
-    invoice.payment_status === 'succeeded'
-      ? 'success'
-      : invoice.payment_status === 'failed'
-      ? 'danger'
-      : 'secondary'
   // Invoices produced during a clock-advance carry a simulated created_at
   // (billing/engine.go stamps effectiveNow). Measure "X ago" against the sub's
   // frozen_time, or a simulated-future invoice collapses to "just now".
@@ -320,14 +322,14 @@ function LastInvoiceLine({ invoice, effectiveNow }: { invoice: Invoice; effectiv
     >
       <div className="flex items-center gap-2 min-w-0">
         <span className="text-muted-foreground">Last invoice:</span>
-        <Badge variant={tone === 'success' ? 'success' : tone === 'danger' ? 'danger' : 'secondary'}>
-          {invoice.payment_status}
-        </Badge>
+        {/* The same badge as the invoice list: a void reads Void, not the
+            payment_status it kept ("pending"). */}
+        <StatusBadge status={invoiceStatus(invoice, effectiveNow)} />
         <span className="font-mono text-foreground truncate">{invoice.invoice_number}</span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <span className="font-medium tabular-nums text-foreground">
-          {formatCents(invoice.amount_due_cents, invoice.currency)}
+          {invoiceRowAmount(invoice)}
         </span>
         {finalizedAgo && <span className="text-muted-foreground">· {finalizedAgo}</span>}
       </div>

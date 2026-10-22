@@ -45,6 +45,7 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { Plus, Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Repeat } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
+import { trialBadgeEndsAt } from '@/lib/statusLabels'
 import { effectiveNow } from '@/lib/effectiveNow'
 import { formatCivilDate } from '@/lib/dates'
 import { nextBillCell, periodLabels } from '@/lib/subscriptionPeriod'
@@ -372,8 +373,11 @@ export default function SubscriptionsPage() {
                               {sub.billing_failure.parked ? 'Billing stopped' : 'Billing failing'}
                             </Badge>
                           )}
+                          {/* Only while the trial runs: trial_end_at stays on
+                              the record after it ends, and an active, paying
+                              subscription read a red "Expired". */}
                           <ExpiryBadge
-                            expiresAt={sub.trial_end_at}
+                            expiresAt={trialBadgeEndsAt(sub)}
                             label="Trial ends"
                             warningDays={3}
                             now={effectiveNow(sub.test_clock_id ? clockFrozenMap[sub.test_clock_id] : undefined)}

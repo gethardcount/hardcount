@@ -56,8 +56,13 @@ type PaymentRetrier interface {
 // dunning until resumed). Pre-amendment this called PauseAtomic
 // (hard pause, no further cycles); that was non-Stripe and silently
 // skipped invoice generation for the affected periods.
+//
+// invoiceID is the run's unpaid invoice. The pause is dunning's and records
+// it: paying that invoice lifts the pause (ADR-036 amendment 2026-10-22). applied reports whether collection is paused on return: an
+// operator's pause already in force counts and is left as it is; an
+// invoice paid before the pause landed does not, and nothing is paused.
 type SubscriptionPauser interface {
-	PauseCollection(ctx context.Context, tenantID, id string) error
+	PauseCollection(ctx context.Context, tenantID, subID, invoiceID string) (applied bool, err error)
 }
 
 // SubscriptionCanceler cancels a subscription when dunning exhausts
@@ -1155,14 +1160,18 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// invoice (a wholly unused prebill, ADR-118), and that void refuses while
 	// a hold is set unless the caller owns it.
 	subCtx := domain.WithChargeHoldOwner(ctx, run.InvoiceID, hold)
+	// invoiceSettled: the pause found the invoice no longer owed, so a
+	// payment (or a void) committed after the late re-check above.
+	invoiceSettled := false
 	if !actionFailed && policy.FinalSubscriptionAction != domain.SubActionNone {
 		if !invRead {
 			slog.Warn("dunning subscription action skipped — no invoice reader wired, so no subscription to act on",
 				"run_id", run.ID, "invoice_id", run.InvoiceID)
 		} else {
-			subApplied, subFailed := s.applySubscriptionAction(
-				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID)
+			subApplied, subFailed, subSettled := s.applySubscriptionAction(
+				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID, run.InvoiceID)
 			actionFailed = actionFailed || subFailed
+			invoiceSettled = subSettled
 			switch {
 			case !subApplied:
 			case policy.FinalSubscriptionAction == domain.SubActionPause:
@@ -1184,6 +1193,26 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		}
 	}
 
+	// The pause found the invoice settled after the late re-check: close the
+	// run from the invoice as it is now, as that re-check would have, rather
+	// than escalate over a paid invoice or leave it action_failed for a day.
+	if invoiceSettled {
+		fresh, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
+		switch {
+		case err != nil:
+			slog.Warn("failed to re-read the invoice the dunning pause found settled", "invoice_id", run.InvoiceID, "error", err)
+			actionFailed = true
+		case fresh.Status == domain.InvoicePaid || fresh.PaymentStatus == domain.PaymentSucceeded:
+			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", nil)
+			return rerr
+		case fresh.Status == domain.InvoiceVoided:
+			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceVoided, "invoice_voided", nil)
+			return rerr
+		default:
+			actionFailed = true
+		}
+	}
+
 	// INVOICE second, and ONLY if the subscription half is settled. Writing
 	// the invoice off while the subscription action is still outstanding
 	// would strand it: the late-paid re-check at the top of this function
@@ -1195,9 +1224,11 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// write-off is attempted — the pre-ADR-112 behaviour.
 	// The cancel can change the invoice: its relief is written in the cancel's
 	// transaction (ADR-118), and an invoice whose period was wholly unused is
-	// voided there. Re-read it before the write-off, so a voided invoice
-	// resolves the run now (the same end state the 24h re-attempt reached,
-	// after a failed write-off tick) instead of failing MarkUncollectible.
+	// voided there. That void resolves this run itself (invoice AfterVoid),
+	// so with no invoice action the escalation below finds the run resolved
+	// and writes nothing. With one, re-read the invoice before the
+	// write-off: a voided invoice resolves the run here (a no-op CAS when
+	// the void already did) instead of failing MarkUncollectible.
 	if !actionFailed && outcome.SubscriptionCanceled && invRead && policy.FinalInvoiceAction != domain.InvActionNone {
 		fresh, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
 		if err != nil {
@@ -1321,18 +1352,19 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 type appliedActions = domain.DunningEscalationOutcome
 
 // applySubscriptionAction moves the subscription to the policy's terminal
-// state, reporting whether that state now holds and whether the attempt
-// errored. See SubscriptionStateReader for why the skip-if-done read
+// state, reporting whether that state now holds, whether the attempt
+// errored, and whether the pause found the invoice no longer owed (paid
+// after the late re-check). See SubscriptionStateReader for why the skip-if-done read
 // exists rather than tolerating the movers' already-terminal errors.
-func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, action domain.DunningSubscriptionAction, subID string) (applied, failed bool) {
+func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, action domain.DunningSubscriptionAction, subID, invoiceID string) (applied, failed, invoiceSettled bool) {
 	if action == domain.SubActionNone {
-		return false, false
+		return false, false, false
 	}
 	if subID == "" {
 		// One-off invoice — no subscription exists to act on. Not a
 		// failure; there is simply nothing to do, and the escalation email
 		// must not claim otherwise.
-		return false, false
+		return false, false, false
 	}
 
 	if s.subState != nil {
@@ -1340,7 +1372,7 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 		if err != nil {
 			slog.Warn("failed to read subscription state for dunning terminal action",
 				"subscription_id", subID, "error", err)
-			return false, true
+			return false, true, false
 		}
 		if st.Terminated {
 			// Already canceled or archived — by this run's earlier attempt,
@@ -1349,7 +1381,7 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 			// `pause` request is NOT: a terminated subscription has no
 			// collection left to pause, so nothing applied and the email
 			// stays silent about it.
-			return action == domain.SubActionCancel, false
+			return action == domain.SubActionCancel, false, false
 		}
 		// On a test clock the action is dated at the escalation (exhaustRun),
 		// and that can be before the current period began: one advance bills
@@ -1375,29 +1407,38 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 			// forever, and the email correctly claims nothing.
 			slog.Warn("dunning pause action skipped — no subscription pauser wired",
 				"subscription_id", subID)
-			return false, false
+			return false, false, false
 		}
-		if err := s.subPauser.PauseCollection(ctx, tenantID, subID); err != nil {
+		paused, err := s.subPauser.PauseCollection(ctx, tenantID, subID, invoiceID)
+		if err != nil {
 			slog.Warn("failed to pause collection after dunning exhausted",
 				"subscription_id", subID, "error", err)
-			return false, true
+			return false, true, false
+		}
+		if !paused {
+			// The invoice was paid after the late paid re-check and before
+			// the pause could land: nothing is paused, and exhaustRun closes
+			// the run from the invoice instead of escalating it.
+			slog.Info("dunning pause skipped: the invoice was paid first",
+				"subscription_id", subID, "invoice_id", invoiceID)
+			return false, false, true
 		}
 		slog.Info("collection paused by dunning", "subscription_id", subID)
-		return true, false
+		return true, false, false
 
 	case domain.SubActionCancel:
 		if s.subCanceler == nil {
 			slog.Warn("dunning cancel action skipped — no subscription canceler wired",
 				"subscription_id", subID)
-			return false, false
+			return false, false, false
 		}
 		if err := s.subCanceler.Cancel(ctx, tenantID, subID); err != nil {
 			slog.Warn("failed to cancel subscription after dunning exhausted",
 				"subscription_id", subID, "error", err)
-			return false, true
+			return false, true, false
 		}
 		slog.Info("subscription canceled by dunning", "subscription_id", subID)
-		return true, false
+		return true, false, false
 
 	default:
 		// Unreachable while the CHECK constraint holds. Loud rather than
@@ -1405,7 +1446,7 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 		// read as "the operator asked for nothing".
 		slog.Error("unknown dunning final_subscription_action — no action taken",
 			"action", action, "subscription_id", subID)
-		return false, false
+		return false, false, false
 	}
 }
 

@@ -2691,7 +2691,8 @@ export interface paths {
          *     periods that end before that instant bill as drafts, and later
          *     periods bill normally. Without it, the pause lasts until you call
          *     `DELETE /v1/subscriptions/{id}/pause-collection`. A new call
-         *     replaces the current pause.
+         *     replaces the current pause, including one dunning set; the pause is
+         *     then yours (`set_by: operator`), and a payment no longer lifts it.
          *
          *     Sends the `subscription.collection_paused` webhook event.
          */
@@ -3411,7 +3412,7 @@ export interface paths {
                     overdue?: boolean;
                     /** @description Comma-separated invoice IDs to fetch exactly. */
                     ids?: string;
-                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). */
+                    /** @description One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps. */
                     sort?: string;
                     dir?: "asc" | "desc";
                     limit?: number;
@@ -8010,7 +8011,7 @@ export interface components {
             max_retries: number;
             intervals_hours: number[];
             /**
-             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
              * @enum {string}
              */
             final_subscription_action: "none" | "pause" | "cancel";
@@ -8399,9 +8400,21 @@ export interface components {
             behavior: "keep_as_draft";
             /**
              * Format: date-time
-             * @description When collection resumes. Absent when the pause lasts until it is cleared.
+             * @description When collection resumes. Absent when the pause lasts until it is
+             *     cleared. On a pause set by dunning, it is when Velox recorded the
+             *     payment of the invoice the pause was set for.
              */
             resumes_at?: string;
+            /**
+             * @description Who paused collection. `operator`: you, through the API or the
+             *     dashboard; the pause lasts until you resume it or until
+             *     `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+             *     A dunning pause lifts by itself once the invoice whose dunning
+             *     set it is paid, even if another invoice is still owed. Periods
+             *     that ended during the pause keep their draft invoices.
+             * @enum {string}
+             */
+            readonly set_by: "operator" | "dunning";
         };
         /** @description Limits that make Velox invoice before the period ends. */
         SubscriptionBillingThresholds: {
@@ -8639,7 +8652,7 @@ export interface components {
             trialing_subscriptions: number;
             /** @description Invoices paid in the window. */
             paid_invoices: number;
-            /** @description Invoices created in the window whose payment failed. All currencies. */
+            /** @description Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
             failed_payments: number;
             /** @description `failed_payments` for the previous window. */
             failed_payments_prev: number;
@@ -8677,7 +8690,7 @@ export interface components {
             nrr: number;
             /**
              * Format: double
-             * @description Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+             * @description Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
              */
             dunning_recovery_rate: number;
             mrr_movement: components["schemas"]["AnalyticsMrrMovementTotals"];
@@ -9112,18 +9125,21 @@ export interface components {
         DunningStats: {
             active_count: number;
             escalated_count: number;
+            /** @description Resolved runs, whatever closed them (a payment, a void or a write-off). */
             resolved_count: number;
+            /** @description Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered. */
+            recovered_count: number;
             /**
              * Format: int64
-             * @description Amount due on active and escalated runs, in `currency` only.
+             * @description Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
              */
             at_risk_cents: number;
             /** @description The tenant's default currency. */
             currency: string;
             /**
-             * @description Amount due on active and escalated runs, one entry per currency.
-             *     `currency` comes first, then the largest amount. Empty when no run
-             *     is at risk.
+             * @description Amount due on active and escalated runs whose invoice is still
+             *     open, one entry per currency. `currency` comes first, then the
+             *     largest amount. Empty when no run is at risk.
              */
             at_risk_by_currency: {
                 currency: string;

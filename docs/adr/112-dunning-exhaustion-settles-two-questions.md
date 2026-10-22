@@ -274,9 +274,10 @@ no claim. A second processor could escalate a run twice or reopen it.
   terminal action did apply. Trigger: the first tenant on `mark_uncollectible`
   who reports a missing final notice.
 - A holder frozen longer than the 15-minute lease can repeat terminal actions
-  alongside the claim winner (pause has no skip-if-done; the escalation itself
-  stays exactly-once on `state`). Trigger: two or more dunning replicas in
-  production, or an observed duplicate `collection_paused` audit row.
+  alongside the claim winner (the escalation itself stays exactly-once on
+  `state`). Trigger: two or more dunning replicas in production. Since
+  2026-10-22 the pause is skip-if-done: a pause already in force writes
+  nothing ([ADR-036](036-dunning-campaigns-model.md) amendment 2026-10-22).
 - The escalated timeline row and `dunning.escalated` webhook are written after
   the escalation commits (a crash between loses them). Trigger: the
   one-attempt-path outbox work.
@@ -390,3 +391,12 @@ progress and for a crash on the final retry. Pinned by
 ## Amendment 2026-10-22 — money-path create routes refuse unknown fields
 
 Money-path create routes and the subscription change routes refuse unknown fields (422, `param` = key); policy routes keep the by-name refusal.
+
+## Amendment 2026-10-22 — a cancel that voids the run's invoice resolves the run
+
+When the final action's cancel voids the run's own invoice (a wholly unused
+prebill, ADR-118), the void now resolves the run as `invoice_voided`
+itself, in its post-commit legs. The run then neither escalates nor sends an
+escalation email, whatever the final invoice action is. Before, a policy
+with final invoice action `none` escalated over the voided invoice. See the
+[ADR-118 amendment of 2026-10-22](118-cancel-and-swap-relief-in-the-change-transaction.md#amendment-2026-10-22-a-relief-void-runs-every-voids-post-commit-legs).

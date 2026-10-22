@@ -1754,6 +1754,24 @@ func (e SubscriptionPauseCollectionBehavior) Valid() bool {
 	}
 }
 
+// Defines values for SubscriptionPauseCollectionSetBy.
+const (
+	Dunning  SubscriptionPauseCollectionSetBy = "dunning"
+	Operator SubscriptionPauseCollectionSetBy = "operator"
+)
+
+// Valid indicates whether the value is a known member of the SubscriptionPauseCollectionSetBy enum.
+func (e SubscriptionPauseCollectionSetBy) Valid() bool {
+	switch e {
+	case Dunning:
+		return true
+	case Operator:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SubscriptionTimelineEventSource.
 const (
 	Audit SubscriptionTimelineEventSource = "audit"
@@ -3341,10 +3359,10 @@ type AnalyticsOverview struct {
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
 	DunningActive int `json:"dunning_active"`
 
-	// DunningRecoveryRate Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+	// DunningRecoveryRate Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
 	DunningRecoveryRate float64 `json:"dunning_recovery_rate"`
 
-	// FailedPayments Invoices created in the window whose payment failed. All currencies.
+	// FailedPayments Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
 	FailedPayments int `json:"failed_payments"`
 
 	// FailedPaymentsPrev `failed_payments` for the previous window.
@@ -4522,21 +4540,26 @@ type DunningRunEventState string
 type DunningStats struct {
 	ActiveCount int `json:"active_count"`
 
-	// AtRiskByCurrency Amount due on active and escalated runs, one entry per currency.
-	// `currency` comes first, then the largest amount. Empty when no run
-	// is at risk.
+	// AtRiskByCurrency Amount due on active and escalated runs whose invoice is still
+	// open, one entry per currency. `currency` comes first, then the
+	// largest amount. Empty when no run is at risk.
 	AtRiskByCurrency []struct {
 		AmountCents int64  `json:"amount_cents"`
 		Currency    string `json:"currency"`
 	} `json:"at_risk_by_currency"`
 
-	// AtRiskCents Amount due on active and escalated runs, in `currency` only.
+	// AtRiskCents Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
 	AtRiskCents int64 `json:"at_risk_cents"`
 
 	// Currency The tenant's default currency.
 	Currency       string `json:"currency"`
 	EscalatedCount int    `json:"escalated_count"`
-	ResolvedCount  int    `json:"resolved_count"`
+
+	// RecoveredCount Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered.
+	RecoveredCount int `json:"recovered_count"`
+
+	// ResolvedCount Resolved runs, whatever closed them (a payment, a void or a write-off).
+	ResolvedCount int `json:"resolved_count"`
 }
 
 // Error defines model for Error.
@@ -5660,7 +5683,7 @@ type RecipeDunningPolicy struct {
 	// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
 	FinalInvoiceAction RecipeDunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
 
-	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
 	FinalSubscriptionAction RecipeDunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
 	IntervalsHours          []int                                      `json:"intervals_hours"`
 	MaxRetries              int                                        `json:"max_retries"`
@@ -5671,7 +5694,7 @@ type RecipeDunningPolicy struct {
 // Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
 type RecipeDunningPolicyFinalInvoiceAction string
 
-// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices); `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
+// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
 type RecipeDunningPolicyFinalSubscriptionAction string
 
 // RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
@@ -6076,12 +6099,30 @@ type SubscriptionItemThreshold struct {
 type SubscriptionPauseCollection struct {
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
-	// ResumesAt When collection resumes. Absent when the pause lasts until it is cleared.
+	// ResumesAt When collection resumes. Absent when the pause lasts until it is
+	// cleared. On a pause set by dunning, it is when Velox recorded the
+	// payment of the invoice the pause was set for.
 	ResumesAt time.Time `json:"resumes_at,omitempty"`
+
+	// SetBy Who paused collection. `operator`: you, through the API or the
+	// dashboard; the pause lasts until you resume it or until
+	// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+	// A dunning pause lifts by itself once the invoice whose dunning
+	// set it is paid, even if another invoice is still owed. Periods
+	// that ended during the pause keep their draft invoices.
+	SetBy SubscriptionPauseCollectionSetBy `json:"set_by,omitempty"`
 }
 
 // SubscriptionPauseCollectionBehavior defines model for SubscriptionPauseCollection.Behavior.
 type SubscriptionPauseCollectionBehavior string
+
+// SubscriptionPauseCollectionSetBy Who paused collection. `operator`: you, through the API or the
+// dashboard; the pause lasts until you resume it or until
+// `resumes_at`. `dunning`: a dunning policy's `pause` final action.
+// A dunning pause lifts by itself once the invoice whose dunning
+// set it is paid, even if another invoice is still owed. Periods
+// that ended during the pause keep their draft invoices.
+type SubscriptionPauseCollectionSetBy string
 
 // SubscriptionTimelineEvent defines model for SubscriptionTimelineEvent.
 type SubscriptionTimelineEvent struct {
@@ -7459,7 +7500,7 @@ type GetV1InvoicesParams struct {
 	// Ids Comma-separated invoice IDs to fetch exactly.
 	Ids string `form:"ids,omitempty" json:"ids,omitempty"`
 
-	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default).
+	// Sort One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
 	Sort   string                 `form:"sort,omitempty" json:"sort,omitempty"`
 	Dir    GetV1InvoicesParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 	Limit  int                    `form:"limit,omitempty" json:"limit,omitempty"`

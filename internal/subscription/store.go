@@ -16,6 +16,21 @@ type SubPlanCurrency struct {
 	Currency string
 }
 
+// DunningPauseOutcome is what SetDunningPause did.
+type DunningPauseOutcome int
+
+const (
+	// DunningPauseWritten: this call paused collection.
+	DunningPauseWritten DunningPauseOutcome = iota + 1
+	// DunningPauseAlreadyHeld: a pause was already in force (the
+	// operator's, this run's earlier attempt, or another invoice's
+	// dunning), and was left as it is.
+	DunningPauseAlreadyHeld
+	// DunningPauseInvoiceSettled: the invoice was no longer owed, so
+	// nothing was paused.
+	DunningPauseInvoiceSettled
+)
+
 // ErrNotPaused is returned by ClearPauseCollection when the row exists but
 // carries no pause — the clear changed nothing, so nothing that announces a
 // resume may fire. Sentinel, not a DomainError: the operator path treats it
@@ -113,6 +128,12 @@ type Store interface {
 	// across two transactions. When the source state does not match, a
 	// re-query distinguishes not-found from a stale-status conflict and
 	// surfaces the current status in the error message.
+	//
+	// Every cancel writer (this, CancelAtomicWithBill, CancelAtTrialEnd and
+	// both FireScheduledCancellation methods) stores and returns the canceled
+	// row with no cancel schedule and no pending plan change on its items
+	// (retireLiveOnlyStateTx). The collection pause stays: it still holds the
+	// subscription's unpaid invoices.
 	CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// CancelAtomicWithBill cancels the subscription AND runs billFn (the
@@ -168,6 +189,11 @@ type Store interface {
 	// (hard) sub can also have collection paused, and clearing one without
 	// the other is supported. Service layer enforces behavior whitelist.
 	SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error)
+
+	// SetDunningPause is dunning's pause final action for the unpaid invoice
+	// invoiceID (see PostgresStore.SetDunningPause). It pauses only while
+	// that invoice is still owed, and never overrides a pause in force.
+	SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error)
 
 	// ClearPauseCollection nulls the pause_collection_* columns as a CAS: it
 	// changes the row only if a pause is set and returns ErrNotPaused
