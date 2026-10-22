@@ -11,7 +11,7 @@ import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { api, formatCents, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
 import { amountInputToCents } from '@/lib/money'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
-import { endOfDayInTZ } from '@/lib/dates'
+import { creditExpiryLabel, startOfNextDayInTZ } from '@/lib/dates'
 import type { Customer, CreditBalance } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
@@ -404,7 +404,7 @@ export default function CreditsPage() {
                                 )}
                                 {entry.expires_at && !expired && (
                                   <span className="block text-xs text-muted-foreground mt-0.5">
-                                    Expires {formatDate(entry.expires_at)}
+                                    {creditExpiryLabel(entry.expires_at)}
                                   </span>
                                 )}
                               </>
@@ -680,7 +680,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
           customer_id: effectiveCustomerId,
           amount_cents: amountCents,
           description,
-          ...(expiresAt ? { expires_at: endOfDayInTZ(expiresAt) } : {}),
+          ...(expiresAt ? { expires_at: startOfNextDayInTZ(expiresAt) } : {}),
           ...(form.getValues('promotional') ? { grant_kind: 'promotional' as const } : {}),
         }, idemKey)
       }
@@ -788,14 +788,14 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   name="expiresAt"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Expires at</FormLabel>
+                      <FormLabel>Valid through</FormLabel>
                       <DatePicker
                         value={field.value}
                         onChange={field.onChange}
                         placeholder="Never expires"
                         minDate={new Date(now)}
                       />
-                      <FormDescription>Leave empty for credits that never expire. Past dates are blocked — a credit that expires before today would be unusable.</FormDescription>
+                      <FormDescription>The credits can be used until the end of this day in your account's time zone. Leave empty for credits that never expire.</FormDescription>
                     </FormItem>
                   )}
                 />

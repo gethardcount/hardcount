@@ -54,10 +54,11 @@ export type GrantState = 'active' | 'used_up' | 'expired' | 'canceled' | 'deduct
 // deducted all of it, and "used up" when invoices drew some of it. Expiry
 // wins over canceled: the sweep takes whatever is left, so it is the last
 // thing that can happen to a grant. A grant past its expiry that the sweep
-// has not written off yet is "expired" too.
+// has not written off yet is "expired" too. A credit is live up to and
+// including its expires_at, the rule the server draws by.
 export function grantState(g: GrantRow, nowMs: number): GrantState {
   if (g.remaining_cents > 0) {
-    return g.expires_at && Date.parse(g.expires_at) <= nowMs ? 'expired' : 'active'
+    return g.expires_at && Date.parse(g.expires_at) < nowMs ? 'expired' : 'active'
   }
   if ((g.expired_cents ?? 0) > 0) return 'expired'
   if ((g.retired_cents ?? 0) > 0) return 'canceled'
