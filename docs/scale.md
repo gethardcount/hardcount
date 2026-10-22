@@ -50,8 +50,9 @@ same data center sent the load through Caddy, over plain HTTP.
 | Billing: 300 invoices | All finished in 32 s. CPU was about 70% busy while it ran. |
 | Dashboard | Most calls under 45 ms at p99. The invoice list is the slow one: 145 ms p50, 173 ms p99. The cause, a few database reads per row, is fixed after v0.8.0 ([#1142](https://github.com/getvelox/velox/issues/1142)); not yet re-measured. |
 
-**Disk.** Each event takes about 570 bytes in the database, counting its
-indexes. At 1 million events a day that is about 17 GB a month. The system and
+**Disk.** Each event takes about 0.5 to 0.6 KB in the database, counting its
+indexes ([how the data grows](ops/postgres-requirements.md#how-the-data-grows)).
+At 1 million events a day that is 15 to 18 GB a month. The system and
 the images already use about 3.5 GB, so the 40 GB disk fills in about two
 months. Before you go live, add a volume for the database or pick a server
 with a bigger disk. The nightly backups also sit on this disk until you copy
@@ -117,6 +118,8 @@ p99 means 99 of every 100 requests finished within that time.
 - **Method and evidence:** [sustained throughput](benchmarks/sustained-throughput.md)
   has the gates, the evidence files, the most a closed loop could push, and
   what the database alone does on the same rows (`pgbench`).
+  [Correctness under failure](benchmarks/failure-correctness.md) has what
+  happens to invoices when the billing process dies mid-run.
 - **Run it yourself:** `scripts/bench-rig/run.sh` runs the whole sequence on
   your own AWS account, which is billed. To get the rows above, set `DB_CLASS`
   and `CONFIGS` to match them. For the WAL pool rows, also set the WAL settings
@@ -175,13 +178,4 @@ streaming, not where Postgres stops working. That is roughly 26 billion
 events a month. That figure is theirs, not ours; Velox's own figures are
 above.
 
-## Published runs
-
-Both runs are published in full, with the method, the evidence and what each
-one does *not* show.
-
-- [Sustained throughput](benchmarks/sustained-throughput.md): the figures on
-  this page.
-- [Correctness under failure](benchmarks/failure-correctness.md): what
-  happens to your invoices when the billing process dies mid-run. In every
-  run, 0 invoices were billed twice and 0 were lost.
+**Next:** [Run Velox in production on one VM](production-one-vm.md).

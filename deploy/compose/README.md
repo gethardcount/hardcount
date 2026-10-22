@@ -1,154 +1,15 @@
-# Install Velox on one VM with Docker Compose
+# The Docker Compose stack
 
-This guide takes you from a fresh VM to a working Velox with a dashboard login and API keys.
+This folder runs Velox on one machine: Postgres, Redis, the Velox API, the dashboard, and nginx in front of them.
 
-Just trying Velox on your own machine? Run `./quickstart.sh` in this directory instead. It does steps 1 to 4 for you, on port 8080, with the published images. It runs in local mode (`APP_ENV=local`), so sign-in works at `http://localhost` in every browser. This guide explains each of those steps, for a server you will keep, and runs in production mode.
+- **Try it on your own computer:** run `./quickstart.sh` here. It uses the published images and local mode, so sign-in works at `http://localhost:8080` in every browser. Walkthrough: [quick start](../../docs/quick-start.md).
+- **Install it on a server:** follow [Production on one VM](../../docs/production-one-vm.md). It installs a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
 
-Going to production? [Production on one VM](../../docs/production-one-vm.md) does the same install with a pinned release, then adds HTTPS, email, Stripe, nightly backups and a go-live checklist.
+## Build from source instead
 
-You get five containers: Postgres, Redis, the Velox API, the dashboard, and nginx in front of them on port 80.
+Production on one VM runs the published release images, set by `VELOX_IMAGE` and `VELOX_DASHBOARD_IMAGE` in `.env`. Leave those two lines out, and `docker compose up -d` builds both images from your checkout. The first build takes a few minutes. Everything else is the same.
 
-## Before you start
-
-- Docker 24 or newer, with the Compose plugin. Check with `docker compose version`.
-- About 1 vCPU and 1 GB of RAM is enough to try it.
-- Port 80 open, if you want to reach the API from outside the VM.
-
-## 1. Get the code and set four secrets
-
-```bash
-git clone https://github.com/getvelox/velox.git
-cd velox/deploy/compose
-cp .env.example .env
-```
-
-Generate the four secrets and add them to `.env`:
-
-```bash
-cat >> .env <<EOF
-POSTGRES_PASSWORD=$(openssl rand -hex 24)
-VELOX_APP_DB_PASSWORD=$(openssl rand -hex 24)
-VELOX_ENCRYPTION_KEY=$(openssl rand -hex 32)
-VELOX_BOOTSTRAP_TOKEN=$(openssl rand -hex 32)
-EOF
-```
-
-| Secret | What it is for |
-|---|---|
-| `POSTGRES_PASSWORD` | The database admin password |
-| `VELOX_APP_DB_PASSWORD` | The password of the limited database user that API requests run as |
-| `VELOX_ENCRYPTION_KEY` | Encrypts stored personal data. Must be 64 hex characters. |
-| `VELOX_BOOTSTRAP_TOKEN` | Lets you create the first tenant in step 4. At least 16 characters. |
-
-Everything else in `.env` is optional. Velox starts without email or Stripe set up.
-
-## 2. Start it
-
-```bash
-docker compose up -d
-```
-
-The first start builds the two Velox images from source, which takes a few minutes. Then:
-
-1. Postgres creates the `velox` database and the limited `velox_app` user.
-2. The API applies the database schema, checks that `velox_app` cannot see across tenants, and starts listening.
-3. nginx forwards port 80 to the API and the dashboard.
-
-Watch it come up:
-
-```bash
-docker compose logs -f velox-api
-```
-
-It is ready when you see `"listening" addr=:8080`.
-
-## 3. Check it is healthy
-
-```bash
-curl -fsS http://localhost/health
-# {"status":"ok"}
-
-curl -fsS http://localhost/health/ready
-# {"checks":{"api":"ok","database":"ok","scheduler":"..."},"status":"ok"}
-```
-
-- `/health` says the process is running.
-- `/health/ready` says it can reach the database. Point a load balancer's health check here. Its body also reports whether background jobs have run recently; that does not change the status code.
-
-## 4. Create your first tenant
-
-A tenant is one business account, with its own data, dashboard users and API keys.
-
-Run this on the VM itself. The reply contains your password and a live API key, and this stack has no TLS yet, so do not send it across a network.
-
-```bash
-set -a; . ./.env; set +a
-curl -X POST http://localhost/v1/bootstrap \
-  -H "Authorization: Bearer ${VELOX_BOOTSTRAP_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d '{"tenant_name":"Acme","owner_email":"you@example.com","owner_password":"a-strong-password-12ch"}'
-```
-
-The email and password are optional. Without them the owner is `admin@velox.local`, with a generated password. A password needs at least 12 characters, and Velox refuses common passwords from leaked-password lists.
-
-**Save the reply. It is shown once.** Velox stores only hashes, so none of it can be recovered later. It contains:
-
-- your dashboard login (`owner_email` and `owner_password`),
-- a test secret key (`vlx_secret_test_…`),
-- a live secret key (`vlx_secret_live_…`). This one charges real cards. Leave it alone until you mean it.
-- a test publishable key.
-
-Calling it a second time returns `409 already_bootstrapped`.
-
-## 5. Sign in to the dashboard
-
-In production mode the sign-in cookie is always marked `Secure`. Browsers keep a `Secure` cookie on HTTPS. At `http://localhost`, Chrome and Firefox keep it too; Safari does not. At any other plain-HTTP address, no browser keeps it.
-
-Until you add [TLS](#tls), sign in at `http://localhost` in Chrome or Firefox. Open `http://localhost/` on the VM, or use an SSH tunnel from your laptop:
-
-```bash
-ssh -L 8080:localhost:80 you@server
-# then open http://localhost:8080/
-```
-
-**Sign-in does not work at `http://<server-ip>/`,** in any browser, and the sign-in page tells you so. Once you add TLS, sign in at your HTTPS address.
-
-## 6. Make a first API call
-
-```bash
-SECRET=vlx_secret_test_...
-curl -fsS http://localhost/v1/customers \
-  -H "Authorization: Bearer ${SECRET}"
-# {"data":[],"total":0}
-```
-
-Velox is running. To see a full flow, from usage to an invoice, run the demo from the repository root:
-
-```bash
-VELOX_BASE=http://localhost VELOX_DASHBOARD_URL=http://localhost ./scripts/demo.sh vlx_secret_test_...
-```
-
-`VELOX_DASHBOARD_URL` makes the dashboard links the demo prints point at this stack. Without it they point at `http://localhost:5173`, the development server.
-
-## Day-to-day commands
-
-| To | Run |
-|---|---|
-| See logs | `docker compose logs -f` |
-| Restart the API | `docker compose restart velox-api` |
-| Upgrade to a new release | See [Upgrade](#upgrade) |
-| Stop, keeping data | `docker compose stop` |
-| Stop and delete all data | `docker compose down -v` |
-| See the database's version and the upgrades still to apply | `docker compose run --rm velox-api migrate status` |
-| Open a database shell | `docker compose exec postgres psql -U velox -d velox` |
-
-## Upgrade
-
-Take a backup before every upgrade. Velox cannot undo a database upgrade (a migration) in place: the way back is to restore the backup taken before it ([Going back](../../docs/production-one-vm.md#going-back)).
-
-Upgrade to a release, not to the newest code on `main`, which can hold changes that are not released yet. Read the upgrade notes in the [changelog](../../CHANGELOG.md) for every release between yours and the new one.
-
-If `.env` sets `VELOX_IMAGE`, you run the published images: follow [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release). Otherwise this stack builds Velox from your checkout. To move it to a release, for example `v0.9.0`, run these steps in `deploy/compose`:
+To upgrade a stack built from source, run these in `deploy/compose`. This example moves to `v0.9.0`.
 
 1. Take a backup. [Production on one VM, step 7](../../docs/production-one-vm.md#7-back-up-every-night) sets up this command. If your checkout is not in `/opt/velox`, change its two `/opt/velox` paths.
 
@@ -166,7 +27,7 @@ If `.env` sets `VELOX_IMAGE`, you run the published images: follow [Upgrade to a
    docker compose build
    ```
 
-   **You see:** `HEAD is now at …` from git, then the two images build. That takes a few minutes.
+   **You see:** `HEAD is now at …` from git, then the two images build.
 
 3. See what the upgrade will change. `migrate status` only reads.
 
@@ -174,7 +35,7 @@ If `.env` sets `VELOX_IMAGE`, you run the published images: follow [Upgrade to a
    docker compose run --rm velox-api migrate status
    ```
 
-   **You see:** the plan. If it says `refused`, stop here and follow the message. If it says `ahead`, the database has migrations this release does not ship, because this install ran newer code: check out a newer release and build again.
+   **You see:** the plan. If it says `refused`, stop and follow the message. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again.
 
 4. Start the new build. It applies the database upgrades as it starts.
 
@@ -184,22 +45,31 @@ If `.env` sets `VELOX_IMAGE`, you run the published images: follow [Upgrade to a
 
    **You see:** after a few seconds, `curl -fsS http://localhost/health/ready` answers `"status":"ok"` again.
 
-If the upgrade stops with an error, see [If something goes wrong](#if-something-goes-wrong).
+Read the [changelog](../../CHANGELOG.md) upgrade notes first, as for any upgrade. If the upgrade stops with an error, see [If something goes wrong](#if-something-goes-wrong).
 
-## TLS
+## Sign in before HTTPS
 
-This stack serves plain HTTP. Before real use, put TLS in front of it. Two common ways:
+With `APP_ENV=production`, the default in this stack, the sign-in cookie is always marked `Secure`. Browsers keep a `Secure` cookie on HTTPS. At `http://localhost`, Chrome and Firefox keep it too; Safari does not. At any other plain-HTTP address, such as `http://<server-ip>/`, no browser keeps it, and the sign-in page says so.
 
-- **A managed load balancer**, such as AWS ALB or Cloudflare. It handles TLS and forwards to port 80 on this VM over a private network.
-- **nginx and certbot on the VM**, outside this stack. It handles TLS and forwards to `localhost:80`.
+Until you add HTTPS, sign in at `http://localhost/` on the server in Chrome or Firefox, or through an SSH tunnel from your laptop:
 
-[Production on one VM](../../docs/production-one-vm.md#3-add-https-with-caddy) has a copy-paste example with Caddy, a web server that gets and renews the certificate by itself.
+```bash
+ssh -L 8080:localhost:80 you@server   # localhost:8080 instead if NGINX_HTTP_PORT=127.0.0.1:8080
+# then open http://localhost:8080/
+```
 
-Keep `APP_ENV=production`, the default. It always marks the sign-in cookie `Secure` and turns on HSTS. If an address setting such as `DASHBOARD_BASE_URL` starts with `http://`, Velox logs a warning at start-up that names it.
+## Day-to-day commands
 
-## Backups
+| To | Run |
+|---|---|
+| See logs | `docker compose logs -f` |
+| Restart the API | `docker compose restart velox-api` |
+| Stop, keeping data | `docker compose stop` |
+| Stop and delete all data | `docker compose down -v` |
+| See the database's version and the upgrades still to apply | `docker compose run --rm velox-api migrate status` |
+| Open a database shell | `docker compose exec postgres psql -U velox -d velox` |
 
-Once the data matters, set up backups: [`docs/ops/backup-considerations.md`](../../docs/ops/backup-considerations.md). It includes backup and restore scripts and a restore drill.
+To upgrade, see [Upgrade to a new release](../../docs/production-one-vm.md#upgrade-to-a-new-release), or [Build from source instead](#build-from-source-instead).
 
 ## If something goes wrong
 
@@ -226,16 +96,16 @@ docker compose exec -e VELOX_APP_DB_PASSWORD postgres \
   -c "ALTER ROLE velox_app PASSWORD :'pw'"
 ```
 
-If the user does not exist at all, create it with the SQL in [Self-host, "The two database users"](../../docs/self-host.md#the-two-database-users).
+If the user does not exist at all, create it with the SQL in [Postgres requirements](../../docs/ops/postgres-requirements.md#the-two-database-users).
 
 **The API exits with `role can BYPASS row-level security`.**
 `APP_DATABASE_URL` points at the admin user, usually because `DATABASE_URL` was copied into it. Point it at `velox_app`.
 
 **The API exits with `migration … failed`, or names `schema_migrations` or `goose_db_version`.**
-A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop velox-api`. Fix the cause the error names, then start it with `docker compose up -d velox-api`. `docker compose run --rm velox-api migrate status` shows the plan. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
+A database upgrade stopped. A failed migration leaves nothing to repair. Compose keeps starting the API again, and each start tries the upgrade again, so stop it first with `docker compose stop velox-api`. Fix the cause the error names, then start it with `docker compose up -d velox-api`. The cases are in [A database upgrade stopped](../../docs/ops/runbook/migration-failed-midway.md).
 
 **`/health/ready` shows `scheduler: degraded`.**
-The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs. To see which copy last ran each job, run `SELECT * FROM leader_status;` in the database shell.
+The API is up and still answers 200 here, but its background jobs have stopped running. Check the API logs, then see [A background job is stuck](../../docs/ops/runbook/background-job-stuck.md).
 
 **`/metrics` returns 401.**
 `METRICS_TOKEN` is not set, or the scraper did not send it. Set it in `.env` (`openssl rand -hex 32`), start the stack again, and have Prometheus send it as a bearer token.
@@ -243,16 +113,7 @@ The API is up and still answers 200 here, but its background jobs have stopped r
 **Port 80 is already in use.**
 Set `NGINX_HTTP_PORT=8080`, or any free port, in `.env` and start the stack again.
 
-**Sign-in says it does not work at this address.**
-You opened the dashboard over plain HTTP at an address other than localhost. See [step 5](#5-sign-in-to-the-dashboard).
+**Sign-in says it does not work at this address, or Safari does not keep you signed in.**
+You opened the dashboard over plain HTTP. See [Sign in before HTTPS](#sign-in-before-https).
 
-**In Safari, sign-in at `http://localhost` says the browser did not keep you signed in.**
-Safari does not keep the `Secure` sign-in cookie over plain HTTP, even at localhost. Use Chrome or Firefox until you add [TLS](#tls). To try Velox on your own Mac, use `./quickstart.sh`, which runs in local mode.
-
-## Next
-
-- [Production on one VM](../../docs/production-one-vm.md): HTTPS, email, Stripe, backups and a go-live checklist.
-- [Self-host](../../docs/self-host.md): settings, Postgres, production setup, and what to monitor.
-- [Backups](../../docs/ops/backup-considerations.md).
-
-There is no Helm chart or Terraform module yet.
+**Next:** [Run Velox in production on one VM](../../docs/production-one-vm.md).

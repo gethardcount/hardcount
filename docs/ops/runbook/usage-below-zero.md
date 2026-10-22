@@ -2,8 +2,7 @@
 
 Velox accepts negative usage events as corrections. When the corrections in
 a billing period are larger than the usage they offset, that meter's usage
-for the period is below zero. This page is for that case. Back to the
-[runbook index](index.md).
+for the period is below zero. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -62,11 +61,6 @@ curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER&from=$FROM&
   (`POST /v1/credit-notes/{id}/issue`).
 - **The correction was sent by mistake:** nothing was charged for it. Fix
   the sender so it does not repeat.
-- **Billing failed with `compute amount for meter …: invalid pricing
-  config`, and that meter's usage is below zero:** before the fix (#1193)
-  this case failed the close. After you upgrade, the next retry bills the
-  subscription; a parked one needs `retry-billing` (see
-  [Billing failing](billing-failing.md)).
 
 ## Verify
 

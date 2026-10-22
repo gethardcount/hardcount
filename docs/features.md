@@ -45,7 +45,7 @@ Good to know:
 | Nothing phones home | No licence check, no telemetry, no analytics SDK. Tracing (OpenTelemetry) goes only to a collector you set up. | [Self-host](self-host.md) |
 | Your data stays with you | Billing data lives in your own Postgres. Velox sends data only to services you set up, such as Stripe for payments and tax, and your email server. You still own the compliance work; self-hosting does not do it for you. | [Why Velox](why-velox.md) |
 | Audit log that cannot be edited | A log of who changed what in your account. The database refuses to change or delete any entry in it. | [Architecture](architecture.md) |
-| Data kept apart | The database itself keeps test data apart from live data, and one account's data apart from another's (Row-Level Security). | [Self-host](self-host.md#the-two-database-users) |
+| Data kept apart | The database itself keeps test data apart from live data, and one account's data apart from another's (Row-Level Security). | [Postgres requirements](ops/postgres-requirements.md#the-two-database-users) |
 
 Good to know: check "nothing is locked" against whatever else you are
 evaluating. For example, Lago's automatic dunning is a

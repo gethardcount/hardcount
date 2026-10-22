@@ -2,8 +2,7 @@
 
 Velox prices each usage event with its meter's pricing rules. Usage that
 matches no rule, on a meter with no default price, is left off the invoice.
-This page is for finding and billing it. Back to the
-[runbook index](index.md).
+Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -25,8 +24,8 @@ The usage matched no pricing rule on its meter, and the meter has no
 default price. A common cause is a new model name on an AI meter that has
 rules for the older models only.
 
-- Velox builds and sends the invoice without that usage, as Lago,
-  Metronome and Orb do. It does not bill it later on its own.
+- Velox builds and sends the invoice without that usage. It does not bill
+  it later on its own.
 - The counter adds the quantity once per invoice built without it: period
   close, cancel final invoice or spend-threshold invoice, once that
   invoice's transaction commits.

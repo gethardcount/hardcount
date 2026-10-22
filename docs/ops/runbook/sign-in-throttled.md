@@ -1,7 +1,6 @@
 # Sign-in says "Too many sign-in attempts"
 
-This page is for an operator whose team member cannot sign in to the
-dashboard because of the sign-in throttle. Back to the
+A team member cannot sign in because of the sign-in throttle. Back to the
 [runbook index](index.md).
 
 ## Symptom

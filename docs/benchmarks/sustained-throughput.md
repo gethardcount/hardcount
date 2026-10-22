@@ -2,8 +2,7 @@
 
 > **Record of runs on 2026-08-16 and 2026-08-17, kept as measured (status checked
 > 2026-10-17).** The code has changed since, and the runs have not been repeated.
-> Of the issues named below, #818 is fixed, and #819 and #823 are still open. The
-> short version of these figures is [How much traffic Velox handles](../scale.md).
+> The short version of these figures is [How much traffic Velox handles](../scale.md).
 
 ## Result
 
@@ -156,9 +155,7 @@ it. The run chapters in
 
 ## What stops it — the five walls
 
-A wall is a limit the runs ran into. There are five, and this section gathers
-them from the runs that hit them, each linking to its evidence. Nothing here is
-new information.
+Five limits the runs hit:
 
 1. **The hot row** (#818, found and fixed). Every request updated its API
    key's last-used row, so one busy key is one contended row.
@@ -168,11 +165,12 @@ new information.
 4. **The vacuum rewrite storm.**
 5. **The linear-scan read path** (#819, open).
 
-### What the ladder found: the wall is a hot row, not the hardware
+### What the ladder found: the wall was a hot row, not the hardware
 
-At batch 10 the open-loop knee (the rate where the latency curve turns
-upward) sits between 4,000 and 6,000 ev/s (events per second). That is about
-**570 requests per second**, at any batch size. That is not the machine:
+On the first runs, at batch 10, the open-loop knee (the rate where the latency
+curve turns upward) sat between 4,000 and 6,000 ev/s (events per second). That
+was about **570 requests per second**, at any batch size. It was not the
+machine:
 
 | candidate | test | result |
 |---|---|---|
@@ -181,15 +179,14 @@ upward) sits between 4,000 and 6,000 ev/s (events per second). That is about
 | commit / fsync rate | `pgbench` one-row transactions on the same RDS | **6,840 commits/s** at 16 clients, 14,284 at 64 — 10× the plateau |
 | what the backends were actually doing | `pg_stat_activity` sampled during a 6k run | **50–55 of 61 backends waiting on `UPDATE api_keys SET last_used_at = $1 WHERE id = $2`** — `Lock:transactionid`, `Lock:tuple`, `LWLock:LockManager` |
 
-Every request touches `last_used_at` on the API key it authenticated with.
-One high-volume client means one row, and a row lock hands off at roughly one
-RTT (~1.75 ms). That is ~570 requests/s, on any hardware. More connections only
-add waiters. Batch 100 and 500 stay under 150 requests/s, which is why 10,000
-and 15,000 ev/s held while 6,000 at batch 10 did not. This is a product
-finding, not a rig finding, and the fix is small (debounce the touch). It is
-filed as [#818](https://github.com/getvelox/velox/issues/818) with this
-evidence. **Until then: batch, and use more than one API key per high-volume
-producer.**
+Every request then wrote `last_used_at` on the API key it authenticated with.
+One high-volume client meant one row, and a row lock hands off at roughly one
+RTT (~1.75 ms), so ~570 requests/s. More connections only added waiters. Batch
+100 and 500 stayed under 150 requests/s, which is why 10,000 and 15,000 ev/s
+held while 6,000 at batch 10 did not. Fixed in
+[#818](https://github.com/getvelox/velox/issues/818): Velox now writes
+`last_used_at` at most once a minute per key. Run 2 moved the knee from ~570 to
+1,600–2,000 requests/s.
 
 ### RAM — the index working set falls out of cache
 
@@ -213,18 +210,9 @@ not replicate on a 2026-08-19 stock series, and it stays "storage-bound, not
 replicated". Where the volume truly cannot absorb the rate, only a bigger
 volume or less WAL per event helps.
 
-**The pool.** After any quiet spell, RDS's stock recycled-segment pool runs
-shallow. A commit that needs a new 64 MB segment then creates it while every
-other commit waits. The result is a ~0.2–0.3 s freeze every ~5 s, until a
-checkpoint refills the pool. (A checkpoint is Postgres's periodic flush of
-dirty pages; it also recycles WAL segments.) p50 (median latency) is
-untouched; p99 jumps 5–10×. The sizing rule, verified under provocation and
-full series:
-`min_wal_size = max_wal_size ≥ wal_keep_size + 1.9 × WAL rate ×
-checkpoint_timeout`. **16 GB covers 12–15k ev/s on this rig; at 25k size to
-~24–32 GB** (or shorten `checkpoint_timeout`). At 25k on stock, the pool churn
-is a *start-up transient*: it stops once the pool grows to working depth
-(2026-08-19 series). Mechanism and sizing rule:
+**The pool.** After a quiet spell, commits freeze ~0.25 s every ~5 s while
+RDS's WAL pool refills. 16 GB covers 12–15k ev/s on this rig; at 25k size to
+~24–32 GB. Mechanism and sizing rule:
 [RFM-001](../failure-modes/rfm-001-wal-pool-exhaustion.md). Series evidence:
 [run 3](../dev/records/sustained-throughput-runs-2026-08.md#third-run-2026-08-17-what-a-tail-event-is-caught-live).
 
@@ -363,10 +351,7 @@ ev/s ingest held and the summary missed its budget, and both are true.
 
 ## Measuring responsiveness, not just throughput
 
-A throughput number with no concurrent latency budget on the read path is the
-half of the benchmark that flatters the vendor. Nobody experiences "10,203
-events/sec". A finance team experiences whether the invoice page loads while
-ingest is at peak.
+The read probe checks that reads stay fast while ingest runs at peak.
 
 ```bash
 k6 run -e BASE=http://<app-private-ip>:8080 -e API_KEY=... -e CUSTOMER_ID=... \

@@ -19,19 +19,15 @@ reported success.
 **Date:** 2026-08-15 · **Commit:** `cde68ede` (#798)
 · **Hardware:** developer laptop, Postgres 16 in Docker, single node.
 
-We publish this benchmark first because a billing system most needs evidence
-on this question. It is also the question most often answered with a slide
-instead of a test. Everything below is reproducible from a clean checkout with
-`docker compose up -d postgres` and two `go test` commands, printed at the
-bottom.
-
 ---
 
 ## The guarantee
 
-Exactly-once billing in Velox is not application logic. It is a partial
-unique index (migration 0101): a uniqueness rule the database enforces only on
-rows matching the index's `WHERE` clause.
+Two guards stop a second cycle invoice. Since ADR-115 each period close locks
+the subscription row and checks its period. Behind that, a partial unique
+index refuses a duplicate: a uniqueness rule the database enforces only on
+rows matching the index's `WHERE` clause. The runs below measured the index
+alone, on code from before ADR-115.
 
 ```sql
 CREATE UNIQUE INDEX idx_invoices_billing_idempotency
@@ -119,10 +115,8 @@ final: 103 invoices over 40 distinct (sub,period) tuples, 257500 cents
 That is a 2.6× overbill, and every leader reported success. A second run of the
 same experiment produced 129 invoices and $3,225.00.
 
-Nothing in the application layer noticed: no error, no retry, no log line. This
-is the point. The guarantee is the database constraint, and the application
-code is not a second line of defence. To check a claim that a billing engine is
-idempotent, ask for this experiment.
+Nothing in the application layer noticed: no error, no retry, no log line. On
+the code these runs measured, the index was the only guard.
 
 ## 4. Money invariants after recovery
 
@@ -155,8 +149,7 @@ The index and the check fail independently. An index can be:
 - dropped by a migration;
 - left `INVALID` by a failed `CREATE INDEX CONCURRENTLY`, which enforces
   nothing while it still appears in `pg_indexes`;
-- quietly narrowed by a predicate change. Migration 0101 narrowed this exact
-  predicate once already.
+- quietly narrowed by a predicate change, as this predicate already was once.
 
 ## 5. How fast a dead leader is replaced
 
@@ -187,9 +180,6 @@ The advisory lock this replaced took 95 s to release after a severed link
 
 ## What this does not show
 
-We state the limits plainly, because a benchmark that hides its limits is what
-this document argues against.
-
 - **This is a correctness result, not a scale result.** 40 subscriptions on one
   laptop. It says nothing about throughput, which is measured in
   [sustained throughput](sustained-throughput.md).
@@ -201,11 +191,7 @@ this document argues against.
   is covered by other tests, not by this one.
 - **No payment provider in the loop.** The charger is a sentinel that fails
   loudly if reached, so this measures invoice generation, not settlement.
-- **Both failover figures are now measured, not computed.** The partition case
-  was measured by severing a real network link (see section 5). What is
-  still *not* covered: failover between physical machines, and Postgres itself
-  dying. A leader dying is not the same event as its database dying, and only
-  the first is measured here.
+- **Not covered:** failover between physical machines.
 
 ## Reproducing
 
@@ -218,15 +204,9 @@ go test -p 1 ./internal/platform/leader/ -short=false -run TestLeaseFailover -v
 The partition figure (9 s) comes from `scripts/partition-drill.sh` (see [section 5](#5-how-fast-a-dead-leader-is-replaced)).
 
 To reproduce the negative control, drop `idx_invoices_billing_idempotency` from
-the test database and re-run the first command. On the code these runs measured
-(2026-08-15), it failed loudly with the duplicate count. Since
-[ADR-115](../adr/115-one-closer-for-the-billing-period.md), every period close
-also locks the subscription row and checks its period, so dropping the index
-alone may no longer produce duplicates. The control has not been re-run on that
-code.
+the test database and re-run the first command. On code after ADR-115,
+dropping the index alone may no longer produce duplicates (see the note at the
+top).
 
-> **Companion:** [sustained-throughput.md](sustained-throughput.md) measures
-> what the ingest API sustains on named AWS hardware under a gated, reconciled
-> protocol: 12,000 ev/s at p99 22 ms on `db.m7g.4xlarge`, batch 10; 15,000 at
-> batch 100. It also covers what stops it, and the two product findings it
-> produced.
+**Next:** throughput is measured separately in
+[sustained throughput](sustained-throughput.md).
