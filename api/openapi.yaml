@@ -1287,8 +1287,11 @@ components:
           format: date-time
           nullable: true
           description: |
-            Expiry of the granted commit block. Absent/null = the credits
-            never expire (the default).
+            Expiry of the granted commit block. The credit can be drawn up
+            to and including this instant; a period invoice draws it when
+            its period ends at or before it. The dashboard sends the local
+            midnight after the picked day. Absent/null = the credits never
+            expire (the default).
 
     ProviderCostRate:
       type: object
@@ -2213,6 +2216,11 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: |
+            On a grant, its expiry. The credit can be drawn up to and
+            including this instant; a period invoice draws it when its
+            period ends at or before it. The dashboard sends the local
+            midnight after the picked day.
         metadata:
           type: object
           additionalProperties: true
@@ -2714,7 +2722,10 @@ components:
           type: string
           format: date-time
           description: |
-            When the granted credit expires. Must be in the future. Needs
+            When the granted credit expires. The credit can be drawn up to
+            and including this instant; a period invoice draws it when its
+            period ends at or before it. The dashboard sends the local
+            midnight after the picked day. Must be in the future. Needs
             `commit_granted_cents`. Absent means it never expires.
 
     InvoiceCreateRequest:
@@ -4708,6 +4719,10 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: |
+            The credit can be drawn up to and including this instant; a
+            period invoice draws it when its period ends at or before it.
+            The dashboard sends the local midnight after the picked day.
         source_invoice_id:
           type: string
           description: For a `commit` block, the invoice that paid for it.
@@ -11646,7 +11661,12 @@ paths:
                 expires_at:
                   type: string
                   format: date-time
-                  description: Optional expiry; must be in the future. Omitted = never expires.
+                  description: |
+                    Optional expiry; must be in the future. Omitted = never
+                    expires. The credit can be drawn up to and including this
+                    instant; a period invoice draws it when its period ends
+                    at or before it. The dashboard sends the local midnight
+                    after the picked day.
                 grant_kind:
                   type: string
                   enum: [promotional]

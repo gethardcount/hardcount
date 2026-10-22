@@ -38,6 +38,11 @@ export interface CreditGrantBlock {
   retired_cents: number;
   /** The part an operator removed with a negative adjustment. */
   deducted_cents: number;
+  /**
+     * The credit can be drawn up to and including this instant; a
+     * period invoice draws it when its period ends at or before it.
+     * The dashboard sends the local midnight after the picked day.
+     */
   expires_at?: string;
   /** For a `commit` block, the invoice that paid for it. */
   source_invoice_id?: string;

@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { api, formatCents, formatDate } from '@/lib/api'
+import { creditExpiryLabel } from '@/lib/dates'
 import { creditTotalsLine, grantState, grantUsedCents, ledgerEntryLabel, ledgerEntryTitle, splitGrants } from '@/lib/customerCredits'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
@@ -108,7 +109,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                       <TableHead className="text-right">Granted</TableHead>
                       <TableHead className="text-right">Used</TableHead>
                       <TableHead className="text-right">Left</TableHead>
-                      <TableHead>Expires</TableHead>
+                      <TableHead>Expiry</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -135,7 +136,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
                             )}
                           </TableCell>
                           <TableCell className="text-right text-sm font-medium tabular-nums">{formatCents(g.remaining_cents, currency)}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{g.expires_at ? formatDate(g.expires_at) : 'Never'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground whitespace-nowrap">{g.expires_at ? creditExpiryLabel(g.expires_at) : 'Never'}</TableCell>
                         </TableRow>
                       )
                     })}

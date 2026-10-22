@@ -23,6 +23,12 @@ export interface CreditLedgerEntry {
   balance_after: number;
   description: string;
   invoice_id?: string;
+  /**
+     * On a grant, its expiry. The credit can be drawn up to and
+     * including this instant; a period invoice draws it when its
+     * period ends at or before it. The dashboard sends the local
+     * midnight after the picked day.
+     */
   expires_at?: string;
   metadata?: CreditLedgerEntryMetadata;
   created_at: string;
