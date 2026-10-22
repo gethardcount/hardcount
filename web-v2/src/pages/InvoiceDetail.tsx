@@ -1557,10 +1557,12 @@ export default function InvoiceDetailPage() {
       >
         {/* A written-off threshold invoice keeps its charges billed, with
             either reset_billing_cycle setting (ADR-066 amendment
-            2026-10-23). */}
+            2026-10-23). A later void can give them back to the period's
+            invoice (reset_billing_cycle: false, before that invoice is
+            built), so the line names it. */}
         {invoice.billing_reason === 'threshold' && (
           <p className="text-xs text-muted-foreground">
-            The charges on this spend-threshold invoice will not be billed again.
+            The charges on this spend-threshold invoice will not be billed again. Voiding it later can change that.
           </p>
         )}
         {canPauseSubOnWriteOff ? (

@@ -3872,7 +3872,8 @@ export interface paths {
          *     webhook event.
          *
          *     A written-off spend-threshold invoice keeps its charges billed: no
-         *     later invoice bills them again.
+         *     later invoice bills them again unless the invoice is then voided.
+         *     `POST /v1/invoices/{id}/void` says when a void gives them back.
          */
         post: operations["markInvoiceUncollectible"];
         delete?: never;

@@ -9795,7 +9795,8 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  * webhook event.
  *
  * A written-off spend-threshold invoice keeps its charges billed: no
- * later invoice bills them again.
+ * later invoice bills them again unless the invoice is then voided.
+ * `POST /v1/invoices/{id}/void` says when a void gives them back.
  * @summary Write off an invoice as uncollectible
  */
 export const markInvoiceUncollectible = async (id: string, options?: RequestInit): Promise<Invoice> => {

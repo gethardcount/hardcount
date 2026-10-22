@@ -270,7 +270,8 @@ dashboard's void and write-off dialogs do not know the setting the fire
 ran under or whether the period's invoice is built, so they carry one line
 true in every case ("After a void, its charges may not be billed on any
 other invoice"; "The charges on this spend-threshold invoice will not be
-billed again"), and the runbook gives each case.
+billed again. Voiding it later can change that"), and the runbook gives
+each case.
 
 **A void racing a closer lands before or after it.** The closers read the
 watermark after their tx locked the subscription row, but before this
@@ -280,33 +281,49 @@ closer's commit was billed by neither: it came first, yet the closer
 committed the residual it had planned. Reproduced for the cycle close (its
 in-tx re-read), the immediate cancel (which read on its own connection)
 and the cross-interval swap. `GetLatestThresholdInvoiceForCycleTx` now
-holds the threshold invoice `FOR SHARE` until the closer's tx ends, and the
-immediate cancel reads on its tx (`loadThresholdWatermarkTx`). A void that
+holds the threshold invoice `FOR KEY SHARE` until the closer's tx ends, and
+the immediate cancel reads on its tx (`loadThresholdWatermarkTx`). `Void`
+locks the invoice `FOR UPDATE`, which conflicts with it. A void that
 arrives after the read waits for the commit and lands after the period's
 invoice (forgiven). A void that holds the row at the read is waited for;
 Postgres re-checks the row after it commits, a voided row no longer
 matches, and the closer bills the window (the cycle close through the
-`ErrWatermarkMoved` re-plan). Lock order is the one every billing writer
-of both takes, subscription row then invoice row (`lockSubscriptionRow`,
-`LockDunningPauseTx` before a paid flip); `Void` and `MarkUncollectible`
-lock only the invoice. Test-clock teardown is the exception: it deletes
-the clock's invoices before its subscriptions, so a teardown overlapping a
-closer on that clock now fails one side with a deadlock error (40P01)
-where it could fail the teardown on a foreign key. Simulation data only;
-a retry succeeds. A write-off, a payment or a card settle on the
-threshold invoice also waits for the closer's commit; none changes the
-watermark. The live balance, the preview and the after_close classifier
-read without a lock: they display or flag, and never write an invoice.
+`ErrWatermarkMoved` re-plan). A write-off also waits; it does not change
+the watermark. On the immediate cancel and the cross-interval swap the
+lock is held across the tax provider call that follows in the same tx, so
+a void, write-off, charge claim or payment failure on that invoice waits
+for that call too.
+
+Payments do not wait for this lock. Every paid flip (card settle, offline payment,
+credit note, zero-due settle) locks the invoice `FOR NO KEY UPDATE`, which
+`FOR KEY SHARE` does not conflict with. This matters because a paid flip
+can need the subscription row while it holds the invoice: it lifts a
+dunning pause set for that invoice (`ReleaseDunningPauseTx`), and
+`LockDunningPauseTx` takes the subscription first only for a pause already
+committed when it reads. A `SetDunningPause` that holds the invoice at that
+read and commits after it leaves the payment holding the invoice and
+waiting for the subscription. With `FOR SHARE` here, a closer holding the
+subscription then waited for the payment, and Postgres failed one of them
+(40P01; `TestThresholdPayment_vs_Close_DunningPauseInFlight`). Writers that
+lock the invoice `FOR UPDATE` (void, write-off, charge claims, payment
+failures) take no subscription lock in that transaction, except the
+cancel's and swap's own prebill void, which already holds it. Test-clock
+teardown is the exception: it deletes the clock's invoices before its
+subscriptions, so a teardown overlapping a closer on that clock now fails
+one side with a deadlock error (40P01) where it could fail the teardown on
+a foreign key. Simulation data only; a retry succeeds. The live balance,
+the preview and the after_close classifier read without a lock: they
+display or flag, and never write an invoice.
 
 **One predicate.** `thresholdBillsWindow` (`status <> 'voided'`,
 `invoice/postgres.go`) is the only copy. Its readers, all checked:
 
 | Reader | Effect |
 |---|---|
-| cycle close build (`buildLineItems`) and its in-tx re-read (`commitPeriodClose`) | bills only the residual after a write-off; a void committed before the re-read moves the watermark, so the close re-plans and bills the window; the re-read holds the row `FOR SHARE` |
-| immediate cancel (`billFinalOnImmediateCancelImpl`) | same, read on the cancel's tx `FOR SHARE` (was its own connection) |
-| cross-interval swap (`BillOnPlanSwapTx`) | same, read on the swap's tx `FOR SHARE` |
-| swap re-anchor guard (`ThresholdBilledThroughTx`) | still refuses to re-anchor below a written-off fire; first `FOR SHARE` read of the swap's tx |
+| cycle close build (`buildLineItems`) and its in-tx re-read (`commitPeriodClose`) | bills only the residual after a write-off; a void committed before the re-read moves the watermark, so the close re-plans and bills the window; the re-read holds the row `FOR KEY SHARE` |
+| immediate cancel (`billFinalOnImmediateCancelImpl`) | same, read on the cancel's tx `FOR KEY SHARE` (was its own connection) |
+| cross-interval swap (`BillOnPlanSwapTx`) | same, read on the swap's tx `FOR KEY SHARE` |
+| swap re-anchor guard (`ThresholdBilledThroughTx`) | still refuses to re-anchor below a written-off fire; first `FOR KEY SHARE` read of the swap's tx |
 | operator preview, live balance | agree with the close |
 | after_close classifier (`ThresholdWatermarks`, #1350) | see below |
 

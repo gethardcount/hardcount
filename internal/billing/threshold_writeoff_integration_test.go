@@ -325,8 +325,8 @@ func (v *racingVoid) wantOrderHonored(t *testing.T, r *s1Rig, closerInv domain.I
 // TestThresholdVoid_vs_Close_VoidAfterReRead: the close re-read the
 // watermark on its tx (the fire's invoice, finalized), and then the operator
 // voids that invoice before the close commits. The close's re-read holds the
-// row FOR SHARE, so the void waits for the close's commit and lands after
-// it: the window is forgiven, as for any void after the period's invoice.
+// row FOR KEY SHARE, so the void (FOR UPDATE) waits for the close's commit
+// and lands after it: the window is forgiven, as for any void after the period's invoice.
 // Before, the void committed first and the close then committed the
 // residual it had planned: a void that came first, and the window billed
 // nowhere.
@@ -363,10 +363,9 @@ func TestThresholdVoid_vs_Close_VoidAfterReRead(t *testing.T) {
 
 // TestThresholdPayment_vs_Close_PaymentAfterReRead is the paid-flip control
 // for the row lock: an offline payment of the threshold invoice after the
-// close's re-read waits for the close's commit (the payment's FOR UPDATE
-// against the re-read's FOR SHARE), with no deadlock, and the close bills
-// the residual whichever lands first: a paid invoice keeps its window
-// billed.
+// close's re-read does not wait for the close (the payment's FOR NO KEY
+// UPDATE against the re-read's FOR KEY SHARE), and the close bills the
+// residual whichever lands first: a paid invoice keeps its window billed.
 func TestThresholdPayment_vs_Close_PaymentAfterReRead(t *testing.T) {
 	r := newS1Rig(t, "Payment after the close's re-read", 200, false)
 	if fired := r.runFire(t); fired != 1 {
@@ -576,7 +575,7 @@ func TestThresholdVoid_vs_Close_VoidHoldsTheRow(t *testing.T) {
 
 // TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead: the immediate cancel
 // is a closer of the same window. It reads the watermark after the cancel's
-// UPDATE locked the subscription, on the cancel's tx, FOR SHARE, so a void
+// UPDATE locked the subscription, on the cancel's tx, FOR KEY SHARE, so a void
 // of the threshold invoice that arrives after the read waits for the cancel
 // and is forgiven. Before, the read ran on its own connection: the void
 // committed first and the cancel's final invoice billed only [t1, tc).
@@ -621,7 +620,7 @@ func TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead(t *testing.T) {
 // TestThresholdVoid_vs_PlanSwap_VoidAfterRead: the cross-interval swap
 // closes [P0, swap) on its own invoice. Its tx reads the watermark twice
 // (the re-anchor guard, then BillOnPlanSwapTx), and the first read takes
-// the row FOR SHARE, so a void after the second read waits for the swap and
+// the row FOR KEY SHARE, so a void after the second read waits for the swap and
 // is forgiven. Before, the void committed first and the swap invoice billed
 // only [t1, swap).
 func TestThresholdVoid_vs_PlanSwap_VoidAfterRead(t *testing.T) {

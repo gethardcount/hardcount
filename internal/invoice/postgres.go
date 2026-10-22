@@ -1177,7 +1177,7 @@ func (s *PostgresStore) MarkPaid(ctx context.Context, tenantID, id string, strip
 // MarkPaidReportingTransition is MarkPaid plus a `transitioned` flag:
 // true when THIS call moved the invoice finalized/uncollectible → paid,
 // false when it was already paid (the idempotent no-op branch). The
-// SELECT … FOR UPDATE serializes concurrent callers, so for two
+// row lock serializes concurrent callers, so for two
 // at-least-once webhook deliveries of the SAME charge exactly one gets
 // transitioned=true. SettleSucceeded gates its post-paid side-effects
 // (payment.succeeded event, receipt email, card stamp) on the flag so a
@@ -1259,9 +1259,14 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	if err := s.lockDunningPauseTx(ctx, tx, id); err != nil {
 		return domain.Invoice{}, false, err
 	}
+	// FOR NO KEY UPDATE serializes with every other writer of the row and
+	// leaves a period closer's FOR KEY SHARE watermark read free
+	// (GetLatestThresholdInvoiceForCycleTx): this transaction can need the
+	// subscription lock that closer holds (the dunning-pause release), so
+	// the closer must not wait for it.
 	var status, taxStatus string
 	if err := tx.QueryRowContext(ctx,
-		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR UPDATE`, id,
+		`SELECT status, tax_status FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, id,
 	).Scan(&status, &taxStatus); err != nil {
 		if err == sql.ErrNoRows {
 			return domain.Invoice{}, false, errs.ErrNotFound
@@ -4090,29 +4095,42 @@ func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, t
 }
 
 // GetLatestThresholdInvoiceForCycleTx is GetLatestThresholdInvoiceForCycle
-// on the caller's tx, holding the invoice row FOR SHARE until that tx ends.
-// Its callers are the period's closers (the cycle close's in-tx re-read,
-// ADR-115; the immediate cancel; the cross-interval swap and its re-anchor
-// guard), and each calls it after its tx locked the subscription row.
+// on the caller's tx, holding the invoice row FOR KEY SHARE until that tx
+// ends. Its callers are the period's closers (the cycle close's in-tx
+// re-read, ADR-115; the immediate cancel; the cross-interval swap and its
+// re-anchor guard), and each calls it after its tx locked the subscription
+// row.
 //
 // Under READ COMMITTED a statement issued after the closer's row-lock wait
 // sees every threshold fire that committed before it took the lock, so the
 // closer can prove the watermark it built its lines against is still the
-// watermark, and roll back if a fire landed in between. The share lock does
-// the same for a void (ADR-066 amendment 2026-10-23). A void that holds the
-// row when the read runs is waited for: the row is re-checked after it
-// commits, a voided row no longer matches, and the closer bills the
-// reopened window. A void that arrives after the read waits for the
-// closer's commit, so it lands after the period's invoice and the window is
-// forgiven. Without the lock that void could commit first and still find
-// its window billed nowhere. Lock order is subscription row, then invoice
-// row, as every billing writer of both takes them (subscription
-// lockSubscriptionRow, LockDunningPauseTx). Test-clock teardown
-// (testclock clockTeardownStatements) is the exception: it deletes the
-// clock's invoices before its subscriptions, so a teardown that overlaps a
-// closer on one of that clock's subscriptions fails one of the two with a
-// deadlock error (40P01); a retry succeeds. Before this lock the same
-// overlap could fail the teardown on a foreign key. Simulation data only.
+// watermark, and roll back if a fire landed in between. The lock does the
+// same for a void (ADR-066 amendment 2026-10-23). A void locks the invoice
+// FOR UPDATE (UpdateStatusWithReversalPriorTx), which conflicts with this
+// lock. A void that holds the row when the read runs is waited for: the row
+// is re-checked after it commits, a voided row no longer matches, and the
+// closer bills the reopened window. A void that arrives after the read waits
+// for the closer's commit, so it lands after the period's invoice and the
+// window is forgiven. Without the lock that void could commit first and
+// still find its window billed nowhere.
+//
+// FOR KEY SHARE, not FOR SHARE: the paid flips (markPaidReportingTransition,
+// the credit note's LockForCreditNoteTx, SettleZeroDue) lock the invoice FOR
+// NO KEY UPDATE, which this lock does not wait for and does not block. Only
+// a void changes the watermark, and a paid flip can need the subscription
+// row while it holds the invoice: when dunning's SetDunningPause for this
+// invoice commits after the payment's LockDunningPauseTx read, the
+// payment's pause release waits for the subscription lock this closer
+// holds. Had this read waited for the payment, the two would deadlock.
+// Every writer that locks the invoice FOR UPDATE (void, write-off, charge
+// claims, payment failures, draft edits, disputes) takes no subscription
+// lock in that transaction, except the cancel's and swap's own prebill
+// void, which already holds it. Test-clock teardown (testclock clockTeardownStatements)
+// is the exception: it deletes the clock's invoices before its
+// subscriptions, so a teardown that overlaps a closer on one of that
+// clock's subscriptions fails one of the two with a deadlock error (40P01);
+// a retry succeeds. Before this lock the same overlap could fail the
+// teardown on a foreign key. Simulation data only.
 //
 // tenantID is accepted for symmetry with the store's other *Tx methods; RLS
 // scoping rides the tx's tenant binding.
@@ -4120,7 +4138,7 @@ func (s *PostgresStore) GetLatestThresholdInvoiceForCycleTx(ctx context.Context,
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
-	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "FOR SHARE")
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "FOR KEY SHARE")
 }
 
 // GetThresholdInvoiceForCycleAnyStatus is the fire-once probe's read: the
@@ -4146,7 +4164,7 @@ func (s *PostgresStore) GetThresholdInvoiceForCycleAnyStatus(ctx context.Context
 
 // thresholdInvoiceForCycleTx reads the newest threshold invoice whose
 // billing_period_start falls in [periodStart, periodEnd) and that matches
-// statusPredicate, with lockClause ("" or "FOR SHARE") on the row it
+// statusPredicate, with lockClause ("" or "FOR KEY SHARE") on the row it
 // returns. Both are this file's constants, never caller input.
 func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, subscriptionID string, periodStart, periodEnd time.Time, statusPredicate, lockClause string) (domain.Invoice, error) {
 	var inv domain.Invoice
