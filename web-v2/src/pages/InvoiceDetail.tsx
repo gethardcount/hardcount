@@ -89,7 +89,7 @@ function TaxReversedLine({ cn, currency }: { cn: CreditNote; currency: string })
 const LINE_TYPE_LABELS: Record<string, string> = {
   base_fee: 'Base fee',
   usage: 'Usage',
-  add_on: 'Add-On',
+  add_on: 'Add-on',
   discount: 'Discount',
   tax: 'Tax',
 }
