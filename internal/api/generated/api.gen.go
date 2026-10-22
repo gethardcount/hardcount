@@ -3890,6 +3890,35 @@ type CreditNoteRefundStatus string
 // CreditNoteStatus defines model for CreditNote.Status.
 type CreditNoteStatus string
 
+// CreditNoteStats defines model for CreditNoteStats.
+type CreditNoteStats struct {
+	// ByCurrency Money on issued notes, one entry per currency, the tenant's
+	// default currency first. Empty when no note is issued.
+	ByCurrency []struct {
+		// CreditedCents Added to customers' credit balances.
+		CreditedCents int64  `json:"credited_cents"`
+		Currency      string `json:"currency"`
+
+		// OutOfBandCents Recorded as paid back outside Stripe.
+		OutOfBandCents int64 `json:"out_of_band_cents"`
+
+		// RefundFailedCents Refunds that failed. No money went back to the card.
+		RefundFailedCents int64 `json:"refund_failed_cents"`
+
+		// RefundPendingCents Refunds sent to Stripe whose result is not back yet.
+		RefundPendingCents int64 `json:"refund_pending_cents"`
+
+		// RefundedCents Refunds that succeeded. A refund still pending or one that failed is not counted here.
+		RefundedCents int64 `json:"refunded_cents"`
+
+		// TotalCents Total of the issued notes.
+		TotalCents int64 `json:"total_cents"`
+	} `json:"by_currency"`
+	DraftCount  int `json:"draft_count"`
+	IssuedCount int `json:"issued_count"`
+	VoidedCount int `json:"voided_count"`
+}
+
 // Customer defines model for Customer.
 type Customer struct {
 	// AdditionalEmails CC'd on billing documents and billing-state emails (invoice,
@@ -6078,6 +6107,11 @@ type TenantSettings struct {
 	// `credit.balance_low` webhook fires. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
+	// applies to new credit notes only. Issued notes keep their
+	// numbers.
+	CreditNotePrefix string `json:"credit_note_prefix"`
+
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency"`
 
@@ -6154,6 +6188,11 @@ type TenantSettingsInput struct {
 	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
 	// `credit.balance_low` webhook fires. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
+
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
+	// applies to new credit notes only. Issued notes keep their
+	// numbers.
+	CreditNotePrefix string `json:"credit_note_prefix,omitempty"`
 
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency,omitempty"`
@@ -9086,6 +9125,9 @@ type ServerInterface interface {
 	// Create a credit note (line-based, or commit relief)
 	// (POST /v1/credit-notes)
 	PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams)
+	// Get credit note totals
+	// (GET /v1/credit-notes/stats)
+	GetCreditNoteStats(w http.ResponseWriter, r *http.Request)
 	// Get a credit note
 	// (GET /v1/credit-notes/{id})
 	GetCreditNote(w http.ResponseWriter, r *http.Request, id string)
@@ -9755,6 +9797,12 @@ func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, p
 // Create a credit note (line-based, or commit relief)
 // (POST /v1/credit-notes)
 func (_ Unimplemented) PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get credit note totals
+// (GET /v1/credit-notes/stats)
+func (_ Unimplemented) GetCreditNoteStats(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11832,6 +11880,26 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1CreditNotes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCreditNoteStats operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditNoteStats(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCreditNoteStats(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19696,6 +19764,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.PostV1CreditNotes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credit-notes/stats", wrapper.GetCreditNoteStats)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes/{id}", wrapper.GetCreditNote)

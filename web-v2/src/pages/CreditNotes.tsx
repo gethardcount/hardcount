@@ -1,21 +1,22 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
+import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime, getActiveCurrency } from '@/lib/api'
 import type { CreditNote, Invoice, Customer } from '@/lib/api'
 import { wallClockNow } from '@/lib/effectiveNow'
-import { applyApiError, showApiError } from '@/lib/formErrors'
-import { useSingleFlight } from '@/hooks/useSingleFlight'
+import { showApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
-import { creditNoteStats } from '@/lib/creditNoteStats'
+import { creditNoteStatFigures } from '@/lib/creditNoteStats'
+import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { Layout } from '@/components/Layout'
+import { ScrollPane } from '@/components/ui/scroll-pane'
 import { SimulatedBadge } from '@/components/TestClockBadge'
+import { CustomerCombobox } from '@/components/CustomerCombobox'
+import { IssueCreditDialog } from '@/components/IssueCreditDialog'
+import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { cn } from '@/lib/utils'
@@ -24,6 +25,7 @@ import { statusBadgeVariant, statusBorderColor, creditNoteReasonLabel } from '@/
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -61,28 +63,10 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
 import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Plus, Search, Download, Loader2, ArrowUpDown, ArrowUp, ArrowDown, FileMinus, Mail } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
-
-const creditNoteSchema = z.object({
-  invoice_id: z.string().min(1, 'Invoice is required'),
-  reason: z.string().min(1, 'Reason is required'),
-  amount: z.string().min(1, 'Amount is required').refine(v => parseFloat(v) >= 0.01, 'Must be at least 0.01'),
-  refundType: z.string(),
-})
-
-type CreditNoteFormData = z.infer<typeof creditNoteSchema>
 
 const PAGE_SIZE = 25
 
@@ -126,6 +110,8 @@ function refundUnconfirmed(note: CreditNote): boolean {
 export default function CreditNotesPage() {
   usePageTitle('Credit notes')
   const [showCreate, setShowCreate] = useState(false)
+  // The invoice picked in the chooser; its own dialog then issues the note.
+  const [creditInvoice, setCreditInvoice] = useState<Invoice | null>(null)
   const [confirmIssue, setConfirmIssue] = useState<string | null>(null)
   const [confirmVoid, setConfirmVoid] = useState<string | null>(null)
   const [sendTarget, setSendTarget] = useState<CreditNote | null>(null)
@@ -186,7 +172,7 @@ export default function CreditNotesPage() {
     enabled: refIds.customers.length > 0,
   })
 
-  const notes = notesData?.data ?? []
+  const notes = useMemo(() => notesData?.data ?? [], [notesData])
   const loading = notesLoading
 
   const invoiceMap = useMemo(() => {
@@ -228,9 +214,15 @@ export default function CreditNotesPage() {
     onError: (err) => showApiError(err, 'Failed to retry refund'),
   })
 
-  // Stats — extracted to creditNoteStats so the "Refunded to Card" gating is
-  // unit-tested: only refund_status=succeeded counts as money returned.
-  const stats = useMemo(() => creditNoteStats(notes), [notes])
+  // Header, tabs and stat cards come from the server, which counts every note
+  // and sums money per currency. The list below is a page of at most 100 rows
+  // filtered to the open tab, so it cannot be their source (E12).
+  const { data: statsData } = useQuery({
+    queryKey: ['credit-notes', 'stats'],
+    queryFn: () => api.getCreditNoteStats(),
+  })
+  const stats = statsData ? creditNoteStatFigures(statsData, getActiveCurrency()) : null
+  const counts = stats?.counts
 
   // Filter + search
   const filtered = useMemo(() => notes.filter(n => {
@@ -255,6 +247,11 @@ export default function CreditNotesPage() {
   const sorted = filtered
 
   const truncated = notes.length >= 100
+  // How many notes the open tab holds in all, when the server can say: the
+  // refund filter has no server count.
+  const tabTotal = counts && !refundStatusFilter
+    ? (filterStatus === 'draft' ? counts.draft : filterStatus === 'issued' ? counts.issued : filterStatus === 'voided' ? counts.voided : counts.all)
+    : null
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
   const currentPage = Math.min(page, totalPages || 1)
   const paginated = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
@@ -284,7 +281,7 @@ export default function CreditNotesPage() {
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Credit notes</h1>
-          <p className="text-sm text-muted-foreground mt-1">A credit note takes money off an invoice. If the invoice is unpaid, the customer owes less; if it's paid, the money goes back as a refund or as credit on their balance{notes.length > 0 ? ` · ${notes.length} total` : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">A credit note takes money off an invoice. If the invoice is unpaid, the customer owes less; if it's paid, the money goes back as a refund or as credit on their balance{counts && counts.all > 0 ? ` · ${counts.all} total` : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           {notes.length > 0 && (
@@ -299,23 +296,23 @@ export default function CreditNotesPage() {
       </div>
 
       {/* Summary cards */}
-      {!loading && notes.length > 0 && (
+      {stats && stats.counts.all > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Total credited</p>
-              <p className="text-xl font-semibold text-foreground mt-1 tabular-nums">{formatCents(stats.totalAmount)}</p>
+              <p className="text-xl font-semibold text-foreground mt-1 tabular-nums">{stats.total}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Refunded to Card</p>
-              <p className="text-xl font-semibold text-primary mt-1 tabular-nums">{formatCents(stats.totalRefunded)}</p>
-              {(stats.refundPendingCents > 0 || stats.refundFailedCents > 0) && (
+              <p className="text-xl font-semibold text-primary mt-1 tabular-nums">{stats.refunded}</p>
+              {(stats.refundPending || stats.refundFailed) && (
                 <p className="text-xs mt-0.5">
-                  {stats.refundPendingCents > 0 && <span className="text-amber-600">{formatCents(stats.refundPendingCents)} pending</span>}
-                  {stats.refundPendingCents > 0 && stats.refundFailedCents > 0 && <span className="text-muted-foreground"> · </span>}
-                  {stats.refundFailedCents > 0 && <span className="text-red-600">{formatCents(stats.refundFailedCents)} failed — not returned</span>}
+                  {stats.refundPending && <span className="text-amber-600">{stats.refundPending} pending</span>}
+                  {stats.refundPending && stats.refundFailed && <span className="text-muted-foreground"> · </span>}
+                  {stats.refundFailed && <span className="text-red-600">{stats.refundFailed} failed — not returned</span>}
                 </p>
               )}
             </CardContent>
@@ -323,14 +320,14 @@ export default function CreditNotesPage() {
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Applied to Balance</p>
-              <p className="text-xl font-semibold text-emerald-600 mt-1 tabular-nums">{formatCents(stats.totalCredited)}</p>
+              <p className="text-xl font-semibold text-emerald-600 mt-1 tabular-nums">{stats.credited}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Issued</p>
-              <p className="text-xl font-semibold text-foreground mt-1">{stats.issued}</p>
-              {stats.draft > 0 && <p className="text-xs text-amber-600 mt-0.5">{stats.draft} draft</p>}
+              <p className="text-xl font-semibold text-foreground mt-1">{stats.counts.issued}</p>
+              {stats.counts.draft > 0 && <p className="text-xs text-amber-600 mt-0.5">{stats.counts.draft} draft</p>}
             </CardContent>
           </Card>
         </div>
@@ -341,10 +338,10 @@ export default function CreditNotesPage() {
         <div className="flex items-center gap-3 mt-6">
           <div className="flex gap-1 bg-muted rounded-lg p-1">
             {[
-              { value: '', label: 'All', count: notes.length },
-              { value: 'draft', label: 'Draft', count: stats.draft },
-              { value: 'issued', label: 'Issued', count: stats.issued },
-              { value: 'voided', label: 'Voided', count: stats.voided },
+              { value: '', label: 'All', count: counts?.all ?? 0 },
+              { value: 'draft', label: 'Draft', count: counts?.draft ?? 0 },
+              { value: 'issued', label: 'Issued', count: counts?.issued ?? 0 },
+              { value: 'voided', label: 'Voided', count: counts?.voided ?? 0 },
             ].map(f => (
               <button
                 key={f.value}
@@ -489,7 +486,7 @@ export default function CreditNotesPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-mono text-sm">
-                          {formatCents(note.total_cents)}
+                          {formatCents(note.total_cents, note.currency)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-between">
@@ -547,7 +544,9 @@ export default function CreditNotesPage() {
 
               {truncated && (
                 <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
-                  Showing the 100 most recent credit notes. Use the status filter to narrow older ones.
+                  {tabTotal !== null && tabTotal > notes.length
+                    ? `Showing the 100 most recent of ${tabTotal} credit notes. Use the status filter to narrow older ones.`
+                    : 'Showing the 100 most recent credit notes. Use the status filter to narrow older ones.'}
                 </div>
               )}
 
@@ -604,17 +603,24 @@ export default function CreditNotesPage() {
         </CardContent>
       </Card>
 
-      {/* Create Credit Note Dialog */}
-      <CreateCreditNoteDialog
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        customerMap={customerMap}
-        onCreated={() => {
-          setShowCreate(false)
-          invalidateMoneySurfaces(queryClient)
-          toast.success('Credit note issued')
-        }}
-      />
+      {/* Issue a credit note: choose the invoice, then its own dialog opens */}
+      {showCreate && (
+        <ChooseInvoiceDialog
+          onClose={() => setShowCreate(false)}
+          onChoose={(inv) => { setShowCreate(false); setCreditInvoice(inv) }}
+        />
+      )}
+      {creditInvoice && (
+        <IssueCreditForInvoice
+          invoice={creditInvoice}
+          onClose={() => setCreditInvoice(null)}
+          onCreated={() => {
+            setCreditInvoice(null)
+            invalidateMoneySurfaces(queryClient, { invoiceId: creditInvoice.id, customerId: creditInvoice.customer_id })
+            toast.success('Credit note issued')
+          }}
+        />
+      )}
 
       {/* Issue Confirm */}
       <AlertDialog open={confirmIssue !== null} onOpenChange={(open) => { if (!open) setConfirmIssue(null) }}>
@@ -730,283 +736,138 @@ function SendCreditNoteDialog({ note, onClose, onSent }: {
   )
 }
 
-// --- Create Credit Note Dialog ---
+// --- Issue a credit note from this page ---
 
-function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  customerMap: Record<string, Customer>
-  onCreated: () => void
+// ChooseInvoiceDialog picks the invoice to credit: the customer first, then
+// one of their invoices that can take a credit note. The note itself is made
+// in the invoice page's dialog (IssueCreditDialog), so both places apply the
+// same ceilings and channels. This page used to have its own form, which
+// listed only the newest 50 finalized and 50 paid invoices of the whole
+// account, labelled amounts in the workspace currency, capped the amount at
+// the invoice's due or paid figure while ignoring earlier notes, and offered a
+// refund the server always refused (E8 / D-13).
+// Mounted only while open, so each opening starts with no customer picked.
+function ChooseInvoiceDialog({ onClose, onChoose }: {
+  onClose: () => void
+  onChoose: (invoice: Invoice) => void
 }) {
-  // Invoices for the dropdown — combined finalized + paid lists.
-  // Two parallel queries gated on dialog `open` so we lazy-fetch and
-  // share the cache with the parent CreditNotes page (which uses the
-  // same backend). React Query handles the StrictMode dedupe.
-  const finalizedQuery = useQuery({
-    queryKey: ['cn-dialog', 'invoices', 'finalized'],
-    queryFn: () => api.listInvoices('status=finalized'),
-    enabled: open,
-  })
-  const paidQuery = useQuery({
-    queryKey: ['cn-dialog', 'invoices', 'paid'],
-    queryFn: () => api.listInvoices('status=paid'),
-    enabled: open,
-  })
-  const invoices: Invoice[] = [...(finalizedQuery.data?.data ?? []), ...(paidQuery.data?.data ?? [])]
-  const loadingInvoices = (finalizedQuery.isLoading || paidQuery.isLoading) && open
+  const [customerId, setCustomerId] = useState('')
+  const [numberSearch, setNumberSearch] = useState('')
+  const search = useDebouncedValue(numberSearch.trim(), 300)
 
-  const form = useForm<CreditNoteFormData>({
-    resolver: zodResolver(creditNoteSchema),
-    defaultValues: { invoice_id: '', reason: '', amount: '', refundType: 'credit' },
-  })
-
-  const invoiceId = form.watch('invoice_id')
-  const reason = form.watch('reason')
-  const amount = form.watch('amount')
-  const refundType = form.watch('refundType')
-
-
-  const selectedInvoice = invoices.find(inv => inv.id === invoiceId)
-  const isPaid = selectedInvoice?.status === 'paid'
-  const maxAmount = selectedInvoice
-    ? isPaid ? selectedInvoice.amount_paid_cents : selectedInvoice.amount_due_cents
-    : 0
-
-  // One Idempotency-Key per dialog open, sent with every submit from it. A
-  // retry after a lost answer (a timeout while Stripe is slow) then gets the
-  // first request's credit note back instead of making a second one. This
-  // dialog stays mounted while closed, so the key is made each time it opens:
-  // a later note with the same values is a new action and must not get the
-  // earlier note back.
-  const idemKey = useRef('')
-  useEffect(() => {
-    if (open) idemKey.current = crypto.randomUUID()
-  }, [open])
-
-  const createMutation = useMutation({
-    mutationFn: async (data: CreditNoteFormData) => {
-      const amountCents = Math.round(parseFloat(data.amount) * 100)
-      return api.createCreditNote({
-        invoice_id: data.invoice_id,
-        reason: data.reason,
-        refund_type: data.refundType,
-        auto_issue: true,
-        lines: [{ description: data.reason, quantity: 1, unit_amount_cents: amountCents }],
-      }, idemKey.current)
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['credit-notes', 'choose-invoice', customerId, search],
+    queryFn: () => {
+      const params = new URLSearchParams({ customer_id: customerId, limit: '100' })
+      if (search) params.set('search', search)
+      return api.listInvoices(params.toString())
     },
-    onSuccess: () => {
-      form.reset()
-      onCreated()
-    },
-    onError: (err) => {
-      applyApiError(form, err, {
-        invoice_id: 'invoice_id',
-        reason: 'reason',
-        lines: 'amount',
-        unit_amount_cents: 'amount',
-        quantity: 'amount',
-      })
-    },
+    enabled: !!customerId,
   })
-
-  // Single-flight: this dialog auto-issues, and the backend's per-invoice lock
-  // caps but does not dedup — a same-tick double-submit issues a SECOND credit
-  // note (real second refund/credit) whenever it still fits under the cap.
-  // mutateAsync lets the ref guard await the in-flight call.
-  const submitOnce = useSingleFlight(async (data: CreditNoteFormData) => {
-    await createMutation.mutateAsync(data)
-  })
-  const onSubmit = form.handleSubmit((data) => {
-    void submitOnce(data)
-  })
+  const rows = data?.data ?? []
+  const creditable = rows.filter(canIssueCreditNote)
+  const truncated = rows.length >= 100
 
   return (
-    <Dialog open={open} onOpenChange={(o) => {
-      onOpenChange(o)
-      if (!o) form.reset()
-    }}>
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Issue credit note</DialogTitle>
+          <DialogTitle>Choose an invoice to credit</DialogTitle>
           <DialogDescription>
-            Create a credit note against an invoice.
+            A credit note takes money off one invoice. Pick the customer, then the invoice.
           </DialogDescription>
         </DialogHeader>
 
-        {loadingInvoices ? (
-          <div className="py-8 flex justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>Customer</Label>
+            <CustomerCombobox value={customerId} onChange={setCustomerId} />
           </div>
-        ) : (
-          <Form {...form}>
-            <form onSubmit={onSubmit} noValidate className="space-y-4">
-              <FormField
-                control={form.control}
-                name="invoice_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Invoice</FormLabel>
-                    <FormControl>
-                      <select
-                        value={field.value}
-                        onChange={(e) => {
-                          field.onChange(e.target.value)
-                          const inv = invoices.find(i => i.id === e.target.value)
-                          if (inv?.status !== 'paid') form.setValue('refundType', 'credit')
-                        }}
-                        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      >
-                        <option value="">Select invoice...</option>
-                        {invoices.map(inv => {
-                          const custName = customerMap[inv.customer_id]?.display_name || ''
-                          return (
-                            <option key={inv.id} value={inv.id}>
-                              {inv.invoice_number} - {custName} ({formatCents(inv.total_amount_cents)})
-                            </option>
-                          )
-                        })}
-                      </select>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
+
+          {customerId && (
+            <div className="space-y-2">
+              <Label htmlFor="cn-invoice-search">Invoice</Label>
+              <Input
+                id="cn-invoice-search"
+                value={numberSearch}
+                onChange={(e) => setNumberSearch(e.target.value)}
+                placeholder="Filter by invoice number"
               />
-
-              {selectedInvoice && (
-                <div className="bg-muted rounded-lg px-4 py-3">
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Customer</p>
-                      <p className="font-medium text-foreground mt-0.5">{customerMap[selectedInvoice.customer_id]?.display_name || 'Unknown'}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">{isPaid ? 'Amount paid' : 'Amount due'}</p>
-                      <p className="font-medium text-foreground mt-0.5">{formatCents(maxAmount)}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Invoice status</p>
-                      <div className="mt-0.5">
-                        <Badge variant={statusBadgeVariant(selectedInvoice.status)}>{selectedInvoice.status}</Badge>
-                      </div>
-                    </div>
-                  </div>
+              {error ? (
+                <LoadError what="invoices" error={error} onRetry={() => refetch()} />
+              ) : isLoading ? (
+                <div className="py-6 flex justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-              )}
-
-              <div>
-                <FormLabel>Reason</FormLabel>
-                <div className="flex flex-wrap gap-1.5 my-2">
-                  {['Service disruption', 'Billing error', 'Goodwill credit', 'Feature downgrade', 'Contract adjustment'].map(r => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={() => form.setValue('reason', r, { shouldValidate: true })}
-                      className={cn(
-                        'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
-                        reason === r
-                          ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                      )}
-                    >
-                      {r}
-                    </button>
+              ) : creditable.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-3">
+                  {search
+                    ? 'No invoice of this customer with that number can take a credit note.'
+                    : 'This customer has no invoice that can take a credit note. Only finalized or paid invoices can, and not while a payment is in progress.'}
+                </p>
+              ) : (
+                <ScrollPane as="ul" className="max-h-72 rounded-md border divide-y">
+                  {creditable.map(inv => (
+                    <li key={inv.id}>
+                      <button
+                        type="button"
+                        onClick={() => onChoose(inv)}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono truncate">{inv.invoice_number}</span>
+                          <Badge variant={statusBadgeVariant(inv.status)}>{inv.status}</Badge>
+                        </span>
+                        <span className="tabular-nums text-muted-foreground whitespace-nowrap">
+                          {formatCents(inv.total_amount_cents, inv.currency)}
+                        </span>
+                      </button>
+                    </li>
                   ))}
-                </div>
-                <FormField
-                  control={form.control}
-                  name="reason"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormControl>
-                        <Input placeholder="Or type a custom reason..." maxLength={500} {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="amount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Amount ({getCurrencySymbol()})</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          max={maxAmount ? (maxAmount / 100).toFixed(2) : '999999.99'}
-                          placeholder="25.00"
-                          {...field}
-                        />
-                      </FormControl>
-                      {maxAmount > 0 && <FormDescription>Max: {formatCents(maxAmount)}</FormDescription>}
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                {isPaid ? (
-                  <FormField
-                    control={form.control}
-                    name="refundType"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Credit type</FormLabel>
-                        <FormControl>
-                          <select
-                            value={field.value}
-                            onChange={field.onChange}
-                            className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          >
-                            <option value="credit">Credit to balance</option>
-                            <option value="refund">Refund to payment method</option>
-                          </select>
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                ) : (
-                  <div className="pt-8">
-                    <p className="text-sm text-muted-foreground">Reduces amount due on invoice</p>
-                  </div>
-                )}
-              </div>
-
-              {amount && selectedInvoice && (
-                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-lg px-4 py-3 text-sm">
-                  <p className="text-blue-800 dark:text-blue-200">
-                    {isPaid && refundType === 'refund'
-                      ? `${getCurrencySymbol()}${parseFloat(amount || '0').toFixed(2)} will be refunded to the customer's payment method`
-                      : isPaid
-                        ? `${getCurrencySymbol()}${parseFloat(amount || '0').toFixed(2)} will be added to the customer's credit balance`
-                        : `Invoice amount due will be reduced by ${getCurrencySymbol()}${parseFloat(amount || '0').toFixed(2)}`
-                    }
-                  </p>
-                </div>
+                </ScrollPane>
               )}
+              {truncated && (
+                <p className="text-xs text-muted-foreground">
+                  Showing this customer&apos;s newest 100 invoices. Type a number to find an older one.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
 
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={createMutation.isPending}>
-                  {createMutation.isPending ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin mr-2" />
-                      Issuing...
-                    </>
-                  ) : (
-                    'Issue credit note'
-                  )}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// IssueCreditForInvoice opens the invoice page's dialog for the chosen
+// invoice, once its existing credit notes are loaded: the dialog's ceilings
+// count every non-voided note, as the server does.
+function IssueCreditForInvoice({ invoice, onClose, onCreated }: {
+  invoice: Invoice
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const { data: existing, error } = useQuery({
+    queryKey: ['credit-notes', 'for-invoice', invoice.id],
+    queryFn: async () => (await api.listCreditNotes(`invoice_id=${invoice.id}&limit=100`)).data ?? [],
+  })
+  useEffect(() => {
+    if (error) {
+      showApiError(error, "Couldn't load this invoice's credit notes")
+      onClose()
+    }
+  }, [error, onClose])
+  if (!existing) return null
+  return (
+    <IssueCreditDialog
+      invoice={invoice}
+      existingCreditNotes={existing}
+      onClose={onClose}
+      onCreated={onCreated}
+    />
   )
 }

@@ -92,6 +92,7 @@ func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
 	r.Get("/", h.list)
+	r.Get("/stats", h.stats)
 	r.Get("/{id}", h.get)
 	r.Get("/{id}/pdf", h.downloadPDF)
 	r.Post("/{id}/issue", h.issue)
@@ -170,6 +171,16 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, http.StatusCreated, cn)
+}
+
+func (h *Handler) stats(w http.ResponseWriter, r *http.Request) {
+	st, err := h.svc.Stats(r.Context(), auth.TenantID(r.Context()))
+	if err != nil {
+		respond.InternalError(w, r)
+		slog.ErrorContext(r.Context(), "credit note stats", "error", err)
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, st)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

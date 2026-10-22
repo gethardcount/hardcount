@@ -19,7 +19,7 @@ test('draft, voided and written-off invoices cannot', () => {
   }
 })
 
-test('an invoice whose payment is in flight cannot, until the payment settles', () => {
+test('an invoice whose payment is processing or unknown cannot, until it settles', () => {
   assert.equal(canIssueCreditNote({ status: 'finalized', payment_status: 'processing' }), false)
   assert.equal(canIssueCreditNote({ status: 'finalized', payment_status: 'unknown' }), false)
 })

@@ -19,4 +19,4 @@ export type TenantSettings = TenantSettingsInput & {
   /** Zero time when the tenant has never saved settings. */
   created_at: string;
   updated_at: string;
-}, 'default_currency' | 'timezone' | 'invoice_prefix' | 'net_payment_terms' | 'tax_provider' | 'tax_rate' | 'tax_inclusive'>>;
+}, 'default_currency' | 'timezone' | 'invoice_prefix' | 'credit_note_prefix' | 'net_payment_terms' | 'tax_provider' | 'tax_rate' | 'tax_inclusive'>>;

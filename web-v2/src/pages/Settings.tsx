@@ -75,6 +75,9 @@ const settingsSchema = z.object({
   invoice_prefix: z.string()
     .max(20, 'Must be at most 20 characters')
     .regex(/^[A-Z0-9-]*$/, 'Letters, numbers, and hyphens only'),
+  credit_note_prefix: z.string()
+    .max(20, 'Must be at most 20 characters')
+    .regex(/^[A-Z0-9-]*$/, 'Letters, numbers, and hyphens only'),
   net_payment_terms: z.number({ error: 'Enter a number of days from 0 to 365' })
     .min(0, 'Enter a number of days from 0 to 365')
     .max(365, 'Enter a number of days from 0 to 365'),
@@ -168,7 +171,7 @@ export default function SettingsPage() {
       company_address_line1: '', company_address_line2: '',
       company_city: '', company_state: '', company_postal_code: '', company_country: '',
       logo_url: '', brand_color: '', tax_id: '', support_url: '', invoice_footer: '',
-      invoice_prefix: '', net_payment_terms: 0,
+      invoice_prefix: '', credit_note_prefix: '', net_payment_terms: 0,
       tax_provider: 'manual', tax_rate: 0, tax_name: '', tax_inclusive: false,
       default_product_tax_code: '',
       default_currency: '', timezone: '',
@@ -203,7 +206,8 @@ export default function SettingsPage() {
         logo_url: s.logo_url || '',
         brand_color: (s.brand_color || '').toLowerCase(),
         tax_id: s.tax_id || '', support_url: s.support_url || '', invoice_footer: s.invoice_footer || '',
-        invoice_prefix: s.invoice_prefix || '', net_payment_terms: s.net_payment_terms || 0,
+        invoice_prefix: s.invoice_prefix || '', credit_note_prefix: s.credit_note_prefix || '',
+        net_payment_terms: s.net_payment_terms || 0,
         tax_provider: (s.tax_provider as 'none' | 'manual' | 'stripe_tax') || 'manual',
         tax_rate: s.tax_rate || 0, tax_name: s.tax_name || '', tax_inclusive: s.tax_inclusive || false,
         default_product_tax_code: s.default_product_tax_code || '',
@@ -267,7 +271,8 @@ export default function SettingsPage() {
         logo_url: updated.logo_url || '',
         brand_color: (updated.brand_color || '').toLowerCase(),
         tax_id: updated.tax_id || '', support_url: updated.support_url || '', invoice_footer: updated.invoice_footer || '',
-        invoice_prefix: updated.invoice_prefix || '', net_payment_terms: updated.net_payment_terms || 0,
+        invoice_prefix: updated.invoice_prefix || '', credit_note_prefix: updated.credit_note_prefix || '',
+        net_payment_terms: updated.net_payment_terms || 0,
         tax_provider: (updated.tax_provider as 'none' | 'manual' | 'stripe_tax') || 'manual',
         tax_rate: updated.tax_rate || 0, tax_name: updated.tax_name || '', tax_inclusive: updated.tax_inclusive || false,
         default_product_tax_code: updated.default_product_tax_code || '',
@@ -293,7 +298,7 @@ export default function SettingsPage() {
         'company_state', 'company_postal_code', 'company_country',
         'logo_url', 'brand_color',
         'tax_id', 'support_url', 'invoice_footer',
-        'invoice_prefix', 'net_payment_terms', 'tax_provider', 'tax_rate', 'tax_name', 'tax_inclusive',
+        'invoice_prefix', 'credit_note_prefix', 'net_payment_terms', 'tax_provider', 'tax_rate', 'tax_name', 'tax_inclusive',
         'default_product_tax_code', 'default_currency', 'timezone',
       ], { toastTitle: 'Failed to save settings' })
       // applyApiError marks a field the server named; if that field is on
@@ -590,6 +595,21 @@ export default function SettingsPage() {
                       : form.invoice_prefix
                         ? <p className="text-xs text-muted-foreground mt-1 font-mono">Preview: {form.invoice_prefix}-000001</p>
                         : <p className="text-xs text-muted-foreground mt-1">Letters, numbers, and hyphens only</p>}
+                  </div>
+                  <div>
+                    <Label htmlFor="settings-credit-note-prefix">Credit note prefix</Label>
+                    <Input id="settings-credit-note-prefix" type="text" maxLength={20}
+                      {...register('credit_note_prefix', {
+                        onChange: (e) => { e.target.value = e.target.value.toUpperCase() },
+                      })}
+                      className={cn('mt-1 font-mono uppercase', formErrors.credit_note_prefix && 'border-destructive')}
+                      placeholder="CN" />
+                    {formErrors.credit_note_prefix
+                      ? <p className="text-xs text-destructive mt-1">{formErrors.credit_note_prefix.message}</p>
+                      : <p className="text-xs text-muted-foreground mt-1">
+                          {form.credit_note_prefix ? <span className="font-mono">Preview: {form.credit_note_prefix.toUpperCase()}-000001. </span> : 'Letters, numbers, and hyphens only. '}
+                          New credit notes only: issued ones keep their numbers.
+                        </p>}
                   </div>
                   <div>
                     <Label>Payment terms</Label>

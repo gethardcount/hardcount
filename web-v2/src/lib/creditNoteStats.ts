@@ -1,55 +1,56 @@
-// Money sums for the Credit Notes stat cards.
+// The Credit Notes page's header, tabs and stat cards, worded from
+// GET /v1/credit-notes/stats.
 //
-// The load-bearing rule: refund_amount_cents on an issued credit note is an
-// ALLOCATION — an instruction to move cash — not evidence that cash moved.
-// The evidence is refund_status. "Refunded to Card" therefore counts only
-// succeeded legs; pending and failed allocations are broken out so the page
-// can say what they are instead of silently folding them into a money total
-// (observed live 2026-08-03: $30.00 of FAILED refund legs — no Stripe refund
-// even existed — displayed as money returned to cards).
+// They used to be computed from the rows the page had loaded: at most 100
+// notes, and only the open tab's status, so past 100 notes every figure was
+// short and under a status tab the other tabs' counts disappeared (E12). The
+// server now counts every note and sums money per currency. It also decides
+// what "refunded" means: only refund legs that succeeded, because a refund
+// amount on a note is an instruction to move cash and refund_status says
+// whether it moved (observed live 2026-08-03: $30.00 of failed legs shown as
+// money returned to cards).
 //
-// Contrast creditNoteCeilings.ts, which deliberately counts failed legs in
-// priorRefunds: the over-refund CEILING mirrors the server cap and must stay
-// conservative (a failed-locally refund may still exist at Stripe). A ceiling
-// errs toward counting; a "money returned" stat must be true.
+// Contrast creditNoteCeilings.ts, which counts failed legs on purpose: the
+// over-refund ceiling mirrors the server cap and errs toward counting; a
+// "money returned" figure must be true.
 
-export interface CreditNoteStatsInput {
-  status: string
-  refund_status?: string | null
-  refund_amount_cents: number
-  credit_amount_cents: number
-  out_of_band_amount_cents?: number | null
-  total_cents: number
+import { amountsByCurrencyText, formatCents } from './money'
+import type { CreditNoteStats } from './gen/schemas/creditNoteStats'
+import type { CreditNoteStatsByCurrencyItem } from './gen/schemas/creditNoteStatsByCurrencyItem'
+
+export type { CreditNoteStats }
+
+type MoneyField = Exclude<keyof CreditNoteStatsByCurrencyItem, 'currency'>
+
+export interface CreditNoteStatFigures {
+  counts: { all: number; draft: number; issued: number; voided: number }
+  total: string
+  /** Succeeded refund legs only: cash that went back. */
+  refunded: string
+  /** Refund legs still waiting on Stripe, or null when there are none. */
+  refundPending: string | null
+  /** Refund legs that failed, or null when there are none. */
+  refundFailed: string | null
+  credited: string
 }
 
-export interface CreditNoteStats {
-  draft: number
-  issued: number
-  voided: number
-  totalCredited: number
-  /** Succeeded card legs only — cash that actually went back. */
-  totalRefunded: number
-  /** Card legs still in flight at the provider (allocated, outcome unknown). */
-  refundPendingCents: number
-  /** Card legs whose provider leg failed (allocated, no cash moved). */
-  refundFailedCents: number
-  totalOutOfBand: number
-  totalAmount: number
-}
-
-export function creditNoteStats(notes: CreditNoteStatsInput[]): CreditNoteStats {
-  const issued = notes.filter(n => n.status === 'issued')
-  const refundLeg = (n: CreditNoteStatsInput, status: string) =>
-    n.refund_amount_cents > 0 && n.refund_status === status ? n.refund_amount_cents : 0
+// creditNoteStatFigures words the server's totals for the page. Amounts in
+// several currencies are shown side by side ("$10.00 + €7.00"), never added.
+export function creditNoteStatFigures(stats: CreditNoteStats, defaultCurrency: string): CreditNoteStatFigures {
+  const text = (field: MoneyField) =>
+    amountsByCurrencyText(stats.by_currency.map(c => ({ currency: c.currency, amount_cents: c[field] })))
+  const money = (field: MoneyField) => text(field) ?? formatCents(0, defaultCurrency)
   return {
-    draft: notes.filter(n => n.status === 'draft').length,
-    issued: issued.length,
-    voided: notes.filter(n => n.status === 'voided').length,
-    totalCredited: issued.reduce((sum, n) => sum + n.credit_amount_cents, 0),
-    totalRefunded: issued.reduce((sum, n) => sum + refundLeg(n, 'succeeded'), 0),
-    refundPendingCents: issued.reduce((sum, n) => sum + refundLeg(n, 'pending'), 0),
-    refundFailedCents: issued.reduce((sum, n) => sum + refundLeg(n, 'failed'), 0),
-    totalOutOfBand: issued.reduce((sum, n) => sum + (n.out_of_band_amount_cents ?? 0), 0),
-    totalAmount: issued.reduce((sum, n) => sum + n.total_cents, 0),
+    counts: {
+      all: stats.draft_count + stats.issued_count + stats.voided_count,
+      draft: stats.draft_count,
+      issued: stats.issued_count,
+      voided: stats.voided_count,
+    },
+    total: money('total_cents'),
+    refunded: money('refunded_cents'),
+    refundPending: text('refund_pending_cents'),
+    refundFailed: text('refund_failed_cents'),
+    credited: money('credited_cents'),
   }
 }

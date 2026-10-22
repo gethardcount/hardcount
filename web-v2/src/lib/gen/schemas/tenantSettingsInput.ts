@@ -24,6 +24,13 @@ export interface TenantSettingsInput {
      */
   invoice_prefix?: string;
   /**
+     * Starts every credit note number, such as `CN-000001`. A change
+     * applies to new credit notes only. Issued notes keep their
+     * numbers.
+     * @pattern ^[A-Za-z0-9-]{1,20}$
+     */
+  credit_note_prefix?: string;
+  /**
      * Days until an invoice is due. 0 means due on issue.
      * @minimum 0
      * @maximum 365

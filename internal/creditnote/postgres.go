@@ -543,6 +543,62 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	return notes, rows.Err()
 }
 
+// Stats counts every credit note by status and sums the issued notes' money
+// per currency, in one RLS-scoped transaction (tenant and mode). No LIMIT:
+// the figures cover every note, not a page of them.
+func (s *PostgresStore) Stats(ctx context.Context, tenantID string) (Stats, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return Stats{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	var st Stats
+	if err := tx.QueryRowContext(ctx, `
+		SELECT
+		    COUNT(*) FILTER (WHERE status = 'draft'),
+		    COUNT(*) FILTER (WHERE status = 'issued'),
+		    COUNT(*) FILTER (WHERE status = 'voided')
+		FROM credit_notes
+	`).Scan(&st.DraftCount, &st.IssuedCount, &st.VoidedCount); err != nil {
+		return Stats{}, err
+	}
+
+	// The default currency first, then the largest total. A tenant with no
+	// settings row has USD as its default (tenant.DefaultSettings).
+	rows, err := tx.QueryContext(ctx, `
+		SELECT currency,
+		    SUM(total_cents),
+		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE refund_status = 'succeeded'), 0),
+		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE refund_status = 'pending'), 0),
+		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE refund_status = 'failed'), 0),
+		    SUM(credit_amount_cents),
+		    SUM(out_of_band_amount_cents)
+		FROM credit_notes
+		WHERE status = 'issued'
+		GROUP BY currency
+		ORDER BY currency = COALESCE((SELECT NULLIF(default_currency, '') FROM tenant_settings LIMIT 1), 'USD') DESC,
+		    SUM(total_cents) DESC, currency
+	`)
+	if err != nil {
+		return Stats{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	st.ByCurrency = []CurrencyStats{}
+	for rows.Next() {
+		var c CurrencyStats
+		if err := rows.Scan(&c.Currency, &c.TotalCents, &c.RefundedCents, &c.RefundPendingCents,
+			&c.RefundFailedCents, &c.CreditedCents, &c.OutOfBandCents); err != nil {
+			return Stats{}, err
+		}
+		st.ByCurrency = append(st.ByCurrency, c)
+	}
+	if err := rows.Err(); err != nil {
+		return Stats{}, err
+	}
+	return st, nil
+}
+
 // BeginTx opens an RLS-scoped (TxTenant) coordinator transaction the
 // creditnote Service owns for Issue(): the draft→issued CAS and the internal
 // money effect (amount_due reduction or credit grant) run on this one tx and

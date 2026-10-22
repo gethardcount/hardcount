@@ -3892,6 +3892,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/credit-notes/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get credit note totals
+         * @description Counts of every credit note by status, and the money on issued
+         *     notes, one entry per currency. Covers every note in this mode, not a
+         *     page of them. Draft and voided notes are counted but move no money.
+         */
+        get: operations["getCreditNoteStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/credit-notes/{id}/send": {
         parameters: {
             query?: never;
@@ -6524,7 +6546,8 @@ export interface paths {
          *     low-balance alerts off.
          *
          *     Empty `default_currency`, `timezone`, `invoice_prefix`,
-         *     `tax_provider` and `tax_on_failure` fall back to their defaults.
+         *     `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back
+         *     to their defaults.
          *     `default_currency` and `company_country` are stored in upper case,
          *     and `brand_color` in lower case. Choosing `stripe_tax` with no
          *     `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
@@ -8580,6 +8603,48 @@ export interface components {
             /** @description Lines created in the same transaction as the invoice. */
             line_items?: components["schemas"]["InvoiceLineItemInput"][];
         };
+        CreditNoteStats: {
+            draft_count: number;
+            issued_count: number;
+            voided_count: number;
+            /**
+             * @description Money on issued notes, one entry per currency, the tenant's
+             *     default currency first. Empty when no note is issued.
+             */
+            by_currency: {
+                currency: string;
+                /**
+                 * Format: int64
+                 * @description Total of the issued notes.
+                 */
+                total_cents: number;
+                /**
+                 * Format: int64
+                 * @description Refunds that succeeded. A refund still pending or one that failed is not counted here.
+                 */
+                refunded_cents: number;
+                /**
+                 * Format: int64
+                 * @description Refunds sent to Stripe whose result is not back yet.
+                 */
+                refund_pending_cents: number;
+                /**
+                 * Format: int64
+                 * @description Refunds that failed. No money went back to the card.
+                 */
+                refund_failed_cents: number;
+                /**
+                 * Format: int64
+                 * @description Added to customers' credit balances.
+                 */
+                credited_cents: number;
+                /**
+                 * Format: int64
+                 * @description Recorded as paid back outside Stripe.
+                 */
+                out_of_band_cents: number;
+            }[];
+        };
         /**
          * @description A credit note reduces what a customer owes on an invoice, or gives
          *     money back after it was paid. Its total is split three ways: refund
@@ -9394,6 +9459,12 @@ export interface components {
             timezone?: string;
             /** @description Starts every invoice number, such as `VLX-000001`. */
             invoice_prefix?: string;
+            /**
+             * @description Starts every credit note number, such as `CN-000001`. A change
+             *     applies to new credit notes only. Issued notes keep their
+             *     numbers.
+             */
+            credit_note_prefix?: string;
             /** @description Days until an invoice is due. 0 means due on issue. */
             net_payment_terms?: number;
             /**
@@ -14180,6 +14251,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getCreditNoteStats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credit note totals. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditNoteStats"];
                 };
             };
         };
