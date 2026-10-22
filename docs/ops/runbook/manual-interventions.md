@@ -30,16 +30,13 @@ this only when the dashboard **Resolve** action is unavailable.
    VALUES ('<tenant_id>', '<run_id>', '<invoice_id>', 'resolved', 'resolved', 'invoice_voided');
    ```
 
-   Do not write `manually_resolved`. It is the old value from before
-   migration 0170, and meant "voided or written off". The CHECK constraint
-   keeps it legal only so that older rows stay readable.
+   Do not write `manually_resolved`; it is kept only so old rows stay
+   readable.
 
 3. **Change the invoice too.** This SQL resolves the run only; it does not
    touch the invoice. The endpoint makes the matching invoice change (void,
    mark uncollectible, or record a payment), and this SQL does not. If you
    skip this step, the run and the invoice disagree.
-
-4. **Record the action in the audit log.**
 
 ## Mark an invoice paid (offline payment received)
 
@@ -54,8 +51,7 @@ invoice is still being confirmed with Stripe: see
 
 ## A customer has no usable payment method on file
 
-There is no `setup_status` flag to change: the `customer_payment_setups`
-table was dropped (migration 0097). Saved cards live in the
+Saved cards live in the
 `payment_methods` table, written by the Stripe `setup_intent.succeeded` and
 `payment_method.attached` webhooks. If a webhook was missed, do not change
 the data with SQL. Instead:

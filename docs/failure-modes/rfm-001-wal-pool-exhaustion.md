@@ -1,23 +1,16 @@
-# A 0.3-second freeze every 5 seconds — and the one Postgres setting that ends it
+# RFM-001: Commits freeze every few seconds after a quiet spell (WAL pool runs dry)
 
-> - **Decided:** the stall is a commit writing a new WAL segment file because Postgres's pool of recycled ones ran dry. The fix is a setting: `min_wal_size = max_wal_size ≥ wal_keep_size + 1.9 × WAL rate × checkpoint_timeout`.
-> - **Shipped:** as guidance, not code, in v0.4.0 by [#852](https://github.com/getvelox/velox/pull/852). Velox and its Compose file set no WAL settings, so you apply the fix on your own Postgres.
-> - **Current docs:** the operator page is the runbook [Commits stall after a quiet spell on RDS](../ops/runbook/rds-wal-pool.md).
+Shipped as guidance in v0.4.0 ([#852](https://github.com/getvelox/velox/pull/852)).
+Operator steps: [runbook](../ops/runbook/rds-wal-pool.md).
 
-**RFM-001 — WAL recycled-pool exhaustion.** Your database looks healthy on
-every dashboard. It is stalling every few seconds anyway.
-
-> Diagnosed on AWS during
-> Velox's [sustained-throughput benchmark](../benchmarks/sustained-throughput.md);
-> reproducible with the rig scripts in [`scripts/bench-rig/`](../../scripts/bench-rig/).
-
----
+Diagnosed on AWS during Velox's
+[sustained-throughput benchmark](../benchmarks/sustained-throughput.md);
+reproducible with the rig scripts in [`scripts/bench-rig/`](../../scripts/bench-rig/).
 
 ## The symptom
 
 Your write latency is fine. Then, for about a quarter of a second, every
-commit stops. Five seconds later it happens again. And again — a metronome —
-until it quietly stops on its own.
+commit stops. Five seconds later it happens again, until it stops on its own.
 
 What makes it hard to catch:
 
@@ -27,25 +20,7 @@ What makes it hard to catch:
   slice takes seconds.
 - **It follows a lull.** Traffic comes back after a quiet spell, and the
   freezes start.
-- **CPU is bored, memory is fine, and the query plans have not changed.**
-
-If you bill per request or serve interactive traffic, your customers are
-feeling seconds-long stalls in a system whose dashboards say "healthy".
-
-## Why the dashboards can't answer it
-
-They show it. They cannot explain it.
-
-A latency graph proves the stall happened. A disk graph shows I/O wait
-climbing at the same moment. Both are true, and neither tells you *which
-mechanism* did it — checkpoint flushing, autovacuum, lock contention and WAL
-segment creation all present as "slow writes with I/O wait." So the graphs
-give you a list of suspects and no answer, and you end up comparing panels by
-eye at 3am.
-
-The evidence that resolves it is not on the dashboard, because nobody
-records it: what the WAL segment pool was doing *in the same second* as the
-stall.
+- **CPU, memory and query plans look normal.**
 
 ## The mechanism
 
@@ -74,11 +49,13 @@ file.**
 
 ## The signature — how to prove it's this one
 
-Three observations, together, distinguish it from every other suspect:
+Checkpoints, autovacuum, locks and WAL creation all look like slow writes;
+only per-second pool depth tells them apart. Three observations, together,
+distinguish it:
 
-1. **Coincidence.** Sample the pool depth once per second. Each freeze-second
-   coincides with a pool-empty reading — in the instrumented run,
-   **11 of 11**.
+1. **Coincidence.** Sample the pool depth once per second. Freeze-seconds
+   coincide with pool-empty readings: in one instrumented series, 29 of 32
+   had the pool at zero.
 2. **Negative coincidence.** Zero of those freeze-seconds coincide with a
    logged autovacuum completion. (A vacuum storm looks different: average I/O size collapses
    ~107 KB → ~6 KB with queue depth in the hundreds. See
@@ -97,8 +74,10 @@ Size the pool to hold at least one checkpoint cycle's worth of WAL, with
 slack. Verified under both provocation and full measured series:
 
 ```
-min_wal_size = max_wal_size ≥ wal_keep_size + 1.9 × WAL rate × checkpoint_timeout
+min_wal_size = max_wal_size ≥ wal_keep_size + (1 + checkpoint_completion_target) × WAL rate × checkpoint_timeout
 ```
+
+(1.9 at RDS's default target of 0.9.)
 
 Worked example from the rig — a `db.m7g.4xlarge` ingesting through an HTTP
 API, every event reconciled against the database:
@@ -109,7 +88,10 @@ API, every event reconciled against the database:
 | 15,000 events/s (batch 100) | 16 GB | **5 of 5**, p99 **40.2–42.8 ms** (stock: 4/5) |
 | 25,000 events/s (batch 100) | 16 GB | 4 of 5, **0 drops** (stock: 2 of 5 with drops) — the sampler shows 16 GB is still one size too small here; size to ~24–32 GB |
 
-Applying it takes no restart:
+Applying it takes no restart. Raising it does not create the files: the
+pool grows only as WAL is written, so the pauses go on until about that much
+WAL has been written. Set it when you provision the database, or before a
+bulk load.
 
 ```sql
 ALTER SYSTEM SET min_wal_size = '16GB';
@@ -119,11 +101,11 @@ SELECT pg_reload_conf();
 
 On RDS, set the same parameters in the parameter group.
 
-**Verify:** the freeze rhythm disappears. Watch p99 across repeats rather
+**Verify:** once the pool has grown, the freeze rhythm stops. Watch p99 across repeats rather
 than the median — the median never showed the problem in the first place.
 
-**The cost:** disk space for the pool, and a longer crash recovery, since
-more WAL may sit between checkpoints. Shortening `checkpoint_timeout` is the
+**The cost** is disk: pg_wal stays near that size. Crash recovery can also
+take a little longer. Shortening `checkpoint_timeout` is the
 alternative lever if the space matters more than the extra checkpoint
 frequency.
 
@@ -132,13 +114,13 @@ frequency.
 - **The pool is not the only wall on this path.** In the same campaign,
   checkpoint-era write bursts saturated a 100 GB gp3 volume (3,000 IOPS) at
   15–25k events/s. Where the volume genuinely cannot absorb the rate, a
-  deeper pool does not help — that is a capacity problem, not this disease.
+  deeper pool does not help — that is a capacity problem, not this failure.
   A collapse observed at 25k on one stock series did not replicate on
   another, and is published as *storage-bound, not replicated*.
 - **At very high rates on stock settings, the freezes can stop on their own**
   as Postgres grows the pool. But the stalls still happened first — and the
   pool goes shallow again after every restart or quiet spell, so they come
-  back next time. Sizing it up front means they never happen at all.
+  back next time. Sizing it up front means they stop once the pool has grown.
 - Everything above was measured on one rig shape, one AZ, in ten-minute
   windows. The method, gates, evidence files and the full *what this does not
   show* section are in the
@@ -150,11 +132,6 @@ The rig that produced these numbers is in
 [`scripts/bench-rig/`](../../scripts/bench-rig/) — provisioning, load
 generation, the per-second sampler whose pool-empty ticks make the
 coincidence visible, and the census script that classifies freeze-seconds by
-mechanism marker. An entry in this catalog is only as good as its
-reproduction; this one's is public.
+mechanism marker.
 
----
-
-*Found while benchmarking [Velox](https://github.com/getvelox/velox), an
-open-source usage-based billing engine. We publish the failure modes we
-diagnose, with their evidence and their fixes.*
+**Next:** apply the fix: [Commits stall after a quiet spell on RDS](../ops/runbook/rds-wal-pool.md).

@@ -1,8 +1,7 @@
 # Write I/O after a large backfill
 
 A backfill loads a lot of old usage at once. Afterwards, Postgres spends a
-few minutes on maintenance. This page is for the high write I/O that
-follows. Back to the [runbook index](index.md).
+few minutes on maintenance. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -21,15 +20,11 @@ Measured on the benchmark rig (2026-08-16):
 
 ## Why
 
-This is Postgres maintenance, not a Velox defect.
+Autovacuum and the checkpointer work through the new rows.
 
 ## Check
 
-Watch `WriteIOPS` return to baseline. Watch `ReadIOPS` too: a latency tail
-that rises while CPU stays flat means the index working set is falling out
-of cache. See the
-[sustained-throughput benchmark](../../benchmarks/sustained-throughput.md)
-for the numbers on `db.m7g.2xlarge`.
+Watch `WriteIOPS` return to baseline.
 
 ## Fix
 

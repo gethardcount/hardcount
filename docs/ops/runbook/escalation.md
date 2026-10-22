@@ -11,8 +11,8 @@ Data leakage, a billing-correctness bug, or all customer charges failing.
    Velox has no read-only mode. Pause webhook delivery by deactivating
    endpoints (`PATCH` with `active=false`, which keeps the signing secret).
 2. **Snapshot the database** for forensic review.
-3. **Assemble responders:** backend lead, DBA, and the support lead if
-   customers are affected.
+3. **Assemble responders:** get whoever runs the database and payments on
+   the call.
 4. **Communicate:** status page and notifications to affected customers.
 5. **Postmortem** within 5 business days.
 
@@ -30,4 +30,4 @@ A subset of customers affected, with bounded financial impact.
 
 A small operator UX issue or an edge case.
 
-- File an issue and schedule it for the next sprint.
+- File an issue.

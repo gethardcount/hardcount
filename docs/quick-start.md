@@ -259,7 +259,7 @@ that release are not in it yet.
   [Send usage and get your first invoice](first-invoice.md).
 - **Price your own AI usage:** [AI pricing reference](ai-pricing.md).
 - **Send usage from a LiteLLM proxy:** [LiteLLM integration](integrations/litellm.md).
-- **Run Velox for real customers:** [Docker Compose on one server](../deploy/compose/README.md),
+- **Run Velox for real customers:** [Production on one VM](production-one-vm.md),
   then [Self-host](self-host.md).
 - **Change Velox itself:** [Development setup](../CONTRIBUTING.md#development-setup).
   The demo script is [`scripts/demo.sh`](../scripts/demo.sh).

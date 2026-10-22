@@ -32,13 +32,11 @@ row-level-security role you see only one tenant's rows, or none.
   takes it. Work checks the number, so a replica whose lease ran out
   cannot claim anything.
 - **Outbox**: a table of emails or webhooks waiting to be sent.
-- **Parked**: set aside until something changes. An invoice is parked
-  when Stripe's answer to its charge was unclear and named no payment; Velox
-  finds out from Stripe within a day. A subscription is parked when billing
-  it failed every time it was tried, and waits for a person.
-- **Wait ladder**: the growing waits between retries of a failed billing
-  attempt: 15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours three
-  times.
+- **Parked**: set aside until something changes
+  ([invoices](unclear-charge.md#parked-no-paymentintent),
+  [subscriptions](billing-failing.md)).
+- **Wait ladder**: the growing waits between billing retries
+  ([Billing failing](billing-failing.md#why)).
 - **PI**: a Stripe PaymentIntent, the Stripe object for one card charge.
 
 ## What do you see?

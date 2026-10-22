@@ -1,24 +1,18 @@
 # Postgres requirements
 
-Velox keeps all its data in one Postgres database. This page is a checklist for the engineer or DBA (database administrator) who prepares that database, often a managed one such as AWS RDS. Running Postgres itself (replication, failover, sizing the server) stays with you or your provider.
+Velox keeps all its data in one Postgres database. This page is a checklist for preparing that database, often a managed one such as AWS RDS. Running Postgres itself (replication, failover, sizing the server) stays with you or your provider.
 
-The Compose stack in [`deploy/compose`](../../deploy/compose/README.md) already covers the version, the extensions and the two users. On a new data volume it also sets the required timeout. Use this page when you bring your own Postgres, and for the [timeouts](#timeouts-on-the-limited-user) on an older Compose volume.
+The Compose stack already covers the version, the extensions and the two users, and on a new data volume it sets the required timeout. Use this page when you bring your own Postgres, and for the [timeouts](#timeouts-on-the-limited-user) on an older Compose volume.
 
 ## Checklist
 
-- [ ] [Postgres 16](#versions).
+- [ ] Postgres 16. Versions 14, 15 and 17 are expected to work but are not tested; see [Which Postgres works](#which-postgres-works).
 - [ ] [Three extensions](#extensions) exist, or the admin user may create them.
 - [ ] [Two database users](#the-two-database-users): an admin user for upgrades and a limited user for requests.
 - [ ] [The idle-transaction timeout](#timeouts-on-the-limited-user) set on the limited user, and a query timeout if you want one.
 - [ ] [A direct connection for database upgrades](#connection-poolers), if you use a pooler.
 - [ ] [Room to grow](#how-the-data-grows) for the usage table.
 - [ ] Backups: see [Backups](backup-considerations.md).
-
-## Versions
-
-- **Tested: Postgres 16.** CI runs every test against `postgres:16-alpine`, and both Compose files (local development and the one-VM install) run it too.
-- **Oldest that should work: Postgres 14.** Velox uses `gen_random_bytes` from the `pgcrypto` extension and standard SQL up to Postgres 14. CI applies the migrations on Postgres 14 for every PR, but the tests run only on 16, and nothing runs on 15, so prefer 16.
-- **Newer than 16:** Velox uses nothing specific to Postgres 17, so upgrading ahead is safe.
 
 ## Extensions
 
@@ -49,7 +43,14 @@ Velox connects as two users. The second one is what keeps each account's data ap
 | `DATABASE_URL` | The admin user, usually the database owner | Database upgrades (migrations) | Create tables and extensions in the database |
 | `APP_DATABASE_URL` | A limited user, usually `velox_app` | Every API request and background job | Read and write the tables. It must not be a superuser and must not have `BYPASSRLS`. |
 
-Postgres hides each account's rows from the others with a feature called Row-Level Security (RLS). A superuser, or a user with `BYPASSRLS`, skips that check. So with `APP_ENV` set to `staging` or `production`, Velox refuses to start when `APP_DATABASE_URL` points at such a user.
+Postgres hides each account's rows from the others with a feature called Row-Level Security (RLS). A superuser, or a user with `BYPASSRLS`, skips that check. So with `APP_ENV` set to `staging` or `production`, Velox refuses to start when `APP_DATABASE_URL`:
+
+- is missing,
+- uses the default password `velox_app`, or an empty one,
+- cannot connect, or
+- points at a superuser or a user with `BYPASSRLS`. This catches a copied `DATABASE_URL`.
+
+With `APP_ENV=local` it builds `velox_app:velox_app` from `DATABASE_URL` and logs a warning instead.
 
 Create the limited user as the admin user, before the first start:
 
@@ -65,8 +66,6 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO velox_app;
 `ALTER DEFAULT PRIVILEGES` covers the tables the admin user creates later, so run the upgrades as that same admin user.
 
 **You see:** `CREATE ROLE`, `GRANT` and `ALTER DEFAULT PRIVILEGES` lines from psql. When Velox starts, it checks the user and starts listening.
-
-More on what Velox checks at start-up: [Self-host, "The two database users"](../self-host.md#the-two-database-users).
 
 ### Settings Velox sets on each transaction
 
@@ -114,7 +113,7 @@ A connection pooler, such as PgBouncer, shares a few database connections among 
 
 **Database upgrades need a direct or session-mode connection.** They hold a lock for the whole run, and some steps run outside a transaction. Run them over that connection, with `RUN_MIGRATIONS_ON_BOOT=true` or the `velox migrate` command, as a deploy step.
 
-Why `max_prepared_statements` matters: the Go database driver reuses prepared statements on each connection. In transaction mode the pooler must track them, or two thirds of queries fail with `prepared statement "stmtcache_…" does not exist`. `scripts/pgbouncer-test.sh` runs the same pooler check locally.
+Why `max_prepared_statements` matters: the Go database driver reuses prepared statements on each connection. In transaction mode the pooler must track them, or most queries fail with `prepared statement "stmtcache_…" does not exist`. `scripts/pgbouncer-test.sh` runs the same pooler check locally.
 
 With RDS Proxy, size it for the number of copies × `DB_MAX_OPEN_CONNS` connections, and watch `DatabaseConnectionsCurrentlySessionPinned`.
 
@@ -127,7 +126,7 @@ With RDS Proxy, size it for the number of copies × `DB_MAX_OPEN_CONNS` connecti
 | `DB_CONN_MAX_LIFETIME_MIN` | 30 | Lower it to 5 to 10 behind a pooler with a short `server_lifetime` |
 | `DB_CONN_MAX_IDLE_TIME_SEC` | 120 | Lower it where connections are scarce |
 
-For one account at about 50 requests per second, 20 connections is enough. With many accounts, raise it with the number of accounts, up to your `max_connections`. Above about 100 connections per copy, put PgBouncer or RDS Proxy in front.
+The default 20 connections carried 1,200 requests a second for one account in the benchmark, and 60 was slower ([sustained throughput](../benchmarks/sustained-throughput.md)). Raise it only if requests wait for a connection. Above about 100 connections per copy, put PgBouncer or RDS Proxy in front.
 
 ## How the data grows
 
@@ -143,15 +142,11 @@ For one account at about 50 requests per second, 20 connections is enough. With 
 | `invoices`, `invoice_line_items`, `credit_notes`, `credit_note_line_items` | Each invoice, line and credit note | All. These are financial records. |
 | `subscriptions`, `subscription_items`, `customers`, `customer_billing_profiles` | Slowly | All. There is no automatic deletion of a customer's personal data yet. |
 
-**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. On the benchmark rig one row took about 516 bytes including its indexes: 62 million rows used 14 GB of table plus 18 GB of indexes ([sustained throughput](../benchmarks/sustained-throughput.md)). Plan for about 15 GB a month, or 185 GB a year, and split the table by month or set a retention window before the second year.
+**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. One event takes about 0.5 to 0.6 KB, counting indexes: on the benchmark rig, 62 million rows used 14 GB of table plus 18 GB of indexes ([sustained throughput](../benchmarks/sustained-throughput.md)). Plan for about 15 GB a month, or 185 GB a year, and split the table by month or set a retention window before the second year.
 
 ## Indexes
 
 Velox's migrations create the indexes its queries need. Check `pg_stat_user_indexes` every few months for unused ones. Do not drop an index without reading the query plans first: some billing queries depend on reading from the index alone.
-
-## Health check
-
-`/health/ready` pings the database. Use it for readiness checks.
 
 ## Which Postgres works
 
@@ -169,8 +164,4 @@ Velox's migrations create the indexes its queries need. Check `pg_stat_user_inde
 | CockroachDB | ⚠️ Untested | Expect problems with Row-Level Security, `gen_random_bytes` and some constraints. Nobody has run the tests against it. |
 | YugabyteDB | ⚠️ Untested | Its Row-Level Security differs |
 
-## Related
-
-- [Background jobs on two or more copies](runbook/background-job-stuck.md): how copies share billing and other background work, and what to do when a job looks stuck.
-- [Backups](backup-considerations.md).
-- Why it works this way: [ADR-114](../adr/114-leader-leases-tick-scoped-fencing.md) (background jobs and poolers) and [ADR-115](../adr/115-one-closer-for-the-billing-period.md) (the subscription row lock).
+**Next:** [Back up Velox](backup-considerations.md).

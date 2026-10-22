@@ -1,11 +1,8 @@
 # A webhook endpoint keeps failing
 
-Velox sends each webhook event to every matching endpoint your customers
-registered. Each attempt to deliver it to one endpoint is a row in
-`webhook_deliveries`. Velox makes six attempts over about 26.5 hours, then
-marks the delivery failed ([Retries](../../webhooks.md#retries)). This page
-is for when one endpoint keeps failing. Back to the
-[runbook index](index.md).
+Velox retries on the [schedule in Webhooks](../../webhooks.md#retries),
+then marks the delivery failed. Each attempt is a row in
+`webhook_deliveries`. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -13,9 +10,6 @@ is for when one endpoint keeps failing. Back to the
   deliveries marked failed after their last retry.
 - The dashboard shows failed deliveries and a falling success rate for one
   endpoint.
-
-`webhook_outbox` does not grow when an endpoint fails: its rows are marked
-dispatched before any request is sent.
 
 ## Why
 

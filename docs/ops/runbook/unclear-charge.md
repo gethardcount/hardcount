@@ -65,9 +65,9 @@ A parked invoice is one whose last charge got an unclear answer from Stripe
 that named no payment. So Velox cannot yet tell whether the customer paid.
 
 **Symptom:** `velox_parked_invoices{disposition="open"}` above 0. The gauge
-counts only parks Velox has not ended on schedule: still parked 26 hours
-after the charge's hold, or with no hold. Parks inside their 24 hours are
-not counted.
+counts only parks Velox has not ended on schedule. Parks less than 26 hours
+past their hold are not counted: Velox normally ends them by about 25 hours.
+A park with no hold is always counted.
 
 **Why:**
 
@@ -85,8 +85,7 @@ not counted.
 - So a counted park is one the check could not finish. Either Velox cannot
   ask Stripe about it (see [Interrupted](#interrupted-velox-cannot-ask-stripe)),
   or Stripe could not be read on any check for a day. Or the park has no
-  hold, so nothing checks it: a replica of an older release cleared it
-  during a rolling upgrade.
+  hold, so nothing checks it; Check step 3 gives it one.
 
 **Check:**
 

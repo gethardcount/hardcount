@@ -53,17 +53,16 @@
 ## Run it for real
 
 1. [Self-host](self-host.md): what you need and how the pieces fit.
-2. [Docker Compose on one VM](../deploy/compose/README.md): step-by-step
-   install.
-3. [Production on one VM](production-one-vm.md): HTTPS, email, Stripe,
-   nightly backups, a go-live checklist and upgrades, for a small team.
-4. [High availability](ops/high-availability.md): run two or more copies
+2. [Production on one VM](production-one-vm.md): install with Docker
+   Compose, then HTTPS, email, Stripe, nightly backups and a go-live
+   checklist.
+3. [High availability](ops/high-availability.md): run two or more copies
    behind a load balancer, with health checks, shutdown and rolling upgrades.
-5. [Postgres requirements](ops/postgres-requirements.md),
+4. [Postgres requirements](ops/postgres-requirements.md),
    [email setup](ops/email-setup.md),
    [backups](ops/backup-considerations.md) and
    [tax calculation](ops/tax-calculation.md).
-6. When something breaks: the [operations runbook](ops/runbook/index.md).
+5. When something breaks: the [operations runbook](ops/runbook/index.md).
    Find what you see, then follow its steps.
 
 ---

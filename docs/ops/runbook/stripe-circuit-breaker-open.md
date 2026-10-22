@@ -1,9 +1,8 @@
 # Stripe circuit breaker open
 
 A circuit breaker stops calling a service that keeps failing, until it
-recovers, like a fuse that trips. Velox has one for Stripe calls. This page
-is for when it has tripped, or when payment retries are being skipped for
-another reason. Back to the [runbook index](index.md).
+recovers. Velox has one for Stripe calls. This page also covers payment
+retries skipped for another reason. Back to the [runbook index](index.md).
 
 ## Symptom
 
@@ -38,7 +37,7 @@ Stripe; a connection or `SQLSTATE` error points to the database.
 
 1. Check Stripe's status page (`status.stripe.com`).
 2. If only one tenant's retries are skipped, check its Stripe credentials
-   in `Settings → Stripe`, and rotate them if needed.
+   in `Settings → Payments`, and rotate them if needed.
 3. For database errors, restore the database connection first.
 4. The breaker closes on its own: after a 30-second cool-off it lets one
    call through, and a success closes it. Skipped retries run on the next
