@@ -915,9 +915,12 @@ type failableInvoiceAdapter struct {
 	// alreadyExists counts inserts that hit an invoice unique index — the
 	// pre-ADR-115 loser's exit, which no racing closer should reach now.
 	alreadyExists atomic.Int32
+	// createTxCalls counts every insert attempt, failed or not.
+	createTxCalls atomic.Int32
 }
 
 func (a *failableInvoiceAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
+	a.createTxCalls.Add(1)
 	if a.createTxErr != nil {
 		return domain.Invoice{}, a.createTxErr
 	}
