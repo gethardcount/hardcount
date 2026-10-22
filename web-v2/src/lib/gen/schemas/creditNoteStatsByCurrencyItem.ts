@@ -14,7 +14,7 @@ export type CreditNoteStatsByCurrencyItem = {
   total_cents: number;
   /** Refunds that succeeded. A refund still pending or one that failed is not counted here. */
   refunded_cents: number;
-  /** Refunds sent to Stripe whose result is not back yet. */
+  /** Refunds not confirmed yet. Neither succeeded nor failed, the refund is waiting on Stripe, Stripe's answer was unclear, or its result was never recorded. */
   refund_pending_cents: number;
   /** Refunds that failed. No money went back to the card. */
   refund_failed_cents: number;

@@ -564,13 +564,17 @@ func (s *PostgresStore) Stats(ctx context.Context, tenantID string) (Stats, erro
 		return Stats{}, err
 	}
 
+	// Every refund amount lands in exactly one refund figure: succeeded,
+	// failed, or pending, which is everything not confirmed yet (pending
+	// at Stripe, an unclear answer, or a result never recorded).
+	//
 	// The default currency first, then the largest total. A tenant with no
 	// settings row has USD as its default (tenant.DefaultSettings).
 	rows, err := tx.QueryContext(ctx, `
 		SELECT currency,
 		    SUM(total_cents),
 		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE refund_status = 'succeeded'), 0),
-		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE refund_status = 'pending'), 0),
+		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE COALESCE(refund_status, 'none') NOT IN ('succeeded', 'failed')), 0),
 		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE refund_status = 'failed'), 0),
 		    SUM(credit_amount_cents),
 		    SUM(out_of_band_amount_cents)

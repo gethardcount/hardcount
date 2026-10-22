@@ -72,12 +72,15 @@ const settingsSchema = z.object({
   tax_id: z.string().max(50, 'Must be at most 50 characters'),
   support_url: z.string().regex(/^https?:\/\/.+/i, 'Must start with http:// or https://').or(z.literal('')),
   invoice_footer: z.string().max(1000, 'Must be at most 1000 characters'),
+  // Either case passes, as on the server, which stores prefixes in capitals.
+  // A prefix stored in lowercase before that (set through the API) used to
+  // fail this check on load, so every save failed on a field that looked right.
   invoice_prefix: z.string()
     .max(20, 'Must be at most 20 characters')
-    .regex(/^[A-Z0-9-]*$/, 'Letters, numbers, and hyphens only'),
+    .regex(/^[A-Za-z0-9-]*$/, 'Letters, numbers, and hyphens only'),
   credit_note_prefix: z.string()
     .max(20, 'Must be at most 20 characters')
-    .regex(/^[A-Z0-9-]*$/, 'Letters, numbers, and hyphens only'),
+    .regex(/^[A-Za-z0-9-]*$/, 'Letters, numbers, and hyphens only'),
   net_payment_terms: z.number({ error: 'Enter a number of days from 0 to 365' })
     .min(0, 'Enter a number of days from 0 to 365')
     .max(365, 'Enter a number of days from 0 to 365'),
@@ -593,7 +596,7 @@ export default function SettingsPage() {
                     {formErrors.invoice_prefix
                       ? <p className="text-xs text-destructive mt-1">{formErrors.invoice_prefix.message}</p>
                       : form.invoice_prefix
-                        ? <p className="text-xs text-muted-foreground mt-1 font-mono">Preview: {form.invoice_prefix}-000001</p>
+                        ? <p className="text-xs text-muted-foreground mt-1">New invoice numbers start <span className="font-mono">{form.invoice_prefix.toUpperCase()}-</span></p>
                         : <p className="text-xs text-muted-foreground mt-1">Letters, numbers, and hyphens only</p>}
                   </div>
                   <div>
@@ -607,8 +610,10 @@ export default function SettingsPage() {
                     {formErrors.credit_note_prefix
                       ? <p className="text-xs text-destructive mt-1">{formErrors.credit_note_prefix.message}</p>
                       : <p className="text-xs text-muted-foreground mt-1">
-                          {form.credit_note_prefix ? <span className="font-mono">Preview: {form.credit_note_prefix.toUpperCase()}-000001. </span> : 'Letters, numbers, and hyphens only. '}
-                          New credit notes only: issued ones keep their numbers.
+                          {form.credit_note_prefix
+                            ? <>New credit note numbers start <span className="font-mono">{form.credit_note_prefix.toUpperCase()}-</span>. </>
+                            : 'Letters, numbers, and hyphens only. '}
+                          Issued ones keep their numbers.
                         </p>}
                   </div>
                   <div>

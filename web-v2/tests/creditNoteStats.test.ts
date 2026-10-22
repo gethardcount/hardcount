@@ -71,7 +71,7 @@ test('under the refund filter the tabs show no counts and the empty list names t
   assert.equal(v.tabTotal, null)
   assert.deepEqual(v.empty, {
     title: 'No refunds need attention',
-    description: 'Every refund has gone through. Clear the filter to see all credit notes.',
+    description: 'No refund has failed, is unconfirmed, or has been pending for more than 72 hours.',
     clear: 'refund_status',
   })
 })

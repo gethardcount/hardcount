@@ -17110,8 +17110,9 @@ export const getUpdateTenantSettingsUrl = () => {
  * Empty `default_currency`, `timezone`, `invoice_prefix`,
  * `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back
  * to their defaults.
- * `default_currency` and `company_country` are stored in upper case,
- * and `brand_color` in lower case. Choosing `stripe_tax` with no
+ * `default_currency`, `company_country`, `invoice_prefix` and
+ * `credit_note_prefix` are stored in upper case, and `brand_color` in
+ * lower case. Choosing `stripe_tax` with no
  * `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
  * business use).
  *

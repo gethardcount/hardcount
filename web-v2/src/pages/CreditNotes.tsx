@@ -9,7 +9,7 @@ import type { CreditNote, Invoice, Customer } from '@/lib/api'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
-import { creditNoteStatFigures } from '@/lib/creditNoteStats'
+import { creditNoteStatFigures, creditNotesListView } from '@/lib/creditNoteStats'
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { Layout } from '@/components/Layout'
 import { ScrollPane } from '@/components/ui/scroll-pane'
@@ -247,11 +247,10 @@ export default function CreditNotesPage() {
   const sorted = filtered
 
   const truncated = notes.length >= 100
-  // How many notes the open tab holds in all, when the server can say: the
-  // refund filter has no server count.
-  const tabTotal = counts && !refundStatusFilter
-    ? (filterStatus === 'draft' ? counts.draft : filterStatus === 'issued' ? counts.issued : filterStatus === 'voided' ? counts.voided : counts.all)
-    : null
+  // Tab counts, the open tab's total and the empty list's words for the open
+  // filters. The server counts by status only, so under the refund filter the
+  // tabs show no counts.
+  const { tabCounts, tabTotal, empty } = creditNotesListView(counts, filterStatus, refundStatusFilter)
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
   const currentPage = Math.min(page, totalPages || 1)
   const paginated = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
@@ -310,7 +309,7 @@ export default function CreditNotesPage() {
               <p className="text-xl font-semibold text-primary mt-1 tabular-nums">{stats.refunded}</p>
               {(stats.refundPending || stats.refundFailed) && (
                 <p className="text-xs mt-0.5">
-                  {stats.refundPending && <span className="text-amber-600">{stats.refundPending} pending</span>}
+                  {stats.refundPending && <span className="text-amber-600">{stats.refundPending} not confirmed yet</span>}
                   {stats.refundPending && stats.refundFailed && <span className="text-muted-foreground"> · </span>}
                   {stats.refundFailed && <span className="text-red-600">{stats.refundFailed} failed — not returned</span>}
                 </p>
@@ -338,10 +337,10 @@ export default function CreditNotesPage() {
         <div className="flex items-center gap-3 mt-6">
           <div className="flex gap-1 bg-muted rounded-lg p-1">
             {[
-              { value: '', label: 'All', count: counts?.all ?? 0 },
-              { value: 'draft', label: 'Draft', count: counts?.draft ?? 0 },
-              { value: 'issued', label: 'Issued', count: counts?.issued ?? 0 },
-              { value: 'voided', label: 'Voided', count: counts?.voided ?? 0 },
+              { value: '', label: 'All', count: tabCounts?.all ?? 0 },
+              { value: 'draft', label: 'Draft', count: tabCounts?.draft ?? 0 },
+              { value: 'issued', label: 'Issued', count: tabCounts?.issued ?? 0 },
+              { value: 'voided', label: 'Voided', count: tabCounts?.voided ?? 0 },
             ].map(f => (
               <button
                 key={f.value}
@@ -393,14 +392,14 @@ export default function CreditNotesPage() {
           ) : loading ? (
             <TableSkeleton columns={7} />
           ) : notes.length === 0 ? (
-            filterStatus ? (
+            empty ? (
               <EmptyState
-                title={`No ${filterStatus} credit notes`}
-                description="Try a different filter to see more results."
+                title={empty.title}
+                description={empty.description}
                 action={{
                   label: 'Clear filter',
                   variant: 'outline',
-                  onClick: () => setUrlState({ status: '', page: '1' }),
+                  onClick: () => setUrlState({ [empty.clear]: '', page: '1' }),
                 }}
               />
             ) : (

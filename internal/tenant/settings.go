@@ -559,13 +559,21 @@ func validateSettings(ts *domain.TenantSettings) error {
 	// The prefix flows verbatim into invoice numbers (INV filenames,
 	// PDF headers, emails) — control chars, slashes, or spaces there
 	// corrupt Content-Disposition filenames and number parsing.
-	ts.InvoicePrefix = strings.TrimSpace(ts.InvoicePrefix)
+	// Stored in capitals: numbers print it in capitals, and the Settings
+	// form refuses a lowercase value, so a stored "acme" blocked every save.
+	ts.InvoicePrefix = strings.ToUpper(strings.TrimSpace(ts.InvoicePrefix))
 	if !invoicePrefixPattern.MatchString(ts.InvoicePrefix) {
 		return errs.Invalid("invoice_prefix", "must be 1-20 characters: letters, digits, and hyphens only")
 	}
 	// Same rule for credit note numbers: they go into the same places.
+	ts.CreditNotePrefix = strings.ToUpper(ts.CreditNotePrefix)
 	if !invoicePrefixPattern.MatchString(ts.CreditNotePrefix) {
 		return errs.Invalid("credit_note_prefix", "must be 1-20 characters: letters, digits, and hyphens only")
+	}
+	// Invoices and credit notes count separately, so one prefix for both
+	// would give an invoice and a credit note the same number.
+	if ts.CreditNotePrefix == ts.InvoicePrefix {
+		return errs.Invalid("credit_note_prefix", "must differ from the invoice prefix")
 	}
 	if ts.NetPaymentTerms > 365 {
 		return errs.Invalid("net_payment_terms", "cannot exceed 365 days")

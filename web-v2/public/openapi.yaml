@@ -2784,7 +2784,7 @@ components:
               refund_pending_cents:
                 type: integer
                 format: int64
-                description: Refunds sent to Stripe whose result is not back yet.
+                description: Refunds not confirmed yet. Neither succeeded nor failed, the refund is waiting on Stripe, Stripe's answer was unclear, or its result was never recorded.
               refund_failed_cents:
                 type: integer
                 format: int64
@@ -3994,7 +3994,8 @@ components:
           description: |
             Starts every credit note number, such as `CN-000001`. A change
             applies to new credit notes only. Issued notes keep their
-            numbers.
+            numbers. It must differ from `invoice_prefix`, or an invoice and
+            a credit note would get the same number.
         net_payment_terms:
           type: integer
           minimum: 0
@@ -13383,8 +13384,9 @@ paths:
         Empty `default_currency`, `timezone`, `invoice_prefix`,
         `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back
         to their defaults.
-        `default_currency` and `company_country` are stored in upper case,
-        and `brand_color` in lower case. Choosing `stripe_tax` with no
+        `default_currency`, `company_country`, `invoice_prefix` and
+        `credit_note_prefix` are stored in upper case, and `brand_color` in
+        lower case. Choosing `stripe_tax` with no
         `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
         business use).
 

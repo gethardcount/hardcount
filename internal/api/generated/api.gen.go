@@ -3923,7 +3923,7 @@ type CreditNoteStats struct {
 		// RefundFailedCents Refunds that failed. No money went back to the card.
 		RefundFailedCents int64 `json:"refund_failed_cents"`
 
-		// RefundPendingCents Refunds sent to Stripe whose result is not back yet.
+		// RefundPendingCents Refunds not confirmed yet. Neither succeeded nor failed, the refund is waiting on Stripe, Stripe's answer was unclear, or its result was never recorded.
 		RefundPendingCents int64 `json:"refund_pending_cents"`
 
 		// RefundedCents Refunds that succeeded. A refund still pending or one that failed is not counted here.
@@ -6127,7 +6127,8 @@ type TenantSettings struct {
 
 	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
 	// applies to new credit notes only. Issued notes keep their
-	// numbers.
+	// numbers. It must differ from `invoice_prefix`, or an invoice and
+	// a credit note would get the same number.
 	CreditNotePrefix string `json:"credit_note_prefix"`
 
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
@@ -6209,7 +6210,8 @@ type TenantSettingsInput struct {
 
 	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
 	// applies to new credit notes only. Issued notes keep their
-	// numbers.
+	// numbers. It must differ from `invoice_prefix`, or an invoice and
+	// a credit note would get the same number.
 	CreditNotePrefix string `json:"credit_note_prefix,omitempty"`
 
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.

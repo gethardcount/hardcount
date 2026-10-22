@@ -125,7 +125,9 @@ type CurrencyStats struct {
 	TotalCents int64  `json:"total_cents"`
 	// RefundedCents counts only refund legs whose refund succeeded. A
 	// refund amount is an instruction to move cash; refund_status says
-	// whether it moved. Pending and failed legs are their own figures.
+	// whether it moved. Failed legs are their own figure, and every other
+	// leg (pending at Stripe, an unclear answer, a result never recorded)
+	// is pending: not confirmed yet.
 	RefundedCents      int64 `json:"refunded_cents"`
 	RefundPendingCents int64 `json:"refund_pending_cents"`
 	RefundFailedCents  int64 `json:"refund_failed_cents"`
