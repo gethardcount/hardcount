@@ -1,7 +1,7 @@
 # An invoice is below Stripe's minimum charge
 
 Stripe will not charge an amount below its minimum, for example $0.50 for
-USD. This page is for an invoice Stripe refused for that reason: what Velox
+an account that settles in USD. This page is for an invoice Stripe refused for that reason: what Velox
 did, and what you can do with it. Back to the [runbook index](index.md).
 
 ## Symptom
@@ -30,10 +30,10 @@ One of these:
   with resolution `amount_below_minimum`, so its final action (by default,
   pausing the subscription) does not run.
 - **Velox learns the minimum from Stripe's answer**, so the invoice is first
-  charged once. An invoice whose customer has no card on file is handled
-  like any card-less invoice (payment-method reminders, then the policy's
-  final action) until a card is saved: the first charge then gets Stripe's
-  answer and ends the recovery.
+  charged once. For a customer with no card on file, Velox learns it when
+  the customer clicks Pay on the hosted page, or when a card is saved and
+  charged. Until then the invoice is handled like any card-less invoice
+  (payment-method reminders, then the policy's final action).
 
 ## Check
 
@@ -72,8 +72,13 @@ Choose one for each invoice:
 - **Collect it on the next invoice.** Add the amount as a line on the
   customer's next invoice by hand, then void this one.
 
-Do not press Collect payment or ask the customer to pay on the hosted page:
-Stripe refuses both for the same reason.
+- **Pay it from credit.** If the customer has a credit balance, or you grant
+  one, **Collect payment** applies it and pays the invoice when it covers the
+  amount. With too little credit, Collect answers `amount_below_minimum`
+  without asking Stripe again; any credit it applied stays applied.
+
+The hosted page has no Pay button for this invoice, so don't ask the
+customer to pay there.
 
 ## Verify
 

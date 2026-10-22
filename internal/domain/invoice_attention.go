@@ -685,9 +685,12 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 // charge because its amount is below Stripe's minimum (ErrBelowMinimumCharge).
 // Warning, not Critical: no money was lost and nothing is failing, but no
 // automatic step will ever collect it, so it waits on the operator. Void is
-// the one button: Collect payment would get the same refusal, and Record
-// offline payment is already in the page's menu. Stripe's sentence, which
-// names the minimum, goes in ProviderResponse.
+// the one button; Record offline payment is already in the page's menu, and
+// Collect payment stays on the page: it applies the customer's credit
+// balance first and pays the invoice when that covers it, and otherwise
+// answers with this refusal without asking Stripe again. Stripe's sentence,
+// which names the minimum, goes in ProviderResponse; the detail names no
+// figure, because the minimum depends on the account's settlement currency.
 func classifyAmountBelowMinimum(inv Invoice) *Attention {
 	since := *inv.BelowMinimumAt
 	return &Attention{
@@ -695,8 +698,10 @@ func classifyAmountBelowMinimum(inv Invoice) *Attention {
 		Reason:   AttentionReasonAmountBelowMinimum,
 		Code:     "payment.amount_too_small",
 		Message:  "This amount is below Stripe's minimum charge, so Velox won't charge it; void the invoice or record a payment made another way.",
-		Detail: "Stripe refused the charge because the amount is below its minimum, which depends on the currency ($0.50 for USD). " +
-			"Nothing was charged. Velox doesn't retry it, doesn't start payment recovery, and doesn't email the customer about it. " +
+		Detail: "Stripe won't charge this amount because it is below Stripe's minimum, which depends on the currency your Stripe account settles in; " +
+			"Stripe's reply under Provider response names it. Nothing was charged. " +
+			"Velox doesn't retry it, doesn't start payment recovery, and doesn't email the customer about it. " +
+			"Collect payment applies the customer's credit balance and pays the invoice if that covers it. " +
 			"To collect it later, add the amount to the customer's next invoice by hand, then void this one. Record offline payment is in the ⋯ menu.",
 		DocURL:           docURL("amount-below-minimum"),
 		Actions:          []AttentionActionItem{{Code: AttentionActionVoidInvoice, Label: "Void invoice"}},

@@ -36,7 +36,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
 import { creditNoteReasonLabel } from '@/lib/status'
-import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight } from '@/lib/invoiceTerminal'
+import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight, invoiceShowsCollect } from '@/lib/invoiceTerminal'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -686,21 +686,16 @@ export default function InvoiceDetailPage() {
             )
           })()}
 
-          {/* Stripe refused this amount as below its minimum charge, so
-              Collect would get the same refusal; the notice offers Void and
-              names Record offline payment instead. */}
-          {invoiceCanCollect(invoice) && invoice.attention?.reason !== 'amount_below_minimum' && (
-            !hasPaymentMethod ? (
-              // No card → no collect. A greyed-out primary next to the
-              // banner's active primary was competing noise; the banner
-              // owns the next step (2026-07-22 audit, P3-2 — Stripe hides
-              // the collect action when it cannot run).
-              null
-            ) : (
-              <Button size="sm" onClick={() => collectMutation.mutate()} disabled={acting}>
-                {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect payment'}
-              </Button>
-            )
+          {/* No card → no collect. A greyed-out primary next to the
+              banner's active primary was competing noise; the banner owns
+              the next step (2026-07-22 audit, P3-2 — Stripe hides the
+              collect action when it cannot run). A below-minimum invoice
+              keeps it: Collect applies the credit balance there, which
+              needs no card. */}
+          {invoiceShowsCollect(invoice, hasPaymentMethod, invoice.attention?.reason) && (
+            <Button size="sm" onClick={() => collectMutation.mutate()} disabled={acting}>
+              {collectMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</> : 'Collect payment'}
+            </Button>
           )}
 
           {/* Terminal states default to Download PDF as the visible

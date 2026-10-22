@@ -10184,7 +10184,7 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * Returns everything that happened to an invoice, oldest first:
  * lifecycle steps (created, finalized, paid, voided, marked
  * uncollectible), charge attempts (source `payment`, event_type
- * `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
+ * `charge_attempt.succeeded|failed|unknown|below_minimum`), dunning retries, credit
  * notes, customer emails, and card disputes (source `dispute`, a
  * `payment.dispute_opened` row and, once Stripe closes the dispute, a
  * `payment.dispute_closed` row; both at Stripe's own time).

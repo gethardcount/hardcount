@@ -176,6 +176,10 @@ func attemptActor(a domain.InvoiceChargeAttempt) *activity.Actor {
 	return nil
 }
 
+// kindRetryRefused is the dunning retry row for a charge Stripe refused as
+// below its minimum; renderChargeAttempts lets it tell that charge.
+const kindRetryRefused = "payment_recovery.retry_refused"
+
 // attemptLine is I-7a/b/c: one charge attempt the timeline shows as its own
 // row.
 func attemptLine(a domain.InvoiceChargeAttempt, inv domain.Invoice) activity.Line {
@@ -184,6 +188,11 @@ func attemptLine(a domain.InvoiceChargeAttempt, inv domain.Invoice) activity.Lin
 	case domain.ChargeAttemptFailed:
 		l.Kind, l.Title, l.Tone = "payment.failed", "Payment failed", activity.ToneFailure
 		l.Problem = activity.DeclineReason(a.DeclineCode, a.ProviderReason)
+	case domain.ChargeAttemptBelowMinimum:
+		// Stripe refused the amount, not the card: a warning, not a failed
+		// payment, with the words the dunning retry row uses.
+		l.Kind, l.Title, l.Tone = "payment.below_minimum", "Charge refused by Stripe", activity.ToneWarning
+		l.Problem = "The amount is below Stripe's minimum charge. Nothing was charged."
 	case domain.ChargeAttemptUnknown:
 		l.Kind, l.Title, l.Tone = "payment.result_unknown", "Payment result unknown", activity.ToneWarning
 		l.Problem = "The payment provider has not confirmed whether this charge went through."
@@ -399,7 +408,7 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 		case evt.Reason == domain.DunningRetryReasonBelowMinimum:
 			// Stripe refused the amount, not the card: nothing was charged
 			// and recovery ends on it.
-			l.Kind, l.Title, l.Tone = "payment_recovery.retry_refused", fmt.Sprintf("Payment retry %d refused by Stripe", evt.AttemptCount), activity.ToneWarning
+			l.Kind, l.Title, l.Tone = kindRetryRefused, fmt.Sprintf("Payment retry %d refused by Stripe", evt.AttemptCount), activity.ToneWarning
 			l.Problem = "The amount is below Stripe's minimum charge. Nothing was charged."
 		default:
 			// A real decline. The attempt row's decline code, when it is

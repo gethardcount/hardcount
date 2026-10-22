@@ -42,12 +42,15 @@
  * its message asks the operator to check Stripe before any refund.
  * The disputes themselves are at `GET /v1/invoices/{id}/disputes`
  * (2026-10-19). `amount_below_minimum` reports an invoice Stripe
- * refused to charge because the amount is below Stripe's minimum
- * charge ($0.50 for USD; it depends on the currency). Nothing was
- * charged, the invoice stays `finalized` with `payment_status`
- * `pending`, it is not charged again automatically, no dunning starts,
- * and the customer is not emailed. The operator voids it or records a
- * payment (2026-10-23).
+ * refused to charge, or refused a payment page for, because the amount
+ * is below Stripe's minimum charge. The minimum depends on the
+ * currency the Stripe account settles in; Stripe's reply, in
+ * `provider_response`, names it. Nothing was charged, the invoice
+ * stays `finalized` with `payment_status` `pending`, it is not
+ * charged again automatically, dunning does not start (a run already
+ * open ends), and the customer is not emailed. The operator voids it
+ * or records a payment; Collect payment applies the customer's credit
+ * balance and pays it if that covers the amount (2026-10-23).
  */
 export type AttentionReason = typeof AttentionReason[keyof typeof AttentionReason];
 

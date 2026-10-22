@@ -1249,6 +1249,16 @@ type hostedInvoiceStripeAdapter struct {
 	// construction — a public customer-token money path must not silently
 	// run unaudited.
 	audit *audit.Logger
+	// belowMinimum records Stripe refusing the session as below its minimum
+	// charge, as a charge's refusal is recorded (payment.Stripe). For a
+	// customer with no card the Pay click is the only place Velox learns it.
+	belowMinimum checkoutBelowMinimumRecorder
+}
+
+// checkoutBelowMinimumRecorder is the one method of payment.Stripe the hosted
+// Pay flow needs.
+type checkoutBelowMinimumRecorder interface {
+	RecordCheckoutBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *payment.BelowMinimumError)
 }
 
 func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
@@ -1479,8 +1489,18 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 			}
 		}
 		// Below the minimum: the customer can't pay this amount online at
-		// all, and the page says so (409 amount_below_minimum).
+		// all, and the page says so (409 amount_below_minimum). Recorded as
+		// a charge's refusal is: the invoice is stamped, so the page drops
+		// its Pay button and the operator sees the notice, and a payment
+		// recovery on it ends. Left unrecorded, a card-less invoice kept its
+		// Pay button and its no-card recovery ran on to the final action.
 		if bm := payment.BelowMinimumOf(err); bm != nil {
+			if a.belowMinimum == nil {
+				slog.ErrorContext(ctx, "checkout: Stripe refused the session as below its minimum, and no recorder is wired to record it",
+					"invoice_id", inv.ID)
+			} else {
+				a.belowMinimum.RecordCheckoutBelowMinimum(ctx, claim.TenantID, inv, bm)
+			}
 			return "", bm
 		}
 		return "", fmt.Errorf("checkout session: %w", err)

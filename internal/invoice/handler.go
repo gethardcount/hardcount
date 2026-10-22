@@ -1145,7 +1145,26 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		if settled.Status == domain.InvoicePaid {
 			h.resolveDunningRecovered(r.Context(), tenantID, id)
 		}
+		// The same collect row the card path writes below: the credit paid
+		// the invoice, and that is the money movement an auditor looks for.
+		if settled.Status == domain.InvoicePaid && h.auditLogger != nil {
+			_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), settled), tenantID, domain.AuditActionCollect, "invoice", settled.ID, settled.InvoiceNumber, map[string]any{
+				"invoice_number":        settled.InvoiceNumber,
+				"credits_applied_cents": settled.CreditsAppliedCents,
+				"currency":              settled.Currency,
+				"paid_with":             "credit",
+			})
+		}
 		respond.JSON(w, r, http.StatusOK, settled)
+		return
+	}
+	if inv.BelowMinimumAt != nil {
+		// Stripe already refused this invoice's amount as below its minimum
+		// charge, and an open invoice's amount only goes down, so a charge
+		// would get the same answer. Refused before Stripe, with the code the
+		// hosted page's Pay uses. The credit applied above stays applied.
+		h.releaseCollectHold(r.Context(), tenantID, id, hold)
+		respond.FromError(w, r, domain.ErrBelowMinimumCharge, "invoice")
 		return
 	}
 
@@ -1556,7 +1575,7 @@ func piFromEventMetadata(meta map[string]any) string {
 // renderChargeAttempts renders the charge-attempt facts — the single
 // source of payment rows on the timeline (ADR-103).
 //
-// Exactly two suppressions, both exact-keyed, no heuristics:
+// Exactly three suppressions, all exact-keyed, no heuristics:
 //
 //   - a dunning row already carrying this attempt's PaymentIntent
 //     absorbs it: the campaign row ("Payment retry 2 failed" with
@@ -1565,13 +1584,24 @@ func piFromEventMetadata(meta map[string]any) string {
 //   - a SUCCEEDED attempt on a paid invoice defers to the "Invoice
 //     paid" lifecycle row. That row is the superset — an invoice can
 //     also become paid with no charge at all (credits, an offline
-//     payment, a $0 total) — so it owns the success story.
+//     payment, a $0 total) — so it owns the success story;
+//   - a dunning retry's below-minimum attempt defers to the retry's own
+//     row ("Payment retry N refused by Stripe"). Stripe made no
+//     PaymentIntent to key on, but a run ends at its one below-minimum
+//     retry, so the invoice has at most one such row, and the attempt
+//     still renders when that row is missing.
 //
 // `pending` attempts never render (in flight; the attention banner owns
 // that), and a succeeded attempt on a NOT-paid invoice does render —
 // that shape is an anomaly worth seeing.
 func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceChargeAttempt, inv domain.Invoice) []timelineEvent {
 	dunningIdxByPI := recoveryRowsByPI(events)
+	retryRefusedRow := false
+	for _, e := range events {
+		if e.Line.Kind == kindRetryRefused {
+			retryRefusedRow = true
+		}
+	}
 	sawSucceeded := false
 	for _, a := range attempts {
 		if a.Outcome == domain.ChargeAttemptSucceeded {
@@ -1579,6 +1609,10 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 		}
 		switch a.Outcome {
 		case domain.ChargeAttemptFailed, domain.ChargeAttemptUnknown:
+		case domain.ChargeAttemptBelowMinimum:
+			if a.Trigger == domain.ChargeTriggerDunningRetry && retryRefusedRow {
+				continue
+			}
 		case domain.ChargeAttemptSucceeded:
 			if inv.PaidAt != nil {
 				// The paid lifecycle row owns this success's story — and

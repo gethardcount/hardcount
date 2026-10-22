@@ -40,7 +40,7 @@ func TestClassify_AmountBelowMinimum(t *testing.T) {
 			}
 			checkShape(t, att.Message)
 			if !sameActions(actionCodes(att), AttentionActionVoidInvoice) {
-				t.Errorf("actions %v, want only void_invoice (Collect would get the same refusal)", actionCodes(att))
+				t.Errorf("actions %v, want only void_invoice", actionCodes(att))
 			}
 			if att.ProviderResponse != inv.LastPaymentError {
 				t.Errorf("provider_response %q, want Stripe's sentence", att.ProviderResponse)

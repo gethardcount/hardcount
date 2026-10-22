@@ -117,9 +117,9 @@ func TestChargeInvoice_BelowMinimum_NotADecline(t *testing.T) {
 			if len(invoices.leaseReleases) != 1 {
 				t.Errorf("hold releases %d, want 1: the answer is final", len(invoices.leaseReleases))
 			}
-			if n := len(invoices.chargeAttempts); n != 1 || invoices.chargeAttempts[0].Outcome != domain.ChargeAttemptFailed ||
+			if n := len(invoices.chargeAttempts); n != 1 || invoices.chargeAttempts[0].Outcome != domain.ChargeAttemptBelowMinimum ||
 				invoices.chargeAttempts[0].Trigger != tc.trigger || !strings.Contains(invoices.chargeAttempts[0].ProviderReason, "at least $0.50") {
-				t.Errorf("attempt rows %+v, want one failed %s attempt with Stripe's sentence", invoices.chargeAttempts, tc.trigger)
+				t.Errorf("attempt rows %+v, want one below_minimum %s attempt with Stripe's sentence", invoices.chargeAttempts, tc.trigger)
 			}
 			switch {
 			case tc.resolveHere && (len(resolver.calls) != 1 || resolver.calls[0].resolution != domain.ResolutionAmountBelowMinimum):
@@ -128,6 +128,38 @@ func TestChargeInvoice_BelowMinimum_NotADecline(t *testing.T) {
 				t.Errorf("dunning resolves %+v, want none: dunning ends its own run at the retry's instant", resolver.calls)
 			}
 		})
+	}
+}
+
+// The hosted page's Checkout Session refusal is recorded as a charge's is,
+// minus the parts that belong to a charge: the invoice is stamped and the
+// payment recovery on it ends (a card-less invoice's no-card run among them),
+// with no attempt row (no charge was made) and no charge hold to release.
+func TestRecordCheckoutBelowMinimum_StampsAndEndsRecovery(t *testing.T) {
+	invoices := newMockInvoiceUpdater()
+	inv := pendingSnapshot()
+	inv.AmountDueCents = 30
+	inv.AutoChargePending = true
+	inv.ChargeAttemptSeq = 2
+	invoices.invoices[inv.ID] = inv
+	resolver := &recordingDunningResolver{}
+	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil)
+	s.SetDunningResolver(resolver)
+
+	s.RecordCheckoutBelowMinimum(auth.WithTenantID(context.Background(), "t1"), "t1", inv,
+		&BelowMinimumError{Message: "The Checkout Session's total amount due must add up to at least $0.50 usd"})
+
+	got := invoices.invoices[inv.ID]
+	if got.BelowMinimumAt == nil || got.AutoChargePending || got.PaymentStatus != domain.PaymentPending ||
+		!strings.Contains(got.LastPaymentError, "at least $0.50") {
+		t.Errorf("invoice after the refusal: below_minimum_at=%v auto_charge_pending=%v payment_status=%s last_payment_error=%q, want stamped, out of the queue, pending, Stripe's sentence",
+			got.BelowMinimumAt, got.AutoChargePending, got.PaymentStatus, got.LastPaymentError)
+	}
+	if len(resolver.calls) != 1 || resolver.calls[0].resolution != domain.ResolutionAmountBelowMinimum {
+		t.Errorf("dunning resolves %+v, want one amount_below_minimum", resolver.calls)
+	}
+	if len(invoices.chargeAttempts) != 0 || len(invoices.leaseReleases) != 0 {
+		t.Errorf("attempt rows %d, hold releases %d, want none: no charge was made", len(invoices.chargeAttempts), len(invoices.leaseReleases))
 	}
 }
 

@@ -3997,7 +3997,7 @@ export interface paths {
          * @description Returns everything that happened to an invoice, oldest first:
          *     lifecycle steps (created, finalized, paid, voided, marked
          *     uncollectible), charge attempts (source `payment`, event_type
-         *     `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
+         *     `charge_attempt.succeeded|failed|unknown|below_minimum`), dunning retries, credit
          *     notes, customer emails, and card disputes (source `dispute`, a
          *     `payment.dispute_opened` row and, once Stripe closes the dispute, a
          *     `payment.dispute_closed` row; both at Stripe's own time).
@@ -7414,12 +7414,15 @@ export interface components {
          *     its message asks the operator to check Stripe before any refund.
          *     The disputes themselves are at `GET /v1/invoices/{id}/disputes`
          *     (2026-10-19). `amount_below_minimum` reports an invoice Stripe
-         *     refused to charge because the amount is below Stripe's minimum
-         *     charge ($0.50 for USD; it depends on the currency). Nothing was
-         *     charged, the invoice stays `finalized` with `payment_status`
-         *     `pending`, it is not charged again automatically, no dunning starts,
-         *     and the customer is not emailed. The operator voids it or records a
-         *     payment (2026-10-23).
+         *     refused to charge, or refused a payment page for, because the amount
+         *     is below Stripe's minimum charge. The minimum depends on the
+         *     currency the Stripe account settles in; Stripe's reply, in
+         *     `provider_response`, names it. Nothing was charged, the invoice
+         *     stays `finalized` with `payment_status` `pending`, it is not
+         *     charged again automatically, dunning does not start (a run already
+         *     open ends), and the customer is not emailed. The operator voids it
+         *     or records a payment; Collect payment applies the customer's credit
+         *     balance and pays it if that covers the amount (2026-10-23).
          * @enum {string}
          */
         AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost" | "amount_below_minimum";
@@ -14392,10 +14395,12 @@ export interface operations {
              *     to the earlier charge was unclear and named no payment; Velox
              *     records a payment that appears, and the invoice is charged again
              *     as usual if none has appeared 24 hours after that charge. Code
-             *     `amount_below_minimum`: Stripe refused the charge because the
-             *     amount is below its minimum charge, so nothing was charged; the
-             *     invoice stays open with `payment_status` `pending`, and no
-             *     dunning starts.
+             *     `amount_below_minimum`: the amount is below Stripe's minimum
+             *     charge, so nothing was charged; the invoice stays open with
+             *     `payment_status` `pending`, and no dunning starts. Once Stripe
+             *     has refused an invoice this way, Collect applies the credit
+             *     balance and, if anything is still owed, answers with this code
+             *     without asking Stripe again.
              */
             409: {
                 headers: {

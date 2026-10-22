@@ -150,6 +150,16 @@ export function invoiceCanCollect(inv: InvoiceMoneyInput): boolean {
 }
 
 /**
+ * Whether the invoice page offers Collect payment. A charge needs a card, so
+ * with none it is hidden; except on an invoice Stripe refused as below its
+ * minimum charge. Collect charges no card there: it applies the customer's
+ * credit balance and pays the invoice when that covers it.
+ */
+export function invoiceShowsCollect(inv: InvoiceMoneyInput, hasPaymentMethod: boolean, attentionReason?: string): boolean {
+  return invoiceCanCollect(inv) && (hasPaymentMethod || attentionReason === 'amount_below_minimum')
+}
+
+/**
  * Open with no payment succeeded or processing. A parked charge ('unknown')
  * still awaits payment: mark uncollectible is its way out (ADR-107).
  */
