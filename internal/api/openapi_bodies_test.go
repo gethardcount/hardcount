@@ -432,3 +432,65 @@ func join(at, name string) string {
 	}
 	return at + "." + name
 }
+
+// TestBodyComparer_ShapeMismatch: when the spec and the Go type disagree on
+// shape, the comparer reports it rather than skipping the subtree, at every
+// depth.
+func TestBodyComparer_ShapeMismatch(t *testing.T) {
+	type inner struct {
+		A int `json:"a"`
+	}
+	type outer struct {
+		Inner inner `json:"inner"`
+	}
+	obj := func(props map[string]any) map[string]any {
+		return map[string]any{"type": "object", "properties": props}
+	}
+	cases := []struct {
+		name   string
+		body   any
+		schema map[string]any
+		want   []string
+	}{
+		{
+			name:   "array decoded, spec is an object",
+			body:   []inner{},
+			schema: obj(map[string]any{"events": map[string]any{"type": "array"}}),
+			want:   []string{"the spec body is not an array"},
+		},
+		{
+			name:   "nested array decoded, spec is an object",
+			body:   struct{ L []inner `json:"l"` }{},
+			schema: obj(map[string]any{"l": map[string]any{"type": "object"}}),
+			want:   []string{"l: the spec is not an array"},
+		},
+		{
+			name:   "nested object, spec lists no properties",
+			body:   outer{},
+			schema: obj(map[string]any{"inner": map[string]any{"type": "object"}}),
+			want:   []string{"inner: the spec lists no properties"},
+		},
+		{
+			name:   "root object, spec lists no properties",
+			body:   inner{},
+			schema: map[string]any{"type": "object"},
+			want:   []string{"the spec body lists no properties"},
+		},
+		{
+			name: "shapes match",
+			body: outer{},
+			schema: obj(map[string]any{"inner": obj(map[string]any{
+				"a": map[string]any{"type": "integer"},
+			})}),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := bodyComparer{used: map[string]bool{}}
+			c.compare("", reflect.TypeOf(tc.body), tc.schema)
+			if !reflect.DeepEqual(c.diffs, tc.want) {
+				t.Errorf("diffs = %q, want %q", c.diffs, tc.want)
+			}
+		})
+	}
+}
