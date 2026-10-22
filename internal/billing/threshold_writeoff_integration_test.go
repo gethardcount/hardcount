@@ -408,6 +408,100 @@ func TestThresholdPayment_vs_Close_PaymentAfterReRead(t *testing.T) {
 	assertUsageBilledOnce(t, r.base)
 }
 
+// TestThresholdPayment_vs_Close_DunningPauseInFlight: dunning's pause for
+// the threshold invoice T (SetDunningPause, held open here after its three
+// statements) holds the subscription and T when a payment of T starts. The
+// payment's LockDunningPauseTx reads before the pause commits, so it does
+// not lock the subscription, and it then waits on T. The close then waits
+// on the subscription. When the pause commits, the payment holds T and the
+// close holds the subscription; the payment's pause release then waits for
+// the close. The close's watermark read must not wait for the payment, or
+// the two deadlock and Postgres fails one of them (40P01).
+func TestThresholdPayment_vs_Close_DunningPauseInFlight(t *testing.T) {
+	r := newS1Rig(t, "Payment vs close, dunning pause in flight", 200, false)
+	r.f.invStore.SetDunningPauseReleaser(r.f.subStore) // as the server wires it
+	if fired := r.runFire(t); fired != 1 {
+		t.Fatalf("fire reported %d, want 1", fired)
+	}
+	_, threshold, _ := r.liveInvoices(t)
+	if len(threshold) != 1 {
+		t.Fatalf("%d threshold invoices after the fire, want 1", len(threshold))
+	}
+	thrID := threshold[0].ID
+	admin := testutil.AdminPool(t)
+	waitFor := func(n int) {
+		t.Helper()
+		for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			got, err := lockWaiters(r.base, admin)
+			if err != nil {
+				t.Errorf("read pg_stat_activity: %v", err)
+				return
+			}
+			if got >= n {
+				return
+			}
+		}
+		t.Errorf("lock waiters never reached %d", n)
+	}
+
+	paidAt := r.t1.Add(time.Hour)
+	payDone := make(chan error, 1)
+	pauseDone := make(chan error, 1)
+	r.closer.subs.beforeTx = func() {
+		r.closer.subs.beforeTx = nil
+		pause, err := r.f.db.BeginTx(r.base, postgres.TxTenant, r.f.tenantID)
+		if err != nil {
+			t.Fatalf("begin pause tx: %v", err)
+		}
+		// SetDunningPause's statements, in its order.
+		var st string
+		if err := pause.QueryRowContext(r.base, `SELECT status FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, r.f.subID).Scan(&st); err != nil {
+			t.Fatalf("pause: lock subscription: %v", err)
+		}
+		if err := pause.QueryRowContext(r.base, `SELECT status FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, thrID).Scan(&st); err != nil {
+			t.Fatalf("pause: lock invoice: %v", err)
+		}
+		if _, err := pause.ExecContext(r.base, `
+			UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft',
+				pause_collection_resumes_at = NULL, pause_collection_invoice_id = $1, updated_at = now()
+			WHERE id = $2`, thrID, r.f.subID); err != nil {
+			t.Fatalf("pause: write: %v", err)
+		}
+		go func() {
+			_, err := r.f.invStore.MarkPaid(r.at(paidAt), r.f.tenantID, thrID, "", paidAt)
+			payDone <- err
+		}()
+		waitFor(1) // the payment waits on T
+		go func() {
+			waitFor(2) // and the close on the subscription
+			pauseDone <- pause.Commit()
+		}()
+	}
+	gen, failures := r.closer.engine.RunCycleForTenant(r.at(r.close), r.f.tenantID, 50)
+	if err := <-pauseDone; err != nil {
+		t.Fatalf("pause commit: %v", err)
+	}
+	payErr := <-payDone
+	if payErr != nil || len(failures) != 0 {
+		t.Fatalf("payment err = %v, close failures = %v; want both to succeed", payErr, failures)
+	}
+	if gen != 1 {
+		t.Fatalf("close generated %d, want 1", gen)
+	}
+	cycle, threshold, _ := r.liveInvoices(t)
+	if len(cycle) != 1 || len(threshold) != 1 || threshold[0].Status != domain.InvoicePaid {
+		t.Fatalf("invoices: cycle=%d threshold=%+v, want one cycle invoice and the threshold invoice paid", len(cycle), threshold)
+	}
+	lines := r.usageLines(t, cycle[0].ID)
+	if len(lines) != 1 || lines[0].BillingPeriodStart == nil || !lines[0].BillingPeriodStart.Equal(r.t1) || lines[0].AmountCents != 700 {
+		t.Fatalf("cycle usage lines = %+v, want one residual line [t1, P1) = 700c", lines)
+	}
+	if sub := r.sub(t); sub.PauseCollection == nil || sub.PauseCollection.ResumesAt == nil {
+		t.Fatalf("pause = %+v, want the payment to have lifted it (resumes_at set)", sub.PauseCollection)
+	}
+	assertUsageBilledOnce(t, r.base)
+}
+
 // blockingReverser stands in for the credit reverser so a void can be held
 // inside its transaction, after it has locked the invoice row: entered is
 // closed when the void gets there, and it returns once release is closed.
