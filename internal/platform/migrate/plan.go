@@ -25,6 +25,9 @@ const (
 	PlanUpToDate PlanState = "up to date"
 	// PlanAhead: the database has migrations this binary does not ship.
 	PlanAhead PlanState = "ahead"
+	// PlanUnrecorded: Velox tables, but goose has not recorded 180.
+	// `velox migrate` refuses it (ErrNoMigrationRecord).
+	PlanUnrecorded PlanState = "no migration record"
 )
 
 // PlanFile is one migration `velox migrate` would apply.
@@ -133,6 +136,8 @@ func planFor(st state, files []PlanFile) Plan {
 	}
 	p.Database = st.gooseVersion()
 	switch {
+	case decide(st) == actRefuse:
+		p.State, p.Pending, p.Ahead = PlanUnrecorded, nil, nil
 	case decide(st) == actBaseline:
 		p.State = PlanEmpty
 	case len(p.Ahead) > 0:
@@ -182,6 +187,8 @@ func FormatPlan(p Plan, release string) string {
 	switch p.State {
 	case PlanEmpty:
 		row("database", "empty")
+	case PlanUnrecorded:
+		row("database", "Velox tables, no migration record")
 	default:
 		row("database", fmt.Sprintf("%d (goose_db_version)", p.Database))
 	}
@@ -196,6 +203,8 @@ func FormatPlan(p Plan, release string) string {
 		row("state", fmt.Sprintf("%s, %s to apply", label, countMigrations(len(p.Pending))))
 	case PlanUpToDate:
 		row("state", "up to date, nothing to apply")
+	case PlanUnrecorded:
+		row("state", "no migration record, velox migrate will not run")
 	case PlanAhead:
 		row("state", "ahead, the database has migrations this release does not ship")
 		for _, a := range p.Ahead {
@@ -221,6 +230,9 @@ func FormatPlan(p Plan, release string) string {
 		b.WriteString(`next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.` + "\n")
 	case PlanAhead:
 		b.WriteString("next: this binary is older than the database; to go back, restore the backup taken before the upgrade\n")
+	case PlanUnrecorded:
+		b.WriteString("next: restore the backup together with its migration table, or use an empty database. " +
+			"Upgrading from Velox 0.8.x is not supported; install fresh. Steps: " + RunbookPath + "\n")
 	}
 	return b.String()
 }

@@ -11,7 +11,8 @@ import (
 // binary cannot serve. It reads goose's record the way `velox migrate`
 // does, read-only, on the caller's pool, and returns an error when a
 // migration this binary ships is not applied, including migration 180 on
-// an empty database. The app would fail on any query that touches a new
+// an empty database, and ErrNoMigrationRecord for Velox tables that goose
+// has no record of. The app would fail on any query that touches a new
 // column or table.
 //
 // Call it at start-up, after Up when RUN_MIGRATIONS_ON_BOOT is on, before
@@ -29,6 +30,8 @@ func CheckSchemaReady(db *sql.DB) error {
 	}
 	p := planFor(st, files)
 	switch p.State {
+	case PlanUnrecorded:
+		return ErrNoMigrationRecord
 	case PlanEmpty, PlanBehind:
 		return fmt.Errorf("schema behind code: %s to apply; run `velox migrate`", countMigrations(len(p.Pending)))
 	case PlanAhead:

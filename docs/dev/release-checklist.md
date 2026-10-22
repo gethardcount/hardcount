@@ -93,6 +93,8 @@ These prove that the images the quick start pulls work, and that an existing ins
 
 ### Upgrade drill
 
+Skip it for v0.9.0: its previous release, v0.8.2, has no upgrade path. On a v0.8.2 install, step 2 says `no migration record`, and step 3 refuses to start.
+
 1. Run `./quickstart.sh destroy` to start from an empty install. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
    **You see:** the demo's invoice link. Open it and note the invoice number, total and line amounts. Download its PDF.
 2. Check out the new release tag. In `deploy/compose/.env`, change the tag on the `VELOX_IMAGE` and `VELOX_DASHBOARD_IMAGE` lines to the new release. Run `docker compose pull`, then `docker compose run --rm velox-api migrate status`.

@@ -49,9 +49,9 @@ func TestFileErrorMessages(t *testing.T) {
 		}
 	}
 
-	exists := &pgconn.PgError{Code: "42723", Message: `function "leader_fence" already exists with same argument types`}
+	exists := &pgconn.PgError{Code: "42723", Message: `function "audit_log_immutable" already exists with same argument types`}
 	got = (&FileError{Version: 180, Name: baselineName, Err: exists}).Error()
-	for _, want := range []string{"00180 baseline", "already has Velox tables but no migration record", "use an empty database"} {
+	for _, want := range []string{"00180 baseline", "already holds objects the baseline creates", "Use an empty database"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("baseline message lacks %q: %s", want, got)
 		}

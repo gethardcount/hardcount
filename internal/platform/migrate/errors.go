@@ -22,6 +22,15 @@ const LockTimeoutRunbookPath = "docs/ops/runbook/migration-failed-midway.md#it-w
 // lock_timeout expires ("canceling statement due to lock timeout").
 const pgLockNotAvailable = "55P03"
 
+// ErrNoMigrationRecord says the database has Velox tables but goose has
+// not recorded migration 180. Up, Down and CheckSchemaReady return it
+// before they change anything; `velox migrate status` shows it as
+// PlanUnrecorded.
+var ErrNoMigrationRecord = errors.New("this database has Velox tables but no migration record " +
+	"(goose_db_version has no row for 180), so Velox cannot tell which version they are at. Nothing was changed. " +
+	"Restore the backup together with its migration table, or use an empty database. " +
+	"Upgrading from Velox 0.8.x is not supported; install fresh. Steps: " + RunbookPath)
+
 // FileError says a migration failed. goose stops at the first failure and
 // records nothing for it.
 type FileError struct {
@@ -42,8 +51,8 @@ func (e *FileError) Error() string {
 		b.WriteString("It runs without a transaction, so Postgres may have left the index INVALID. " +
 			"Running the upgrade again is safe: the file drops the index and builds it again. Fix the cause first.")
 	case e.Version == baselineVersion && isDuplicateObject(e.Err):
-		b.WriteString("This database already has Velox tables but no migration record, and none of the baseline was applied. " +
-			"Restore the backup together with its migration table, or use an empty database.")
+		b.WriteString("This database already holds objects the baseline creates, and none of the baseline was applied. " +
+			"Use an empty database.")
 	default:
 		b.WriteString("It runs in one transaction, so none of it was applied. Fix the cause and run the upgrade again.")
 	}

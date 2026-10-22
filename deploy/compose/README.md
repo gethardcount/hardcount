@@ -35,7 +35,7 @@ To upgrade a stack built from source, run these in `deploy/compose`. This exampl
    docker compose run --rm velox-api migrate status
    ```
 
-   **You see:** the plan. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again.
+   **You see:** the plan. If it says `ahead`, this install ran newer code than the release: check out a newer release and build again. If it says `no migration record`, stop: the upgrade will not run ([why](../../docs/ops/runbook/migration-failed-midway.md#velox-tables-but-no-migration-record)). A Velox 0.8.x install says this, and cannot be upgraded.
 
 4. Start the new build. It applies the database upgrades as it starts.
 

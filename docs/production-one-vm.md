@@ -25,7 +25,7 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.8.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.2`.
+A release is a tested version with a number, such as `v0.8.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.2`. A v0.8.2 install cannot be upgraded to the next release, v0.9.0: that will be a fresh install.
 
 1. Get the files for that release.
 
@@ -407,7 +407,7 @@ Database changes (migrations) run by themselves as the new version starts.
    docker compose run --rm velox-api migrate status
    ```
 
-   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply.
+   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#velox-tables-but-no-migration-record)). A Velox 0.8.x install says this, and cannot be upgraded.
 
 5. Start the new images.
 

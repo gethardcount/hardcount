@@ -570,22 +570,21 @@ func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 			if err != nil {
 				t.Fatalf("readPlan: %v", err)
 			}
-			if p.State != PlanState("no migration record") || len(p.Pending) != 0 {
-				t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), "no migration record")
+			if p.State != PlanUnrecorded || len(p.Pending) != 0 {
+				t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), PlanUnrecorded)
 			}
 			out := FormatPlan(p, "v0.9.1")
 			if !strings.Contains(out, "Velox tables, no migration record") || strings.Contains(out, `run "velox migrate"`) {
 				t.Errorf("status output:\n%s", out)
 			}
 
-			ready := CheckSchemaReady(db)
-			if ready == nil || !strings.Contains(ready.Error(), "no migration record") || strings.Contains(ready.Error(), "to apply") {
+			if ready := CheckSchemaReady(db); !errors.Is(ready, ErrNoMigrationRecord) {
 				t.Errorf("CheckSchemaReady: %v", ready)
 			}
 
 			err = up(ctx, dsn, migrationFiles())
 			var fe *FileError
-			if err == nil || errors.As(err, &fe) {
+			if !errors.Is(err, ErrNoMigrationRecord) || errors.As(err, &fe) {
 				t.Errorf("Up: want a refusal before any migration runs, got %v", err)
 			} else {
 				for _, want := range []string{"Velox tables but no migration record", "Nothing was changed", "Upgrading from Velox 0.8.x is not supported", RunbookPath} {
@@ -593,6 +592,9 @@ func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
 						t.Errorf("Up's message lacks %q: %v", want, err)
 					}
 				}
+			}
+			if _, err := down(ctx, dsn, migrationFiles(), -1); !errors.Is(err, ErrNoMigrationRecord) {
+				t.Errorf("Down: want ErrNoMigrationRecord, got %v", err)
 			}
 			if !hadGooseTable && tableExists(t, db, versionTable) {
 				t.Error("a refused command created goose_db_version")

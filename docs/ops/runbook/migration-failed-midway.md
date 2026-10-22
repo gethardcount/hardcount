@@ -132,20 +132,29 @@ the INVALID index goes away and is built again.
 
 ## Velox tables, but no migration record
 
-**Symptom:**
+**Symptom:** `velox migrate`, or Velox at start-up, stops with:
 
 ```
-migration 00180 baseline failed: ERROR: function "leader_fence" already exists with same argument types (SQLSTATE 42723). This database already has Velox tables but no migration record, and none of the baseline was applied. ...
+this database has Velox tables but no migration record (goose_db_version has no row for 180), so Velox cannot tell which version they are at. Nothing was changed. ...
 ```
 
-**Why:** the database has Velox's tables but no `goose_db_version`, the
-migration record. Velox cannot tell which version the tables are at. This
-happens when a backup was restored without its migration table, when the
-record was dropped by hand, or when the database is from Velox 0.8.x.
+`velox migrate status` prints
+`state:        no migration record, velox migrate will not run`.
+
+**Why:** the database has Velox's tables but no row 180 in
+`goose_db_version`, the migration record. Velox cannot tell which version
+the tables are at, so it changes nothing. This happens when a backup was
+restored without its migration table, when the record was dropped by hand,
+or when the database is from Velox 0.8.x.
 
 **Fix:** restore the backup again, with its migration table, into an empty
 database, or point Velox at an empty database. Then run `velox migrate`.
 Upgrading from Velox 0.8.x is not supported; install fresh.
+
+If `velox migrate` instead stops with
+`migration 00180 baseline failed: ... already exists`, the database holds
+some of the objects the baseline creates but no `tenants` table. Point
+Velox at an empty database.
 
 ## Verify
 

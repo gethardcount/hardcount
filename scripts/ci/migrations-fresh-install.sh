@@ -17,6 +17,10 @@
 #   restore drill  back up a HEAD database with scripts/backup.sh and restore
 #                  it into an empty database with scripts/restore.sh: it must
 #                  succeed, equal the database backed up, and be up to date.
+#                  Then restore it over a newer database, one where a later
+#                  migration added a table that refers to a backed-up one:
+#                  the restore must stop and change nothing
+#                  (docs/ops/backup-considerations.md, section 4).
 #   Postgres 14    HEAD applies on postgres:14 and reports up to date.
 #
 # Needs Docker, psql and pg_restore on the host, and Go to build HEAD.
@@ -242,6 +246,40 @@ restore_drill() {
   grep -q 'up to date, nothing to apply' "$OUT/restore-status.txt" \
     || fail "restore drill: the restored database is not up to date"
   echo "restore drill: the backup restored into an empty database, up to date"
+
+  # Over a newer database. A later migration is stood in for by a table
+  # with a foreign key into invoices and the next version in goose's
+  # record. pg_restore --clean drops each backed-up table before it creates
+  # it again; invoices cannot be dropped while the newer table refers to
+  # it, so the single-transaction restore rolls back. Only that cause
+  # passes: any other failure, or a restore that succeeds, fails the drill.
+  echo "restore over a newer database"
+  local next=$(( ${SHIPPED##*,} + 1 )) before
+  q "$c" compose "CREATE TABLE public.newer_table (invoice_id text REFERENCES public.invoices (id))"
+  q "$c" compose "INSERT INTO public.goose_db_version (version_id, is_applied) VALUES ($next, true)"
+  before=$(versions "$c" compose)
+  for kind in schema data; do
+    dump "$c" compose "$kind" > "$OUT/restore-over-before-$kind.sql"
+  done
+  if DATABASE_URL="$url" VELOX_RESTORE_CONFIRM=yes \
+    PG_RESTORE="docker run --rm -i --network host $POSTGRES16_IMAGE pg_restore" \
+    "$ROOT/scripts/restore.sh" "$backup" > "$OUT/restore-over.txt" 2>&1; then
+    cat "$OUT/restore-over.txt"
+    fail "restore drill: the restore over a newer database succeeded"
+  fi
+  cat "$OUT/restore-over.txt"
+  grep -q 'single-transaction restore was rolled back' "$OUT/restore-over.txt" \
+    || fail "restore drill: the restore over a newer database failed without rolling back"
+  grep -E -q 'cannot drop .* because other objects depend on it' "$OUT/restore-over.txt" \
+    || fail "restore drill: the restore over a newer database failed, but not because a newer table refers to a backed-up one"
+  [ "$(versions "$c" compose)" = "$before" ] \
+    || fail "restore drill: goose_db_version changed ($before -> $(versions "$c" compose))"
+  for kind in schema data; do
+    dump "$c" compose "$kind" > "$OUT/restore-over-after-$kind.sql"
+    diff -u "$OUT/restore-over-before-$kind.sql" "$OUT/restore-over-after-$kind.sql" > "$OUT/restore-over-$kind.diff" \
+      || fail "restore drill: the refused restore changed the $kind"
+  done
+  echo "restore drill: the restore over a newer database stopped, nothing changed"
 }
 
 pg14() {

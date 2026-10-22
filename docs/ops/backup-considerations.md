@@ -71,7 +71,7 @@ The dump travels through standard output, so the container needs no mounted fold
 
 `scripts/restore.sh` replaces the objects in the backup, in the target database, in one transaction: either all of it is restored, or nothing changes. Each restored table gets the access rights it has in the backup, even when the target database gives new tables more, as a new Compose install does. It needs `pg_restore` and `psql` on the machine that runs it. `psql` runs the SQL that `pg_restore` writes, so it must be at least as recent as `pg_restore`: an older `psql` stops at `invalid command \restrict`, and nothing changes.
 
-**Restore into an empty database when you can.** The script leaves alone what the backup does not hold. Restored over a newer database, that includes its migration record and any table a newer migration created. When such a table refers to a table in the backup, the restore cannot replace that table, so it stops and changes nothing: `invoice_disputes` (migration 185) refers to `invoices` and `tenants`.
+**Restore into an empty database when you can.** The script leaves alone what the backup does not hold. Restored over a newer database, that includes its migration record and any table a newer migration created. When such a table refers to a table in the backup, the restore cannot replace that table, so it stops and changes nothing.
 
 1. On a new Postgres server, create the limited user first. Users and their settings belong to the server, not to the database, so a dump cannot carry them. Without the user the restore fails, and the script stops before it starts. The second line sets the timeout that [Postgres requirements](postgres-requirements.md#timeouts-on-the-limited-user) calls required.
 
@@ -142,7 +142,7 @@ Run these before you let traffic back in.
 
 Run the `velox migrate status` of the release you will start, against the restored database.
 
-**You see:** `state:        up to date, nothing to apply`. Another state lists what `velox migrate` will do.
+**You see:** `state:        up to date, nothing to apply`. `behind` lists what `velox migrate` will do. `no migration record` means the backup was restored without its migration table: restore it again, with the table, into an empty database.
 
 The record itself, if you want to look:
 
