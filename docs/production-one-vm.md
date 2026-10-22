@@ -25,7 +25,7 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.8.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.2`.
+A release is a tested version with a number, such as `v0.8.2`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/getvelox/velox/releases). This page uses `v0.8.2`. A v0.8.2 install cannot be upgraded to the next release, v0.9.0: that will be a fresh install.
 
 1. Get the files for that release.
 
@@ -374,6 +374,8 @@ Check each line before the first real customer.
 
 ## Upgrade to a new release
 
+Upgrading from Velox 0.8.x is not supported; install fresh.
+
 Database changes (migrations) run by themselves as the new version starts.
 
 1. Read the upgrade notes in the [changelog](../CHANGELOG.md) for every release between yours and the new one.
@@ -385,10 +387,10 @@ Database changes (migrations) run by themselves as the new version starts.
 
    **You see:** `Verified:  yes`.
 
-3. Get the new release's files and point `.env` at its images. This example moves to `v0.9.0`.
+3. Get the new release's files and point `.env` at its images. This example moves to `v0.9.1`.
 
    ```bash
-   VELOX_VERSION=v0.9.0
+   VELOX_VERSION=v0.9.1
    cd /opt/velox
    git fetch --tags
    git checkout "$VELOX_VERSION"
@@ -405,7 +407,7 @@ Database changes (migrations) run by themselves as the new version starts.
    docker compose run --rm velox-api migrate status
    ```
 
-   **You see:** a few `Container … Running` lines, then the plan. From v0.8.x to v0.9.0 it says `state:        ready to move: the next "velox migrate" records 180 in goose_db_version and changes no table`. For a later release it lists the migrations to apply. If it says `refused`, stop here and follow the message.
+   **You see:** a few `Container … Running` lines, then the plan. It lists the migrations to apply. If it says `no migration record`, stop: the upgrade will not run ([why](ops/runbook/migration-failed-midway.md#velox-tables-but-no-migration-record)). A Velox 0.8.x install says this, and cannot be upgraded.
 
 5. Start the new images.
 
@@ -414,7 +416,7 @@ Database changes (migrations) run by themselves as the new version starts.
    docker compose exec velox-api /usr/local/bin/velox version
    ```
 
-   **You see:** `velox v0.9.0`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
+   **You see:** `velox v0.9.1`, and `curl -fsS http://localhost:8080/health/ready` answers `"status":"ok"` again.
 
 If the upgrade stops with an error, Velox does not start, and nothing needs repair: a failed migration is undone. `docker compose logs --tail 20 velox-api` shows the error. Compose keeps starting the API again, and each start tries the upgrade again, so stop it while you find the cause:
 
@@ -431,8 +433,6 @@ docker compose up -d velox-api
 ### Going back
 
 Never roll the database back with `velox migrate rollback`: it runs only with `APP_ENV=local`, because it loses data the newer release wrote. To go back, restore the backup from step 2. That is why every upgrade starts with a backup: without one, a database upgrade cannot be undone.
-
-**From v0.9.0 to v0.8.x only, when v0.9.0 applied no migration after 180,** you can also start the old images as they are, with no restore. v0.8.x reads its own record, still at 180, and changes nothing. `velox migrate status` (with v0.9.0) shows `database:     180` when this applies.
 
 **A restore loses everything written after the backup.** The old release kept running after step 2, and the new one ran after step 5. The restore removes what both wrote: usage events your app sent, invoices Velox built and charged, payments and refunds, and changes made in the dashboard or through the API. The longer the new release runs, the more a restore loses.
 
@@ -470,7 +470,5 @@ To go back with a restore:
    - **Usage events.** Have your app send again every event it sent after the backup time, with the same `idempotency_key`. Velox counts each key once, so an event the backup already holds is not counted twice. An event that is not sent again is not billed.
    - **Payments.** The restored database does not know about a payment Stripe took after the backup. A subscription's invoice built after the backup is built again by the next billing run, and the customer's card can be charged again. Check each invoice on your list in Stripe, and refund a second charge.
    - **Everything else.** Run the [checks after a restore](ops/backup-considerations.md#checks-after-a-restore).
-
-Do not run v0.8.x's `migrate rollback` or `migrate force` on a database v0.9.0 took over. If one runs, v0.9.0 refuses to start until the records agree again; see [Two migration records](ops/runbook/migration-failed-midway.md#two-migration-records).
 
 **Next:** send your first usage event and bill it: [First invoice](first-invoice.md).

@@ -132,89 +132,32 @@ the INVALID index goes away and is built again.
 
 ## Velox tables, but no migration record
 
-**Symptom:**
+**Symptom:** `velox migrate`, or Velox at start-up, stops with:
 
 ```
-migration 00180 v0.8.1 baseline failed: ERROR: function "leader_fence" already exists with same argument types (SQLSTATE 42723). This database already has Velox tables but no migration record, and none of the baseline was applied. ...
+this database has Velox tables but no migration record (goose_db_version has no row for 180), so Velox cannot tell which version they are at. Nothing was changed. ...
 ```
 
-**Why:** the database has Velox's tables but neither `goose_db_version`
-(this release's record) nor `schema_migrations` (the v0.8 record). Velox
-cannot tell which version the tables are at. This happens when a backup
-was restored without its migration table, or when the record was dropped
-by hand.
+`velox migrate status` prints
+`state:        no migration record, velox migrate will not run`.
+
+**Why:** the database has Velox's tables but no row 180 in
+`goose_db_version`, the migration record. Velox cannot tell which version
+the tables are at, so it changes nothing. This happens when a backup was
+restored without its migration table, when the record was dropped by hand,
+or when the database is from Velox 0.8.x. Velox looks for a `tenants`
+table in `public` and in every schema on the connecting user's
+`search_path`, so Velox 0.8.x tables kept in the admin user's own schema
+count too.
 
 **Fix:** restore the backup again, with its migration table, into an empty
 database, or point Velox at an empty database. Then run `velox migrate`.
+Upgrading from Velox 0.8.x is not supported; install fresh.
 
-## A dirty database from v0.8.x
-
-**Symptom:**
-
-```
-This database's v0.8 migration record (schema_migrations) says version 179, dirty=true. This release takes over only a clean v0.8.0, v0.8.1 or v0.8.2 database at version 180. ...
-```
-
-**Why:** v0.9.0 takes over a database from v0.8.0, v0.8.1 or v0.8.2 at version 180,
-not dirty. Any other v0.8 state must reach version 180, not dirty, on
-v0.8.x first.
-
-**Fix:** with Velox v0.8.1, run `velox migrate`. If it reports the database
-dirty, follow v0.8.1's
-[A database upgrade failed midway](https://github.com/getvelox/velox/blob/v0.8.1/docs/ops/runbook/migration-failed-midway.md).
-When v0.8.1's `velox migrate status` prints `version: 180, dirty: false`,
-run v0.9.0's `velox migrate`.
-
-A version above 180 came from a development build. Use an empty database.
-
-## Two migration records
-
-**Symptom:**
-
-```
-public.schema_migrations (version 180, dirty=false, without the comment this release adds when it takes a database over) does not match this release's record in goose_db_version (version 180). ...
-```
-
-**Why:** when v0.9.0 takes over a v0.8 database, it keeps
-`schema_migrations` frozen at 180 and marks it with a table comment. Its
-own record is `goose_db_version`. The two now disagree, so something
-changed `schema_migrations` after the upgrade. Velox will not guess which
-schema is present, and changes nothing.
-
-**Fix:** pick the case.
-
-- **`goose_db_version` says 180, and the record says version 180,
-  dirty=false, without the comment.** The comment was lost: a copy tool
-  left comments out (`pg_dump --no-comments`, some database migration
-  services), or a v0.8.x backup was restored over a database still at 180.
-  Either way the tables are v0.8.1's, at the 180 both records name. Put the
-  comment back, then start this release:
-
-  ```sql
-  COMMENT ON TABLE public.schema_migrations IS 'velox: frozen at 180; the migration record moved to public.goose_db_version';
-  ```
-
-  This case is only for `goose_db_version` at 180. Above 180, newer
-  migrations changed tables a v0.8.x backup does not have: see the next
-  case.
-- **A v0.8.x backup was restored over this database.** `scripts/restore.sh`
-  replaces only the objects in the backup. It leaves `goose_db_version` and
-  any table a newer migration created. Restore the backup into an **empty**
-  database instead, then run `velox migrate`.
-- **A v0.8.x binary ran on a database this release set up.** The record
-  shows version 1, dirty. v0.8.x tried its first migration and failed on
-  the existing tables, inside one transaction, so it changed nothing else.
-  Drop its record, then start this release:
-
-  ```sql
-  DROP TABLE public.schema_migrations;
-  ```
-
-- **A v0.8.x `migrate rollback` or `migrate force` ran after the upgrade.**
-  Run v0.8.1's `velox migrate` to return the database to 180. Then start
-  this release, which checks the record again. If you cannot tell what the
-  rollback changed, restore the backup taken before the upgrade, into an
-  empty database.
+If `velox migrate` instead stops with
+`migration 00180 baseline failed: ... already exists`, the database holds
+some of the objects the baseline creates but no `tenants` table. Point
+Velox at an empty database.
 
 ## Verify
 

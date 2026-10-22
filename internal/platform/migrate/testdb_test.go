@@ -3,7 +3,6 @@ package migrate
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -72,19 +71,6 @@ func withDBName(t *testing.T, dsn, name string) string {
 	return u.String()
 }
 
-// withParam adds a runtime parameter to a DSN, e.g. search_path.
-func withParam(t *testing.T, dsn, key, value string) string {
-	t.Helper()
-	u, err := url.Parse(dsn)
-	if err != nil {
-		t.Fatalf("parse DSN: %v", err)
-	}
-	q := u.Query()
-	q.Set(key, value)
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
 func quoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
@@ -148,22 +134,22 @@ func gooseRows(t *testing.T, db *sql.DB, version int64) int {
 }
 
 // buildV08 turns a database that Up has migrated into what Velox v0.8.x
-// leaves: no goose record, and golang-migrate's two-column record at
-// (version, dirty). The schema under it is the baseline, which the
-// migrations CI job proves equal to the v0.8.1 history.
-func buildV08(t *testing.T, db *sql.DB, version int64, dirty bool) {
+// leaves: the tables, no goose record, and golang-migrate's two-column
+// record at (180, false). The baseline was generated from v0.8.1's schema
+// (ADR-125).
+func buildV08(t *testing.T, db *sql.DB) {
 	t.Helper()
 	mustExec(t, db, `DROP TABLE public.goose_db_version`)
-	writeV08Record(t, db, "public", version, dirty)
+	writeV08Record(t, db, 180, false)
 }
 
-// writeV08Record creates golang-migrate's record exactly as it does:
-// CREATE TABLE IF NOT EXISTS, then TRUNCATE and INSERT.
-func writeV08Record(t *testing.T, db *sql.DB, schema string, version int64, dirty bool) {
+// writeV08Record creates golang-migrate's record in public exactly as it
+// does: CREATE TABLE IF NOT EXISTS, then TRUNCATE and INSERT.
+func writeV08Record(t *testing.T, db *sql.DB, version int64, dirty bool) {
 	t.Helper()
-	mustExec(t, db, fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)`, quoteIdent(schema)))
-	mustExec(t, db, fmt.Sprintf(`TRUNCATE %s.schema_migrations`, quoteIdent(schema)))
-	mustExec(t, db, fmt.Sprintf(`INSERT INTO %s.schema_migrations (version, dirty) VALUES ($1, $2)`, quoteIdent(schema)), version, dirty)
+	mustExec(t, db, `CREATE TABLE IF NOT EXISTS public.schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)`)
+	mustExec(t, db, `TRUNCATE public.schema_migrations`)
+	mustExec(t, db, `INSERT INTO public.schema_migrations (version, dirty) VALUES ($1, $2)`, version, dirty)
 }
 
 // recordGoose writes goose's record by hand, the way goose does: the
@@ -188,24 +174,21 @@ func recordGoose(t *testing.T, db *sql.DB, versions ...int64) {
 	}
 }
 
-// fingerprint summarises everything a refused command must not change:
-// the relations in public and other, their comments, and both records.
+// fingerprint summarises everything a failed or no-op command must not
+// change: the relations in public, their comments, golang-migrate's old
+// record and goose's.
 func fingerprint(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var rels, sm, goose sql.NullString
 	if err := db.QueryRow(`
-		SELECT string_agg(n.nspname || '.' || c.relname || ':' || c.relkind::text || ':' || coalesce(obj_description(c.oid, 'pg_class'), ''), ',' ORDER BY n.nspname, c.relname)
+		SELECT string_agg(c.relname || ':' || c.relkind::text || ':' || coalesce(obj_description(c.oid, 'pg_class'), ''), ',' ORDER BY c.relname)
 		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE n.nspname IN ('public', 'other')`).Scan(&rels); err != nil {
+		WHERE n.nspname = 'public'`).Scan(&rels); err != nil {
 		t.Fatal(err)
 	}
-	for _, schema := range []string{"public", "other"} {
-		if tableExists(t, db, schema+".schema_migrations") {
-			var s sql.NullString
-			if err := db.QueryRow(`SELECT string_agg(version || '/' || dirty, ',') FROM ` + quoteIdent(schema) + `.schema_migrations`).Scan(&s); err != nil {
-				t.Fatal(err)
-			}
-			sm.String += schema + "=" + s.String + ";"
+	if tableExists(t, db, "public.schema_migrations") {
+		if err := db.QueryRow(`SELECT string_agg(version || '/' || dirty, ',') FROM public.schema_migrations`).Scan(&sm); err != nil {
+			t.Fatal(err)
 		}
 	}
 	if tableExists(t, db, versionTable) {

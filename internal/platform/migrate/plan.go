@@ -16,20 +16,18 @@ import (
 type PlanState string
 
 const (
-	// PlanEmpty: no Velox tables and no record; migration 180 runs the
+	// PlanEmpty: goose has not recorded 180; migration 180 runs the
 	// baseline, then the files after it.
 	PlanEmpty PlanState = "empty"
-	// PlanAdopt: a v0.8.0, v0.8.1 or v0.8.2 database at (180, false); migration
-	// 180 records 180 in goose_db_version and changes no table.
-	PlanAdopt PlanState = "ready to move"
 	// PlanBehind: `velox migrate` would apply Plan.Pending.
 	PlanBehind PlanState = "behind"
 	// PlanUpToDate: nothing to apply.
 	PlanUpToDate PlanState = "up to date"
 	// PlanAhead: the database has migrations this binary does not ship.
 	PlanAhead PlanState = "ahead"
-	// PlanRefused: the state check refuses the database (Plan.Refusal).
-	PlanRefused PlanState = "refused"
+	// PlanUnrecorded: Velox tables, but goose has not recorded 180.
+	// `velox migrate` refuses it (ErrNoMigrationRecord).
+	PlanUnrecorded PlanState = "no migration record"
 )
 
 // PlanFile is one migration `velox migrate` would apply.
@@ -49,16 +47,12 @@ type PlanVersion struct {
 // `velox migrate status` prints it before an upgrade.
 type Plan struct {
 	State PlanState
-	// Database is the highest version goose recorded, or 180 for a v0.8
-	// database (State PlanAdopt), 0 when none.
+	// Database is the highest version goose recorded, 0 when none.
 	Database int64
 	// Latest is the highest version this binary ships.
 	Latest  int64
-	Pending []PlanFile    // in order; set for PlanEmpty, PlanAdopt and PlanBehind
+	Pending []PlanFile    // in order; set for PlanEmpty and PlanBehind
 	Ahead   []PlanVersion // set for PlanAhead
-	Refusal error         // set for PlanRefused
-	// Records describes both version records, for a refused state.
-	Records string
 	// Running describes the process holding the migration lock now, ""
 	// when none does.
 	Running string
@@ -128,12 +122,6 @@ func planFor(st state, files []PlanFile) Plan {
 	for _, f := range files {
 		p.Latest = f.Version
 	}
-	d := decide(st)
-	if d.act == actRefuse {
-		p.State, p.Refusal, p.Records = PlanRefused, d.err, describeRecords(st)
-		p.Database = st.gooseVersion()
-		return p
-	}
 	shipped := map[int64]bool{}
 	for _, f := range files {
 		shipped[f.Version] = true
@@ -148,18 +136,10 @@ func planFor(st state, files []PlanFile) Plan {
 	}
 	p.Database = st.gooseVersion()
 	switch {
-	case d.act == actBaseline:
+	case decide(st) == actRefuse:
+		p.State, p.Pending, p.Ahead = PlanUnrecorded, nil, nil
+	case decide(st) == actBaseline:
 		p.State = PlanEmpty
-	case d.act == actAdopt:
-		p.State, p.Database = PlanAdopt, baselineVersion
-		// 180 itself only records; list the files after it.
-		var after []PlanFile
-		for _, f := range p.Pending {
-			if f.Version != baselineVersion {
-				after = append(after, f)
-			}
-		}
-		p.Pending = after
 	case len(p.Ahead) > 0:
 		p.State, p.Pending = PlanAhead, nil
 	case len(p.Pending) > 0:
@@ -168,17 +148,6 @@ func planFor(st state, files []PlanFile) Plan {
 		p.State = PlanUpToDate
 	}
 	return p
-}
-
-func describeRecords(st state) string {
-	parts := []string{"goose_db_version: none"}
-	if st.gooseTable {
-		parts[0] = fmt.Sprintf("goose_db_version: %d", st.gooseVersion())
-	}
-	if st.v08.exists {
-		parts = append(parts, "schema_migrations: "+st.v08.describe())
-	}
-	return strings.Join(parts, "; ")
 }
 
 // lockHolder names the session holding goose's migration lock in this
@@ -218,10 +187,8 @@ func FormatPlan(p Plan, release string) string {
 	switch p.State {
 	case PlanEmpty:
 		row("database", "empty")
-	case PlanAdopt:
-		row("database", "180 (recorded by Velox v0.8.x)")
-	case PlanRefused:
-		row("database", p.Records)
+	case PlanUnrecorded:
+		row("database", "Velox tables, no migration record")
 	default:
 		row("database", fmt.Sprintf("%d (goose_db_version)", p.Database))
 	}
@@ -234,20 +201,15 @@ func FormatPlan(p Plan, release string) string {
 			label = "empty"
 		}
 		row("state", fmt.Sprintf("%s, %s to apply", label, countMigrations(len(p.Pending))))
-	case PlanAdopt:
-		row("state", `ready to move: the next "velox migrate" records 180 in goose_db_version and changes no table`)
-		if len(p.Pending) > 0 {
-			fmt.Fprintf(&b, "  then %s to apply\n", countMigrations(len(p.Pending)))
-		}
 	case PlanUpToDate:
 		row("state", "up to date, nothing to apply")
+	case PlanUnrecorded:
+		row("state", "no migration record, velox migrate will not run")
 	case PlanAhead:
 		row("state", "ahead, the database has migrations this release does not ship")
 		for _, a := range p.Ahead {
 			fmt.Fprintf(&b, "  %05d   applied %s\n", a.Version, a.AppliedAt.UTC().Format("2006-01-02 15:04:05 UTC"))
 		}
-	case PlanRefused:
-		row("state", "refused, this release will not migrate this database")
 	}
 	for _, f := range p.Pending {
 		if f.NoTx {
@@ -264,12 +226,13 @@ func FormatPlan(p Plan, release string) string {
 	row("running now", running)
 
 	switch p.State {
-	case PlanEmpty, PlanAdopt, PlanBehind:
+	case PlanEmpty, PlanBehind:
 		b.WriteString(`next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.` + "\n")
 	case PlanAhead:
 		b.WriteString("next: this binary is older than the database; to go back, restore the backup taken before the upgrade\n")
-	case PlanRefused:
-		b.WriteString("\n" + p.Refusal.Error() + "\n")
+	case PlanUnrecorded:
+		b.WriteString("next: restore the backup together with its migration table, or use an empty database. " +
+			"Upgrading from Velox 0.8.x is not supported; install fresh. Steps: " + RunbookPath + "\n")
 	}
 	return b.String()
 }

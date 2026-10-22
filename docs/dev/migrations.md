@@ -6,8 +6,12 @@ two shapes a file can take, and the rules CI checks before any database is
 involved.
 
 Velox applies migrations with [goose](https://github.com/pressly/goose).
-Migration 180 is the whole schema of Velox v0.8.1 in one generated file. New
-files go in `internal/platform/migrate/sql/` and start at `00181`.
+Migration 180 is the starting schema in one file,
+[`baseline/00180_baseline.sql`](../../internal/platform/migrate/baseline/00180_baseline.sql).
+It runs only on an empty database. New files go in
+`internal/platform/migrate/sql/` and start at `00181`.
+
+Upgrading from Velox 0.8.x is not supported; install fresh.
 
 ## Add a migration in three steps
 
@@ -27,7 +31,7 @@ Step 3 needs the local Postgres from
 
    ```text
    Wrote internal/platform/migrate/sql/00181_add_invoice_purchase_order.sql
-   The highest number before it was 00180, in the v0.8.1 baseline.
+   The highest number before it was 00180, in the baseline.
    ```
 
    The number is one above the highest file in any worktree of your clone
@@ -82,12 +86,12 @@ Step 3 needs the local Postgres from
    database:     empty
    this release: 181 (velox dev)
    state:        empty, 2 migrations to apply
-     00180 v0.8.1 baseline
+     00180 baseline
      00181_add_invoice_purchase_order.sql
    running now:  no
    next: take a backup, then run "velox migrate". A server started with RUN_MIGRATIONS_ON_BOOT=true runs it as it starts.
    $ go run ./cmd/velox migrate
-   2026/10/18 01:00:33 INFO migration applied migration="00180 v0.8.1 baseline" version=180 duration_ms=493
+   2026/10/18 01:00:33 INFO migration applied migration="00180 baseline" version=180 duration_ms=493
    2026/10/18 01:00:33 INFO migration applied migration=00181_add_invoice_purchase_order.sql version=181 duration_ms=4
    2026/10/18 01:00:33 INFO migrations applied version=181 applied=2 duration_ms=507
    migrations applied successfully
@@ -104,8 +108,8 @@ Step 3 needs the local Postgres from
    180.
 
 Then commit the file with the code that uses it. CI applies every migration
-to a new database and to one upgraded from v0.8.1, and checks that the two
-end up identical.
+to an empty database under three role setups, and checks that a second run
+has nothing to do.
 
 ## The two shapes of a file
 

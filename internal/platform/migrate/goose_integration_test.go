@@ -14,7 +14,8 @@ import (
 
 // Real-Postgres tests of the goose runner (ADR-125). Each names the
 // mutation that must turn it red; the migrations CI job covers the rest
-// (new install == upgraded install, privileges, the restore drill).
+// (each role setup, the limited user's timeout, the restore drill,
+// Postgres 14).
 
 const widgetsFile = `-- +goose Up
 CREATE TABLE widgets (id int NOT NULL);
@@ -22,133 +23,10 @@ CREATE TABLE widgets (id int NOT NULL);
 DROP TABLE widgets;
 `
 
-// T1. Three copies take over one v0.8 database at once. Mutation: a
-// provider without WithSessionLocker; then two copies run migration 180
-// and goose writes row 180 twice (its table has no unique constraint, so
-// only the lock keeps it to one).
-func TestUpAdoptsV08Concurrently(t *testing.T) {
-	dsn, db := scratchDB(t, "velox_migrate_t1")
-	ctx := context.Background()
-	if err := up(ctx, dsn, noFiles); err != nil {
-		t.Fatalf("baseline: %v", err)
-	}
-	buildV08(t, db, 180, false)
-	fastLockWait(t, 60)
-
-	errs := make([]error, 3)
-	var wg sync.WaitGroup
-	for i := range errs {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			errs[i] = up(ctx, dsn, noFiles)
-		}(i)
-	}
-	wg.Wait()
-	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("copy %d: %v", i, err)
-		}
-	}
-	if n := gooseRows(t, db, 180); n != 1 {
-		t.Fatalf("goose_db_version holds %d rows for 180, want 1", n)
-	}
-	var comment sql.NullString
-	if err := db.QueryRow(`SELECT obj_description('public.schema_migrations'::regclass, 'pg_class')`).Scan(&comment); err != nil {
-		t.Fatal(err)
-	}
-	if comment.String != v08Marker {
-		t.Fatalf("schema_migrations comment = %q, want the marker", comment.String)
-	}
-	var v int64
-	var dirty bool
-	if err := db.QueryRow(`SELECT version, dirty FROM public.schema_migrations`).Scan(&v, &dirty); err != nil || v != 180 || dirty {
-		t.Fatalf("schema_migrations after adoption: %d %v %v, want 180 false (frozen)", v, dirty, err)
-	}
-}
-
-// T3. Every state the check refuses, built by hand: Up returns the
-// message, creates no goose_db_version where none existed, and changes
-// nothing. Mutation: read the record without its comment; the
-// "restored over" case then passes as a frozen record.
-func TestUpRefusesV08States(t *testing.T) {
-	cases := []struct {
-		name  string
-		build func(t *testing.T, db *sql.DB)
-		dsn   func(t *testing.T, dsn string) string
-		kind  v08Kind
-		want  string
-	}{
-		{"v0.8 below 180", func(t *testing.T, db *sql.DB) { writeV08Record(t, db, "public", 179, false) }, nil,
-			v08NotClean, "says version 179, dirty=false"},
-		{"v0.8 dirty at 180", func(t *testing.T, db *sql.DB) { writeV08Record(t, db, "public", 180, true) }, nil,
-			v08NotClean, "says version 180, dirty=true"},
-		{"v0.8 development build at 181", func(t *testing.T, db *sql.DB) { writeV08Record(t, db, "public", 181, false) }, nil,
-			v08NotClean, "A version above 180 came from a development build"},
-		{"v0.8 backup restored over an adopted database", func(t *testing.T, db *sql.DB) {
-			recordGoose(t, db, 180)
-			writeV08Record(t, db, "public", 180, false) // no marker: --clean recreated the table
-		}, nil, v08Mismatch, "without the comment this release adds"},
-		{"v0.8 rollback after adoption", func(t *testing.T, db *sql.DB) {
-			recordGoose(t, db, 180)
-			writeV08Record(t, db, "public", 180, false)
-			mustExec(t, db, `COMMENT ON TABLE public.schema_migrations IS '`+v08Marker+`'`)
-			mustExec(t, db, `TRUNCATE public.schema_migrations`)
-			mustExec(t, db, `INSERT INTO public.schema_migrations VALUES (179, false)`)
-		}, nil, v08Mismatch, "(version 179, dirty=false) does not match this release's record in goose_db_version (version 180)"},
-		{"v0.8 binary ran on a new database", func(t *testing.T, db *sql.DB) {
-			recordGoose(t, db, 180)
-			writeV08Record(t, db, "public", 1, true)
-		}, nil, v08Mismatch, "version 1, dirty=true"},
-		{"v0.8 tables outside public", func(t *testing.T, db *sql.DB) {
-			mustExec(t, db, `CREATE SCHEMA other`)
-			writeV08Record(t, db, "other", 180, false)
-		}, func(t *testing.T, dsn string) string { return withParam(t, dsn, "search_path", "other") },
-			v08OutsidePublic, `schema "other"`},
-	}
-	for i, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dsn, db := scratchDB(t, "velox_migrate_t3_"+string(rune('a'+i)))
-			tc.build(t, db)
-			if tc.dsn != nil {
-				dsn = tc.dsn(t, dsn)
-			}
-			hadGoose := tableExists(t, db, versionTable)
-			before := fingerprint(t, db)
-
-			err := up(context.Background(), dsn, noFiles)
-			var refused *V08Error
-			if !errors.As(err, &refused) || refused.kind != tc.kind {
-				t.Fatalf("Up: want a V08Error of kind %d, got %v", tc.kind, err)
-			}
-			for _, want := range []string{tc.want, "Nothing was changed."} {
-				if !strings.Contains(err.Error(), want) {
-					t.Errorf("message lacks %q: %v", want, err)
-				}
-			}
-			if !hadGoose && tableExists(t, db, versionTable) {
-				t.Error("Up created goose_db_version on a refused database")
-			}
-			if after := fingerprint(t, db); after != before {
-				t.Errorf("Up changed the database:\nbefore %s\nafter  %s", before, after)
-			}
-			// The same refusal at boot, on a pool with the same settings.
-			check, err := sql.Open("pgx", dsn)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = check.Close() }()
-			if err := CheckSchemaReady(check); !errors.As(err, &refused) || refused.kind != tc.kind {
-				t.Errorf("CheckSchemaReady: want the same refusal, got %v", err)
-			}
-		})
-	}
-}
-
 // T4. A new database: the baseline, then a file with unqualified names, in
-// the same Up. Mutation: drop gen-baseline's R4 (search_path made
-// transaction-local); the baseline's empty search_path then leaks into
-// the widgets file, which has no schema to create its table in.
+// the same Up. Mutation: set the baseline's empty search_path for the
+// session (set_config(..., false)); it then leaks into the widgets file,
+// which has no schema to create its table in.
 func TestUpBaselineThenFileInOneUp(t *testing.T) {
 	dsn, db := scratchDB(t, "velox_migrate_t4")
 	widgets, version := pastShipped(t, "widgets.sql")
@@ -215,7 +93,7 @@ func TestUpCreatesInPublicWhateverTheSearchPath(t *testing.T) {
 		t.Fatalf("tenants (baseline) and widgets (%s) are in %q, want both in public", widgets, schemas.String)
 	}
 	// A second run, then the boot check on a pool with the user's own
-	// search_path: no M3 refusal, because Velox's tables are in public.
+	// search_path.
 	if err := up(context.Background(), dsn, fsys); err != nil {
 		t.Fatalf("second Up: %v", err)
 	}
@@ -343,6 +221,36 @@ func TestUpFailedFileLeavesNothing(t *testing.T) {
 	}
 }
 
+// A baseline that fails partway leaves nothing: not the tables before the
+// failing statement, and no row 180. The baseline is hand-edited source,
+// and an edit that commits partway would leave tables goose has no record
+// of, which every later command refuses. Mutation: a COMMIT after
+// CREATE TABLE public.tenants in the baseline; tenants then stays.
+func TestUpFailedBaselineLeavesNothing(t *testing.T) {
+	dsn, db := scratchDB(t, "velox_migrate_baseline_fails")
+	ctx := context.Background()
+	// The baseline creates tenants long before webhook_events.
+	mustExec(t, db, `CREATE TABLE public.webhook_events (id int)`)
+	err := up(ctx, dsn, noFiles)
+	var fe *FileError
+	if !errors.As(err, &fe) || fe.Version != baselineVersion {
+		t.Fatalf("want a FileError for 180, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "none of the baseline was applied") {
+		t.Errorf("message: %v", err)
+	}
+	if tableExists(t, db, "public.tenants") || gooseRows(t, db, baselineVersion) != 0 {
+		t.Fatal("the failed baseline left its tables or row 180")
+	}
+	mustExec(t, db, `DROP TABLE public.webhook_events`)
+	if err := up(ctx, dsn, noFiles); err != nil {
+		t.Fatalf("Up on the emptied database: %v", err)
+	}
+	if !tableExists(t, db, "public.tenants") || gooseRows(t, db, baselineVersion) != 1 {
+		t.Fatal("the baseline did not apply")
+	}
+}
+
 // blockTable holds ACCESS SHARE on a table, the way an open SELECT does.
 func blockTable(t *testing.T, db *sql.DB, table string) (release func()) {
 	t.Helper()
@@ -376,8 +284,8 @@ func upWithin(t *testing.T, d time.Duration, dsn string, fsys fstest.MapFS, rele
 }
 
 // T7. A normal file stops at MIGRATION_LOCK_TIMEOUT, undone in full. The
-// second case runs the baseline and the file in one Up. Mutation: drop
-// gen-baseline's R3 (SET LOCAL); the baseline's lock_timeout = 0 then
+// second case runs the baseline and the file in one Up. Mutation: turn the
+// baseline's SET LOCAL lock_timeout into a plain SET; lock_timeout = 0 then
 // stays on the session, and the file waits forever.
 func TestUpStopsOnLockTimeout(t *testing.T) {
 	t.Setenv(LockTimeoutEnv, "1s")
@@ -517,8 +425,8 @@ func TestUpLockWait(t *testing.T) {
 	}
 }
 
-// T11. The boot check. Mutation: treat row 5 (a v0.8 database at 180) as
-// ready; the server would then start before migration 180 records it.
+// T11. The boot check. Mutation: treat PlanEmpty as ready; the server
+// would then start on an empty database.
 //
 // CheckSchemaReady reads the set this binary ships: migration 180 and the
 // files in sql/. The counts and the "ahead" version below follow that set,
@@ -532,29 +440,6 @@ func TestCheckSchemaReady(t *testing.T) {
 		_, db := scratchDB(t, "velox_migrate_t11a")
 		if err := CheckSchemaReady(db); err == nil || !strings.Contains(err.Error(), behind) {
 			t.Fatalf("got %v, want %q", err, behind)
-		}
-	})
-	t.Run("v0.8 at 180", func(t *testing.T) {
-		dsn, db := scratchDB(t, "velox_migrate_t11b")
-		if err := up(ctx, dsn, noFiles); err != nil {
-			t.Fatal(err)
-		}
-		buildV08(t, db, 180, false)
-		if err := CheckSchemaReady(db); err == nil || !strings.Contains(err.Error(), behind) {
-			t.Fatalf("got %v, want %q", err, behind)
-		}
-		// What `velox migrate` does: adopt 180, then apply the shipped files.
-		if err := up(ctx, dsn, migrationFiles()); err != nil {
-			t.Fatalf("adopt: %v", err)
-		}
-		if err := CheckSchemaReady(db); err != nil {
-			t.Fatalf("after adoption: %v", err)
-		}
-		// Restored over: a v0.8.x archive brings back the unmarked record.
-		mustExec(t, db, `COMMENT ON TABLE public.schema_migrations IS NULL`)
-		var refused *V08Error
-		if err := CheckSchemaReady(db); !errors.As(err, &refused) || refused.kind != v08Mismatch {
-			t.Fatalf("restored over: want M2, got %v", err)
 		}
 	})
 	t.Run("up to date, then ahead", func(t *testing.T) {
@@ -602,12 +487,6 @@ func TestReadPlanIsReadOnly(t *testing.T) {
 		state PlanState
 	}{
 		{"empty", func(*testing.T, string, *sql.DB) {}, PlanEmpty},
-		{"v0.8 at 180", func(t *testing.T, dsn string, db *sql.DB) {
-			if err := up(ctx, dsn, noFiles); err != nil {
-				t.Fatal(err)
-			}
-			buildV08(t, db, 180, false)
-		}, PlanAdopt},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dsn, db := scratchDB(t, "velox_migrate_t12_"+strings.ReplaceAll(strings.ReplaceAll(tc.name, " ", "_"), ".", ""))
@@ -679,5 +558,150 @@ func TestDownRoundTrip(t *testing.T) {
 	}
 	if gooseRows(t, db, 180) != 1 || !tableExists(t, db, "public.tenants") {
 		t.Fatal("the refused Down changed the database")
+	}
+}
+
+// A database with Velox's tables but no goose record for 180: a Velox
+// 0.8.x database, or a backup restored without its migration table. It has
+// no upgrade path. Status says so, the boot check refuses, and Up refuses
+// before it takes the lock or creates anything; goose's own table included.
+// Mutation: drop the refusal from decide; status then says "empty", and
+// Up runs the baseline, which fails and leaves goose_db_version behind.
+func TestVeloxTablesWithoutRecordAreRefused(t *testing.T) {
+	ctx := context.Background()
+	for i, tc := range []struct {
+		name  string
+		build func(t *testing.T, db *sql.DB)
+	}{
+		{"Velox 0.8.x database", buildV08},
+		{"restored without its migration table", func(t *testing.T, db *sql.DB) {
+			mustExec(t, db, `DROP TABLE public.goose_db_version`)
+		}},
+		{"goose table with only row 0, left by an earlier attempt", func(t *testing.T, db *sql.DB) {
+			buildV08(t, db)
+			recordGoose(t, db)
+		}},
+		// v0.8.x created its tables unqualified, so an install could keep
+		// them in the admin user's own schema, which Postgres's default
+		// search_path ("$user", public) lists before public. public is
+		// then empty, and only the search_path finds the tables.
+		{"Velox 0.8.x database outside public", func(t *testing.T, db *sql.DB) {
+			mustExec(t, db, `DROP TABLE public.goose_db_version`)
+			mustExec(t, db, `DO $$ BEGIN EXECUTE format('ALTER SCHEMA public RENAME TO %I', current_user); END $$`)
+			mustExec(t, db, `CREATE SCHEMA public`)
+			for _, ext := range []string{"pgcrypto", "citext", "btree_gist"} {
+				mustExec(t, db, `ALTER EXTENSION `+ext+` SET SCHEMA public`)
+			}
+			mustExec(t, db, `CREATE TABLE schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL)`)
+			mustExec(t, db, `INSERT INTO schema_migrations VALUES (180, false)`)
+			if tableExists(t, db, "public.tenants") || !tableExists(t, db, "tenants") {
+				t.Fatal("setup: tenants should be outside public, on the search_path")
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn, db := scratchDB(t, "velox_migrate_unrecorded_"+string(rune('a'+i)))
+			if err := up(ctx, dsn, migrationFiles()); err != nil {
+				t.Fatalf("Up: %v", err)
+			}
+			tc.build(t, db)
+			before := fingerprint(t, db)
+			hadGooseTable := tableExists(t, db, versionTable)
+
+			pool, err := openPool(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = pool.Close() }()
+			p, err := readPlan(ctx, pool, migrationFiles())
+			if err != nil {
+				t.Fatalf("readPlan: %v", err)
+			}
+			if p.State != PlanUnrecorded || len(p.Pending) != 0 {
+				t.Errorf("status: state %q with %d pending, want %q and none", p.State, len(p.Pending), PlanUnrecorded)
+			}
+			out := FormatPlan(p, "v0.9.1")
+			if !strings.Contains(out, "Velox tables, no migration record") || strings.Contains(out, `run "velox migrate"`) {
+				t.Errorf("status output:\n%s", out)
+			}
+
+			if ready := CheckSchemaReady(db); !errors.Is(ready, ErrNoMigrationRecord) {
+				t.Errorf("CheckSchemaReady: %v", ready)
+			}
+
+			err = up(ctx, dsn, migrationFiles())
+			var fe *FileError
+			if !errors.Is(err, ErrNoMigrationRecord) || errors.As(err, &fe) {
+				t.Errorf("Up: want a refusal before any migration runs, got %v", err)
+			} else {
+				for _, want := range []string{"Velox tables but no migration record", "Nothing was changed", "Upgrading from Velox 0.8.x is not supported", RunbookPath} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("Up's message lacks %q: %v", want, err)
+					}
+				}
+			}
+			if _, err := down(ctx, dsn, migrationFiles(), -1); !errors.Is(err, ErrNoMigrationRecord) {
+				t.Errorf("Down: want ErrNoMigrationRecord, got %v", err)
+			}
+			if !hadGooseTable && tableExists(t, db, versionTable) {
+				t.Error("a refused command created goose_db_version")
+			}
+			if after := fingerprint(t, db); after != before {
+				t.Errorf("a refused command changed the database:\nbefore %s\nafter  %s", before, after)
+			}
+		})
+	}
+}
+
+// Our own dev databases moved to goose and kept golang-migrate's
+// schema_migrations table. With goose at 180, that table is never read,
+// whatever it holds. Mutation: refuse a goose database that also has
+// schema_migrations; the unmarked and dirty cases then fail.
+func TestUpIgnoresOldRecordWhenGooseHas180(t *testing.T) {
+	ctx := context.Background()
+	for i, tc := range []struct {
+		name  string
+		build func(t *testing.T, db *sql.DB)
+	}{
+		{"frozen record with its comment", func(t *testing.T, db *sql.DB) {
+			writeV08Record(t, db, 180, false)
+			mustExec(t, db, `COMMENT ON TABLE public.schema_migrations IS 'velox: frozen at 180; the migration record moved to public.goose_db_version'`)
+		}},
+		{"record at 180 without the comment", func(t *testing.T, db *sql.DB) {
+			writeV08Record(t, db, 180, false)
+		}},
+		{"dirty record at 1", func(t *testing.T, db *sql.DB) {
+			writeV08Record(t, db, 1, true)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dsn, db := scratchDB(t, "velox_migrate_old_record_"+string(rune('a'+i)))
+			if err := up(ctx, dsn, migrationFiles()); err != nil {
+				t.Fatalf("Up: %v", err)
+			}
+			tc.build(t, db)
+			before := fingerprint(t, db)
+			if err := up(ctx, dsn, migrationFiles()); err != nil {
+				t.Fatalf("second Up: %v", err)
+			}
+			if after := fingerprint(t, db); after != before {
+				t.Errorf("a no-op Up changed the database:\nbefore %s\nafter  %s", before, after)
+			}
+			if err := CheckSchemaReady(db); err != nil {
+				t.Fatalf("CheckSchemaReady: %v", err)
+			}
+			pool, err := openPool(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = pool.Close() }()
+			p, err := readPlan(ctx, pool, migrationFiles())
+			if err != nil {
+				t.Fatalf("readPlan: %v", err)
+			}
+			if p.State != PlanUpToDate {
+				t.Fatalf("status: state %q, want %q", p.State, PlanUpToDate)
+			}
+		})
 	}
 }
