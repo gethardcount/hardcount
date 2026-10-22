@@ -11,30 +11,16 @@ import (
 
 // Branding is the per-tenant visual identity a sender pulls from
 // TenantSettings before rendering an outbound email. Every field is
-// optional — NewSender falls back to Velox defaults when a tenant
-// hasn't set their own (T0-11 onboarding surfaces this in the
-// dashboard, but cold-start tenants will still send branded-enough
-// email).
+// optional, and an unset field stays empty: no logo means no <img>, no
+// company name means no seller name in the header or the From name. The
+// email never fills in "Velox" as the seller, because Velox is the
+// software, not the business billing the customer.
 type Branding struct {
 	CompanyName string
 	LogoURL     string
 	BrandColor  string // 7-char hex, e.g. #1f6feb. Empty = fall back to neutral.
 	SupportURL  string
 	FromName    string // Appears as "From: FromName <from@address>" when set.
-}
-
-// fill fills in Velox defaults so every rendered email has something in
-// each slot; keeps the templates simple (no "if empty" branches) at the
-// cost of one method call per send.
-func (b Branding) fill() Branding {
-	if b.CompanyName == "" {
-		b.CompanyName = "Velox Billing"
-	}
-	// BrandColor / LogoURL / SupportURL stay empty when unset — templates
-	// {{if}}-gate their renders so "no brand color" means no accent bar,
-	// and "no logo" means no <img> tag. Defensive fallbacks would look
-	// weirder than absence.
-	return b
 }
 
 // layoutTemplate is the shared chrome every customer-facing HTML email
@@ -46,7 +32,7 @@ func (b Branding) fill() Branding {
 //
 // Structure:
 //   - optional 3px brand_color accent bar at the very top
-//   - header: tenant logo + company name
+//   - header: tenant logo + company name, each only when set
 //   - content: per-email HTML (injected as template.HTML, pre-rendered)
 //   - optional CTA button
 //   - footer: support link + "Powered by Velox Billing" micro-credit
@@ -63,16 +49,16 @@ const layoutHTML = `<!DOCTYPE html>
       <td align="center" style="padding:32px 16px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
           {{if .BrandColor}}<tr><td style="height:3px;background-color:{{.BrandColor}};line-height:0;font-size:0;">&nbsp;</td></tr>{{end}}
-          <tr>
+          {{if or .LogoURL .CompanyName}}<tr>
             <td style="padding:24px 32px;border-bottom:1px solid #e5e7eb;">
               <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
                   {{if .LogoURL}}<td style="padding-right:12px;vertical-align:middle;"><img src="{{.LogoURL}}" alt="" height="32" style="display:block;max-height:32px;"></td>{{end}}
-                  <td style="vertical-align:middle;font-size:16px;font-weight:600;color:#111827;">{{.CompanyName}}</td>
+                  {{if .CompanyName}}<td style="vertical-align:middle;font-size:16px;font-weight:600;color:#111827;">{{.CompanyName}}</td>{{end}}
                 </tr>
               </table>
             </td>
-          </tr>
+          </tr>{{end}}
           <tr>
             <td style="padding:32px;font-size:15px;line-height:1.6;color:#1f2937;">
               {{.Content}}
