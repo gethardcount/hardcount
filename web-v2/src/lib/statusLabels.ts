@@ -82,13 +82,23 @@ export function subscriptionStatus(sub: SubscriptionStatusInput): StatusDisplay 
   return { label: humanizeStatus(sub.status), tone: 'neutral' }
 }
 
+// collectionPausedFlag is the chip a list shows beside a live subscription
+// whose collection is paused (by an operator or by dunning), or null. Live
+// means active or trialing, the same rule as GET /v1/subscriptions
+// ?collection=paused: a canceled row can keep the pause columns.
+export function collectionPausedFlag(sub: SubscriptionStatusInput): StatusDisplay | null {
+  if (sub.status !== 'active' && sub.status !== 'trialing') return null
+  return sub.pause_collection ? { label: 'Collection paused', tone: 'warning' } : null
+}
+
 // subscriptionFlags are the secondary chips shown beside the main badge, for
 // states the main status does not carry: collection paused (often by
 // dunning) and a scheduled cancel. Only for live subscriptions.
 export function subscriptionFlags(sub: SubscriptionStatusInput): StatusDisplay[] {
   if (sub.status !== 'active' && sub.status !== 'trialing') return []
   const flags: StatusDisplay[] = []
-  if (sub.pause_collection) flags.push({ label: 'Collection paused', tone: 'warning' })
+  const paused = collectionPausedFlag(sub)
+  if (paused) flags.push(paused)
   if (sub.cancel_at_period_end || sub.cancel_at) flags.push({ label: 'Cancel scheduled', tone: 'warning' })
   return flags
 }

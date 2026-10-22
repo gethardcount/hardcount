@@ -88,6 +88,7 @@ A subscription puts a customer on a plan.
 | `POST` | `/v1/subscriptions/{id}/cancel` | Cancel now |
 | `POST` | `/v1/subscriptions/{id}/retry-billing` | Clear a billing failure and bill now |
 | `GET` | `/v1/subscriptions?billing=failing` | List subscriptions whose billing is failing |
+| `GET` | `/v1/subscriptions?collection=paused` | List active and trialing subscriptions whose collection is paused, by you or by dunning |
 
 Changing, pausing or canceling a subscription first bills any period that
 has already ended, then applies the change. If that period cannot be billed,

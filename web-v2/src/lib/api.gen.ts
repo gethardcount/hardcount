@@ -2207,13 +2207,23 @@ export interface paths {
                     customer_id?: string;
                     /** @description Filter to subscriptions with a live item on this plan. */
                     plan_id?: string;
-                    status?: string;
+                    /**
+                     * @description Exact status. Any other value is a 400. Paused collection is not
+                     *     a status: use `collection=paused`.
+                     */
+                    status?: "draft" | "trialing" | "active" | "canceled" | "archived";
                     /**
                      * @description `failing` returns only subscriptions that carry a
                      *     `billing_failure`: those waiting for their next billing attempt
                      *     and those that are parked. Any other value is a 400.
                      */
                     billing?: "failing";
+                    /**
+                     * @description `paused` returns only active and trialing subscriptions that carry
+                     *     `pause_collection`, whether an operator or dunning set it. Any
+                     *     other value is a 400.
+                     */
+                    collection?: "paused";
                     /** @description Case-insensitive substring match on display name or code. */
                     search?: string;
                     /** @description One of display_name, status, next_billing_at, trial_end_at, created_at (default). */
@@ -2238,6 +2248,15 @@ export interface paths {
                             data: components["schemas"]["Subscription"][];
                             total: number;
                         };
+                    };
+                };
+                /** @description A `status`, `billing` or `collection` value the API does not know. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -7613,6 +7632,14 @@ export interface components {
              *     instead of inferring it. Always false in live mode.
              */
             is_simulated?: boolean;
+            /**
+             * @description The test clock this invoice's dates follow: the clock its customer
+             *     is pinned to, for cycle and one-off invoices alike. Read from the
+             *     customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+             *     responses may leave it out. Left out for a customer on wall-clock
+             *     time, and always in live mode.
+             */
+            test_clock_id?: string;
         };
         /** @description A single line on an invoice. */
         InvoiceLineItem: {

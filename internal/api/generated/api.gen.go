@@ -2906,6 +2906,33 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 	}
 }
 
+// Defines values for GetV1SubscriptionsParamsStatus.
+const (
+	Active   GetV1SubscriptionsParamsStatus = "active"
+	Archived GetV1SubscriptionsParamsStatus = "archived"
+	Canceled GetV1SubscriptionsParamsStatus = "canceled"
+	Draft    GetV1SubscriptionsParamsStatus = "draft"
+	Trialing GetV1SubscriptionsParamsStatus = "trialing"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsStatus enum.
+func (e GetV1SubscriptionsParamsStatus) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Archived:
+		return true
+	case Canceled:
+		return true
+	case Draft:
+		return true
+	case Trialing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1SubscriptionsParamsBilling.
 const (
 	Failing GetV1SubscriptionsParamsBilling = "failing"
@@ -2915,6 +2942,21 @@ const (
 func (e GetV1SubscriptionsParamsBilling) Valid() bool {
 	switch e {
 	case Failing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetV1SubscriptionsParamsCollection.
+const (
+	Paused GetV1SubscriptionsParamsCollection = "paused"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsCollection enum.
+func (e GetV1SubscriptionsParamsCollection) Valid() bool {
+	switch e {
+	case Paused:
 		return true
 	default:
 		return false
@@ -4869,7 +4911,14 @@ type Invoice struct {
 	// TenantId Owning tenant. Returned for diagnostic clarity but redundant
 	// with the API key (which already determines the tenant).
 	// Omitted when empty.
-	TenantId         string `json:"tenant_id,omitempty"`
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock this invoice's dates follow: the clock its customer
+	// is pinned to, for cycle and one-off invoices alike. Read from the
+	// customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+	// responses may leave it out. Left out for a customer on wall-clock
+	// time, and always in live mode.
+	TestClockId      string `json:"test_clock_id,omitempty"`
 	TotalAmountCents int64  `json:"total_amount_cents"`
 
 	// UncollectibleAt When the invoice was marked uncollectible.
@@ -7952,12 +8001,20 @@ type GetV1SubscriptionsParams struct {
 
 	// PlanId Filter to subscriptions with a live item on this plan.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
-	Status string `form:"status,omitempty" json:"status,omitempty"`
+
+	// Status Exact status. Any other value is a 400. Paused collection is not
+	// a status: use `collection=paused`.
+	Status GetV1SubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
 	// and those that are parked. Any other value is a 400.
 	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
+
+	// Collection `paused` returns only active and trialing subscriptions that carry
+	// `pause_collection`, whether an operator or dunning set it. Any
+	// other value is a 400.
+	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
@@ -7969,8 +8026,14 @@ type GetV1SubscriptionsParams struct {
 	Offset int                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// GetV1SubscriptionsParamsStatus defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsStatus string
+
 // GetV1SubscriptionsParamsBilling defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsBilling string
+
+// GetV1SubscriptionsParamsCollection defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsCollection string
 
 // GetV1SubscriptionsParamsDir defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsDir string
@@ -17018,6 +17081,19 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "billing"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "billing", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "collection" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "collection", r.URL.Query(), &params.Collection, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "collection"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "collection", Err: err})
 		}
 		return
 	}

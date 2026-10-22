@@ -201,7 +201,6 @@ export default function SubscriptionDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['customer-overview', sub.customer_id] })
       queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', sub.customer_id] })
     }
-    queryClient.invalidateQueries({ queryKey: ['subscriptions-for-test-clock-chip'] })
     // Plan/quantity changes can credit the customer's balance via
     // proration — refresh the balance-bearing families (2026-07-21 audit).
     invalidateMoneySurfaces(queryClient, { customerId: sub?.customer_id })

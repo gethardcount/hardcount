@@ -173,18 +173,9 @@ export default function InvoicesPage() {
     enabled: customerIds.length > 0,
   })
 
-  // subscriptionsForChip → test_clock_id lookup so each row can carry
-  // a TestClockBadge inline. Fetch is cheap (subs list is small in
-  // practice; the dashboard already pages other lists) and avoids a
-  // backend JOIN in the invoice list query.
-  const { data: subscriptionsData } = useQuery({
-    queryKey: ['subscriptions-for-test-clock-chip'],
-    queryFn: () => api.listSubscriptions(),
-  })
-
   // Test clocks → frozen_time lookup so per-row "Due in N days" badges
-  // read from simulation time when the row's subscription is pinned to a
-  // clock. Without it, the badge defaults to wall-clock and understates
+  // read from simulation time when the row's invoice follows a clock
+  // (inv.test_clock_id, read from its customer by the server). Without it, the badge defaults to wall-clock and understates
   // urgency on test-clock-driven invoices. The hook is mode-gated (no
   // fetch in live, where the server refuses the resource) and returns {}
   // there — every live row correctly falls back to wall time.
@@ -198,12 +189,6 @@ export default function InvoicesPage() {
     ;(customersData?.data ?? []).forEach(c => { cMap[c.id] = c })
     return cMap
   }, [customersData])
-
-  const subTestClockMap = useMemo(() => {
-    const m: Record<string, string> = {}
-    ;(subscriptionsData?.data ?? []).forEach(s => { if (s.test_clock_id) m[s.id] = s.test_clock_id })
-    return m
-  }, [subscriptionsData])
 
   // Search + date range are server-side (search=, from=, to= query
   // params) — the rows arriving here are already filtered across the
@@ -409,14 +394,11 @@ export default function InvoicesPage() {
                 </TableHeader>
                 <TableBody>
                   {sorted.map((inv: Invoice) => {
-                    // The invoice's own "now": a subscription invoice follows the
-                    // sub's clock; a manual one-off follows the customer's
-                    // (ADR-027). Wall-clock invoices resolve to '' → wall time.
-                    const now = effectiveNow(clockFrozenMap[
-                      (inv.subscription_id && subTestClockMap[inv.subscription_id]) ||
-                      customerMap[inv.customer_id]?.test_clock_id ||
-                      ''
-                    ])
+                    // The invoice's own "now": the clock its customer is pinned
+                    // to, which every subscription inherits (ADR-027). The
+                    // server sends it on each row; wall-clock invoices have
+                    // none → wall time.
+                    const now = effectiveNow(clockFrozenMap[inv.test_clock_id ?? ''])
                     return (
                     <TableRow
                       key={inv.id}

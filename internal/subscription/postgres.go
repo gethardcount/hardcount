@@ -3005,6 +3005,12 @@ func buildSubWhere(f ListFilter) (string, []any) {
 		// can never disagree about which subscriptions are failing.
 		clauses = append(clauses, domain.SubscriptionBillingFailingSQL("s"))
 	}
+	if f.Collection == ListCollectionPaused {
+		// Live rows only, the same rule as the dashboard's pause chip: a
+		// canceled row can still carry the pause columns, and nothing is
+		// collected from it for a reason the pause explains.
+		clauses = append(clauses, "(s.pause_collection_behavior IS NOT NULL AND s.status IN ('active','trialing'))")
+	}
 	if f.Search != "" {
 		// One placeholder reused across both columns — Postgres
 		// allows repeating $N, and it keeps the pattern arg single-

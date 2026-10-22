@@ -1170,6 +1170,14 @@ components:
             clock-pinned; manual composer: the customer is clock-pinned). The
             dashboard renders a "simulated" badge from this authoritative flag
             instead of inferring it. Always false in live mode.
+        test_clock_id:
+          type: string
+          description: |
+            The test clock this invoice's dates follow: the clock its customer
+            is pinned to, for cycle and one-off invoices alike. Read from the
+            customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+            responses may leave it out. Left out for a customer on wall-clock
+            time, and always in live mode.
 
     InvoiceLineItem:
       type: object
@@ -7975,8 +7983,12 @@ paths:
             type: string
         - name: status
           in: query
+          description: |
+            Exact status. Any other value is a 400. Paused collection is not
+            a status: use `collection=paused`.
           schema:
             type: string
+            enum: [draft, trialing, active, canceled, archived]
         - name: billing
           in: query
           description: |
@@ -7986,6 +7998,15 @@ paths:
           schema:
             type: string
             enum: [failing]
+        - name: collection
+          in: query
+          description: |
+            `paused` returns only active and trialing subscriptions that carry
+            `pause_collection`, whether an operator or dunning set it. Any
+            other value is a 400.
+          schema:
+            type: string
+            enum: [paused]
         - name: search
           in: query
           description: Case-insensitive substring match on display name or code.
@@ -8024,6 +8045,12 @@ paths:
                       $ref: "#/components/schemas/Subscription"
                   total:
                     type: integer
+        "400":
+          description: A `status`, `billing` or `collection` value the API does not know.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/subscriptions/{id}/activate:
     post:
