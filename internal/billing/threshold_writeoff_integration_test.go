@@ -230,10 +230,19 @@ type racingVoid struct {
 }
 
 func startVoid(r *s1Rig, invSvc *invoice.Service, admin *sql.DB, thrID string, at time.Time) *racingVoid {
+	return startRacing(r, admin, func() error {
+		_, err := invSvc.Void(r.at(at), r.f.tenantID, thrID)
+		return err
+	})
+}
+
+// startRacing runs action (a status change of the threshold invoice) on its
+// own goroutine, as startVoid does.
+func startRacing(r *s1Rig, admin *sql.DB, action func() error) *racingVoid {
 	v := &racingVoid{done: make(chan struct{})}
 	go func() {
 		defer close(v.done)
-		if _, v.err = invSvc.Void(r.at(at), r.f.tenantID, thrID); v.err != nil {
+		if v.err = action(); v.err != nil {
 			return
 		}
 		v.err = admin.QueryRowContext(r.base, `
@@ -349,6 +358,53 @@ func TestThresholdVoid_vs_Close_VoidAfterReRead(t *testing.T) {
 		t.Fatalf("%d cycle invoices, want 1", len(cycle))
 	}
 	v.wantOrderHonored(t, r, cycle[0], 1000, 700)
+	assertUsageBilledOnce(t, r.base)
+}
+
+// TestThresholdPayment_vs_Close_PaymentAfterReRead is the paid-flip control
+// for the row lock: an offline payment of the threshold invoice after the
+// close's re-read waits for the close's commit (the payment's FOR UPDATE
+// against the re-read's FOR SHARE), with no deadlock, and the close bills
+// the residual whichever lands first: a paid invoice keeps its window
+// billed.
+func TestThresholdPayment_vs_Close_PaymentAfterReRead(t *testing.T) {
+	r := newS1Rig(t, "Payment after the close's re-read", 200, false)
+	if fired := r.runFire(t); fired != 1 {
+		t.Fatalf("fire reported %d, want 1", fired)
+	}
+	_, threshold, _ := r.liveInvoices(t)
+	if len(threshold) != 1 {
+		t.Fatalf("%d threshold invoices after the fire, want 1", len(threshold))
+	}
+	admin := testutil.AdminPool(t)
+	invSvc := invoice.NewService(r.f.invStore, clock.Real(), r.f.settings)
+	var p *racingVoid
+	r.closer.invs.afterWatermarkTx = func() {
+		r.closer.invs.afterWatermarkTx = nil
+		p = startRacing(r, admin, func() error {
+			_, err := invSvc.RecordOfflinePayment(r.at(r.t1.Add(time.Hour)), r.f.tenantID, threshold[0].ID, "wire")
+			return err
+		})
+		p.settle(t, r.base, admin)
+	}
+	if gen := r.runClose(t); gen != 1 {
+		t.Fatalf("close generated %d, want 1", gen)
+	}
+	if p == nil {
+		t.Fatal("the close never re-read the watermark on its tx")
+	}
+	<-p.done
+	if p.err != nil {
+		t.Fatalf("offline payment: %v", p.err)
+	}
+	cycle, threshold, _ := r.liveInvoices(t)
+	if len(cycle) != 1 || len(threshold) != 1 || threshold[0].Status != domain.InvoicePaid {
+		t.Fatalf("invoices: cycle=%d threshold=%+v, want one cycle invoice and the threshold invoice paid", len(cycle), threshold)
+	}
+	lines := r.usageLines(t, cycle[0].ID)
+	if len(lines) != 1 || lines[0].BillingPeriodStart == nil || !lines[0].BillingPeriodStart.Equal(r.t1) || lines[0].AmountCents != 700 {
+		t.Fatalf("cycle usage lines = %+v, want one residual line [t1, P1) = 700c", lines)
+	}
 	assertUsageBilledOnce(t, r.base)
 }
 

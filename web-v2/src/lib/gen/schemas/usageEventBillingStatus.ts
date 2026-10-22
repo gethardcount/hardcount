@@ -13,11 +13,11 @@
  * subscription that prices this meter already invoiced the
  * event's time, so the event is stored but billed on no invoice,
  * now or later. Bill it with a one-off invoice if it should be
- * charged. A spend-threshold invoice counts only once it is paid:
- * until then it can be voided, and then the period's invoice bills
- * the event. Absent otherwise, which is not
- * a promise that the event will be billed. Never sent on a replay
- * or a read.
+ * charged. A spend-threshold invoice that fired with
+ * `reset_billing_cycle: false` counts only once it is paid: until
+ * then it can be voided, and then the period's invoice bills the
+ * event. Absent otherwise, which is not a promise that the event
+ * will be billed. Never sent on a replay or a read.
  */
 export type UsageEventBillingStatus = typeof UsageEventBillingStatus[keyof typeof UsageEventBillingStatus];
 

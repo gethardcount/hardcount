@@ -3809,11 +3809,12 @@ export interface paths {
          *     it) and resolves any active dunning run with `invoice_voided`.
          *     Fires the `invoice.voided` webhook event.
          *
-         *     A spend-threshold invoice (`billing_reason = threshold`) voided
-         *     before its period's invoice is built gives its window back: that
-         *     invoice bills the base fee and usage the threshold invoice billed.
-         *     Voided after, the window is billed nowhere; bill it with a one-off
-         *     invoice if it should be charged.
+         *     A spend-threshold invoice (`billing_reason = threshold`) that fired
+         *     with `reset_billing_cycle: false` and is voided before its period's
+         *     invoice is built gives its charges back: that invoice bills the base
+         *     fee and usage the threshold invoice billed. Voided after that, or
+         *     fired with `reset_billing_cycle: true`, its charges are billed on no
+         *     invoice; bill them with a one-off invoice if they should be charged.
          *
          *     A paid invoice cannot be voided: issue a credit note instead.
          */
@@ -3870,10 +3871,8 @@ export interface paths {
          *     payment retries stop. Fires the `invoice.marked_uncollectible`
          *     webhook event.
          *
-         *     A written-off spend-threshold invoice keeps its window billed: the
-         *     period's invoice does not bill that base fee and usage again. To
-         *     have it billed there instead, void the threshold invoice before the
-         *     period's invoice is built.
+         *     A written-off spend-threshold invoice keeps its charges billed: no
+         *     later invoice bills them again.
          */
         post: operations["markInvoiceUncollectible"];
         delete?: never;
@@ -7307,11 +7306,11 @@ export interface components {
              *     subscription that prices this meter already invoiced the
              *     event's time, so the event is stored but billed on no invoice,
              *     now or later. Bill it with a one-off invoice if it should be
-             *     charged. A spend-threshold invoice counts only once it is paid:
-             *     until then it can be voided, and then the period's invoice bills
-             *     the event. Absent otherwise, which is not
-             *     a promise that the event will be billed. Never sent on a replay
-             *     or a read.
+             *     charged. A spend-threshold invoice that fired with
+             *     `reset_billing_cycle: false` counts only once it is paid: until
+             *     then it can be voided, and then the period's invoice bills the
+             *     event. Absent otherwise, which is not a promise that the event
+             *     will be billed. Never sent on a replay or a read.
              * @enum {string}
              */
             billing_status?: "after_close";

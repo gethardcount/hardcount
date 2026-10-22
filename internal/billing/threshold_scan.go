@@ -382,7 +382,9 @@ func (e *Engine) loadThresholdWatermark(ctx context.Context, tenantID, subID str
 // loadThresholdWatermarkTx is loadThresholdWatermark with the fire invoice read
 // on tx (nil: its own connection). A closer that holds the subscription row
 // lock reads on its tx, after the lock: a fire commits under the same lock, so
-// every fire committed before it is seen (BillOnPlanSwapTx).
+// every fire committed before it is seen (BillOnPlanSwapTx, the immediate
+// cancel). The read holds the fire invoice FOR SHARE until tx ends, so a void
+// of it waits for the closer's commit.
 func (e *Engine) loadThresholdWatermarkTx(ctx context.Context, tx *sql.Tx, tenantID, subID string, periodStart, periodEnd time.Time) (thresholdWatermark, error) {
 	var wmInv domain.Invoice
 	var err error

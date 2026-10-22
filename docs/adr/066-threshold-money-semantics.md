@@ -254,21 +254,54 @@ late payment (breaks "never refuse to RECORD", leaves the credit form
 unfixed) and refunding the overlap after the paid flip (most code, on the
 paid chokepoint, undoing a re-bill that should not happen).
 
-**Void timing.** A void before the period's invoice is built gives the
-window back to it. A void after that forgives the window: the built
-invoice never changes (ADR-120), and nothing else bills it. The operator
-bills it with a one-off invoice if wanted. The void dialog and the
-late-usage runbook say so.
+**Void timing (`reset=false`).** A void before the period's invoice is
+built gives the window back to it. A void after that forgives the window:
+the built invoice never changes (ADR-120), and nothing else bills it. The
+operator bills it with a one-off invoice if wanted. The late-usage runbook
+says so.
+
+**`reset=true` is unchanged.** The fire starts a new period at the fire
+instant, so the threshold invoice is outside every later watermark window
+and no later invoice bills `[periodStart, fire)`: a write-off keeps it
+billed, and a void at any time forgives it. Locked by
+`TestThresholdResetTrue_VoidOrWriteOff_CloseBillsOnlyTheNewPeriod`. The
+dashboard's void and write-off dialogs do not know the setting the fire
+ran under or whether the period's invoice is built, so they carry one line
+true in every case ("After a void, its charges may not be billed on any
+other invoice"; "The charges on this spend-threshold invoice will not be
+billed again"), and the runbook gives each case.
+
+**A void racing a closer lands before or after it.** The closers read the
+watermark after their tx locked the subscription row, but before this
+amendment nothing locked the threshold invoice, and `Void` never takes the
+subscription lock. A void committing after the read and before the
+closer's commit was billed by neither: it came first, yet the closer
+committed the residual it had planned. Reproduced for the cycle close (its
+in-tx re-read), the immediate cancel (which read on its own connection)
+and the cross-interval swap. `GetLatestThresholdInvoiceForCycleTx` now
+holds the threshold invoice `FOR SHARE` until the closer's tx ends, and the
+immediate cancel reads on its tx (`loadThresholdWatermarkTx`). A void that
+arrives after the read waits for the commit and lands after the period's
+invoice (forgiven). A void that holds the row at the read is waited for;
+Postgres re-checks the row after it commits, a voided row no longer
+matches, and the closer bills the window (the cycle close through the
+`ErrWatermarkMoved` re-plan). Lock order is the one every writer of both
+takes, subscription row then invoice row (`lockSubscriptionRow`,
+`LockDunningPauseTx` before a paid flip); `Void` and `MarkUncollectible`
+lock only the invoice. A write-off, a payment or a card settle on the
+threshold invoice also waits for the closer's commit; none changes the
+watermark. The live balance, the preview and the after_close classifier
+read without a lock: they display or flag, and never write an invoice.
 
 **One predicate.** `thresholdBillsWindow` (`status <> 'voided'`,
 `invoice/postgres.go`) is the only copy. Its readers, all checked:
 
 | Reader | Effect |
 |---|---|
-| cycle close build (`buildLineItems`) and its in-tx re-read (`commitPeriodClose`) | bills only the residual after a write-off; a void between build and commit moves the watermark, so the close re-plans and bills the window |
-| immediate cancel (`billFinalOnImmediateCancelImpl`) | same |
-| cross-interval swap (`BillOnPlanSwapTx`) | same, read on the swap's tx |
-| swap re-anchor guard (`ThresholdBilledThroughTx`) | still refuses to re-anchor below a written-off fire |
+| cycle close build (`buildLineItems`) and its in-tx re-read (`commitPeriodClose`) | bills only the residual after a write-off; a void committed before the re-read moves the watermark, so the close re-plans and bills the window; the re-read holds the row `FOR SHARE` |
+| immediate cancel (`billFinalOnImmediateCancelImpl`) | same, read on the cancel's tx `FOR SHARE` (was its own connection) |
+| cross-interval swap (`BillOnPlanSwapTx`) | same, read on the swap's tx `FOR SHARE` |
+| swap re-anchor guard (`ThresholdBilledThroughTx`) | still refuses to re-anchor below a written-off fire; first `FOR SHARE` read of the swap's tx |
 | operator preview, live balance | agree with the close |
 | after_close classifier (`ThresholdWatermarks`, #1350) | see below |
 
@@ -338,6 +371,14 @@ settle, credit; real server over HTTP),
 `TestUsageAfterClose_HeldReleaseUnderWrittenOffThresholdInvoice`,
 `TestUsageAfterClose_ThresholdWatermark_Unpaid` (write-off case now 5c),
 the doctor's seeded `doc_wo`/`doc_vd` pair and
-`TestRecoveryWarnsOnOfflinePayment`. Controls that must not change:
-`TestThresholdWriteOff_VoidStillReopensTheWindow` (void, and write-off
-then void, still re-bill).
+`TestRecoveryWarnsOnOfflinePayment`. The race, each red before the row
+lock: `TestThresholdVoid_vs_Close_VoidAfterReRead`,
+`TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead`,
+`TestThresholdVoid_vs_PlanSwap_VoidAfterRead`. Controls that must not
+change: `TestThresholdWriteOff_VoidStillReopensTheWindow` (void, and
+write-off then void, still re-bill), `TestThresholdVoid_vs_Close_VoidInFlight`,
+`TestThresholdVoid_vs_Close_VoidHoldsTheRow` (the void holds the row at the
+re-read; the close waits and bills the window),
+`TestThresholdPayment_vs_Close_PaymentAfterReRead` (a payment after the
+re-read waits, no deadlock, the close bills the residual), and the
+`reset=true` test above.

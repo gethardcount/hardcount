@@ -4086,24 +4086,36 @@ func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, t
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
-	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "")
 }
 
 // GetLatestThresholdInvoiceForCycleTx is GetLatestThresholdInvoiceForCycle
-// on the caller's tx — the period closer's in-tx watermark re-read
-// (ADR-115). Under READ COMMITTED a statement issued AFTER the closer's
-// row-lock wait sees every threshold fire that committed before it took the
-// lock, so the closer can prove the watermark it built its lines against is
-// still the watermark, and roll back if a fire landed in between. A void
-// that commits between the build and this re-read moves the watermark too,
-// so the close re-plans and bills the reopened window.
+// on the caller's tx, holding the invoice row FOR SHARE until that tx ends.
+// Its callers are the period's closers (the cycle close's in-tx re-read,
+// ADR-115; the immediate cancel; the cross-interval swap and its re-anchor
+// guard), and each calls it after its tx locked the subscription row.
+//
+// Under READ COMMITTED a statement issued after the closer's row-lock wait
+// sees every threshold fire that committed before it took the lock, so the
+// closer can prove the watermark it built its lines against is still the
+// watermark, and roll back if a fire landed in between. The share lock does
+// the same for a void (ADR-066 amendment 2026-10-23). A void that holds the
+// row when the read runs is waited for: the row is re-checked after it
+// commits, a voided row no longer matches, and the closer bills the
+// reopened window. A void that arrives after the read waits for the
+// closer's commit, so it lands after the period's invoice and the window is
+// forgiven. Without the lock that void could commit first and still find
+// its window billed nowhere. Lock order is subscription row, then invoice
+// row, as every writer of both takes them (subscription
+// lockSubscriptionRow, LockDunningPauseTx).
+//
 // tenantID is accepted for symmetry with the store's other *Tx methods; RLS
 // scoping rides the tx's tenant binding.
 func (s *PostgresStore) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	if subscriptionID == "" {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
-	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdBillsWindow, "FOR SHARE")
 }
 
 // GetThresholdInvoiceForCycleAnyStatus is the fire-once probe's read: the
@@ -4124,13 +4136,14 @@ func (s *PostgresStore) GetThresholdInvoiceForCycleAnyStatus(ctx context.Context
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
-	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdAnyStatus)
+	return s.thresholdInvoiceForCycleTx(ctx, tx, subscriptionID, periodStart, periodEnd, thresholdAnyStatus, "")
 }
 
 // thresholdInvoiceForCycleTx reads the newest threshold invoice whose
 // billing_period_start falls in [periodStart, periodEnd) and that matches
-// statusPredicate — one of this file's constants, never caller input.
-func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, subscriptionID string, periodStart, periodEnd time.Time, statusPredicate string) (domain.Invoice, error) {
+// statusPredicate, with lockClause ("" or "FOR SHARE") on the row it
+// returns. Both are this file's constants, never caller input.
+func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, subscriptionID string, periodStart, periodEnd time.Time, statusPredicate, lockClause string) (domain.Invoice, error) {
 	var inv domain.Invoice
 	err := tx.QueryRowContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
@@ -4141,6 +4154,7 @@ func (s *PostgresStore) thresholdInvoiceForCycleTx(ctx context.Context, tx *sql.
 		  AND i.billing_period_start < $3
 		ORDER BY i.billing_period_end DESC
 		LIMIT 1
+		`+lockClause+`
 	`, subscriptionID, periodStart, periodEnd).Scan(s.scanInvDest(&inv)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
