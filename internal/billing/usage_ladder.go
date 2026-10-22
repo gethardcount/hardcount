@@ -18,9 +18,8 @@ import (
 // slice at 0, and a later slice of the same bucket recovers the difference.
 //
 // It prices exactly as before (ComputeAmountCents(rule, qty)) when there is
-// no fire, for a non-additive bucket, for a flat rule (linear: the seed
-// changes nothing), and when a usage cap scales the close (the fire is
-// uncapped, so its quantity is not on the capped ladder; registered).
+// no fire, for a non-additive bucket, and for a flat rule (linear: the seed
+// changes nothing).
 //
 // The seed amount is F(seed quantity) recomputed under the rule, never the
 // fire line's persisted AmountCents: in tax-inclusive mode that field holds
@@ -33,10 +32,10 @@ type usageLadder struct {
 	amt map[string]int64           // bucket key → amount billed so far this period
 }
 
-// newUsageLadder builds the closer's ladder; capped reports that a usage cap
-// scales this close's quantities.
-func newUsageLadder(wm thresholdWatermark, capped bool) *usageLadder {
-	return &usageLadder{wm: wm, on: wm.exists() && !capped, qty: map[string]decimal.Decimal{}, amt: map[string]int64{}}
+// newUsageLadder builds the closer's ladder. It is on whenever this period
+// has a threshold fire to continue from.
+func newUsageLadder(wm thresholdWatermark) *usageLadder {
+	return &usageLadder{wm: wm, on: wm.exists(), qty: map[string]decimal.Decimal{}, amt: map[string]int64{}}
 }
 
 // continues reports whether a bucket priced under rule continues a ladder.

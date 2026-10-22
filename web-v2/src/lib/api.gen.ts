@@ -187,6 +187,19 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /**
+                 * @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 *     `dunning_policy_id` is not a create field: assign a policy with
+                 *     `PATCH /v1/customers/{id}`.
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -1220,18 +1233,26 @@ export interface paths {
                             quantity?: number;
                             unit_amount_cents?: number;
                         }[];
+                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
                         refund_amount_cents?: number;
                         credit_amount_cents?: number;
+                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
                         out_of_band_amount_cents?: number;
                         /**
                          * @description Older single-channel form. On a paid invoice whose three
                          *     `*_amount_cents` fields are all 0, `refund` or `credit`
-                         *     puts the whole note in that channel.
+                         *     puts the whole note in that channel. Not with commit_relief.
                          * @enum {string}
                          */
                         refund_type?: "refund" | "credit";
                         auto_issue?: boolean;
-                        /** @description Mutually exclusive with lines/credit_amount_cents. */
+                        /**
+                         * @description Mutually exclusive with lines and credit_amount_cents. The
+                         *     relief's split goes in here, not at the top level: a top-level
+                         *     `refund_amount_cents`, `out_of_band_amount_cents` or
+                         *     `refund_type` is a 422. Example after a lost dispute:
+                         *     `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+                         */
                         commit_relief?: {
                             /** @description Optional. Defaults to the top-level invoice_id. */
                             invoice_id?: string;
@@ -1265,7 +1286,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice) */
+                /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -2023,6 +2044,11 @@ export interface paths {
                         base_bill_timing?: "in_advance" | "in_arrears";
                         meter_ids?: string[];
                         /**
+                         * @description Optional. A plan is created active; archive it with PATCH.
+                         * @enum {string}
+                         */
+                        status?: "active";
+                        /**
                          * @description Stripe product tax code for the base fee, such as
                          *     `txcd_10103001`. Empty or omitted means the tenant's
                          *     `default_product_tax_code`.
@@ -2039,6 +2065,19 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Plan"];
+                    };
+                };
+                /**
+                 * @description A field failed validation, `status` is set to anything but
+                 *     `active` (a plan is created active; archive it with PATCH), or
+                 *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -2163,6 +2202,28 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["RatingRule"];
+                    };
+                };
+                /** @description The body is not valid JSON. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description A field failed validation, or the body has an unknown field at
+                 *     any depth (`param` names it; the body must use only the fields
+                 *     listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -2290,6 +2351,18 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Subscription"];
+                    };
+                };
+                /**
+                 * @description A field failed validation (`param` names it), for example
+                 *     `trial_days` outside 0 to 730, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -3393,9 +3466,7 @@ export interface paths {
          *     trial-end invoice when a plan bills in advance, otherwise the close
          *     of the first paid period, prorated the same way. With an
          *     explicit `period`, it is a flat estimate over that window and warns
-         *     when a mid-period change makes the invoice differ. Neither applies
-         *     usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
-         *     says the invoice can be lower. Composes across customer / subscription / pricing;
+         *     when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
          *     registered as a sibling of `/v1/invoices` (chi picks the more
          *     specific pattern, otherwise `/{id}` would capture
          *     `create_preview` as an invoice ID). See
@@ -5290,6 +5361,15 @@ export interface paths {
                         "application/json": components["schemas"]["CreditLedgerEntry"];
                     };
                 };
+                /** @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -5366,8 +5446,7 @@ export interface paths {
          *     A top-up shows on the next read.
          *
          *     Not included, so the figure can read high: tax, base fees billed at
-         *     period end, and amounts due on unpaid invoices. A subscription with a
-         *     blocking usage cap can read low. Requires a secret key.
+         *     period end, and amounts due on unpaid invoices. Requires a secret key.
          */
         get: {
             parameters: {
@@ -7038,13 +7117,6 @@ export interface components {
             next_billing_at?: string;
             /** @description Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
             billing_anchor_day?: number;
-            /**
-             * Format: int64
-             * @description Most usage units per billing period. Absent means no cap.
-             */
-            usage_cap_units?: number;
-            /** @description `block` or `charge` (the default). */
-            overage_action?: string;
             test_clock_id?: string;
             billing_failure?: components["schemas"]["BillingFailure"];
             /** Format: date-time */
@@ -10363,7 +10435,11 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A field failed validation (`param` names it). */
+            /**
+             * @description A field failed validation, or the body has a key the profile does
+             *     not have, such as `tax_exempt` (set `tax_status` instead). `param`
+             *     names the field. A body read back from GET is accepted.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -11555,7 +11631,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Validation failed (see description). */
+            /** @description Validation failed (see description), or an unknown field (`param` names it; the body must use only the fields listed here). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12410,6 +12486,7 @@ export interface operations {
              * @description Code `validation_error`: neither or both of `at_period_end` and
              *     `cancel_at` are set, or `cancel_at` is in the past or breaks the
              *     date rules above.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12540,6 +12617,7 @@ export interface operations {
             /**
              * @description Code `validation_error`: `behavior` is missing or not
              *     `keep_as_draft`, or `resumes_at` is not in the future.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12669,7 +12747,7 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: date-time
-                     * @description The new trial end. Must be in the future and after the current `trial_end_at`.
+                     * @description The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
                      */
                     trial_end: string;
                 };
@@ -12717,8 +12795,8 @@ export interface operations {
                 };
             };
             /**
-             * @description `trial_end` is missing, in the past, or not after the current
-             *     `trial_end_at`.
+             * @description `trial_end` is missing, in the past, not after the current
+             *     `trial_end_at`, or more than 730 days after `trial_start_at`.
              */
             422: {
                 headers: {
@@ -12815,6 +12893,7 @@ export interface operations {
              *     not on this subscription; a `usage_gte` is not a number or is
              *     negative; or the subscription's plans use more than one
              *     currency.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12938,6 +13017,7 @@ export interface operations {
              * @description Code `validation_error`: `plan_id` is missing or not found,
              *     `quantity` is less than 1, or the plan's billing interval
              *     differs from the other items'.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13084,6 +13164,7 @@ export interface operations {
              *     `new_plan_id` are set; the value equals the current one;
              *     `quantity` is less than 1; the new plan is not found; or the new
              *     plan's billing timing or interval does not fit the subscription.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13573,8 +13654,9 @@ export interface operations {
                 };
             };
             /**
-             * @description Validation error: missing `customer_id`, unsupported currency, or
-             *     an invalid line item (the message names the line number).
+             * @description Validation error: missing `customer_id`, unsupported currency,
+             *     an invalid line item (the message names the line number), or
+             *     an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13681,8 +13763,9 @@ export interface operations {
                 };
             };
             /**
-             * @description Validation error: the invoice is not a draft, or a line field is
-             *     invalid (for example a quantity of 0, or a second commit line).
+             * @description Validation error: the invoice is not a draft, a line field is
+             *     invalid (for example a quantity of 0, or a second commit line), or
+             *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -14142,8 +14225,10 @@ export interface operations {
             };
             /**
              * @description Validation error: missing or unknown `reason`, a negative
-             *     amount, an amount above what is left to refund, or refunds are
-             *     not configured.
+             *     amount, an amount above what is left to refund, refunds are
+             *     not configured, or an unknown field (`param` names it; the body
+             *     must use only the fields listed here). A misspelled amount such
+             *     as `amount` is refused rather than read as a full refund.
              */
             422: {
                 headers: {
@@ -15763,9 +15848,10 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: a missing field, an unknown rating rule, or a
+             * @description `validation_error`: a missing field, an unknown rating rule, a
              *     price shape that cannot be billed (negative rate, bad tier table,
-             *     package size of 0).
+             *     package size of 0), or an unknown field at any depth (`param`
+             *     names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {

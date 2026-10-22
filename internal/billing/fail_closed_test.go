@@ -119,40 +119,6 @@ func TestRunCycle_MeterReadBlipFailsTheClose(t *testing.T) {
 	}
 }
 
-// blipFirstRuleAggregate fails the first pricing-rule aggregation: on a
-// capped close, the read that counts a pricing-rule meter for the cap.
-type blipFirstRuleAggregate struct {
-	*mockUsage
-	calls int
-}
-
-func (b *blipFirstRuleAggregate) AggregateByPricingRules(ctx context.Context, tenantID, customerID, meterID string, mode domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error) {
-	b.calls++
-	if b.calls == 1 {
-		return nil, errBlip
-	}
-	return b.mockUsage.AggregateByPricingRules(ctx, tenantID, customerID, meterID, mode, from, to)
-}
-
-// A block-capped close whose cap total cannot be read stops; it retries next
-// tick. Carrying on without the cap would bill every unit above it.
-func TestRunCycle_CapTotalReadBlipFailsTheClose(t *testing.T) {
-	engine, subs, usage, pricing, invoices := setupEngine()
-	sub := subs.subs["sub_1"]
-	capUnits := int64(200)
-	sub.UsageCapUnits, sub.OverageAction = &capUnits, "block"
-	subs.subs["sub_1"] = sub
-	pricing.plans["pln_1"] = domain.Plan{ID: "pln_1", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_a", "mtr_b", "mtr_tok"}}
-	capMeters(pricing, usage)
-	engine.usage = &blipFirstRuleAggregate{mockUsage: usage}
-
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
-	if count != 0 || len(errs) == 0 || len(invoices.invoices) != 0 {
-		t.Fatalf("RunCycle = %d invoice(s) stored=%d, errs %v; want no invoice and an error", count, len(invoices.invoices), errs)
-	}
-}
-
 // A threshold fire's lines come from the preview path. A meter whose pinned
 // rating rule is missing used to be skipped with a warning, so the fire
 // invoice under-billed while the cycle close failed loudly on the same rule.

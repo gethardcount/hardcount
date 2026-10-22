@@ -186,6 +186,32 @@ func (f *raceCredits) GetByProrationSource(context.Context, string, string, stri
 	return domain.CreditLedgerEntry{}, errs.ErrNotFound
 }
 
+// raceCredits is also the credit-note issuer: a decrease credits through a
+// credit-note draft on the change's tx, and that first draft holds. Gross
+// equals net here (no tax).
+func (f *raceCredits) CreateAdjustmentDraftTx(_ context.Context, _ *sql.Tx, _, invoiceID string, gross int64, _, _ string) (domain.CreditNote, error) {
+	f.gate.wait()
+	f.record(ProrationGrantInput{AmountCents: gross})
+	return domain.CreditNote{ID: "vlx_cn_race", InvoiceID: invoiceID, Status: domain.CreditNoteDraft}, nil
+}
+
+func (f *raceCredits) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, gross int64, _, _ string) (domain.CreditNote, error) {
+	f.record(ProrationGrantInput{AmountCents: gross})
+	return domain.CreditNote{ID: "vlx_cn_race", InvoiceID: invoiceID}, nil
+}
+
+func (f *raceCredits) LockInvoicesForDraftsTx(context.Context, *sql.Tx, string, []string) error {
+	return nil
+}
+
+func (f *raceCredits) Issue(_ context.Context, _, id string) (domain.CreditNote, error) {
+	return domain.CreditNote{ID: id, Status: domain.CreditNoteIssued}, nil
+}
+
+func (f *raceCredits) CreditedCents(context.Context, string, string) (int64, error) {
+	return 0, nil
+}
+
 // raceReq is one item change: a PATCH body, a DELETE when remove is set, or
 // a POST of add. It changes the rig's basic item unless itemID names another.
 type raceReq struct {
@@ -315,6 +341,7 @@ func newItemRaceRig(t *testing.T, db *postgres.DB, name string, qty int64, withK
 	h := NewHandler(svc)
 	h.SetDB(db)
 	h.SetProrationDeps(reader, invoices, credits)
+	h.SetCreditNoteIssuer(credits)
 	h.SetProrationTaxApplier(&raceTax{gate: gate})
 
 	return &itemRaceRig{

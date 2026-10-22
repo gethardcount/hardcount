@@ -338,6 +338,7 @@ export * from './postV1MetersBodyAggregation';
 export * from './postV1PlansBody';
 export * from './postV1PlansBodyBaseBillTiming';
 export * from './postV1PlansBodyBillingInterval';
+export * from './postV1PlansBodyStatus';
 export * from './postV1RatingRulesBody';
 export * from './postV1RatingRulesBodyGraduatedTiersItem';
 export * from './postV1RatingRulesBodyMode';

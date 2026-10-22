@@ -387,3 +387,7 @@ either action:
 That closes the first item under "Not covered yet" above, for a Collect in
 progress and for a crash on the final retry. Pinned by
 `internal/dunning/stale_hold_integration_test.go`.
+
+## Amendment 2026-10-22 — money-path create routes refuse unknown fields
+
+Money-path create routes and the subscription change routes refuse unknown fields (422, `param` = key); policy routes keep the by-name refusal.

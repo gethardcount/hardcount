@@ -17,6 +17,10 @@ export type PostV1SubscriptionsBody = {
   /** Plan items — a subscription bills one or more plans. */
   items: PostV1SubscriptionsBodyItemsItem[];
   billing_time?: PostV1SubscriptionsBodyBillingTime;
+  /**
+     * @minimum 0
+     * @maximum 730
+     */
   trial_days?: number;
   start_now?: boolean;
 };
