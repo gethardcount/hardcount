@@ -343,28 +343,17 @@ log "All critical tables present."
 
 log "Checking migration state..."
 
-# Report both records as they are; `velox migrate status` decides whether
-# this release can upgrade the database (ADR-125). A v0.8.x backup restored
-# over a newer database leaves the newer goose_db_version in place, and
-# Velox refuses that state, so restore v0.8.x backups into an empty database.
+# Report the record as it is; `velox migrate status` decides what this
+# release would do with the database.
 GOOSE_VERSION=$(psql "$DATABASE_URL" -t -A -c "
   SELECT CASE WHEN to_regclass('public.goose_db_version') IS NULL THEN ''
               ELSE (SELECT max(version_id)::text FROM public.goose_db_version) END;
-" 2>/dev/null || echo "unknown")
-V08_RECORD=$(psql "$DATABASE_URL" -t -A -c "
-  SELECT CASE WHEN to_regclass('public.schema_migrations') IS NULL THEN ''
-              ELSE (SELECT string_agg(version || ', dirty=' || dirty, '; ') FROM public.schema_migrations) END;
 " 2>/dev/null || echo "unknown")
 
 if [ -n "$GOOSE_VERSION" ]; then
   log "goose_db_version: ${GOOSE_VERSION}"
   LATEST_MIGRATION="$GOOSE_VERSION"
-fi
-if [ -n "$V08_RECORD" ]; then
-  log "schema_migrations (Velox v0.8.x record): ${V08_RECORD}"
-  LATEST_MIGRATION="${LATEST_MIGRATION:-v0.8.x record ${V08_RECORD}}"
-fi
-if [ -z "$GOOSE_VERSION" ] && [ -z "$V08_RECORD" ]; then
+else
   log "WARNING: No migration record found."
 fi
 log "NOTE: Run \"velox migrate status\" with the Velox release you will start, to check it can upgrade this database."

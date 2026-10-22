@@ -49,9 +49,9 @@ func TestFileErrorMessages(t *testing.T) {
 		}
 	}
 
-	exists := &pgconn.PgError{Code: "42723", Message: `function "leader_fence" already exists with same argument types`}
+	exists := &pgconn.PgError{Code: "42723", Message: `function "audit_log_immutable" already exists with same argument types`}
 	got = (&FileError{Version: 180, Name: baselineName, Err: exists}).Error()
-	for _, want := range []string{"00180 v0.8.1 baseline", "already has Velox tables but no migration record", "use an empty database"} {
+	for _, want := range []string{"00180 baseline", "already holds objects the baseline creates", "Use an empty database"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("baseline message lacks %q: %s", want, got)
 		}
@@ -97,20 +97,13 @@ func TestUpErrorMapping(t *testing.T) {
 	if err := upError(partial(182, goose.TypeSQL, "00182_b.sql", lockErr), fsys, st, nil); !errors.As(err, &fe) || !fe.NoTx {
 		t.Fatalf("no-tx lock timeout: want a no-tx FileError, got %v", err)
 	}
-	refused := &V08Error{kind: v08NotClean, record: v08Record{exists: true, rows: 1, version: 179}}
-	var v8 *V08Error
-	if err := upError(partial(180, goose.TypeGo, "", refused), fsys, st, nil); !errors.As(err, &v8) || v8 != refused {
-		t.Fatalf("migration 180's refusal: got %v", err)
-	}
 	if err := upError(partial(180, goose.TypeGo, "", sql.ErrConnDone), fsys, st, nil); !errors.As(err, &fe) || fe.Name != baselineName {
 		t.Fatalf("migration 180 failure: got %v", err)
 	}
-	// A lock timeout while migration 180 takes a v0.8 database over: the
-	// database is at v0.8's 180, not "no migration applied".
-	v08 := state{v08: v08Record{exists: true, rows: 1, version: 180}}
-	if err := upError(partial(180, goose.TypeGo, "", lockErr), fsys, v08, nil); !errors.As(err, &lte) || lte.Previous != 180 ||
-		!strings.Contains(err.Error(), "is still at version 180") {
-		t.Fatalf("lock timeout during the v0.8 takeover: want Previous 180, got %v", err)
+	// A lock timeout in the baseline on a new database: nothing applied.
+	if err := upError(partial(180, goose.TypeGo, "", lockErr), fsys, st, nil); !errors.As(err, &lte) || lte.Previous != 0 ||
+		!strings.Contains(err.Error(), "has no migration applied") {
+		t.Fatalf("lock timeout in the baseline: want Previous 0, got %v", err)
 	}
 	lw := &LockWaitError{Waited: time.Minute}
 	if err := upError(fmt.Errorf("failed to initialize: %w", lw), fsys, st, nil); err != lw {

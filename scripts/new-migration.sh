@@ -32,8 +32,8 @@ esac
 root="$(git rev-parse --show-toplevel)"
 rel="internal/platform/migrate/sql"
 
-highest=180 # migration 180 is the v0.8.1 baseline
-seen_in="the v0.8.1 baseline"
+highest=180 # migration 180 is the baseline
+seen_in="the baseline"
 consider() { # $1: a path, $2: where it was seen
   local base="${1##*/}"
   [[ "$base" =~ ^([0-9]{5})_[a-z0-9_]+\.sql$ ]] || return 0

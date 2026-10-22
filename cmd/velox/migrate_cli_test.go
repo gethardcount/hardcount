@@ -35,7 +35,7 @@ func TestMigrateForceIsRemoved(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit code %d, want 2; output:\n%s", code, out)
 	}
-	for _, want := range []string{"removed in v0.9.0", "run \"velox migrate\" again", "v0.8.1/docs/ops/runbook/migration-failed-midway.md"} {
+	for _, want := range []string{"removed in v0.9.0", "run \"velox migrate\" again", "docs/ops/runbook/migration-failed-midway.md"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

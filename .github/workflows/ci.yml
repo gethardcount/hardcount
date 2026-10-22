@@ -184,13 +184,13 @@ jobs:
         env:
           VELOX_LIVEMODE_STRICT: "true"
 
-  # The upgrade path (ADR-125): a new install of HEAD must equal an install
-  # upgraded from the published v0.8.1 image, schema with owners and access
-  # rights, data and applied versions, under three role setups (Compose,
-  # managed Postgres, the CI test database). Also a restore drill (a v0.8.1
-  # backup restored over a database HEAD took over must be refused) and an
-  # apply on Postgres 14. Each Postgres runs in its own container, so the
-  # job has no service.
+  # A fresh install of HEAD under three role setups (Compose, managed
+  # Postgres, the CI test database): every migration applies to an empty
+  # database, a second run has nothing to do, and the limited user has the
+  # idle-transaction timeout. Also a restore drill (a HEAD backup restored
+  # into an empty database with scripts/restore.sh) and an apply on
+  # Postgres 14. Each Postgres runs in its own container, so the job has no
+  # service.
   migrations:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -204,13 +204,13 @@ jobs:
       - name: Build HEAD
         run: go build -o "${{ runner.temp }}/velox" ./cmd/velox
 
-      - name: New install equals upgraded install
-        run: scripts/ci/migration-convergence.sh
+      - name: Fresh install under each role setup
+        run: scripts/ci/migrations-fresh-install.sh
         env:
           VELOX_BIN: ${{ runner.temp }}/velox
           KEEP_OUT: ${{ runner.temp }}/migrations-out
 
-      - name: Upload dumps on failure
+      - name: Upload outputs on failure
         if: failure()
         uses: actions/upload-artifact@v7
         with:
