@@ -2,6 +2,8 @@ package paymentmethods_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,7 +50,7 @@ func TestAttach_DedupesByFingerprint(t *testing.T) {
 
 	// 1. First attach — pm_first, fingerprint fp_A.
 	stripe.next = paymentmethods.CardMetadata{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2030, Fingerprint: "fp_A"}
-	pm1, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_first")
+	pm1, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_first", false)
 	if err != nil {
 		t.Fatalf("attach first: %v", err)
 	}
@@ -61,7 +63,7 @@ func TestAttach_DedupesByFingerprint(t *testing.T) {
 	// with the same card". Should dedupe: pm_first detached, pm_second
 	// inherits is_default=true. List size stays at 1.
 	stripe.next = paymentmethods.CardMetadata{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2030, Fingerprint: "fp_A"}
-	pm2, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_second")
+	pm2, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_second", false)
 	if err != nil {
 		t.Fatalf("attach second (dedupe): %v", err)
 	}
@@ -83,7 +85,7 @@ func TestAttach_DedupesByFingerprint(t *testing.T) {
 	// No dedupe should fire. Existing pm_second stays default;
 	// pm_third is the second non-default row.
 	stripe.next = paymentmethods.CardMetadata{Brand: "mastercard", Last4: "5555", ExpMonth: 6, ExpYear: 2031, Fingerprint: "fp_B"}
-	pm3, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_third")
+	pm3, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_third", false)
 	if err != nil {
 		t.Fatalf("attach third (different card): %v", err)
 	}
@@ -152,12 +154,12 @@ func TestDetachAndRebalance_AtomicPromote(t *testing.T) {
 	// pm_old (fp_A) attaches first → becomes default. pm_new (fp_B, distinct
 	// fingerprint so it isn't deduped) attaches second → newer created_at.
 	stripe.next = paymentmethods.CardMetadata{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2030, Fingerprint: "fp_A"}
-	pmOld, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_old")
+	pmOld, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_old", false)
 	if err != nil {
 		t.Fatalf("attach old: %v", err)
 	}
 	stripe.next = paymentmethods.CardMetadata{Brand: "mastercard", Last4: "5555", ExpMonth: 6, ExpYear: 2031, Fingerprint: "fp_B"}
-	if _, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_new"); err != nil {
+	if _, err := svc.AttachFromSetupIntent(ctx, tenantID, cust.ID, "pm_new", false); err != nil {
 		t.Fatalf("attach new: %v", err)
 	}
 
@@ -176,5 +178,190 @@ func TestDetachAndRebalance_AtomicPromote(t *testing.T) {
 	}
 	if !list[0].IsDefault || list[0].StripePaymentMethodID != "pm_new" {
 		t.Fatalf("expected pm_new promoted to default, got %+v", list[0])
+	}
+}
+
+// setupDefaultRig drives the store directly (real Postgres): the rule a
+// card saved through a setup flow takes the default (makeDefault) lives in
+// PostgresStore.Upsert's transaction.
+type setupDefaultRig struct {
+	t        *testing.T
+	ctx      context.Context
+	tenantID string
+	custs    *customer.PostgresStore
+	store    *paymentmethods.PostgresStore
+}
+
+func newSetupDefaultRig(t *testing.T, name string) *setupDefaultRig {
+	t.Helper()
+	db := testutil.SetupTestDB(t)
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
+	t.Cleanup(cancel)
+	return &setupDefaultRig{
+		t: t, ctx: ctx, tenantID: testutil.CreateTestTenant(t, db, name),
+		custs: customer.NewPostgresStore(db), store: paymentmethods.NewPostgresStore(db),
+	}
+}
+
+func (r *setupDefaultRig) customer(key string) string {
+	r.t.Helper()
+	c, err := r.custs.Create(r.ctx, r.tenantID, domain.Customer{ExternalID: "ext_" + key, DisplayName: key})
+	if err != nil {
+		r.t.Fatalf("create customer: %v", err)
+	}
+	return c.ID
+}
+
+func (r *setupDefaultRig) upsert(custID, pm, fingerprint string, makeDefault bool) paymentmethods.PaymentMethod {
+	r.t.Helper()
+	got, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
+		CustomerID: custID, StripePaymentMethodID: pm, Type: "card",
+		CardBrand: "visa", CardLast4: "4242", CardExpMonth: 12, CardExpYear: 2034, CardFingerprint: fingerprint,
+	}, makeDefault)
+	if err != nil {
+		r.t.Fatalf("upsert %s (makeDefault=%v): %v", pm, makeDefault, err)
+	}
+	return got
+}
+
+// defaults lists the customer's active default cards, read from the table.
+func (r *setupDefaultRig) defaults(custID string) []string {
+	r.t.Helper()
+	pms, err := r.store.List(r.ctx, r.tenantID, custID)
+	if err != nil {
+		r.t.Fatalf("list: %v", err)
+	}
+	var out []string
+	for _, pm := range pms {
+		if pm.IsDefault && pm.DetachedAt == nil {
+			out = append(out, pm.StripePaymentMethodID)
+		}
+	}
+	return out
+}
+
+func (r *setupDefaultRig) assertOnlyDefault(custID, want string) {
+	r.t.Helper()
+	if got := r.defaults(custID); len(got) != 1 || got[0] != want {
+		r.t.Fatalf("default cards = %v, want exactly [%s]", got, want)
+	}
+}
+
+// A card saved through a setup flow (makeDefault) takes the default from a
+// working one, on the store's insert path and its conflict path; without
+// makeDefault a card beside a working default stays beside (control).
+func TestUpsert_MakeDefault_RealStore(t *testing.T) {
+	r := newSetupDefaultRig(t, "Setup Card Default")
+
+	t.Run("insert path: a new card takes the default", func(t *testing.T) {
+		c := r.customer("ins")
+		r.upsert(c, "pm_ins_a", "fp_ins_a", false)
+		if b := r.upsert(c, "pm_ins_b", "fp_ins_b", true); !b.IsDefault {
+			t.Fatal("the returned row is not the default")
+		}
+		r.assertOnlyDefault(c, "pm_ins_b")
+	})
+
+	t.Run("conflict path: a card already saved beside takes the default", func(t *testing.T) {
+		c := r.customer("conf")
+		r.upsert(c, "pm_conf_a", "fp_conf_a", false)
+		if b := r.upsert(c, "pm_conf_b", "fp_conf_b", false); b.IsDefault {
+			t.Fatal("the card saved beside became the default")
+		}
+		if b := r.upsert(c, "pm_conf_b", "fp_conf_b", true); !b.IsDefault {
+			t.Fatal("the returned row is not the default")
+		}
+		r.assertOnlyDefault(c, "pm_conf_b")
+	})
+
+	t.Run("control: without makeDefault a working default stays", func(t *testing.T) {
+		c := r.customer("ctl")
+		r.upsert(c, "pm_ctl_a", "fp_ctl_a", false)
+		if b := r.upsert(c, "pm_ctl_b", "fp_ctl_b", false); b.IsDefault {
+			t.Fatal("a card beside a working default took it without makeDefault")
+		}
+		r.assertOnlyDefault(c, "pm_ctl_a")
+	})
+
+	t.Run("fingerprint dedupe of a card beside, with makeDefault", func(t *testing.T) {
+		c := r.customer("dd1")
+		r.upsert(c, "pm_dd1_a", "fp_dd1_a", false)
+		r.upsert(c, "pm_dd1_b", "fp_dd1_b", false)
+		// The same physical card as b, saved again through a setup flow.
+		r.upsert(c, "pm_dd1_c", "fp_dd1_b", true)
+		r.assertOnlyDefault(c, "pm_dd1_c")
+		if pms, _ := r.store.List(r.ctx, r.tenantID, c); len(pms) != 2 {
+			t.Fatalf("active cards = %d, want 2 (a, and c replacing its duplicate b)", len(pms))
+		}
+	})
+
+	t.Run("fingerprint dedupe of the default, with makeDefault", func(t *testing.T) {
+		c := r.customer("dd2")
+		r.upsert(c, "pm_dd2_a", "fp_dd2_a", false)
+		r.upsert(c, "pm_dd2_b", "fp_dd2_b", false)
+		// The same physical card as the default a, saved again.
+		r.upsert(c, "pm_dd2_c", "fp_dd2_a", true)
+		r.assertOnlyDefault(c, "pm_dd2_c")
+	})
+
+	// One setup session sends checkout.session.completed (C2, makeDefault
+	// false) and setup_intent.succeeded (C1, true) for the same card, in
+	// either order. The setup flow's card is the default both ways.
+	t.Run("order: beside first, then makeDefault", func(t *testing.T) {
+		c := r.customer("ord1")
+		r.upsert(c, "pm_ord1_a", "fp_ord1_a", false)
+		r.upsert(c, "pm_ord1_b", "fp_ord1_b", false)
+		r.upsert(c, "pm_ord1_b", "fp_ord1_b", true)
+		r.assertOnlyDefault(c, "pm_ord1_b")
+	})
+	t.Run("order: makeDefault first, then beside", func(t *testing.T) {
+		c := r.customer("ord2")
+		r.upsert(c, "pm_ord2_a", "fp_ord2_a", false)
+		r.upsert(c, "pm_ord2_b", "fp_ord2_b", true)
+		if b := r.upsert(c, "pm_ord2_b", "fp_ord2_b", false); !b.IsDefault {
+			t.Fatal("a later attach without makeDefault took the default back off the card")
+		}
+		r.assertOnlyDefault(c, "pm_ord2_b")
+	})
+}
+
+// The two webhooks of one setup session, concurrently: C2's attach (beside)
+// and C1's (makeDefault) of the same card race on the same customer. Every
+// run must end with exactly one default, the setup flow's card, and neither
+// attach may fail on the one-default-per-customer index.
+func TestUpsert_MakeDefault_ConcurrentWithBeside_RealStore(t *testing.T) {
+	r := newSetupDefaultRig(t, "Setup Card Default Race")
+	const runs = 50
+	for i := 0; i < runs; i++ {
+		c := r.customer(fmt.Sprintf("race%d", i))
+		r.upsert(c, fmt.Sprintf("pm_race%d_a", i), fmt.Sprintf("fp_race%d_a", i), false)
+		pmB, fpB := fmt.Sprintf("pm_race%d_b", i), fmt.Sprintf("fp_race%d_b", i)
+
+		start := make(chan struct{})
+		errsCh := make(chan error, 2)
+		var wg sync.WaitGroup
+		for _, makeDefault := range []bool{false, true} {
+			wg.Add(1)
+			go func(makeDefault bool) {
+				defer wg.Done()
+				<-start
+				_, err := r.store.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
+					CustomerID: c, StripePaymentMethodID: pmB, Type: "card",
+					CardBrand: "visa", CardLast4: "4242", CardExpMonth: 12, CardExpYear: 2034, CardFingerprint: fpB,
+				}, makeDefault)
+				if err != nil {
+					errsCh <- fmt.Errorf("upsert makeDefault=%v: %w", makeDefault, err)
+				}
+			}(makeDefault)
+		}
+		close(start)
+		wg.Wait()
+		close(errsCh)
+		for err := range errsCh {
+			t.Fatalf("run %d: %v", i, err)
+		}
+		if got := r.defaults(c); len(got) != 1 || got[0] != pmB {
+			t.Fatalf("run %d: default cards = %v, want exactly [%s]", i, got, pmB)
+		}
 	}
 }

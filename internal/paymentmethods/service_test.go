@@ -60,15 +60,30 @@ func (m *memStore) Get(_ context.Context, tenantID, pmID string) (PaymentMethod,
 	return pm, nil
 }
 
-func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod) (PaymentMethod, error) {
+func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod, makeDefault bool) (PaymentMethod, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// makeDefault: this card takes the default, so every other active
+	// default of the customer is cleared first, on the insert and the
+	// conflict path alike (as the Postgres store does in its tx).
+	if makeDefault {
+		for id, row := range m.rows {
+			if row.TenantID == tenantID && row.CustomerID == in.CustomerID && row.IsDefault &&
+				row.DetachedAt == nil && row.StripePaymentMethodID != in.StripePaymentMethodID {
+				row.IsDefault = false
+				row.UpdatedAt = time.Now().UTC()
+				m.rows[id] = row
+			}
+		}
+	}
 
 	for id, existing := range m.rows {
 		if existing.TenantID == tenantID && existing.StripePaymentMethodID == in.StripePaymentMethodID {
 			existing.CardBrand, existing.CardLast4 = in.CardBrand, in.CardLast4
 			existing.CardExpMonth, existing.CardExpYear = in.CardExpMonth, in.CardExpYear
 			existing.DetachedAt = nil
+			existing.IsDefault = existing.IsDefault || makeDefault
 			existing.UpdatedAt = time.Now().UTC()
 			m.rows[id] = existing
 			return existing, nil
@@ -97,7 +112,7 @@ func (m *memStore) Upsert(_ context.Context, tenantID string, in PaymentMethod) 
 		CardLast4:             in.CardLast4,
 		CardExpMonth:          in.CardExpMonth,
 		CardExpYear:           in.CardExpYear,
-		IsDefault:             !hasDefault,
+		IsDefault:             !hasDefault || makeDefault,
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
@@ -293,7 +308,7 @@ func TestAttach_FirstBecomesDefault(t *testing.T) {
 	stripe := &fakeStripe{}
 	svc := NewService(store, stripe, &fakeSummary{})
 
-	pm, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_stripe_1")
+	pm, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_stripe_1", false)
 	if err != nil {
 		t.Fatalf("attach: %v", err)
 	}
@@ -305,20 +320,168 @@ func TestAttach_FirstBecomesDefault(t *testing.T) {
 	}
 }
 
-// TestAttach_SecondDoesNotStealDefault — adding a second card while one
-// is already default must keep the existing default. The customer must
-// explicitly call SetDefault to switch.
+// TestAttach_SecondDoesNotStealDefault — a second card attached without
+// makeDefault (a hosted-page payment, a SetupIntent Velox did not create)
+// while one is already default keeps the existing default. Switching takes
+// SetDefault, or a setup flow (makeDefault).
 func TestAttach_SecondDoesNotStealDefault(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &fakeStripe{}, &fakeSummary{})
 
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1")
-	pm2, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2")
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1", false)
+	pm2, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2", false)
 	if err != nil {
 		t.Fatalf("attach 2: %v", err)
 	}
 	if pm2.IsDefault {
 		t.Fatalf("second PM must not auto-default")
+	}
+}
+
+// A card saved through a Velox setup flow (makeDefault) becomes the default
+// beside a working one: exactly one default, the new card, and Stripe's copy
+// is pointed at it. The attach audit row records set_default.
+func TestAttach_MakeDefaultTakesTheDefaultAndSyncsStripe(t *testing.T) {
+	store := newMemStore()
+	stripe := &fakeStripe{}
+	audit := &fakeAudit{}
+	svc := NewService(store, stripe, &fakeSummary{})
+	svc.SetAuditLogger(audit)
+
+	if _, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_old", false); err != nil {
+		t.Fatalf("attach old: %v", err)
+	}
+	stripe.setDefaultCalls, stripe.setDefaultPMID = 0, ""
+
+	pm, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_new", true)
+	if err != nil {
+		t.Fatalf("attach new: %v", err)
+	}
+	if !pm.IsDefault {
+		t.Fatal("a card saved through a setup flow must become the default")
+	}
+	list, _ := svc.List(context.Background(), "tnt_x", "cus_y")
+	var defaults []string
+	for _, p := range list {
+		if p.IsDefault {
+			defaults = append(defaults, p.StripePaymentMethodID)
+		}
+	}
+	if len(defaults) != 1 || defaults[0] != "pm_new" {
+		t.Fatalf("defaults = %v, want exactly [pm_new]", defaults)
+	}
+	if stripe.setDefaultCalls != 1 || stripe.setDefaultPMID != "pm_new" {
+		t.Fatalf("Stripe default sync: calls=%d pm=%q, want once with pm_new", stripe.setDefaultCalls, stripe.setDefaultPMID)
+	}
+	row := audit.logs[len(audit.logs)-1]
+	if row.meta["action"] != "attached" || row.meta["set_default"] != true {
+		t.Fatalf("audit row meta = %v, want action=attached set_default=true", row.meta)
+	}
+	if _, ok := row.meta["stripe_sync_error"]; ok {
+		t.Fatalf("audit row must not carry stripe_sync_error on the happy path: %v", row.meta)
+	}
+}
+
+// The conflict path: a card already saved beside the default (C2's
+// checkout.session.completed got there first) is attached again by its
+// setup_intent.succeeded with makeDefault, and takes the default.
+func TestAttach_MakeDefaultOnACardAlreadyBeside(t *testing.T) {
+	store := newMemStore()
+	stripe := &fakeStripe{}
+	svc := NewService(store, stripe, &fakeSummary{})
+
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_old", false)
+	if beside, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_new", false); beside.IsDefault {
+		t.Fatal("the card attached beside became the default")
+	}
+	stripe.setDefaultCalls = 0
+	pm, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_new", true)
+	if err != nil {
+		t.Fatalf("re-attach: %v", err)
+	}
+	if !pm.IsDefault {
+		t.Fatal("re-attaching with makeDefault must make the card the default")
+	}
+	list, _ := svc.List(context.Background(), "tnt_x", "cus_y")
+	n := 0
+	for _, p := range list {
+		if p.IsDefault {
+			n++
+		}
+	}
+	if n != 1 || list[0].StripePaymentMethodID != "pm_new" {
+		t.Fatalf("want exactly one default, pm_new; got %+v", list)
+	}
+	if stripe.setDefaultCalls != 1 || stripe.setDefaultPMID != "pm_new" {
+		t.Fatalf("Stripe default sync: calls=%d pm=%q, want once with pm_new", stripe.setDefaultCalls, stripe.setDefaultPMID)
+	}
+}
+
+// The Stripe sync after a default-taking attach is best-effort: a Stripe
+// failure still returns the saved default card, and the audit row carries
+// stripe_sync_error so the divergence is visible.
+func TestAttach_MakeDefaultStripeFailureStillReturnsTheCard(t *testing.T) {
+	store := newMemStore()
+	stripe := &fakeStripe{}
+	audit := &fakeAudit{}
+	svc := NewService(store, stripe, &fakeSummary{})
+	svc.SetAuditLogger(audit)
+
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_old", false)
+	stripe.setDefaultErr = errors.New("stripe 503")
+
+	pm, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_new", true)
+	if err != nil {
+		t.Fatalf("attach must not fail on a Stripe sync error: %v", err)
+	}
+	if !pm.IsDefault || pm.StripePaymentMethodID != "pm_new" {
+		t.Fatalf("attach returned %+v, want pm_new as the default", pm)
+	}
+	row := audit.logs[len(audit.logs)-1]
+	if got, _ := row.meta["stripe_sync_error"].(string); got != "stripe 503" {
+		t.Fatalf("audit stripe_sync_error = %q, want %q", got, "stripe 503")
+	}
+}
+
+// A card added beside the working default makes no Stripe call: Stripe's
+// copy already names the default, which did not change.
+func TestAttach_BesideMakesNoStripeCall(t *testing.T) {
+	store := newMemStore()
+	stripe := &fakeStripe{}
+	audit := &fakeAudit{}
+	svc := NewService(store, stripe, &fakeSummary{})
+	svc.SetAuditLogger(audit)
+
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_old", false)
+	stripe.setDefaultCalls = 0
+
+	pm, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_beside", false)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if pm.IsDefault {
+		t.Fatal("a card attached without makeDefault beside a working default must not take it")
+	}
+	if stripe.setDefaultCalls != 0 {
+		t.Fatalf("Stripe SetDefaultPaymentMethod calls = %d, want 0", stripe.setDefaultCalls)
+	}
+	if row := audit.logs[len(audit.logs)-1]; row.meta["set_default"] != false {
+		t.Fatalf("audit row meta = %v, want set_default=false", row.meta)
+	}
+}
+
+// The first card becomes the default by the store's rule, and its attach
+// points Stripe's copy at it (Stripe's default follows Velox's).
+func TestAttach_FirstCardSyncsStripeDefault(t *testing.T) {
+	store := newMemStore()
+	stripe := &fakeStripe{}
+	svc := NewService(store, stripe, &fakeSummary{})
+
+	if _, err := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_first", false); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if stripe.setDefaultCalls != 1 || stripe.setDefaultPMID != "pm_first" {
+		t.Fatalf("Stripe default sync: calls=%d pm=%q, want once with pm_first", stripe.setDefaultCalls, stripe.setDefaultPMID)
 	}
 }
 
@@ -329,8 +492,8 @@ func TestSetDefault_AtomicSwap(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &fakeStripe{}, &fakeSummary{})
 
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1")
-	pm2, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2")
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1", false)
+	pm2, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2", false)
 
 	promoted, err := svc.SetDefault(context.Background(), "tnt_x", "cus_y", pm2.ID)
 	if err != nil {
@@ -366,8 +529,9 @@ func TestSetDefault_PushesToStripe(t *testing.T) {
 	svc := NewService(store, stripe, &fakeSummary{})
 	svc.SetAuditLogger(audit)
 
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_first")
-	pm2, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_second")
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_first", false)
+	pm2, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_second", false)
+	stripe.setDefaultCalls = 0 // the first card's attach synced its own default
 
 	if _, err := svc.SetDefault(context.Background(), "tnt_x", "cus_y", pm2.ID); err != nil {
 		t.Fatalf("SetDefault: %v", err)
@@ -398,8 +562,8 @@ func TestSetDefault_StripeFailureIsBestEffort(t *testing.T) {
 	svc := NewService(store, stripe, &fakeSummary{})
 	svc.SetAuditLogger(audit)
 
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_first")
-	pm2, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_second")
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_first", false)
+	pm2, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_second", false)
 
 	promoted, err := svc.SetDefault(context.Background(), "tnt_x", "cus_y", pm2.ID)
 	if err != nil {
@@ -421,8 +585,8 @@ func TestDetach_PromotesReplacement(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &fakeStripe{}, &fakeSummary{})
 
-	pm1, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1")
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2")
+	pm1, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1", false)
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2", false)
 
 	if _, err := svc.Detach(context.Background(), "tnt_x", "cus_y", pm1.ID); err != nil {
 		t.Fatalf("detach: %v", err)
@@ -441,7 +605,7 @@ func TestDetach_LastPM(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &fakeStripe{}, &fakeSummary{})
 
-	pm, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1")
+	pm, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1", false)
 	if _, err := svc.Detach(context.Background(), "tnt_x", "cus_y", pm.ID); err != nil {
 		t.Fatalf("detach: %v", err)
 	}
@@ -459,7 +623,7 @@ func TestDetach_StripeAlreadyGone(t *testing.T) {
 	stripe := &fakeStripe{detachErr: errs.ErrNotFound}
 	svc := NewService(store, stripe, &fakeSummary{})
 
-	pm, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1")
+	pm, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1", false)
 	if _, err := svc.Detach(context.Background(), "tnt_x", "cus_y", pm.ID); err != nil {
 		t.Fatalf("detach: %v", err)
 	}
@@ -475,7 +639,7 @@ func TestDetach_CrossCustomer(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &fakeStripe{}, &fakeSummary{})
 
-	pm, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_a", "pm_1")
+	pm, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_a", "pm_1", false)
 	if _, err := svc.Detach(context.Background(), "tnt_x", "cus_b", pm.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
@@ -491,9 +655,10 @@ func TestDetach_PromotesNewestAndSyncsStripe(t *testing.T) {
 	svc := NewService(store, stripe, &fakeSummary{})
 
 	// pm_1 is default (first attached); pm_2 then pm_3 are newer.
-	pm1, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1")
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2")
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_3")
+	pm1, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1", false)
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2", false)
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_3", false)
+	stripe.setDefaultCalls = 0 // the first card's attach synced its own default
 
 	if _, err := svc.Detach(context.Background(), "tnt_x", "cus_y", pm1.ID); err != nil {
 		t.Fatalf("detach: %v", err)
@@ -529,8 +694,8 @@ func TestDetach_PromotionStripeSyncFailureStillSucceeds(t *testing.T) {
 	stripe := &fakeStripe{setDefaultErr: errors.New("stripe 503")}
 	svc := NewService(store, stripe, &fakeSummary{})
 
-	pm1, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1")
-	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2")
+	pm1, _ := svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_1", false)
+	_, _ = svc.AttachFromSetupIntent(context.Background(), "tnt_x", "cus_y", "pm_2", false)
 
 	if _, err := svc.Detach(context.Background(), "tnt_x", "cus_y", pm1.ID); err != nil {
 		t.Fatalf("detach must succeed despite Stripe sync failure: %v", err)
