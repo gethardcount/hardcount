@@ -39,8 +39,12 @@ func TestReadRoutesHonest(t *testing.T) {
 		"billing_interval": "monthly", "base_amount_cents": 1000,
 		"base_bill_timing": "in_arrears", "meter_ids": []string{meterID},
 	}).want(t, 201, "create plan").body, "id")
+	// One instant for the clock and for "today" below: an event with no
+	// timestamp lands at the clock's frozen_time, so a second time.Now()
+	// would name the next day if midnight UTC fell between the two.
+	frozen := time.Now().UTC()
 	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
-		"name": "honest clock", "frozen_time": time.Now().UTC().Format(time.RFC3339),
+		"name": "honest clock", "frozen_time": frozen.Format(time.RFC3339),
 	}).want(t, 201, "create test clock").body, "id")
 	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
 		"external_id": "honest-cust", "display_name": "Honest Customer",
@@ -94,7 +98,7 @@ func TestReadRoutesHonest(t *testing.T) {
 			if n := flowInt(future.body, "total"); base == "/v1/usage-events" && n != 0 {
 				t.Errorf("%s?from=2030-01-01 total = %d, want 0: the date must filter", base, n)
 			}
-			today := time.Now().UTC().Format("2006-01-02")
+			today := frozen.Format("2006-01-02")
 			within := call("GET", base+"?from="+today+"&to="+today, nil).want(t, 200, base+" plain date today")
 			if n := flowInt(within.body, "total_events"); base == "/v1/usage-events/aggregate" && n != 1 {
 				t.Errorf("%s today total_events = %d, want 1: a date-only `to` includes the day", base, n)

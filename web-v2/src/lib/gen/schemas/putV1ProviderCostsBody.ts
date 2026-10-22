@@ -19,7 +19,7 @@ export type PutV1ProviderCostsBody = {
   cost_per_token: string;
   /**
      * Rates are in USD only, the currency LiteLLM reports cost
-     * in. Any other value is 422. Case does not matter.
+     * in. Any other value is 422.
      */
   currency?: PutV1ProviderCostsBodyCurrency;
 };

@@ -5051,7 +5051,7 @@ export interface paths {
                         cost_per_token: string;
                         /**
                          * @description Rates are in USD only, the currency LiteLLM reports cost
-                         *     in. Any other value is 422. Case does not matter.
+                         *     in. Any other value is 422.
                          * @default USD
                          * @enum {string}
                          */

@@ -7732,7 +7732,7 @@ type PutV1ProviderCostsJSONBody struct {
 	CostPerToken string `json:"cost_per_token"`
 
 	// Currency Rates are in USD only, the currency LiteLLM reports cost
-	// in. Any other value is 422. Case does not matter.
+	// in. Any other value is 422.
 	Currency PutV1ProviderCostsJSONBodyCurrency `json:"currency,omitempty"`
 
 	// Model Model family token or raw snapshot id — raw ids match first at ingest.

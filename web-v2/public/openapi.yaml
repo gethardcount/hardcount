@@ -11437,7 +11437,7 @@ paths:
                   default: USD
                   description: |
                     Rates are in USD only, the currency LiteLLM reports cost
-                    in. Any other value is 422. Case does not matter.
+                    in. Any other value is 422.
       responses:
         "200":
           description: Upserted rate

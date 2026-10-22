@@ -10,7 +10,7 @@
 
 /**
  * Rates are in USD only, the currency LiteLLM reports cost
- * in. Any other value is 422. Case does not matter.
+ * in. Any other value is 422.
  */
 export type PutV1ProviderCostsBodyCurrency = typeof PutV1ProviderCostsBodyCurrency[keyof typeof PutV1ProviderCostsBodyCurrency];
 

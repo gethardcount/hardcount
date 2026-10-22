@@ -73,9 +73,10 @@ func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
 // mode. The ledger's foreign key to customers is on the id alone and
 // foreign-key checks do not apply row-level security, so without this read
 // the insert accepts any existing customer id, including another tenant's or
-// the other mode's. Called only from the operator entry points (Grant,
-// Adjust, and the balance, ledger and grants reads): engine callers pass a
-// customer id they read from a row in scope. On the reads it is what turns
+// the other mode's. Called from Grant, Adjust and the balance, ledger and
+// grants reads, which the operator routes and the public cost dashboard use:
+// engine callers pass a customer id they read from a row in scope. On the
+// reads it is what turns
 // an unknown id into 404 instead of 200 with zeros, since row-level security
 // hides every ledger row of a customer the caller cannot see.
 func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID string) error {
