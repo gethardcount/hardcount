@@ -33,8 +33,10 @@ Replay LiteLLM's spend logs for the window to
 `POST /v1/integrations/litellm/spend`.
 
 - Every row carries an idempotency key
-  (`<litellm_call_id>:input|output|cache_read`). So replaying a window that
-  was partly recorded only fills the gap.
+  (`<litellm_call_id>:input|cache_read|cache_write_5m|cache_write_1h|output`),
+  and a call's rows are saved together. So replaying a window that was
+  partly recorded only fills the gap. A call first saved before cache writes
+  were split (2026-10-22) is saved the old way again, not billed twice.
 - **Deadline:** the replay must reach Velox before the period's invoice is
   built. That is `INVOICE_GRACE_PERIOD` (default 1 hour) after the period
   ends, plus up to one billing tick. A replay after that is stored but not
