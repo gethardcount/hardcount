@@ -41,6 +41,9 @@ test('grant state: used up, expired, active', () => {
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 50000, remaining_cents: 0 }, NOW), 'used_up')
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 0, remaining_cents: 50000, expires_at: '2026-12-01T00:00:00Z' }, NOW), 'active')
   assert.equal(grantState({ amount_cents: 50000, consumed_cents: 0, remaining_cents: 50000, expires_at: '2026-10-01T00:00:00Z' }, NOW), 'expired')
+  // Live up to and including expires_at, the rule the server draws by.
+  assert.equal(grantState({ amount_cents: 50000, consumed_cents: 0, remaining_cents: 50000, expires_at: '2026-10-16T12:00:00Z' }, NOW), 'active')
+  assert.equal(grantState({ amount_cents: 50000, consumed_cents: 0, remaining_cents: 50000, expires_at: '2026-10-16T11:59:59.999Z' }, NOW), 'expired')
 })
 
 test('an expired grant is not "used up", and its expired part is not counted as used', () => {

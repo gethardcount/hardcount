@@ -13,7 +13,7 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
-import { endOfDayInTZ, isAfterCivilToday, startOfDayInTZ } from '@/lib/dates'
+import { isBeforeCivilToday, startOfDayInTZ, startOfNextDayInTZ } from '@/lib/dates'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MarginCard } from '@/components/MarginCard'
 import { Layout } from '@/components/Layout'
@@ -1856,12 +1856,13 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
         } else {
           commitGranted = granted
           if (l.commitExpiresAt) {
-            // "Future" is judged in tenant TZ, the zone endOfDayInTZ resolves
-            // the expiry in below.
-            if (!isAfterCivilToday(l.commitExpiresAt, now)) {
-              errs.commit = 'Credit expiry must be a future date'
+            // "Today" is judged in tenant TZ, the zone startOfNextDayInTZ
+            // resolves the expiry in below: valid through the picked day, so
+            // today is a valid pick, as in the grant dialog.
+            if (isBeforeCivilToday(l.commitExpiresAt, now)) {
+              errs.commit = 'Credit expiry must be today or later'
             } else {
-              commitExpires = endOfDayInTZ(l.commitExpiresAt)
+              commitExpires = startOfNextDayInTZ(l.commitExpiresAt)
             }
           }
         }
@@ -2170,14 +2171,17 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                               onChange={e => updateLine(idx, { commitGrantedCents: e.target.value })}
                               disabled={isBusy}
                             />
-                            <Input
-                              type="date"
-                              aria-label={`Line ${idx + 1} credits expire`}
-                              className="w-auto"
-                              value={line.commitExpiresAt}
-                              onChange={e => updateLine(idx, { commitExpiresAt: e.target.value })}
-                              disabled={isBusy}
-                            />
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                              Valid through
+                              <Input
+                                type="date"
+                                aria-label={`Line ${idx + 1} credits valid through`}
+                                className="w-auto"
+                                value={line.commitExpiresAt}
+                                onChange={e => updateLine(idx, { commitExpiresAt: e.target.value })}
+                                disabled={isBusy}
+                              />
+                            </label>
                             <span className="text-xs text-muted-foreground">
                               {Number(line.commitGrantedCents) > 0
                                 ? `Grants ${formatCents(Number(line.commitGrantedCents), currency)} of credits when the invoice is finalized.`
