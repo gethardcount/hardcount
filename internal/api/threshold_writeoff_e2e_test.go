@@ -36,6 +36,18 @@ func (r *lagRig) invoiceAction(id, action string, at time.Time) {
 	}
 }
 
+// liveUnbilledUsage is the customer's live credit balance's
+// unbilled_usage_cents at `at`: what the open period's close will bill.
+func (r *lagRig) liveUnbilledUsage(at time.Time) int64 {
+	r.t.Helper()
+	out := r.must(http.MethodGet, "/v1/credits/balance/"+r.custID+"/live", at, nil, http.StatusOK)
+	n, ok := out["unbilled_usage_cents"].(float64)
+	if !ok {
+		r.t.Fatalf("live balance has no unbilled_usage_cents: %v", out)
+	}
+	return int64(n)
+}
+
 // wantSubUsageBilledOnce runs the doctor and wants no usage instant of the
 // rig subscription's meters on two live invoices.
 func (r *lagRig) wantSubUsageBilledOnce() {
@@ -60,8 +72,9 @@ func (r *lagRig) wantSubUsageBilledOnce() {
 // In every form April's close must bill neither the base nor the pre-fire
 // calls again: the window is billed once, on the threshold invoice.
 //
-// The operator preview must agree with the close: writing the invoice off
-// does not change what April's invoice will bill.
+// The operator preview and the live credit balance must agree with the
+// close: writing the invoice off does not change what April's invoice will
+// bill.
 //
 // Mutation check: put 'uncollectible' back in the watermark predicate →
 // April's invoice bills base 3000 and 105c of usage in all three forms.
@@ -90,9 +103,15 @@ func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 			}
 
 			before := r.previewUsage(fireAt.Add(30 * time.Minute))
+			if live := r.liveUnbilledUsage(fireAt.Add(30 * time.Minute)); live != 5 {
+				t.Errorf("live balance unbilled usage before the write-off = %dc, want 5c (the deferred peak)", live)
+			}
 			r.invoiceAction(thr, "mark-uncollectible", fireAt.Add(time.Hour))
 			if after := r.previewUsage(fireAt.Add(90 * time.Minute)); after != before {
 				t.Errorf("preview usage after the write-off = %dc, want %dc as before it: a write-off does not reopen the window", after, before)
+			}
+			if live := r.liveUnbilledUsage(fireAt.Add(90 * time.Minute)); live != 5 {
+				t.Errorf("live balance unbilled usage after the write-off = %dc, want 5c as before it: a write-off does not reopen the window", live)
 			}
 
 			r.run(lagB.Add(2 * time.Hour))

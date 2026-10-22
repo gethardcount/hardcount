@@ -917,6 +917,28 @@ type failableInvoiceAdapter struct {
 	alreadyExists atomic.Int32
 	// createTxCalls counts every insert attempt, failed or not.
 	createTxCalls atomic.Int32
+	// afterWatermark and afterWatermarkTx run after each threshold
+	// watermark read (its own connection, or the caller's tx) returns: the
+	// seam where a competing void commits between a closer's read and its
+	// commit.
+	afterWatermark   func()
+	afterWatermarkTx func()
+}
+
+func (a *failableInvoiceAdapter) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	inv, err := a.invoiceStoreAdapter.GetLatestThresholdInvoiceForCycle(ctx, tenantID, subscriptionID, periodStart, periodEnd)
+	if a.afterWatermark != nil {
+		a.afterWatermark()
+	}
+	return inv, err
+}
+
+func (a *failableInvoiceAdapter) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	inv, err := a.invoiceStoreAdapter.GetLatestThresholdInvoiceForCycleTx(ctx, tx, tenantID, subscriptionID, periodStart, periodEnd)
+	if a.afterWatermarkTx != nil {
+		a.afterWatermarkTx()
+	}
+	return inv, err
 }
 
 func (a *failableInvoiceAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
