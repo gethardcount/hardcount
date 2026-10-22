@@ -71,6 +71,19 @@ type SubscriptionCanceler interface {
 	Cancel(ctx context.Context, tenantID, id string) error
 }
 
+// SubscriptionActionNotYet is what a SubscriptionPauser or SubscriptionCanceler
+// returns when the action would close a billing period still inside its
+// invoice grace (ADR-120 amendment 2026-10-22). Nothing was changed. The
+// final actions run again at Until, when the grace has passed; it is a wait,
+// not a failure.
+type SubscriptionActionNotYet struct {
+	Until time.Time
+}
+
+func (e *SubscriptionActionNotYet) Error() string {
+	return "the subscription action waits for the invoice grace until " + e.Until.UTC().Format(time.RFC3339Nano)
+}
+
 // InvoiceUncollectibleMarker writes the unpaid invoice off when dunning
 // exhausts retries with final_invoice_action='mark_uncollectible'.
 type InvoiceUncollectibleMarker interface {

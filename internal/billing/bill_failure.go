@@ -341,11 +341,25 @@ func (e *Engine) attemptSub(ctx context.Context, sub domain.Subscription, grace 
 // operator without it: a failed attempt by attemptSub, the two reads here.
 //
 // No invoice grace (ADR-120): the operator is acting on this subscription
-// now, so its ended period is closed now. Its callers (retry-billing, and the
-// pre-close of an immediate cancel and of every other subscription write)
-// compare with domain.BillingDueAt, which has no grace either.
+// now, so its ended period is closed now. It is BillDue with grace 0.
 func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string) (int, error) {
+	return e.BillDue(ctx, tenantID, subscriptionID, 0)
+}
+
+// BillDue is BillDueNow honouring an invoice grace: a due instant counts only
+// once grace has passed after it (billSubscription), and "still due" after a
+// clean attempt is judged at now less grace, so a period left inside its
+// grace is not a failure. Grace 0 is the operator's close: retry-billing, and
+// the pre-close of an immediate cancel and of every other subscription write
+// (subscription.Service.closeEndedPeriods). Dunning's final pause and cancel
+// pass INVOICE_GRACE_PERIOD (ADR-120 amendment 2026-10-22): a catch-up over
+// several ended periods closes those past their grace and leaves the newest.
+// A test clock has no grace (ADR-120); the caller passes 0 for one.
+func (e *Engine) BillDue(ctx context.Context, tenantID, subscriptionID string, grace time.Duration) (int, error) {
 	logArgs := []any{"run", "operator_retry"}
+	if grace > 0 {
+		logArgs = []any{"run", "close_with_grace"}
+	}
 	sub, err := e.subs.Get(ctx, tenantID, subscriptionID)
 	if err != nil {
 		// No row was read, so there is nothing to record a failure against.
@@ -354,7 +368,7 @@ func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string
 		}, logArgs...)...)
 		return 0, fmt.Errorf("read subscription %s: %w", subscriptionID, err)
 	}
-	n, err := e.attemptSub(ctx, sub, 0, logArgs...)
+	n, err := e.attemptSub(ctx, sub, grace, logArgs...)
 	if errors.Is(err, errBillingGated) {
 		// A billing run saved a failure between the caller's clear and this
 		// attempt. The response shows that record.
@@ -370,7 +384,7 @@ func (e *Engine) BillDueNow(ctx context.Context, tenantID, subscriptionID string
 		}, logArgs...)...)
 		return n, fmt.Errorf("re-read subscription %s: %w", subscriptionID, err)
 	}
-	if fresh.TestClockID == "" && fresh.BillingFailure == nil && domain.BillingDueAt(fresh, e.clock.Now(ctx)) {
+	if fresh.TestClockID == "" && fresh.BillingFailure == nil && domain.BillingDueAt(fresh, e.clock.Now(ctx).Add(-grace)) {
 		e.reportBillFailure(ctx, fresh, n, errStillDue, logArgs...)
 		return n, errStillDue
 	}

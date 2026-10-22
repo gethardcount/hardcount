@@ -107,11 +107,18 @@ type Biller interface {
 
 // DueBiller bills one subscription now, through the same attempt the billing
 // run makes (period CAS, failure record and all). It is the bill half of the
-// operator's retry-billing action (ADR-119). Its own one-method interface, not
-// a method on Biller, so the fakes of that interface do not all grow.
-// Implemented by *billing.Engine.
+// operator's retry-billing action (ADR-119) and of the close every
+// subscription write runs first (closeEndedPeriods). Its own one-method
+// interface, not a method on Biller, so the fakes of that interface do not
+// all grow. Implemented by *billing.Engine.
+//
+// grace is the invoice grace the attempt honours (ADR-120): a due instant
+// counts only once grace has passed after it. 0 closes every ended period
+// now, as the operator's writes do; dunning's final pause and cancel pass
+// INVOICE_GRACE_PERIOD, so a catch-up closes the periods past their grace and
+// leaves the newest to its grace.
 type DueBiller interface {
-	BillDueNow(ctx context.Context, tenantID, subscriptionID string) (invoicesGenerated int, err error)
+	BillDue(ctx context.Context, tenantID, subscriptionID string, grace time.Duration) (invoicesGenerated int, err error)
 }
 
 // PlanReader (defined in handler.go) is also used at sub-lifecycle
@@ -129,9 +136,12 @@ type Service struct {
 	plans     PlanReader
 	biller    Biller
 	dueBiller DueBiller
-	resolver  clock.Resolver
-	events    domain.EventDispatcher
-	audit     AuditLogger
+	// invoiceGrace is INVOICE_GRACE_PERIOD (ADR-120). Only dunning's final
+	// pause and cancel wait for it; see SetInvoiceGrace.
+	invoiceGrace time.Duration
+	resolver     clock.Resolver
+	events       domain.EventDispatcher
+	audit        AuditLogger
 }
 
 // AuditLogger is the narrow audit-write interface the service uses to
@@ -247,6 +257,31 @@ func (s *Service) SetBiller(b Biller) {
 // refused until that run has billed the period.
 func (s *Service) SetDueBiller(b DueBiller) {
 	s.dueBiller = b
+}
+
+// SetInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120), the same value the
+// billing engine's runs wait for (billing.Engine.SetInvoiceGrace). Dunning's
+// final pause and cancel (PauseCollectionForDunning, CancelForDunning) do not
+// close a period that ended less than this long ago: dunning is not the
+// operator acting now, so it waits for the grace like the billing run, and
+// usage that arrives inside the grace is on the period's invoice. Every other
+// subscription write closes the ended period at once. Unset (0) waits for
+// nothing.
+func (s *Service) SetInvoiceGrace(d time.Duration) {
+	s.invoiceGrace = d
+}
+
+// InsideInvoiceGraceError is the answer of a dunning final action (pause or
+// cancel) that would close a period still inside its invoice grace. Nothing
+// was billed or changed. Until is when the grace ends (the due instant plus
+// INVOICE_GRACE_PERIOD, truncated to the microsecond the database keeps): the
+// action can run then.
+type InsideInvoiceGraceError struct {
+	Until time.Time
+}
+
+func (e *InsideInvoiceGraceError) Error() string {
+	return "the subscription's ended period is inside its invoice grace until " + e.Until.UTC().Format(time.RFC3339Nano)
 }
 
 // SetResolver wires the unified clock.Resolver used to bind
@@ -2181,7 +2216,7 @@ func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string) (s
 	if s.dueBiller == nil || sub.Status != domain.SubscriptionActive || !domain.BillingDueAt(sub, s.clock.Now(ctx)) {
 		return sub, false, nil
 	}
-	if _, billErr := s.dueBiller.BillDueNow(ctx, tenantID, id); billErr != nil {
+	if _, billErr := s.dueBiller.BillDue(ctx, tenantID, id, 0); billErr != nil {
 		slog.WarnContext(ctx, "billing the ended period before a subscription write failed",
 			"subscription_id", id, "tenant_id", tenantID, "error", billErr)
 	}
@@ -2237,6 +2272,15 @@ func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string
 // Orb all surface the credit on the subscription timeline, not just the
 // customer's credit balance).
 func (s *Service) Cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
+	return s.cancel(ctx, tenantID, id)
+}
+
+// CancelForDunning is dunning's cancel final action.
+func (s *Service) CancelForDunning(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
+	return s.cancel(ctx, tenantID, id)
+}
+
+func (s *Service) cancel(ctx context.Context, tenantID, id string) (domain.Subscription, int64, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 
 	// A cancel can arrive after the period ended and before the billing run
@@ -2434,7 +2478,7 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryB
 	var res RetryBillingResult
 	var billErr error
 	if s.dueBiller != nil {
-		res.InvoicesGenerated, billErr = s.dueBiller.BillDueNow(ctx, tenantID, id)
+		res.InvoicesGenerated, billErr = s.dueBiller.BillDue(ctx, tenantID, id, 0)
 	}
 
 	res.Subscription, err = s.store.Get(ctx, tenantID, id)

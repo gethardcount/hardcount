@@ -1,12 +1,20 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/dunning"
+	"github.com/sagarsuperuser/velox/internal/invoice"
+	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // INVOICE_GRACE_PERIOD over HTTP (ADR-120), on the close-lag rig: the real
@@ -224,4 +232,243 @@ func TestInvoiceGrace_CatchUpOverHTTP(t *testing.T) {
 	if n := r.run(lagP2.Add(e2eGrace)); n != 1 {
 		t.Fatalf("run at Jun 1 + 1h generated %d invoices, want May's", n)
 	}
+}
+
+// Dunning's final actions and the grace (ADR-120 amendment 2026-10-22).
+// Dunning is not the operator acting now: its final pause or cancel, landing
+// inside an ended period's grace, waits for the grace like the billing run,
+// so usage that arrives inside the grace is on the period's invoice. The run
+// is due again when the grace ends, and only then pauses or cancels and
+// escalates. The unpaid invoice is a manual one on the subscription (a
+// threshold or one-off invoice can exhaust its dunning at any time of day).
+
+// graceDunning is a dunning policy on the lag rig and the run under it.
+type graceDunning struct {
+	r     *lagRig
+	ctx   context.Context
+	runs  *dunning.PostgresStore
+	pol   domain.DunningPolicy
+	invID string
+	runID string
+}
+
+// exhaustedDunning leaves a manual invoice of the subscription unpaid, with
+// an active dunning run whose one retry is used and whose exhaustion is due
+// at due, under a policy with the given final actions.
+func (r *lagRig) exhaustedDunning(subAction domain.DunningSubscriptionAction, invAction domain.DunningInvoiceAction, due time.Time) *graceDunning {
+	r.t.Helper()
+	ctx := leadertest.Token(r.t, testutil.AdminPool(r.t), postgres.WithLivemode(context.Background(), true), leader.RoleDunning)
+	d := &graceDunning{r: r, ctx: ctx, runs: dunning.NewPostgresStore(r.db)}
+	pol, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
+		Name: "grace wait", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 1,
+		FinalSubscriptionAction: subAction, FinalInvoiceAction: invAction, GracePeriodDays: 3,
+	})
+	if err != nil {
+		r.t.Fatalf("upsert policy: %v", err)
+	}
+	d.pol = pol
+	issued := lagP0.AddDate(0, 0, 11)
+	inv, err := invoice.NewPostgresStore(r.db).Create(ctx, r.tenantID, domain.Invoice{
+		CustomerID: r.custID, SubscriptionID: r.subID, InvoiceNumber: "GRACE-1", BillingReason: domain.BillingReasonManual,
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
+		SubtotalCents: 500, TotalAmountCents: 500, AmountDueCents: 500,
+		BillingPeriodStart: lagP0.AddDate(0, 0, 10), BillingPeriodEnd: issued, IssuedAt: &issued,
+	})
+	if err != nil {
+		r.t.Fatalf("create invoice: %v", err)
+	}
+	d.invID = inv.ID
+	run, err := d.runs.CreateRun(ctx, r.tenantID, domain.InvoiceDunningRun{
+		InvoiceID: inv.ID, CustomerID: r.custID, PolicyID: pol.ID,
+		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: pol.MaxRetryAttempts, NextActionAt: &due,
+	})
+	if err != nil {
+		r.t.Fatalf("create run: %v", err)
+	}
+	if ok, err := d.runs.UpdateRunIfActive(ctx, r.tenantID, run, run.AttemptCount, nil); err != nil || !ok {
+		r.t.Fatalf("record the attempts: applied=%v err=%v", ok, err)
+	}
+	d.runID = run.ID
+	return d
+}
+
+// tick is the dunning scheduler's tick at the instant at.
+func (d *graceDunning) tick(at time.Time) {
+	d.r.t.Helper()
+	d.r.clk.Set(at)
+	if _, errs := d.r.srv.DunningSvc.ProcessDueRuns(clock.WithEffectiveNow(d.ctx, at), d.r.tenantID, 50); len(errs) > 0 {
+		d.r.t.Fatalf("dunning tick at %v: %v", at, errs)
+	}
+}
+
+func (d *graceDunning) run() domain.InvoiceDunningRun {
+	d.r.t.Helper()
+	run, err := d.runs.GetRun(d.ctx, d.r.tenantID, d.runID)
+	if err != nil {
+		d.r.t.Fatalf("get run: %v", err)
+	}
+	return run
+}
+
+// escalations counts the run's escalated timeline rows.
+func (d *graceDunning) escalations() int {
+	d.r.t.Helper()
+	evs, err := d.runs.ListEvents(d.ctx, d.r.tenantID, d.runID)
+	if err != nil {
+		d.r.t.Fatalf("list run events: %v", err)
+	}
+	n := 0
+	for _, e := range evs {
+		if e.EventType == domain.DunningEventEscalated {
+			n++
+		}
+	}
+	return n
+}
+
+// waiting asserts the run waits for the grace: active, not action_failed,
+// not escalated, due again at until.
+func (d *graceDunning) waiting(when string, until time.Time) {
+	d.r.t.Helper()
+	run := d.run()
+	if run.State != domain.DunningActive || run.Resolution == domain.ResolutionActionFailed ||
+		run.NextActionAt == nil || !run.NextActionAt.Equal(until) {
+		d.r.t.Fatalf("%s: run state=%s resolution=%q next_action_at=%v, want active, not action_failed, due again at %v",
+			when, run.State, run.Resolution, run.NextActionAt, until)
+	}
+	if n := d.escalations(); n != 0 {
+		d.r.t.Fatalf("%s: %d escalated rows, want none while the action waits", when, n)
+	}
+}
+
+// escalated asserts the run escalated once.
+func (d *graceDunning) escalated() {
+	d.r.t.Helper()
+	if run := d.run(); run.State != domain.DunningEscalated || run.Resolution != domain.ResolutionRetriesExhausted {
+		d.r.t.Fatalf("after the grace: run state=%s resolution=%q, want escalated as retries_exhausted", run.State, run.Resolution)
+	}
+	if n := d.escalations(); n != 1 {
+		d.r.t.Fatalf("%d escalated rows, want 1", n)
+	}
+}
+
+// TestInvoiceGrace_DunningPauseWaitsForTheGrace: a dunning run on the
+// subscription exhausts at B+5m under a pause policy that also writes the
+// invoice off. April ended 5 minutes ago and is inside its grace, so the
+// pause waits: April stays open, nothing is paused or written off, the run is
+// not escalated and is due again at B+1h. An April event arriving at B+20m is
+// then on April's invoice, which dunning's own close builds at B+1h05m before
+// it pauses.
+//
+// Mutation checks: remove the grace guard from closeEndedPeriods → the pause
+// closes April at B+5m (April usage 100); send the wait down the
+// action_failed path → the run is due a day later.
+func TestInvoiceGrace_DunningPauseWaitsForTheGrace(t *testing.T) {
+	skipShort(t)
+	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
+	r.ingest(lagP0.AddDate(0, 0, 19), 100)
+	d := r.exhaustedDunning(domain.SubActionPause, domain.InvActionMarkUncollectible, lagB)
+
+	d.tick(lagB.Add(5 * time.Minute))
+	if s := r.sub(); !s.CurrentBillingPeriodStart.Equal(lagP0) || s.PauseCollection != nil || s.BillingFailure != nil {
+		t.Fatalf("at B+5m: period start=%v pause=%+v failure=%+v, want April open, no pause, no failure", s.CurrentBillingPeriodStart, s.PauseCollection, s.BillingFailure)
+	}
+	d.waiting("at B+5m", lagB.Add(e2eGrace))
+	if inv := r.invoiceStatus(d.invID); inv != string(domain.InvoiceFinalized) {
+		t.Fatalf("at B+5m the invoice is %s, want finalized: the write-off waits with the pause", inv)
+	}
+
+	r.ingestAt(lagB.Add(-10*time.Minute), lagB.Add(20*time.Minute), 40)
+	d.tick(lagB.Add(30 * time.Minute))
+	d.waiting("at B+30m", lagB.Add(e2eGrace))
+
+	d.tick(lagB.Add(e2eGrace + 5*time.Minute))
+	s := r.sub()
+	if s.PauseCollection == nil || s.PauseCollection.SetBy != domain.PauseSetByDunning {
+		t.Fatalf("after the grace: pause=%+v, want dunning's pause", s.PauseCollection)
+	}
+	if !s.CurrentBillingPeriodStart.Equal(lagB) {
+		t.Fatalf("after the grace: period start=%v, want May", s.CurrentBillingPeriodStart)
+	}
+	d.escalated()
+	if inv := r.invoiceStatus(d.invID); inv != string(domain.InvoiceUncollectible) {
+		t.Errorf("after the grace the invoice is %s, want uncollectible", inv)
+	}
+	if got := r.cycleInvoice(r.invoices(), lagP0).sum("usage"); got != 140 {
+		r.logInvoices(r.invoices())
+		t.Errorf("April usage = %dc, want 140c: the 40 calls that arrived inside the grace belong on April's invoice", got)
+	}
+}
+
+// TestInvoiceGrace_DunningCancelWaitsForTheGrace is the cancel policy's
+// version: the subscription stays active inside the grace and is canceled
+// after it, with April's invoice carrying the usage that arrived inside the
+// grace.
+func TestInvoiceGrace_DunningCancelWaitsForTheGrace(t *testing.T) {
+	skipShort(t)
+	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
+	r.ingest(lagP0.AddDate(0, 0, 19), 100)
+	d := r.exhaustedDunning(domain.SubActionCancel, domain.InvActionNone, lagB)
+
+	d.tick(lagB.Add(5 * time.Minute))
+	if s := r.sub(); s.Status != domain.SubscriptionActive || !s.CurrentBillingPeriodStart.Equal(lagP0) || s.BillingFailure != nil {
+		t.Fatalf("at B+5m: status=%s period start=%v failure=%+v, want active, April open, no failure", s.Status, s.CurrentBillingPeriodStart, s.BillingFailure)
+	}
+	d.waiting("at B+5m", lagB.Add(e2eGrace))
+
+	r.ingestAt(lagB.Add(-10*time.Minute), lagB.Add(20*time.Minute), 40)
+	d.tick(lagB.Add(e2eGrace + 5*time.Minute))
+	if s := r.sub(); s.Status != domain.SubscriptionCanceled {
+		t.Fatalf("after the grace: status=%s, want canceled", s.Status)
+	}
+	d.escalated()
+	if got := r.cycleInvoice(r.invoices(), lagP0).sum("usage"); got != 140 {
+		r.logInvoices(r.invoices())
+		t.Errorf("April usage = %dc, want 140c: the 40 calls that arrived inside the grace belong on April's invoice", got)
+	}
+}
+
+// TestInvoiceGrace_DunningCatchUpClosesTheOlderPeriodAndWaits: the billing
+// run was down over two period ends. Dunning's pause at Jun 1 00:05 closes
+// April, whose grace passed long ago, and waits for May's: May stays open
+// until Jun 1 01:00, and a May event arriving at 00:20 is on May's invoice.
+//
+// Mutation checks: bill with grace 0 in Engine.BillDue, or have
+// closeEndedPeriods pass 0 to it → May is closed at 00:05 too.
+func TestInvoiceGrace_DunningCatchUpClosesTheOlderPeriodAndWaits(t *testing.T) {
+	skipShort(t)
+	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
+	r.ingest(lagP0.AddDate(0, 0, 19), 100)
+	r.ingest(lagB.AddDate(0, 0, 9), 30)
+	d := r.exhaustedDunning(domain.SubActionPause, domain.InvActionNone, lagP2)
+
+	d.tick(lagP2.Add(5 * time.Minute))
+	if s := r.sub(); !s.CurrentBillingPeriodStart.Equal(lagB) || s.PauseCollection != nil || s.BillingFailure != nil {
+		t.Fatalf("at Jun 1 00:05: period start=%v pause=%+v failure=%+v, want April closed, May open, no pause, no failure",
+			s.CurrentBillingPeriodStart, s.PauseCollection, s.BillingFailure)
+	}
+	if got := r.cycleInvoice(r.invoices(), lagP0).sum("usage"); got != 100 {
+		t.Errorf("April usage = %dc, want 100c", got)
+	}
+	d.waiting("at Jun 1 00:05", lagP2.Add(e2eGrace))
+
+	r.ingestAt(lagP2.Add(-10*time.Minute), lagP2.Add(20*time.Minute), 40)
+	d.tick(lagP2.Add(e2eGrace + 5*time.Minute))
+	if s := r.sub(); s.PauseCollection == nil || !s.CurrentBillingPeriodStart.Equal(lagP2) {
+		t.Fatalf("after May's grace: pause=%+v period start=%v, want paused with June running", s.PauseCollection, s.CurrentBillingPeriodStart)
+	}
+	d.escalated()
+	if got := r.cycleInvoice(r.invoices(), lagB).sum("usage"); got != 70 {
+		r.logInvoices(r.invoices())
+		t.Errorf("May usage = %dc, want 70c: the 40 calls that arrived inside May's grace belong on May's invoice", got)
+	}
+}
+
+// invoiceStatus is the invoice's status as GET /v1/invoices/{id} returns it.
+func (r *lagRig) invoiceStatus(id string) string {
+	r.t.Helper()
+	out := r.must(http.MethodGet, "/v1/invoices/"+id, r.clk.Now(context.Background()), nil, http.StatusOK)
+	inv, _ := out["invoice"].(map[string]any)
+	s, _ := inv["status"].(string)
+	return s
 }
