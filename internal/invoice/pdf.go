@@ -985,7 +985,8 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 			}
 
 			// The tenant's footer (payment details, legal text) and support
-			// link. Both may be long, so they wrap to the page width.
+			// link. Both may be long, so they wrap to the page width, and a
+			// footer taller than the page breaks between its lines.
 			var footerText, supportURL string
 			if len(company) > 0 {
 				footerText = strings.TrimSpace(company[0].Footer)
@@ -997,6 +998,7 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 				y += 6
 				for _, line := range wrap(footerText, contentW) {
 					y += 11
+					need(11, false)
 					textAt(margin, y, line)
 				}
 			}
@@ -1004,11 +1006,13 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 				y += 6
 				for _, line := range wrap("Need help? "+supportURL, contentW) {
 					y += 11
+					need(11, false)
 					textAt(margin, y, line)
 				}
 			}
 
 			y += 24
+			need(10, false)
 			setFont(false, 7)
 			setColor(170, 170, 170)
 			footer := fmt.Sprintf("Generated on %s  |  %s", clock.Now(ctx).Format("Jan 2, 2006 15:04 UTC"), inv.ID)
