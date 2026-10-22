@@ -8011,9 +8011,11 @@ type GetV1SubscriptionsParams struct {
 	// and those that are parked. Any other value is a 400.
 	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
 
-	// Collection `paused` returns only active and trialing subscriptions that carry
-	// `pause_collection`, whether an operator or dunning set it. Any
-	// other value is a 400.
+	// Collection `paused` returns only active and trialing subscriptions whose
+	// `pause_collection` is in force, whether an operator or dunning set
+	// it. A timed pause ends at `resumes_at` (on the subscription's test
+	// clock, if it has one), even while the response still carries it.
+	// Any other value is a 400.
 	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.

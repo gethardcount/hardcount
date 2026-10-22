@@ -222,7 +222,8 @@ export default function CustomerDetailPage() {
     return m
   }, [clocksData])
   // The customer's "now" (its test clock when pinned), for Past due on the
-  // recent-invoice badges. Subscriptions inherit the customer's pin (ADR-027).
+  // recent-invoice badges and for when a timed collection pause ends on the
+  // subscription rows. Subscriptions inherit the customer's pin (ADR-027).
   const invoiceNow = useEffectiveNow(customer?.test_clock_id)
 
   const { data: overview } = useQuery({
@@ -1041,7 +1042,7 @@ export default function CustomerDetailPage() {
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <Badge variant={statusVariant(sub.status)} className="shrink-0">{sub.status}</Badge>
                     {(() => {
-                      const paused = collectionPausedFlag(sub)
+                      const paused = collectionPausedFlag(sub, invoiceNow)
                       return paused && <StatusBadge status={paused} className="shrink-0" />
                     })()}
                     <span className="text-sm font-medium text-foreground truncate">{sub.display_name}</span>

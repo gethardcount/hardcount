@@ -419,9 +419,8 @@ export default function SubscriptionDetailPage() {
           : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
       }
       case 'collection_paused': {
-        // Distinct from the hard pause (status=paused): the sub stays active
-        // but invoices generate as drafts and skip finalize/charge/dunning
-        // until resumed. A deliberate state, so the neutral tone.
+        // The sub stays active, but invoices generate as drafts and skip
+        // finalize/charge/dunning until resumed. A deliberate state, so the neutral tone.
         const action = (
           <Button variant="outline" size="sm" onClick={() => resumeCollectionMutation.mutate()} disabled={acting}>
             {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}

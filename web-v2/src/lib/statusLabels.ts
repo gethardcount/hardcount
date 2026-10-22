@@ -65,7 +65,7 @@ const PAYMENT_IN_BADGE = new Set(['succeeded', 'processing', 'failed'])
 
 export interface SubscriptionStatusInput {
   status: string
-  pause_collection?: unknown
+  pause_collection?: { behavior?: string; resumes_at?: string | null } | null
   cancel_at_period_end?: boolean
   cancel_at?: string | null
 }
@@ -83,21 +83,26 @@ export function subscriptionStatus(sub: SubscriptionStatusInput): StatusDisplay 
 }
 
 // collectionPausedFlag is the chip a list shows beside a live subscription
-// whose collection is paused (by an operator or by dunning), or null. Live
-// means active or trialing, the same rule as GET /v1/subscriptions
-// ?collection=paused: a canceled row can keep the pause columns.
-export function collectionPausedFlag(sub: SubscriptionStatusInput): StatusDisplay | null {
+// whose collection is paused (by an operator or by dunning), or null. The
+// same rule as GET /v1/subscriptions?collection=paused: live means active or
+// trialing (a canceled row can keep the pause columns), and a timed pause
+// ends at resumes_at, though the row can keep it a while after. `nowMs` is
+// the subscription's effective now (test clock aware).
+export function collectionPausedFlag(sub: SubscriptionStatusInput, nowMs: number): StatusDisplay | null {
   if (sub.status !== 'active' && sub.status !== 'trialing') return null
-  return sub.pause_collection ? { label: 'Collection paused', tone: 'warning' } : null
+  const pause = sub.pause_collection
+  if (!pause) return null
+  if (pause.resumes_at && new Date(pause.resumes_at).getTime() <= nowMs) return null
+  return { label: 'Collection paused', tone: 'warning' }
 }
 
 // subscriptionFlags are the secondary chips shown beside the main badge, for
 // states the main status does not carry: collection paused (often by
 // dunning) and a scheduled cancel. Only for live subscriptions.
-export function subscriptionFlags(sub: SubscriptionStatusInput): StatusDisplay[] {
+export function subscriptionFlags(sub: SubscriptionStatusInput, nowMs: number): StatusDisplay[] {
   if (sub.status !== 'active' && sub.status !== 'trialing') return []
   const flags: StatusDisplay[] = []
-  const paused = collectionPausedFlag(sub)
+  const paused = collectionPausedFlag(sub, nowMs)
   if (paused) flags.push(paused)
   if (sub.cancel_at_period_end || sub.cancel_at) flags.push({ label: 'Cancel scheduled', tone: 'warning' })
   return flags

@@ -2219,9 +2219,11 @@ export interface paths {
                      */
                     billing?: "failing";
                     /**
-                     * @description `paused` returns only active and trialing subscriptions that carry
-                     *     `pause_collection`, whether an operator or dunning set it. Any
-                     *     other value is a 400.
+                     * @description `paused` returns only active and trialing subscriptions whose
+                     *     `pause_collection` is in force, whether an operator or dunning set
+                     *     it. A timed pause ends at `resumes_at` (on the subscription's test
+                     *     clock, if it has one), even while the response still carries it.
+                     *     Any other value is a 400.
                      */
                     collection?: "paused";
                     /** @description Case-insensitive substring match on display name or code. */

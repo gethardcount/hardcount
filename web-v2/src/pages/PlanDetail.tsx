@@ -14,6 +14,7 @@ import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { TestClockBadge } from '@/components/TestClockBadge'
+import { useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
 import { statusBadgeVariant } from '@/lib/status'
 import { collectionPausedFlag } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -69,6 +70,9 @@ export default function PlanDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  // Each subscription's "now" (its test clock when pinned), for when a timed
+  // collection pause ends.
+  const resolveNow = useEffectiveNowResolver()
   const [showEdit, setShowEdit] = useState(false)
   const [showAttachMeter, setShowAttachMeter] = useState(false)
   const [detachTarget, setDetachTarget] = useState<Meter | null>(null)
@@ -439,7 +443,7 @@ export default function PlanDetailPage() {
                       <div className="flex items-center gap-2">
                         <Badge variant={statusVariant(sub.status)}>{sub.status}</Badge>
                         {(() => {
-                          const paused = collectionPausedFlag(sub)
+                          const paused = collectionPausedFlag(sub, resolveNow(sub.test_clock_id))
                           return paused && <StatusBadge status={paused} />
                         })()}
                       </div>

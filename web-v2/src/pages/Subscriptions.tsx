@@ -364,7 +364,7 @@ export default function SubscriptionsPage() {
                         <div className="flex items-center gap-2">
                           <Badge variant={statusBadgeVariant(sub.status)}>{sub.status}</Badge>
                           {(() => {
-                            const paused = collectionPausedFlag(sub)
+                            const paused = collectionPausedFlag(sub, effectiveNow(sub.test_clock_id ? clockFrozenMap[sub.test_clock_id] : undefined))
                             return paused && <StatusBadge status={paused} />
                           })()}
                           {sub.billing_failure && (

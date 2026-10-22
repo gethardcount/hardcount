@@ -429,7 +429,9 @@ type ListFilter struct {
 	// rejects any other value.
 	Billing string
 	// Collection "paused" keeps only live (active or trialing) subscriptions
-	// whose pause_collection is set, by an operator or by dunning. Paused
+	// whose pause_collection is in force now (set, by an operator or by
+	// dunning, and its resumes_at, if any, not yet reached on the
+	// subscription's clock). Paused
 	// collection is not a status: the subscription stays active and keeps
 	// billing into drafts. Empty = no filter. The handler rejects any other
 	// value.
