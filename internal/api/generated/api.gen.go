@@ -4625,11 +4625,13 @@ type HostedInvoice struct {
 		Currency            string    `json:"currency"`
 		DiscountCents       int64     `json:"discount_cents"`
 		DueAt               time.Time `json:"due_at,omitempty"`
-		Footer              string    `json:"footer,omitempty"`
-		InvoiceNumber       string    `json:"invoice_number"`
-		IssuedAt            time.Time `json:"issued_at,omitempty"`
-		Memo                string    `json:"memo,omitempty"`
-		PaidAt              time.Time `json:"paid_at,omitempty"`
+
+		// Footer The footer this invoice was issued with.
+		Footer        string    `json:"footer,omitempty"`
+		InvoiceNumber string    `json:"invoice_number"`
+		IssuedAt      time.Time `json:"issued_at,omitempty"`
+		Memo          string    `json:"memo,omitempty"`
+		PaidAt        time.Time `json:"paid_at,omitempty"`
 
 		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 		// returned an ambiguous error (5xx, timeout, connection reset) where
@@ -4733,8 +4735,12 @@ type Invoice struct {
 	CustomerId          string    `json:"customer_id"`
 	DiscountCents       int64     `json:"discount_cents"`
 	DueAt               time.Time `json:"due_at,omitempty"`
-	Footer              string    `json:"footer,omitempty"`
-	Id                  string    `json:"id"`
+
+	// Footer The tenant's `invoice_footer` as it was when this invoice was
+	// issued. Printed on the PDF and the hosted invoice page. Empty on
+	// a draft.
+	Footer string `json:"footer,omitempty"`
+	Id     string `json:"id"`
 
 	// InvoiceNumber Set when the invoice is created, including drafts.
 	InvoiceNumber string `json:"invoice_number"`
@@ -6131,12 +6137,17 @@ type TenantSettings struct {
 	// trimmed before the check.
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
-	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
+	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
+	// invoice page. Each invoice keeps the footer it was issued with,
+	// so a change applies to invoices issued after it. A draft shows
+	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
 	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
 	InvoicePrefix string `json:"invoice_prefix"`
-	LogoUrl       string `json:"logo_url,omitempty"`
+
+	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
+	LogoUrl string `json:"logo_url,omitempty"`
 
 	// NetPaymentTerms Days until an invoice is due. 0 means due on issue.
 	NetPaymentTerms int `json:"net_payment_terms"`
@@ -6148,7 +6159,9 @@ type TenantSettings struct {
 	// sending it on `PUT` does nothing.
 	NextInvoiceSequence int `json:"next_invoice_sequence"`
 
-	// SupportUrl Must start with `http://` or `https://`. Printed in the invoice footer.
+	// SupportUrl Must start with `http://` or `https://`. Linked in emails and on
+	// the hosted invoice page, and printed at the foot of invoice and
+	// credit-note PDFs.
 	SupportUrl string `json:"support_url,omitempty"`
 
 	// TaxId Your own tax number (VAT, EIN, GSTIN), printed on invoices.
@@ -6215,17 +6228,24 @@ type TenantSettingsInput struct {
 	// trimmed before the check.
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
-	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
+	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
+	// invoice page. Each invoice keeps the footer it was issued with,
+	// so a change applies to invoices issued after it. A draft shows
+	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
 	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
 	InvoicePrefix string `json:"invoice_prefix,omitempty"`
-	LogoUrl       string `json:"logo_url,omitempty"`
+
+	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
+	LogoUrl string `json:"logo_url,omitempty"`
 
 	// NetPaymentTerms Days until an invoice is due. 0 means due on issue.
 	NetPaymentTerms int `json:"net_payment_terms,omitempty"`
 
-	// SupportUrl Must start with `http://` or `https://`. Printed in the invoice footer.
+	// SupportUrl Must start with `http://` or `https://`. Linked in emails and on
+	// the hosted invoice page, and printed at the foot of invoice and
+	// credit-note PDFs.
 	SupportUrl string `json:"support_url,omitempty"`
 
 	// TaxId Your own tax number (VAT, EIN, GSTIN), printed on invoices.

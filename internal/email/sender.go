@@ -66,7 +66,8 @@ type Sender struct {
 
 	// settings, when non-nil, is consulted on every customer-facing
 	// send to fetch the tenant's branding (logo, brand color, company
-	// name, support URL, from-name). Nil => fall back to Velox defaults.
+	// name, support URL, from-name). Nil => no branding: no logo, no
+	// seller name.
 	settings SettingsGetter
 
 	// bounceReporter, when non-nil, is called on SMTP permanent-failure
@@ -380,15 +381,15 @@ func (s *Sender) reportBounceIfPermanent(ctx context.Context, tenantID, to strin
 	s.bounceReporter.ReportBounce(ctx, tenantID, to, reason)
 }
 
-// brandingFor resolves branding for tenantID. Never errors — a missing
-// tenant or a cold-start settings row just gets Velox defaults. ctx
+// brandingFor resolves branding for tenantID. Never errors: a missing
+// tenant, a cold-start settings row or a failed read gets empty branding,
+// so the email names no seller rather than a made-up one. ctx
 // must carry livemode (set by the request middleware for direct-send,
 // or constructed from the email_outbox row's livemode by the
 // dispatcher for the durable path).
 func (s *Sender) brandingFor(ctx context.Context, tenantID string) Branding {
-	b := Branding{}
 	if s.settings == nil || tenantID == "" {
-		return b.fill()
+		return Branding{}
 	}
 	// 5s bound on settings query so a slow tenant lookup doesn't stall
 	// the send path. Inherits livemode + tenant from the caller's ctx.
@@ -397,18 +398,17 @@ func (s *Sender) brandingFor(ctx context.Context, tenantID string) Branding {
 	ts, err := s.settings.Get(ctx, tenantID)
 	if err != nil {
 		if !errors.Is(err, errs.ErrNotFound) {
-			slog.Warn("email: branding lookup failed — falling back to defaults",
+			slog.Warn("email: branding lookup failed, sending without branding",
 				"tenant_id", tenantID, "error", err)
 		}
-		return b.fill()
+		return Branding{}
 	}
-	b = Branding{
+	return Branding{
 		CompanyName: ts.CompanyName,
 		LogoURL:     ts.LogoURL,
 		BrandColor:  ts.BrandColor,
 		SupportURL:  ts.SupportURL,
 	}
-	return b.fill()
 }
 
 // hostedInvoiceURL returns the shareable hosted-invoice URL for the

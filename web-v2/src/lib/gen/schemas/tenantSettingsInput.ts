@@ -83,6 +83,7 @@ export interface TenantSettingsInput {
   company_email?: string;
   /** 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`. */
   company_phone?: string;
+  /** Shown in emails and on the hosted invoice page. PDFs do not print it. */
   logo_url?: string;
   /**
      * Accent color on invoice PDFs, as `#rrggbb`.
@@ -95,12 +96,17 @@ export interface TenantSettingsInput {
      */
   tax_id?: string;
   /**
-     * Must start with `http://` or `https://`. Printed in the invoice footer.
+     * Must start with `http://` or `https://`. Linked in emails and on
+     * the hosted invoice page, and printed at the foot of invoice and
+     * credit-note PDFs.
      * @maxLength 500
      */
   support_url?: string;
   /**
-     * Default footer for new invoices. An invoice's own footer takes precedence.
+     * Printed under the totals on invoice PDFs and on the hosted
+     * invoice page. Each invoice keeps the footer it was issued with,
+     * so a change applies to invoices issued after it. A draft shows
+     * the current text.
      * @maxLength 1000
      */
   invoice_footer?: string;

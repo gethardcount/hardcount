@@ -3617,6 +3617,11 @@ func (s *PostgresStore) scanInvoiceRows(rows *sql.Rows, queryErr error) ([]domai
 // copy, as they are on the customer and billing-profile rows; the scan
 // decrypts them (openBillTo).
 //
+// The same UPDATE copies the tenant's invoice footer into invoices.footer.
+// The footer carries payment details and legal text, so an issued invoice
+// keeps the one it was issued with, and the PDF and the hosted page print
+// that copy.
+//
 // The UPDATE returns the row, so inv (and every caller that renders from the
 // returned value instead of re-reading) carries the copy. A customer the
 // transaction cannot see fails the issue instead of writing an empty copy.
@@ -3649,7 +3654,8 @@ func (s *PostgresStore) stampIssuedPartiesTx(ctx context.Context, tx *sql.Tx, in
 		return fmt.Errorf("issue invoice %s: encode supplier copy: %w", inv.ID, err)
 	}
 	if err := tx.QueryRowContext(ctx, `
-		UPDATE invoices SET bill_to_snapshot = $1::jsonb, supplier_snapshot = $2::jsonb
+		UPDATE invoices SET bill_to_snapshot = $1::jsonb, supplier_snapshot = $2::jsonb,
+			footer = (SELECT NULLIF(ts.invoice_footer, '') FROM tenant_settings ts WHERE ts.tenant_id = invoices.tenant_id)
 		WHERE id = $3
 		RETURNING `+invCols,
 		billJSON, supJSON, inv.ID,
