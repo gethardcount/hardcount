@@ -357,8 +357,7 @@ export interface paths {
          *     days, newest first: invoice, payment receipt, payment failed,
          *     payment setup request, dunning, and credit note emails. Emails
          *     not tied to an invoice (such as a setup link sent from the
-         *     payment-methods page) are not listed. No paging. An unknown
-         *     customer ID returns an empty list, not 404.
+         *     payment-methods page) are not listed. No paging.
          */
         get: operations["listCustomerSentEmails"];
         put?: never;
@@ -641,9 +640,7 @@ export interface paths {
          * @description An older route the dashboard no longer uses. Prefer
          *     `GET /v1/customers/{customer_id}/payment-methods`.
          *
-         *     Any read error, an unknown customer included, returns 200 with
-         *     `setup_status: missing` and zero timestamps. Needs the
-         *     `customer:write` permission.
+         *     An unknown customer is 404. Needs the `customer:write` permission.
          */
         get: operations["getCheckoutSetupStatus"];
         put?: never;
@@ -1096,8 +1093,7 @@ export interface paths {
          * List a meter's pricing rules
          * @description Every pricing rule on the meter, highest priority first, then oldest
          *     first. At billing time each usage event is billed by the first rule
-         *     in this order whose `dimension_match` it matches. The meter id is
-         *     not checked: an unknown id returns an empty list.
+         *     in this order whose `dimension_match` it matches.
          */
         get: operations["listMeterPricingRules"];
         put?: never;
@@ -1312,6 +1308,15 @@ export interface paths {
                         "application/json": components["schemas"]["CreditGrants"];
                     };
                 };
+                /** @description No customer with this ID in this tenant and mode. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
@@ -1383,8 +1388,7 @@ export interface paths {
          * List a customer's credit ledger
          * @description Ledger entries for one customer. `balance_after` is the running
          *     balance in time order over the whole ledger, so it stays right
-         *     when you filter by `entry_type`. An unknown customer returns an
-         *     empty list, not 404.
+         *     when you filter by `entry_type`.
          */
         get: operations["listCreditLedgerEntries"];
         put?: never;
@@ -2836,9 +2840,9 @@ export interface paths {
                      *     `model=gpt-4o,token_type=input`.
                      */
                     dimensions?: string;
-                    /** @description Only events at or after this time (RFC 3339). A value that does not parse is ignored. */
+                    /** @description Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
                     from?: string;
-                    /** @description Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored. */
+                    /** @description Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
                     to?: string;
                     limit?: number;
                     offset?: number;
@@ -2868,12 +2872,14 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Malformed dimensions filter */
+                /** @description `validation_error`: a malformed `dimensions` pair, or a `from` or `to` that cannot be parsed, or `to` before `from` (param names the field). */
                 422: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -3217,8 +3223,7 @@ export interface paths {
          *     customer's latest reading (Latest value), added across customers.
          *     `total` stays the plain sum of reported quantities. `total_units`
          *     adds quantities across all meters whatever their units, and is kept
-         *     for compatibility only. A `from` or `to` value that is not RFC 3339
-         *     is ignored, not rejected.
+         *     for compatibility only.
          */
         get: operations["aggregateUsageEvents"];
         put?: never;
@@ -3241,8 +3246,7 @@ export interface paths {
          * @description Per-meter quantity totals and the event count for one customer over
          *     a window. Without `from` and `to` the window is the current calendar
          *     month in UTC (the test clock's month when the customer is on one).
-         *     Quantities are plain sums, whatever the meter's aggregation. An
-         *     unknown customer id returns zero totals, not 404.
+         *     Quantities are plain sums, whatever the meter's aggregation.
          */
         get: operations["getUsageSummary"];
         put?: never;
@@ -5045,8 +5049,13 @@ export interface paths {
                         token_type: string;
                         /** @description Decimal dollars per token (e.g. "0.000003"). */
                         cost_per_token: string;
-                        /** @default USD */
-                        currency?: string;
+                        /**
+                         * @description Rates are in USD only, the currency LiteLLM reports cost
+                         *     in. Any other value is 422. Case does not matter.
+                         * @default USD
+                         * @enum {string}
+                         */
+                        currency?: "USD";
                     };
                 };
             };
@@ -5058,6 +5067,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ProviderCostRate"];
+                    };
+                };
+                /** @description `validation_error`: a required field is missing, `cost_per_token` is negative, or `currency` is not USD (param names the field). */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -5285,6 +5303,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["CreditBalance"];
+                    };
+                };
+                /** @description No customer with this ID in this tenant and mode. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -7645,7 +7672,11 @@ export interface components {
             token_type: string;
             /** @description Decimal dollars per token. */
             cost_per_token: string;
-            currency: string;
+            /**
+             * @description Always USD. Cost and margin count every rate in dollars.
+             * @enum {string}
+             */
+            currency: "USD";
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
@@ -8194,11 +8225,10 @@ export interface components {
             plan_id: string;
             /** Format: int64 */
             quantity: number;
-            /**
-             * Format: byte
-             * @description The item's stored metadata JSON, base64-encoded. Absent when empty.
-             */
-            metadata?: string;
+            /** @description The item's stored metadata. Absent when empty. */
+            metadata?: {
+                [key: string]: unknown;
+            };
             /** @description Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled. */
             pending_plan_id?: string;
             /** Format: date-time */
@@ -8982,6 +9012,7 @@ export interface components {
             mode: "flat" | "graduated" | "package";
             /** @description Per-unit rate in cents, as a decimal string. */
             flat_amount_cents?: string;
+            /** @description Empty (`[]`) unless `mode` is `graduated`. */
             graduated_tiers?: {
                 /**
                  * Format: int64
@@ -8990,7 +9021,7 @@ export interface components {
                 up_to?: number;
                 /** @description Per-unit rate in cents, as a decimal string. */
                 unit_amount_cents?: string;
-            }[] | null;
+            }[];
             /** Format: int64 */
             package_size?: number;
             /** Format: int64 */
@@ -10332,6 +10363,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getCustomerUsage: {
@@ -10874,6 +10914,15 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerPaymentSetup"];
                 };
             };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getHostedInvoice: {
@@ -11175,6 +11224,15 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["MeterPricingRule"][];
                     };
+                };
+            };
+            /** @description No meter with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -11527,6 +11585,15 @@ export interface operations {
                         data: components["schemas"]["CreditLedgerEntry"][];
                         total: number;
                     };
+                };
+            };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -13320,9 +13387,9 @@ export interface operations {
             query?: {
                 customer_id?: string;
                 meter_id?: string;
-                /** @description Events at or after this time (RFC 3339). */
+                /** @description Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
                 from?: string;
-                /** @description Events before this time (RFC 3339). */
+                /** @description Events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
                 to?: string;
                 /**
                  * @description Comma-separated key=value pairs matched against event dimensions,
@@ -13351,7 +13418,7 @@ export interface operations {
                     "application/json": components["schemas"]["UsageAggregate"];
                 };
             };
-            /** @description `validation_error`: a malformed `dimensions` pair or an unknown `tz`. */
+            /** @description `validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13386,6 +13453,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description `validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field). */

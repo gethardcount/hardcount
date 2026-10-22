@@ -1340,6 +1340,21 @@ func (e PlanStatus) Valid() bool {
 	}
 }
 
+// Defines values for ProviderCostRateCurrency.
+const (
+	ProviderCostRateCurrencyUSD ProviderCostRateCurrency = "USD"
+)
+
+// Valid indicates whether the value is a known member of the ProviderCostRateCurrency enum.
+func (e ProviderCostRateCurrency) Valid() bool {
+	switch e {
+	case ProviderCostRateCurrencyUSD:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RatingRuleLifecycleState.
 const (
 	RatingRuleLifecycleStateActive   RatingRuleLifecycleState = "active"
@@ -2720,6 +2735,21 @@ func (e DeletePriceOverride200JSONResponseBodyActive) Valid() bool {
 	}
 }
 
+// Defines values for PutV1ProviderCostsJSONBodyCurrency.
+const (
+	PutV1ProviderCostsJSONBodyCurrencyUSD PutV1ProviderCostsJSONBodyCurrency = "USD"
+)
+
+// Valid indicates whether the value is a known member of the PutV1ProviderCostsJSONBodyCurrency enum.
+func (e PutV1ProviderCostsJSONBodyCurrency) Valid() bool {
+	switch e {
+	case PutV1ProviderCostsJSONBodyCurrencyUSD:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource.
 const (
 	GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource = "no_subscription"
@@ -4043,7 +4073,9 @@ type CustomerPriceOverride struct {
 
 	// FlatAmountCents Per-unit rate in cents, as a decimal string.
 	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers  []struct {
+
+	// GraduatedTiers Empty (`[]`) unless `mode` is `graduated`.
+	GraduatedTiers []struct {
 		// UnitAmountCents Per-unit rate in cents, as a decimal string.
 		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 
@@ -5383,14 +5415,19 @@ type ProviderCostRate struct {
 	// CostPerToken Decimal dollars per token.
 	CostPerToken string    `json:"cost_per_token"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
-	Currency     string    `json:"currency"`
-	Id           string    `json:"id"`
-	Model        string    `json:"model"`
-	Provider     string    `json:"provider"`
-	TenantId     string    `json:"tenant_id,omitempty"`
-	TokenType    string    `json:"token_type"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+
+	// Currency Always USD. Cost and margin count every rate in dollars.
+	Currency  ProviderCostRateCurrency `json:"currency"`
+	Id        string                   `json:"id"`
+	Model     string                   `json:"model"`
+	Provider  string                   `json:"provider"`
+	TenantId  string                   `json:"tenant_id,omitempty"`
+	TokenType string                   `json:"token_type"`
+	UpdatedAt time.Time                `json:"updated_at,omitempty"`
 }
+
+// ProviderCostRateCurrency Always USD. Cost and margin count every rate in dollars.
+type ProviderCostRateCurrency string
 
 // PublicPaymentUpdate What the payment-update page shows before the customer adds a card.
 type PublicPaymentUpdate struct {
@@ -5880,9 +5917,9 @@ type SubscriptionItem struct {
 	CreatedAt time.Time `json:"created_at"`
 	Id        string    `json:"id"`
 
-	// Metadata The item's stored metadata JSON, base64-encoded. Absent when empty.
-	Metadata               []byte    `json:"metadata,omitempty"`
-	PendingPlanEffectiveAt time.Time `json:"pending_plan_effective_at,omitempty"`
+	// Metadata The item's stored metadata. Absent when empty.
+	Metadata               map[string]interface{} `json:"metadata,omitempty"`
+	PendingPlanEffectiveAt time.Time              `json:"pending_plan_effective_at,omitempty"`
 
 	// PendingPlanId Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled.
 	PendingPlanId string `json:"pending_plan_id,omitempty"`
@@ -7693,7 +7730,10 @@ type DeletePriceOverride200JSONResponseBodyActive bool
 type PutV1ProviderCostsJSONBody struct {
 	// CostPerToken Decimal dollars per token (e.g. "0.000003").
 	CostPerToken string `json:"cost_per_token"`
-	Currency     string `json:"currency,omitempty"`
+
+	// Currency Rates are in USD only, the currency LiteLLM reports cost
+	// in. Any other value is 422. Case does not matter.
+	Currency PutV1ProviderCostsJSONBodyCurrency `json:"currency,omitempty"`
 
 	// Model Model family token or raw snapshot id — raw ids match first at ingest.
 	Model    string `json:"model"`
@@ -7712,6 +7752,9 @@ type PutV1ProviderCostsParams struct {
 	// error cases are in docs/api-surface.md.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
+
+// PutV1ProviderCostsJSONBodyCurrency defines parameters for PutV1ProviderCosts.
+type PutV1ProviderCostsJSONBodyCurrency string
 
 // GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource defines parameters for GetV1PublicCostDashboardToken.
 type GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource string
@@ -8157,13 +8200,13 @@ type GetV1UsageEventsParams struct {
 	// `model=gpt-4o,token_type=input`.
 	Dimensions string `form:"dimensions,omitempty" json:"dimensions,omitempty"`
 
-	// From Only events at or after this time (RFC 3339). A value that does not parse is ignored.
-	From time.Time `form:"from,omitempty" json:"from,omitempty"`
+	// From Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
+	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
-	To     time.Time `form:"to,omitempty" json:"to,omitempty"`
-	Limit  int       `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int       `form:"offset,omitempty" json:"offset,omitempty"`
+	// To Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
+	To     string `form:"to,omitempty" json:"to,omitempty"`
+	Limit  int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset int    `form:"offset,omitempty" json:"offset,omitempty"`
 
 	// After Opaque cursor from `next_cursor`. Takes precedence over `offset`.
 	After string `form:"after,omitempty" json:"after,omitempty"`
@@ -8226,11 +8269,11 @@ type AggregateUsageEventsParams struct {
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
 
-	// From Events at or after this time (RFC 3339).
-	From time.Time `form:"from,omitempty" json:"from,omitempty"`
+	// From Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
+	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To Events before this time (RFC 3339).
-	To time.Time `form:"to,omitempty" json:"to,omitempty"`
+	// To Events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
+	To string `form:"to,omitempty" json:"to,omitempty"`
 
 	// Dimensions Comma-separated key=value pairs matched against event dimensions,
 	// same syntax as `GET /v1/usage-events`. Example:
@@ -18325,7 +18368,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 
 	// ------------- Optional query parameter "from" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -18338,7 +18381,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 
 	// ------------- Optional query parameter "to" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -18489,7 +18532,7 @@ func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r
 
 	// ------------- Optional query parameter "from" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -18502,7 +18545,7 @@ func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r
 
 	// ------------- Optional query parameter "to" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {

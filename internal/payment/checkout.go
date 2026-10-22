@@ -290,16 +290,21 @@ func (h *CheckoutHandler) persistStripeMapping(ctx context.Context, tenantID str
 	return err
 }
 
+// getPaymentStatus serves the older card-status route. An unknown customer is
+// 404 and a failed read is 500: answering both as 200 with setup_status
+// "missing" told the caller the customer had no card.
 func (h *CheckoutHandler) getPaymentStatus(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "customerID")
 
 	ps, err := h.store.GetPaymentSetup(r.Context(), tenantID, customerID)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "customer")
+		return
+	}
 	if err != nil {
-		respond.JSON(w, r, http.StatusOK, domain.CustomerPaymentSetup{
-			CustomerID:  customerID,
-			SetupStatus: domain.PaymentSetupMissing,
-		})
+		slog.ErrorContext(r.Context(), "get payment setup status", "error", err, "customer_id", customerID)
+		respond.InternalError(w, r)
 		return
 	}
 

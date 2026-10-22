@@ -160,7 +160,7 @@ func (h *Handler) listGrants(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.ListGrants(r.Context(), tenantID, customerID, includeExhausted)
 	if err != nil {
-		respond.FromError(w, r, err, "credit_grants")
+		respond.FromError(w, r, err, "customer")
 		return
 	}
 	respond.JSON(w, r, http.StatusOK, resp)
@@ -194,6 +194,10 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 		Offset:     offset,
 	}
 	entries, err := h.svc.ListEntries(r.Context(), filter)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "customer")
+		return
+	}
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list credit entries", "error", err)

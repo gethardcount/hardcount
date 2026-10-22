@@ -48,7 +48,7 @@ func TestReadRoutesHonest(t *testing.T) {
 	}).want(t, 201, "create customer").body, "id")
 	sub := call("POST", "/v1/subscriptions", map[string]any{
 		"code": "honest-sub", "display_name": "Honest Subscription", "customer_id": customerID,
-		"items": []map[string]any{{"plan_id": planID, "quantity": 1}},
+		"items":        []map[string]any{{"plan_id": planID, "quantity": 1}},
 		"billing_time": "anniversary", "start_now": true,
 	}).want(t, 201, "create subscription").body
 	subID := flowStr(sub, "id")

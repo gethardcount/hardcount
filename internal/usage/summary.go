@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -69,6 +70,16 @@ func (h *Handler) SummaryRoutes() chi.Router {
 func (h *Handler) getSummary(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "customer_id")
+
+	if h.summaryCustomers == nil {
+		slog.ErrorContext(r.Context(), "usage summary: customer lookup not wired")
+		respond.InternalError(w, r)
+		return
+	}
+	if _, err := h.summaryCustomers.Get(r.Context(), tenantID, customerID); err != nil {
+		respond.FromError(w, r, err, "customer")
+		return
+	}
 
 	// Default to the customer's current month — frozen_time's month when
 	// the customer is pinned to a test clock (wall-clock's otherwise), so
