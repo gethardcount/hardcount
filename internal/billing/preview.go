@@ -126,6 +126,10 @@ func (e *Engine) Preview(ctx context.Context, sub domain.Subscription) (PreviewR
 func (e *Engine) previewCycle(ctx context.Context, sub domain.Subscription) (PreviewResult, error) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
+	// The close applies the plan changes due at this boundary before it
+	// reads plans (applyDueScheduledPlanChanges), so its estimate reads the
+	// items as the close will (A5).
+	sub = withDuePlanChanges(sub, periodEnd)
 	if sub.Status == domain.SubscriptionTrialing && sub.TrialEndAt != nil && sub.TrialEndAt.After(periodEnd) {
 		return e.previewWithWindow(ctx, sub, periodStart, periodEnd)
 	}
@@ -183,7 +187,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 				return PreviewResult{}, err
 			}
 			invoiceStart = periodEnd
-			invoiceEnd = advanceBillingPeriod(periodEnd, plans[it.PlanID].BillingInterval, loc, sub.BillingAnchorDay)
+			invoiceEnd = domain.NextBillingPeriodEnd(periodEnd, sub.BillingTime, plans[it.PlanID].BillingInterval, loc, sub.BillingAnchorDay)
 			break
 		}
 	}

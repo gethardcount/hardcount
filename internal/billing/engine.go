@@ -2452,7 +2452,7 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 	}
 	anyDue := false
 	for _, it := range sub.Items {
-		if it.PendingPlanID != "" && it.PendingPlanEffectiveAt != nil && !it.PendingPlanEffectiveAt.After(gate) {
+		if pendingPlanDue(it, gate) {
 			anyDue = true
 			break
 		}
@@ -2470,7 +2470,7 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 		// snapshot map through this function.
 		dueItems := make([]domain.SubscriptionItem, 0)
 		for _, it := range sub.Items {
-			if it.PendingPlanID != "" && it.PendingPlanEffectiveAt != nil && !it.PendingPlanEffectiveAt.After(gate) {
+			if pendingPlanDue(it, gate) {
 				dueItems = append(dueItems, it)
 			}
 		}
@@ -2541,6 +2541,29 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 		}
 	}
 	return sub, nil
+}
+
+// pendingPlanDue reports whether its scheduled plan change applies at the
+// close of the period ending at gate. ApplyDuePendingItemPlansAtomic selects
+// the same rows in SQL (pending_plan_effective_at <= gate).
+func pendingPlanDue(it domain.SubscriptionItem, gate time.Time) bool {
+	return it.PendingPlanID != "" && it.PendingPlanEffectiveAt != nil && !it.PendingPlanEffectiveAt.After(gate)
+}
+
+// withDuePlanChanges is sub with the plan changes due at gate applied in
+// memory: the items the close at gate bills, without the write.
+func withDuePlanChanges(sub domain.Subscription, gate time.Time) domain.Subscription {
+	items := make([]domain.SubscriptionItem, len(sub.Items))
+	for i, it := range sub.Items {
+		if pendingPlanDue(it, gate) {
+			it.PlanID = it.PendingPlanID
+			it.PendingPlanID = ""
+			it.PendingPlanEffectiveAt = nil
+		}
+		items[i] = it
+	}
+	sub.Items = items
+	return sub
 }
 
 // invoiceCurrency resolves an invoice's currency in the ADR-100 order:
