@@ -82,8 +82,8 @@ func TestUpdatePlan_InvalidTaxCodeRefused(t *testing.T) {
 		t.Fatalf("seed plan: %v", err)
 	}
 	rr := doJSON(t, NewHandler(svc).updatePlan, http.MethodPatch, "/", `{"name":"Pro 2","tax_code":"not-a-code"}`, map[string]string{"id": p.ID})
-	if rr.Code != http.StatusUnprocessableEntity && rr.Code != http.StatusBadRequest {
-		t.Fatalf("status %d, want a 4xx refusal: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422: %s", rr.Code, rr.Body.String())
 	}
 	got, _ := svc.GetPlan(context.Background(), "tnt_test", p.ID)
 	if got.Name != "Pro" || got.TaxCode != "txcd_10103001" {
