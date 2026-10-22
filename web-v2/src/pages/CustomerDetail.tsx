@@ -1038,8 +1038,10 @@ export default function CustomerDetailPage() {
           <CardContent className="p-0">
             <div className="divide-y divide-border">
               {activeSubsToShow.map(sub => (
-                <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex items-center justify-between gap-3 px-6 py-2.5 hover:bg-accent/50 transition-colors">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                // Wraps on a narrow screen, so the date drops below rather
+                // than the chips squeezing the name out.
+                <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-6 py-2.5 hover:bg-accent/50 transition-colors">
+                  <div className="flex items-center gap-2 min-w-0 grow">
                     <Badge variant={statusVariant(sub.status)} className="shrink-0">{sub.status}</Badge>
                     {(() => {
                       const paused = collectionPausedFlag(sub, invoiceNow)
