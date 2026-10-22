@@ -415,9 +415,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// timeline event (all or none).
 	dunningStore.SetOutboxEnqueuer(outboxStore)
 	dunningSvc := dunning.NewService(dunningStore, nil, clk) // retrier set below after stripeAdapter created
-	// PaymentCancel is wired lazily below (SetPaymentCanceler) — stopping
-	// collection needs the payment SERVICE (session expiry + PI cancel),
-	// which is constructed after this handler.
 	dunningH := dunning.NewHandler(dunningSvc)
 
 	// Recipe registry — built-in pricing recipes loaded once at boot from
@@ -500,6 +497,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	webhookH := payment.NewHandler(stripeAdapter, tenantStripeSvc)
 
 	invoiceSvc := invoice.NewService(invoiceStore, clk, settingsStore)
+	// Every committed void, whichever path voided it (operator, dunning
+	// resolve, the cancel or plan-swap relief), stops collection at Stripe
+	// and closes the invoice's dunning run (invoice.Service.AfterVoid).
+	invoiceSvc.SetCollectionStopper(stripeAdapter)
+	invoiceSvc.SetDunningResolver(dunningSvc)
 	// Mark-uncollectible adapter (ADR-036 amendment) — Stripe-standard
 	// dunning terminal action. Wires here because it depends on the
 	// invoice service which is defined just above; other dunning
@@ -513,9 +515,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// void writer: guards + in-flight block + tax reversal + invoice.voided
 	// event) instead of the raw store. Same lazy wire as the marker above.
 	dunningH.SetInvoiceVoider(invoiceSvc)
-	// Void-resolve must stop collection at Stripe the same way the operator
-	// void does — one seam, both callers.
-	dunningH.SetPaymentCanceler(stripeAdapter)
 	// Wire the post-connect tax-retry hook (ADR-019). When an
 	// operator (re)connects Stripe in Settings → Payments, the
 	// tenantstripe service fans out a goroutine that flushes any
@@ -525,7 +524,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		CreditNotes:     &creditNoteListerAdapter{svc: creditNoteSvc},
 		Charger:         stripeAdapter,
 		PaymentSetups:   paymentSetupStore,
-		PaymentCancel:   stripeAdapter,
 		Dunning:         dunningSvc,
 		DunningTimeline: &dunningTimelineAdapter{store: dunningStore},
 		RefundIssuer:    &refundIssuerAdapter{svc: creditNoteSvc},

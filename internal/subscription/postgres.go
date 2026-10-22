@@ -403,7 +403,7 @@ func cancelSpec() transitionSpec {
 // when the hard-pause API was deleted — no path now produces
 // status='paused', so it's not in allowedFrom.
 func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	return s.transitionAtomic(ctx, tenantID, id, cancelSpec())
+	return s.CancelAtomicWithBill(ctx, tenantID, id, nil)
 }
 
 // CancelAtomicWithBill cancels the subscription AND runs billFn — the
@@ -412,7 +412,9 @@ func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (
 // an uninvoiced partial period (a revenue leak: there is no final-on-cancel
 // reconciler). ADR-056 coordinator pattern. The external finalize (tax commit +
 // auto-charge) and the proration relief's legs run post-commit via the caller
-// (FinalizeOnCreateInvoice / FinishRelief). billFn may be nil.
+// (FinalizeOnCreateInvoice / FinishRelief). billFn may be nil. billFn gets
+// the row as the flip left it; the row returned is the retired one
+// (retireLiveOnlyStateTx).
 func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -429,10 +431,59 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 			return domain.Subscription{}, err
 		}
 	}
+	if canceled, err = retireLiveOnlyStateTx(ctx, tx, id); err != nil {
+		return domain.Subscription{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Subscription{}, err
 	}
 	return canceled, nil
+}
+
+// retireLiveOnlyStateTx clears, on a subscription its caller canceled in tx,
+// the state that only says what a live subscription does next: the cancel
+// schedule and its items' pending plan changes. Each cancel writer runs it
+// as the last write of its transaction and returns its row. Left on the row,
+// they made the API and the dashboard show a scheduled cancel (with Undo) or
+// a coming plan change on a canceled subscription. A column added later that
+// only a live subscription uses is cleared here too.
+//
+// The collection pause is not live-only, so it stays. It holds the
+// subscription's unpaid invoices after the cancel: the auto-charge sweep
+// (notPausedForCollection) and the tax retry's auto-finalize read it, and a
+// cancel's own keep_as_draft final invoice is one of them. Clearing it would
+// let Velox charge invoices the operator, or dunning's pause, held back.
+// Resume collection releases them.
+//
+// The pending plan lives on subscription_items, so it takes a second UPDATE.
+// Clearing only the pending columns writes no subscription_item_changes row:
+// the trigger records plan, quantity and removal changes only.
+func retireLiveOnlyStateTx(ctx context.Context, tx *sql.Tx, id string) (domain.Subscription, error) {
+	var sub domain.Subscription
+	if err := scanSubRow(tx.QueryRowContext(ctx, `
+		UPDATE subscriptions
+		SET cancel_at = NULL,
+		    cancel_at_period_end = false
+		WHERE id = $1 AND status = 'canceled'
+		RETURNING `+subCols,
+		id,
+	), &sub); err != nil {
+		return domain.Subscription{}, fmt.Errorf("clear the canceled subscription's cancel schedule: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE subscription_items
+		SET pending_plan_id = NULL,
+		    pending_plan_effective_at = NULL,
+		    updated_at = $2
+		WHERE subscription_id = $1 AND pending_plan_id IS NOT NULL`,
+		id, clock.Now(ctx),
+	); err != nil {
+		return domain.Subscription{}, fmt.Errorf("clear the canceled subscription's pending plan changes: %w", err)
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	return sub, nil
 }
 
 // ScheduleCancellation persists the soft-cancel intent. The schedule fires
@@ -503,9 +554,10 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 
 // ClearScheduledCancellation undoes a prior schedule. Idempotent — a row
 // with both fields already cleared returns unchanged. Returns errs.ErrNotFound
-// if the subscription doesn't exist; status is not checked because clearing
-// a schedule on a canceled sub would be a no-op anyway and surfacing
-// not-found there would mask the real "you already canceled" state.
+// if the subscription doesn't exist. Status is not checked: every cancel
+// writer clears the schedule in its own transaction (retireLiveOnlyStateTx),
+// and migration 192 cleared the rows earlier cancels left, so on a canceled
+// subscription this changes nothing.
 func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -602,7 +654,9 @@ func (s *PostgresStore) FireScheduledCancellationTx(ctx context.Context, tx *sql
 	}); err != nil {
 		return domain.Subscription{}, err
 	}
-	return sub, nil
+	// The engine built this close's invoice from its snapshot before the tx,
+	// so the retire can run before that insert.
+	return retireLiveOnlyStateTx(ctx, tx, id)
 }
 
 // WithTenantTx runs fn inside one tenant-scoped transaction: commit when fn
@@ -700,6 +754,9 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 	}); err != nil {
 		return domain.Subscription{}, err
 	}
+	if sub, err = retireLiveOnlyStateTx(ctx, tx, id); err != nil {
+		return domain.Subscription{}, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.Subscription{}, err
@@ -756,11 +813,10 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 	return sub, nil
 }
 
-// ClearPauseCollection nulls both pause_collection_* columns. Idempotent —
-// runs even on a row that already has them null, returning the unchanged
-// subscription. Returns errs.ErrNotFound if the row doesn't exist; status
-// is not checked because clearing a no-op pause on a terminated sub is
-// itself a no-op.
+// ClearPauseCollection nulls both pause_collection_* columns. A row with no
+// pause returns ErrNotPaused; a missing row errs.ErrNotFound. Status is not
+// checked: a canceled subscription keeps its pause, which still holds its
+// unpaid invoices, and clearing it is how an operator releases them.
 func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1130,27 +1186,9 @@ type transitionSpec struct {
 	wrongStateMsg string
 }
 
-func (s *PostgresStore) transitionAtomic(ctx context.Context, tenantID, id string, spec transitionSpec) (domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	sub, err := s.transitionInTx(ctx, tx, id, spec, clock.Now(ctx))
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
 // transitionInTx runs the status-transition UPDATE (+ child hydration) on the
-// given tx WITHOUT committing. Shared by transitionAtomic and the
-// CancelAtomicWithBill coordinator so the final-on-cancel invoice can join the
-// same transaction (ADR-056).
+// given tx WITHOUT committing, for the CancelAtomicWithBill coordinator, so
+// the final-on-cancel invoice can join the same transaction (ADR-056).
 func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id string, spec transitionSpec, now time.Time) (domain.Subscription, error) {
 	// Build the WHERE status IN (...) clause with positional args starting at $3
 	// ($1 = updated_at, $2 = id). canceled_at slots in at $3 when needed.
@@ -3173,6 +3211,9 @@ func (s *PostgresStore) CancelAtTrialEnd(ctx context.Context, tenantID, id strin
 		extra["canceled_at"] = sub.CanceledAt.UTC()
 	}
 	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCanceled, sub, extra); err != nil {
+		return domain.Subscription{}, err
+	}
+	if sub, err = retireLiveOnlyStateTx(ctx, tx, id); err != nil {
 		return domain.Subscription{}, err
 	}
 	if err := tx.Commit(); err != nil {
