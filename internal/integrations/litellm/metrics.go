@@ -9,7 +9,9 @@ import "github.com/prometheus/client_golang/prometheus"
 var cacheWriteUnsplit *prometheus.CounterVec
 
 // skippedWithTokens counts records Velox does not bill because of their call
-// type although they carry token counts.
+// type although they carry token counts (images, audio, realtime, batch
+// results, A2A, ...). The label is a skip-list key or the Vertex AI Live
+// label, never a free string from the payload, so it is bounded.
 var skippedWithTokens *prometheus.CounterVec
 
 func init() {
@@ -20,7 +22,7 @@ func init() {
 
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "velox_litellm_cache_write_unsplit_total",
-		Help: "LiteLLM calls whose cache-write tokens had no usable 5m/1h split and were billed as input tokens. reason: no_split, sum_mismatch or not_in_prompt.",
+		Help: "LiteLLM calls whose cache-write tokens had no usable 5m/1h split and were billed as input tokens. reason: no_split, sum_mismatch, not_in_prompt or no_count.",
 	}, []string{"provider", "reason"})
 	cacheWriteUnsplit = register(c)
 }

@@ -8,6 +8,7 @@ package litellm
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 )
 
@@ -33,10 +34,11 @@ type StandardLoggingPayload struct {
 	// with the token type to keep sibling events distinct.
 	ID string `json:"id"`
 
-	// CallType narrows what kind of LLM operation this was —
-	// "completion", "embedding", "image_generation", etc. We only
-	// emit usage events for token-bearing call types (completion,
-	// chat, embedding). Other types are accepted but skipped.
+	// CallType is LiteLLM's name for the operation: the proxy route type
+	// ("acompletion", "anthropic_messages", "aresponses", ...) or the SDK
+	// function name. A record bills on its token counts unless its call type
+	// is on the skip list (nonTokenCallTypes: images, audio, moderation,
+	// ...). A skipped record that carries tokens is logged and counted.
 	CallType string `json:"call_type"`
 
 	// Model is the resolved model name LiteLLM dispatched to
@@ -230,7 +232,10 @@ const (
 	// UnsplitNotInPrompt: the cache writes do not fit inside prompt_tokens
 	// minus the cache reads, so prompt_tokens cannot include them.
 	UnsplitNotInPrompt = "not_in_prompt"
-	// UnsplitNoCount: STUB for the failing-first commit.
+	// UnsplitNoCount: the usage counts no cache writes, but LiteLLM priced
+	// some (cost_breakdown.cache_creation_cost above zero). Seen on a bridged
+	// /v1/responses record when a post_call guardrail is configured: the
+	// Responses object LiteLLM logs drops the write count.
 	UnsplitNoCount = "no_count"
 )
 
@@ -335,17 +340,31 @@ type SpendRequest struct {
 	Batch []StandardLoggingPayload `json:"events,omitempty"`
 }
 
-// IsTokenBearing reports whether this call type produces tokens
-// Velox should map to usage events. Other types (image_generation,
-// moderation, etc.) are accepted by the adapter but skipped without
-// emitting events — they don't have a clean per-token billing model.
-func (p *StandardLoggingPayload) IsTokenBearing() bool {
-	switch p.CallType {
-	case "completion", "acompletion", "chat", "chat.completion",
-		"embedding", "aembedding",
-		"text_completion", "atext_completion":
-		return true
-	default:
-		return false
+// skipLabel reports whether the record is skipped for its kind, and the
+// label it is counted under when it carries tokens: the call type when it is
+// on the skip list, or "pass_through_endpoint:/vertex_ai/live" for Vertex AI
+// Live audio.
+func (p *StandardLoggingPayload) skipLabel() (string, bool) {
+	if _, skip := nonTokenCallTypes[p.CallType]; skip {
+		return p.CallType, true
 	}
+	if p.CallType == "pass_through_endpoint" && p.route() == vertexLiveRoute {
+		return p.CallType + ":" + vertexLiveRoute, true
+	}
+	return "", false
+}
+
+// route is the proxy route the call came in on, from
+// metadata.user_api_key_request_route, or "".
+func (p *StandardLoggingPayload) route() string {
+	r, _ := p.Metadata["user_api_key_request_route"].(string)
+	return r
+}
+
+// hasHiddenCacheWrites reports whether LiteLLM priced cache writes
+// (cost_breakdown.cache_creation_cost above zero). MapPayload asks only when
+// the usage counts no writes.
+func (p *StandardLoggingPayload) hasHiddenCacheWrites() bool {
+	b := p.CostBreakdown
+	return b != nil && b.CacheCreationCost != nil && *b.CacheCreationCost > 0 && !math.IsInf(*b.CacheCreationCost, 1)
 }

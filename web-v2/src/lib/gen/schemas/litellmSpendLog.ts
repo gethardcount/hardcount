@@ -28,9 +28,10 @@ export interface LitellmSpendLog {
      */
   cache_hit?: boolean | null;
   /**
-     * Only completion, acompletion, chat, chat.completion, embedding,
-     * aembedding, text_completion and atext_completion records produce
-     * usage. Others are skipped.
+     * A record bills on its token counts unless its call type is one
+     * Velox does not bill (images, audio, realtime, moderation,
+     * batches, files, A2A, response retrieval, ...); those are
+     * skipped, and a skipped record that carries tokens is logged.
      */
   call_type?: string;
   model?: string;

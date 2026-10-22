@@ -3773,9 +3773,10 @@ components:
         call_type:
           type: string
           description: |
-            Only completion, acompletion, chat, chat.completion, embedding,
-            aembedding, text_completion and atext_completion records produce
-            usage. Others are skipped.
+            A record bills on its token counts unless its call type is one
+            Velox does not bill (images, audio, realtime, moderation,
+            batches, files, A2A, response retrieval, ...); those are
+            skipped, and a skipped record that carries tokens is logged.
         model:
           type: string
         custom_llm_provider:

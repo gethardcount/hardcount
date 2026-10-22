@@ -5339,9 +5339,10 @@ type LitellmSpendLog struct {
 	// charged nothing.
 	CacheHit bool `json:"cache_hit,omitempty"`
 
-	// CallType Only completion, acompletion, chat, chat.completion, embedding,
-	// aembedding, text_completion and atext_completion records produce
-	// usage. Others are skipped.
+	// CallType A record bills on its token counts unless its call type is one
+	// Velox does not bill (images, audio, realtime, moderation,
+	// batches, files, A2A, response retrieval, ...); those are
+	// skipped, and a skipped record that carries tokens is logged.
 	CallType         string `json:"call_type,omitempty"`
 	CompletionTokens int64  `json:"completion_tokens,omitempty"`
 

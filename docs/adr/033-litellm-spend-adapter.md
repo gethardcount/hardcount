@@ -92,6 +92,19 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > dedups on `(tenant_id, livemode, idempotency_key)`. Pair it with
 > `max_retries: 4` in the callback config (`docs/integrations/litellm.md`).
 
+> **Amendment (2026-10-22): bill on token counts, not call type.** The
+> adapter billed only eight call types (chat, text completion, embedding)
+> and answered 200 for the rest, so `/v1/messages` (Claude Code),
+> `/v1/responses`, Gemini and pass-through usage was never billed. Now a
+> record bills on its token counts. It is skipped only when its call type
+> is one whose tokens Velox does not price (images, audio, realtime,
+> batches, A2A, ...), from a list of LiteLLM 1.83.9's call types. A skipped
+> record that carries tokens is logged and counted in
+> `velox_litellm_skipped_with_tokens_total`. The newly billed call types
+> key their events on `<id>@<startTime>`, because LiteLLM gives a streamed
+> `/v1/messages` record the client's `x-litellm-call-id` as its id; the
+> eight call types billed before keep `<id>`.
+
 ### What's NOT in scope (deferred)
 
 - **Cost-table fallback**: when LiteLLM doesn't emit cost (custom model, older proxy version), Velox could fall back to a built-in cost table by model name. Deferred — most operators run a recent LiteLLM with cost tracking enabled; building a cost table is multi-day work for a niche case.

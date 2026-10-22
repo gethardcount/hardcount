@@ -1,14 +1,20 @@
 package litellm
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
 // MeterKeyTokens is the single canonical meter every provider mapper writes
@@ -29,17 +35,100 @@ const (
 	TokenTypeCacheWrite1h = "cache_write_1h"
 )
 
-// nonTokenCallTypes: STUB for the failing-first commit (today's allowlist
-// still decides). Replaced by the skip list in the fix.
-var nonTokenCallTypes = map[string]struct{}{}
+// nonTokenCallTypes are the LiteLLM call types Velox never bills as tokens:
+// images, audio, realtime, moderation, rerank, search, OCR, video, batches,
+// files, fine-tuning, assistants, vector stores, containers, evals, skills,
+// MCP, A2A, response retrieval and management, and names that never label a
+// model call. Exact strings. Any other call type, including one LiteLLM adds
+// later, bills on its token counts; a model with no price then shows as
+// unpriced usage, not a charge.
+//
+// The list is every "skip" row of testdata/litellm-1.83.9-call-types.tsv,
+// the inventory of call_type strings in the LiteLLM 1.83.9 wheel
+// (testdata/list_call_types.py); TestCallTypeInventory keeps the two equal.
+// A skipped record that carries tokens is logged and counted, so a call
+// type that starts carrying usage is seen, not billed at a guessed price.
+var nonTokenCallTypes = map[string]struct{}{
+	"_arealtime": {}, "_emit_acquired_lock_event": {}, "_emit_new_item_added_to_queue_event": {},
+	"_emit_released_lock_event": {}, "a_add_message": {}, "aadapter_generate_content": {}, "acancel": {},
+	"acancel_batch": {}, "acancel_eval": {}, "acancel_fine_tuning_job": {}, "acancel_interaction": {},
+	"acancel_responses": {}, "acancel_run": {}, "acreate": {}, "acreate_assistants": {}, "acreate_batch": {},
+	"acreate_container": {}, "acreate_eval": {}, "acreate_file": {}, "acreate_fine_tuning_job": {},
+	"acreate_realtime_client_secret": {}, "acreate_run": {}, "acreate_skill": {}, "acreate_thread": {},
+	"acreate_video": {}, "add_litellm_data_to_request": {}, "add_message": {}, "adelete": {},
+	"adelete_assistant": {}, "adelete_container": {}, "adelete_eval": {}, "adelete_interaction": {},
+	"adelete_responses": {}, "adelete_run": {}, "adelete_skill": {}, "afile_content": {}, "afile_delete": {},
+	"afile_list": {}, "afile_retrieve": {}, "aget": {}, "aget_assistants": {}, "aget_eval": {},
+	"aget_interaction": {}, "aget_messages": {}, "aget_responses": {}, "aget_run": {}, "aget_skill": {},
+	"aget_thread": {}, "aimage_edit": {}, "aimage_generation": {}, "aimage_variation": {}, "aingest": {},
+	"aiplatform": {}, "alist": {}, "alist_batches": {}, "alist_container_files": {}, "alist_containers": {},
+	"alist_evals": {}, "alist_files": {}, "alist_fine_tuning_jobs": {}, "alist_input_items": {},
+	"alist_runs": {}, "alist_skills": {}, "amoderation": {}, "aocr": {}, "aquery": {}, "arealtime_calls": {},
+	"arerank": {}, "aretrieve": {}, "aretrieve_batch": {}, "aretrieve_container": {}, "aretrieve_content": {},
+	"aretrieve_fine_tuning_job": {}, "arun_thread": {}, "arun_thread_stream": {}, "asearch": {},
+	"asend_message": {}, "asend_message_streaming": {}, "aspeech": {}, "async_get_available_deployment": {},
+	"atranscription": {}, "aupdate": {}, "aupdate_eval": {}, "aupload_container_file": {},
+	"avector_store_create": {}, "avector_store_delete": {}, "avector_store_file_content": {},
+	"avector_store_file_create": {}, "avector_store_file_delete": {}, "avector_store_file_list": {},
+	"avector_store_file_retrieve": {}, "avector_store_file_update": {}, "avector_store_list": {},
+	"avector_store_retrieve": {}, "avector_store_search": {}, "avector_store_update": {}, "avideo_content": {},
+	"avideo_create_character": {}, "avideo_delete": {}, "avideo_edit": {}, "avideo_extension": {},
+	"avideo_generation": {}, "avideo_get_character": {}, "avideo_list": {}, "avideo_remix": {},
+	"avideo_retrieve": {}, "avideo_retrieve_job": {}, "avideo_status": {}, "batch_retrieve": {},
+	"call_mcp_tool": {}, "cancel": {}, "cancel_batch": {}, "cancel_eval": {}, "cancel_fine_tuning_job": {},
+	"cancel_interaction": {}, "cancel_responses": {}, "cancel_run": {}, "connect": {},
+	"container_file_content": {}, "create": {}, "create_assistants": {}, "create_batch": {},
+	"create_container": {}, "create_eval": {}, "create_file": {}, "create_fine_tuning_job": {},
+	"create_run": {}, "create_skill": {}, "create_thread": {}, "create_video": {}, "delete": {},
+	"delete_assistant": {}, "delete_container": {}, "delete_data": {}, "delete_eval": {},
+	"delete_interaction": {}, "delete_responses": {}, "delete_run": {}, "delete_skill": {}, "disconnect": {},
+	"discovery": {}, "file_content": {}, "file_delete": {}, "file_list": {}, "file_retrieve": {}, "get": {},
+	"get_assistants": {}, "get_data": {}, "get_eval": {}, "get_generic_data": {}, "get_interaction": {},
+	"get_key_object": {}, "get_messages": {}, "get_responses": {}, "get_run": {}, "get_skill": {},
+	"get_thread": {}, "health_check": {}, "image_edit": {}, "image_generation": {}, "image_variation": {},
+	"ingest": {}, "insert_data": {}, "list": {}, "list_batches": {}, "list_container_files": {},
+	"list_containers": {}, "list_evals": {}, "list_fine_tuning_jobs": {}, "list_input_items": {},
+	"list_mcp_tools": {}, "list_runs": {}, "list_skills": {}, "moderation": {}, "ocr": {}, "query": {},
+	"redis_async_ping": {}, "redis_sync_ping": {}, "rerank": {}, "reset_budget_budget_table": {},
+	"reset_budget_endusers": {}, "reset_budget_keys": {}, "reset_budget_teams": {}, "reset_budget_users": {},
+	"retrieve": {}, "retrieve_batch": {}, "retrieve_container": {}, "retrieve_content": {},
+	"retrieve_fine_tuning_job": {}, "run_thread": {}, "run_thread_stream": {}, "search": {}, "send_message": {},
+	"speech": {}, "sync": {}, "transcription": {}, "update": {}, "update_data": {}, "update_eval": {},
+	"update_spend": {}, "upload_container_file": {}, "vector_store_create": {}, "vector_store_delete": {},
+	"vector_store_file_content": {}, "vector_store_file_create": {}, "vector_store_file_delete": {},
+	"vector_store_file_list": {}, "vector_store_file_retrieve": {}, "vector_store_file_update": {},
+	"vector_store_list": {}, "vector_store_retrieve": {}, "vector_store_search": {}, "vector_store_update": {},
+	"video_content": {}, "video_create_character": {}, "video_delete": {}, "video_edit": {},
+	"video_extension": {}, "video_generation": {}, "video_get_character": {}, "video_list": {},
+	"video_remix": {}, "video_retrieve": {}, "video_retrieve_job": {}, "video_status": {},
+}
+
+// billedByIDBefore are the call types Velox billed before 2026-10-22. Their
+// event keys stay <id>:<role>, so a record stored before then deduplicates
+// if it is ever sent again. Every other call type keys on
+// <id>@<startTime>:<role> (see keyPrefix).
+var billedByIDBefore = map[string]struct{}{
+	"completion": {}, "acompletion": {}, "chat": {}, "chat.completion": {},
+	"embedding": {}, "aembedding": {}, "text_completion": {}, "atext_completion": {},
+}
+
+// vertexLiveRoute is the proxy route of Vertex AI Live, a WebSocket
+// pass-through whose record adds text and audio tokens together under the
+// call type pass_through_endpoint. Audio is priced unlike text, so those
+// records are skipped like _arealtime (open decision D7).
+const vertexLiveRoute = "/vertex_ai/live"
+
+// maxKeyPrefix is the longest key prefix that leaves room for the longest
+// role suffix (":cache_write_5m") within usage.MaxIdempotencyKeyLen.
+const maxKeyPrefix = usage.MaxIdempotencyKeyLen - len(":"+TokenTypeCacheWrite5m)
 
 // SkipReason says why a record maps to no events. The handler counts every
 // skipped record in SpendResponse.Skipped.
 type SkipReason string
 
 const (
-	// SkipNotTokenBearing: a call type with no per-token billing model
-	// (image generation, moderation, ...).
+	// SkipNotTokenBearing: a call type on the skip list (nonTokenCallTypes),
+	// or a Vertex AI Live record. Image generation, moderation, audio, ...
 	SkipNotTokenBearing SkipReason = "not_token_bearing"
 	// SkipFailure: LiteLLM reports the call failed (status "failure"). The
 	// provider charged nothing, whatever token counts the record carries.
@@ -193,37 +282,53 @@ func canonicalModel(raw string) string {
 //	completion_tokens → output
 //
 // The checks run in this order, each before the next:
-//   - call_type isn't token-bearing (image_gen, moderation, etc.): skipped
 //   - status is "failure": skipped. A failed call bills nothing whatever
-//     token counts it carries, and it is skipped before the user check, so
-//     a failed call without a user is not an error.
+//     token counts it carries. Proxy-only errors carry the URL path as their
+//     call type; they are failures, so this check must stay first.
 //   - cache_hit is true (LiteLLM's response cache answered): skipped. Its
 //     cost_breakdown holds what the call would have cost; the provider
 //     charged nothing.
+//   - call_type is on the skip list (image generation, moderation, ...), or
+//     the record is Vertex AI Live audio: skipped. If it carries tokens, a
+//     WARN names the call type and velox_litellm_skipped_with_tokens_total
+//     counts it.
+//   - no token counts: skipped, no events. Before the user check, so a
+//     record with nothing to bill and no user is not an error.
 //   - no user: ErrMissingUser. The adapter refuses to bill anonymous usage
 //     to an unknown customer; operators set user="<external_customer_id>".
-//   - no token counts: no events
 //   - no id: ErrMissingID
+//
+// Any call type not on the skip list bills on its token counts, including
+// one LiteLLM adds later. That is the rule: skip only known non-token call
+// types.
 //
 // ExternalIngest.ExternalCustomerID carries the EXTERNAL id; the handler
 // resolves it to the internal customer_id once per call.
 func MapPayload(p StandardLoggingPayload) (Mapping, error) {
-	if !p.IsTokenBearing() {
-		return Mapping{Skip: SkipNotTokenBearing}, nil
-	}
 	if strings.EqualFold(strings.TrimSpace(p.Status), "failure") {
 		return Mapping{Skip: SkipFailure}, nil
 	}
 	if p.CacheHit != nil && *p.CacheHit {
 		return Mapping{Skip: SkipCacheHit}, nil
 	}
+	u := p.tokenUsage()
+	hasTokens := u != nil && (u.PromptTokens > 0 || u.CompletionTokens > 0)
+	if label, skip := p.skipLabel(); skip {
+		if hasTokens {
+			// label is a skip-list key or the Live label: a bounded set.
+			skippedWithTokens.WithLabelValues(label).Inc()
+			slog.Warn("litellm: skipped a record that carries tokens; Velox does not bill this call type (velox_litellm_skipped_with_tokens_total)",
+				"call_type", p.CallType, "route", p.route(), "model", p.Model,
+				"prompt_tokens", u.PromptTokens, "completion_tokens", u.CompletionTokens, "litellm_id", p.ID)
+		}
+		return Mapping{Skip: SkipNotTokenBearing}, nil
+	}
+	if !hasTokens {
+		return Mapping{Skip: SkipNoTokens}, nil
+	}
 	user := p.callerID()
 	if user == "" {
 		return Mapping{}, ErrMissingUser
-	}
-	usage := p.tokenUsage()
-	if usage == nil {
-		return Mapping{Skip: SkipNoTokens}, nil
 	}
 	// Every event key is built from the call id. Without one, every id-less
 	// call in a tenant would share the keys ":input", ":output" and
@@ -305,12 +410,12 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	// prompt_tokens INCLUDES cache-read tokens and, for Anthropic, cache-write
 	// tokens, so the uncached input is the remainder. The mapper does this
 	// split (the engine never does role math).
-	cacheRead := usage.cachedReadTokens()
-	uncached := usage.PromptTokens - cacheRead
+	cacheRead := u.cachedReadTokens()
+	uncached := u.PromptTokens - cacheRead
 	if uncached < 0 {
 		// Malformed payload (cached > prompt). Don't emit a negative quantity;
 		// fall back to billing the whole prompt as uncached input.
-		uncached = usage.PromptTokens
+		uncached = u.PromptTokens
 		cacheRead = 0
 	}
 
@@ -318,27 +423,40 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	// 1.25x (5m) and 2x (1h) input. When the split cannot be trusted the
 	// writes stay inside input (1.0x), the pre-split mapping, and the
 	// fallback is counted where an operator can see it.
-	w5m, w1h, reason := usage.cacheWriteSplit(uncached)
+	w5m, w1h, reason := u.cacheWriteSplit(uncached)
+	if reason == "" && w5m+w1h == 0 && p.hasHiddenCacheWrites() {
+		// LiteLLM priced cache writes the usage does not count: the bridged
+		// /v1/responses record a post_call guardrail makes the proxy log
+		// (open decision D3). The writes are inside input, as before; this
+		// makes that visible.
+		reason = UnsplitNoCount
+	}
 	if reason != "" {
 		cacheWriteUnsplit.WithLabelValues(metricProvider(p.CustomLLMProvider), reason).Inc()
 		slog.Warn("litellm: cache-write tokens have no usable 5m/1h split — billed as input tokens, below the provider's cache-write price (velox_litellm_cache_write_unsplit_total)",
-			"reason", reason, "cache_creation_tokens", usage.cacheWriteTokens(),
+			"reason", reason, "cache_creation_tokens", u.cacheWriteTokens(),
 			"model", modelDim, "litellm_id", p.ID)
 	}
 
+	prefix := p.keyPrefix()
 	ev := func(tokenType string, qty int64, cost *int64) ExternalIngest {
 		return ExternalIngest{
 			ExternalCustomerID: user,
 			MeterKey:           MeterKeyTokens,
 			Quantity:           decimal.NewFromInt(qty),
 			Dimensions:         dimsWithTokenType(dims, tokenType),
-			IdempotencyKey:     p.ID + ":" + tokenType,
+			IdempotencyKey:     prefix + ":" + tokenType,
 			Timestamp:          ts,
 			Metadata:           buildEventMetadata(p, tokenType),
 			ObservedCostMicros: cost,
 		}
 	}
 	costs := roleCosts(p, cacheRead, w5m, w1h)
+	if reason == UnsplitNoCount {
+		// LiteLLM's input_cost covers writes Velox cannot see or split, so
+		// it is not the input event's cost; the rate table prices it.
+		costs.legacyInput = nil
+	}
 
 	// mapping is the call's events with uncached input `input` and the
 	// given writes.
@@ -358,8 +476,8 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 		if w1h > 0 {
 			out = append(out, ev(TokenTypeCacheWrite1h, w1h, costs.write1h))
 		}
-		if usage.CompletionTokens > 0 {
-			out = append(out, ev(TokenTypeOutput, usage.CompletionTokens, costs.output))
+		if u.CompletionTokens > 0 {
+			out = append(out, ev(TokenTypeOutput, u.CompletionTokens, costs.output))
 		}
 		return out
 	}
@@ -370,8 +488,33 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	return Mapping{
 		Events:    mapping(uncached-w5m-w1h, w5m, w1h, costs.input),
 		Legacy:    mapping(uncached, 0, 0, costs.legacyInput),
-		LegacyKey: p.ID + ":" + TokenTypeInput,
+		LegacyKey: prefix + ":" + TokenTypeInput,
 	}, nil
+}
+
+// keyPrefix is what every event key of the record starts with, before
+// ":<token_type>".
+//
+// For the call types billed before 2026-10-22 it is the record id, as it
+// always was. For every other call type it is <id>@<startTime>: on a
+// streamed /v1/messages or Gemini stream record LiteLLM 1.83.9 sets the id
+// to the client's x-litellm-call-id header, so two calls, even two
+// customers' calls, can share an id, and the tenant-wide key would
+// deduplicate the second one unbilled. LiteLLM sets startTime when the call
+// starts: a resend of the record keeps it, another call does not. A prefix
+// that would push a key past 255 characters (a non-streamed /v1/responses id
+// is 400+) is replaced by its SHA-256, so the hold path accepts the key and a
+// resend still deduplicates.
+func (p *StandardLoggingPayload) keyPrefix() string {
+	if _, before := billedByIDBefore[p.CallType]; before || p.StartTime <= 0 {
+		return p.ID
+	}
+	k := p.ID + "@" + strconv.FormatFloat(p.StartTime, 'f', -1, 64)
+	if utf8.RuneCountInString(k) > maxKeyPrefix {
+		sum := sha256.Sum256([]byte(k))
+		k = "sha256-" + hex.EncodeToString(sum[:])
+	}
+	return k
 }
 
 // dimsWithTokenType returns a copy of base with token_type set, so the two
