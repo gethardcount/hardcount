@@ -87,6 +87,29 @@ instead, with the reason. Today that is only the methods other than `GET` on
 - an operation lists it but the middleware does not run on that route, so
   the server would ignore the header.
 
+`TestOpenAPISpec_RequestBodies` in `openapi_bodies_test.go` checks request
+bodies. `requestBodies` maps each operation that has a JSON body to the Go
+type its handler decodes. The test compares the type's JSON tags with the
+spec's properties, nested objects included, and fails when:
+
+- the type reads a field the spec does not list, so generated clients
+  cannot send it;
+- the spec lists a field the type does not have, so the server drops it, or
+  refuses it on a strict route;
+- one side is an array or an object with fields and the other is not, at
+  any depth;
+- an operation with a JSON body is in neither `requestBodies` nor
+  `bodiesNotChecked`.
+
+It compares field names and shape, not value types: a spec `string` against
+a Go `int64` passes.
+
+A field left out of the spec on purpose, such as a read-only `id` on a type
+the handler decodes whole, goes in the entry's `undocumented` with the
+reason. The test starts from the spec, so it cannot see a handler that
+decodes a body the spec does not declare. When you add one, add its
+`requestBody` too.
+
 ## Why it is built this way
 
 ### Why a build-time copy of the spec into `web-v2/public/`

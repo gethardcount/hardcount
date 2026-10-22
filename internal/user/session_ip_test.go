@@ -51,7 +51,7 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 			// The router mounts TrustedClientIP globally, ahead of /v1/auth.
 			srv := mw.TrustedClientIP(mw.ParseTrustedProxies(c.trustProxy))(h.Routes())
 
-			body, _ := json.Marshal(loginReq{Email: "op@acme.com", Password: "a-good-password-123"})
+			body, _ := json.Marshal(LoginReq{Email: "op@acme.com", Password: "a-good-password-123"})
 			req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))
 			req.RemoteAddr = c.remoteAddr
 			if c.xff != "" {

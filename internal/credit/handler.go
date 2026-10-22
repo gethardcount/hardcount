@@ -37,20 +37,23 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
+// GrantRequest is the POST /v1/credits/grant body. It carries only the
+// documented fields. GrantInput also has invoice and source_* ids the engine
+// sets on its own grants; decoding the body straight into it let a caller
+// stamp those onto a ledger row unchecked, including ids from another tenant
+// or the other mode.
+type GrantRequest struct {
+	CustomerID  string           `json:"customer_id"`
+	AmountCents int64            `json:"amount_cents"`
+	Description string           `json:"description"`
+	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
+	GrantKind   domain.GrantKind `json:"grant_kind,omitempty"`
+}
+
 func (h *Handler) grant(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	// The request carries only the documented fields. GrantInput also has
-	// invoice and source_* ids the engine sets on its own grants; decoding the
-	// body straight into it let a caller stamp those onto a ledger row
-	// unchecked, including ids from another tenant or the other mode.
-	var req struct {
-		CustomerID  string           `json:"customer_id"`
-		AmountCents int64            `json:"amount_cents"`
-		Description string           `json:"description"`
-		ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
-		GrantKind   domain.GrantKind `json:"grant_kind,omitempty"`
-	}
+	var req GrantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return

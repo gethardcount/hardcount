@@ -54,7 +54,7 @@ func TestLogin_AuditsSuccessAsOperator(t *testing.T) {
 	store := &fakeUserStore{loginUser: &u, tenants: []domain.UserTenant{{UserID: "usr_1", TenantID: "ten_acme"}}}
 	h, rec := newAuthHandler(t, store)
 
-	body, _ := json.Marshal(loginReq{Email: "op@acme.com", Password: "a-good-password-123"})
+	body, _ := json.Marshal(LoginReq{Email: "op@acme.com", Password: "a-good-password-123"})
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))
 	req.RemoteAddr = "203.0.113.9:5555"
 	rr := httptest.NewRecorder()
@@ -82,7 +82,7 @@ func TestLogin_AuditsSuccessAsOperator(t *testing.T) {
 func TestLogin_FailureNotInAuditLog(t *testing.T) {
 	h, rec := newAuthHandler(t, &fakeUserStore{}) // loginUser nil → GetByEmail misses → bad creds
 
-	body, _ := json.Marshal(loginReq{Email: "nobody@acme.com", Password: "some-long-password"})
+	body, _ := json.Marshal(LoginReq{Email: "nobody@acme.com", Password: "some-long-password"})
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rr, req)
@@ -108,7 +108,7 @@ func TestConfirmPasswordReset_Audits(t *testing.T) {
 	}
 	h, rec := newAuthHandler(t, store)
 
-	body, _ := json.Marshal(confirmResetReq{Token: plaintext, Password: "a-sufficiently-long-password"})
+	body, _ := json.Marshal(ConfirmResetReq{Token: plaintext, Password: "a-sufficiently-long-password"})
 	req := httptest.NewRequest(http.MethodPost, "/password-reset/confirm", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rr, req)

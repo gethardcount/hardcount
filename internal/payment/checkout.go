@@ -69,7 +69,7 @@ func (h *CheckoutHandler) Routes() chi.Router {
 	return r
 }
 
-type setupRequest struct {
+type SetupRequest struct {
 	CustomerID   string `json:"customer_id"`
 	CustomerName string `json:"customer_name"`
 	Email        string `json:"email"`
@@ -101,7 +101,7 @@ func (h *CheckoutHandler) createSetupSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var req setupRequest
+	var req SetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -257,7 +257,7 @@ func (h *CheckoutHandler) createSetupSession(w http.ResponseWriter, r *http.Requ
 // "checkout_setup_started" evidence. A re-setup for a customer that already has
 // the mapping DOES emit — the operator really did start a new setup flow, which
 // is the fact this row records.
-func (h *CheckoutHandler) persistStripeMapping(ctx context.Context, tenantID string, req setupRequest, stripeCustomerID string) error {
+func (h *CheckoutHandler) persistStripeMapping(ctx context.Context, tenantID string, req SetupRequest, stripeCustomerID string) error {
 	var emit func(tx *sql.Tx) error
 	if h.audit != nil {
 		emit = func(tx *sql.Tx) error {

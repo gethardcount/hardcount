@@ -2255,6 +2255,24 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 	}
 }
 
+// Defines values for PostV1CreditNotesJSONBodyRefundType.
+const (
+	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
+	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
+)
+
+// Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
+func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
+	switch e {
+	case PostV1CreditNotesJSONBodyRefundTypeCredit:
+		return true
+	case PostV1CreditNotesJSONBodyRefundTypeRefund:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostV1CreditNotesIdSend200JSONResponseBodyStatus.
 const (
 	PostV1CreditNotesIdSend200JSONResponseBodyStatusSent PostV1CreditNotesIdSend200JSONResponseBodyStatus = "sent"
@@ -2287,22 +2305,22 @@ func (e PostV1CreditsGrantJSONBodyGrantKind) Valid() bool {
 
 // Defines values for ListCreditLedgerEntriesParamsEntryType.
 const (
-	ListCreditLedgerEntriesParamsEntryTypeAdjustment ListCreditLedgerEntriesParamsEntryType = "adjustment"
-	ListCreditLedgerEntriesParamsEntryTypeExpiry     ListCreditLedgerEntriesParamsEntryType = "expiry"
-	ListCreditLedgerEntriesParamsEntryTypeGrant      ListCreditLedgerEntriesParamsEntryType = "grant"
-	ListCreditLedgerEntriesParamsEntryTypeUsage      ListCreditLedgerEntriesParamsEntryType = "usage"
+	Adjustment ListCreditLedgerEntriesParamsEntryType = "adjustment"
+	Expiry     ListCreditLedgerEntriesParamsEntryType = "expiry"
+	Grant      ListCreditLedgerEntriesParamsEntryType = "grant"
+	Usage      ListCreditLedgerEntriesParamsEntryType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the ListCreditLedgerEntriesParamsEntryType enum.
 func (e ListCreditLedgerEntriesParamsEntryType) Valid() bool {
 	switch e {
-	case ListCreditLedgerEntriesParamsEntryTypeAdjustment:
+	case Adjustment:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeExpiry:
+	case Expiry:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeGrant:
+	case Grant:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeUsage:
+	case Usage:
 		return true
 	default:
 		return false
@@ -3773,7 +3791,7 @@ type CreditLedgerEntry struct {
 	// AmountCents Positive adds credit, negative removes it.
 	AmountCents int64 `json:"amount_cents"`
 
-	// BalanceAfter Customer's credit balance after this entry.
+	// BalanceAfter Customer's credit balance after this entry, in cents.
 	BalanceAfter int64 `json:"balance_after"`
 
 	// ConsumedCents For entries that add credit, how much has been used or expired.
@@ -6849,7 +6867,12 @@ type PostV1CreditNotesJSONBody struct {
 
 	// CommitRelief Mutually exclusive with lines/credit_amount_cents.
 	CommitRelief struct {
-		OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
+		// InvoiceId Optional. Defaults to the top-level invoice_id.
+		InvoiceId            string `json:"invoice_id,omitempty"`
+		OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
+
+		// Reason Optional. Defaults to the top-level reason.
+		Reason string `json:"reason,omitempty"`
 
 		// RefundAmountCents Optional allocation; must sum with out_of_band to the derived cash.
 		RefundAmountCents int `json:"refund_amount_cents,omitempty"`
@@ -6863,13 +6886,21 @@ type PostV1CreditNotesJSONBody struct {
 	CreditAmountCents int    `json:"credit_amount_cents,omitempty"`
 	InvoiceId         string `json:"invoice_id"`
 	Lines             []struct {
-		Description     string `json:"description,omitempty"`
-		Quantity        int    `json:"quantity,omitempty"`
-		UnitAmountCents int    `json:"unit_amount_cents,omitempty"`
+		Description string `json:"description,omitempty"`
+
+		// InvoiceLineItemId Optional. The invoice line this credit line reverses.
+		InvoiceLineItemId string `json:"invoice_line_item_id,omitempty"`
+		Quantity          int    `json:"quantity,omitempty"`
+		UnitAmountCents   int    `json:"unit_amount_cents,omitempty"`
 	} `json:"lines,omitempty"`
 	OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
 	Reason               string `json:"reason,omitempty"`
 	RefundAmountCents    int    `json:"refund_amount_cents,omitempty"`
+
+	// RefundType Older single-channel form. On a paid invoice whose three
+	// `*_amount_cents` fields are all 0, `refund` or `credit`
+	// puts the whole note in that channel.
+	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
 }
 
 // PostV1CreditNotesParams defines parameters for PostV1CreditNotes.
@@ -6881,6 +6912,9 @@ type PostV1CreditNotesParams struct {
 	// error cases are in docs/api-surface.md.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
+
+// PostV1CreditNotesJSONBodyRefundType defines parameters for PostV1CreditNotes.
+type PostV1CreditNotesJSONBodyRefundType string
 
 // IssueCreditNoteParams defines parameters for IssueCreditNote.
 type IssueCreditNoteParams struct {
@@ -7037,6 +7071,9 @@ type PostV1CustomersJSONBody struct {
 	DisplayName      string   `json:"display_name"`
 	Email            string   `json:"email,omitempty"`
 	ExternalId       string   `json:"external_id"`
+
+	// TestClockId Test mode only. Attaches the customer to a test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
 // PostV1CustomersParams defines parameters for PostV1Customers.
@@ -8271,8 +8308,10 @@ type PostV1UsageEventsJSONBody struct {
 	// 255 characters. The `Idempotency-Key` header does not
 	// count as this key: it caches one HTTP response for 24
 	// hours.
-	IdempotencyKey string                 `json:"idempotency_key"`
-	Properties     map[string]interface{} `json:"properties,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
+	Properties map[string]interface{} `json:"properties,omitempty"`
 
 	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
 	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
@@ -8400,6 +8439,9 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// count as this key: it caches one HTTP response for 24
 	// hours.
 	IdempotencyKey string `json:"idempotency_key"`
+
+	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
+	Properties map[string]interface{} `json:"properties,omitempty"`
 
 	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
 	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
