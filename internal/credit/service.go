@@ -73,9 +73,12 @@ func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
 // mode. The ledger's foreign key to customers is on the id alone and
 // foreign-key checks do not apply row-level security, so without this read
 // the insert accepts any existing customer id, including another tenant's or
-// the other mode's. Called only from the operator entry points (Grant,
-// Adjust, and the LiveBalance read): engine callers pass a customer id they
-// read from a row in scope.
+// the other mode's. Called from Grant, Adjust and the balance, ledger and
+// grants reads, which the operator routes and the public cost dashboard use:
+// engine callers pass a customer id they read from a row in scope. On the
+// reads it is what turns
+// an unknown id into 404 instead of 200 with zeros, since row-level security
+// hides every ledger row of a customer the caller cannot see.
 func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID string) error {
 	if s.customers == nil {
 		return nil
@@ -642,6 +645,9 @@ func (s *Service) ListGrants(ctx context.Context, tenantID, customerID string, i
 	if customerID == "" {
 		return GrantsResponse{}, errs.Required("customer_id")
 	}
+	if err := s.requireCustomer(ctx, tenantID, customerID); err != nil {
+		return GrantsResponse{}, err
+	}
 	grants, err := s.store.ListGrantSummaries(ctx, tenantID, customerID, includeExhausted)
 	if err != nil {
 		return GrantsResponse{}, err
@@ -667,6 +673,9 @@ func (s *Service) ListGrants(ctx context.Context, tenantID, customerID string, i
 }
 
 func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error) {
+	if err := s.requireCustomer(ctx, tenantID, customerID); err != nil {
+		return domain.CreditBalance{}, err
+	}
 	return s.store.GetBalance(ctx, tenantID, customerID)
 }
 
@@ -703,6 +712,9 @@ func (s *Service) ListBalances(ctx context.Context, tenantID string) ([]domain.C
 }
 
 func (s *Service) ListEntries(ctx context.Context, filter ListFilter) ([]domain.CreditLedgerEntry, error) {
+	if err := s.requireCustomer(ctx, filter.TenantID, filter.CustomerID); err != nil {
+		return nil, err
+	}
 	return s.store.ListEntries(ctx, filter)
 }
 

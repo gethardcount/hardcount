@@ -265,6 +265,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	usageH := usage.NewHandler(usageSvc, customerStore, pricingSvc)
 	usageH.SetMeterLister(pricingSvc)
 	usageH.SetHeldDeps(customerStore, subStore, pricingSvc)
+	usageH.SetSummaryCustomerLookup(customerStore)
 	customerUsageSvc := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
 	customerUsageH := usage.NewCustomerUsageHandler(customerUsageSvc)
 	// Provider cost rates + margin (ADR-079).
@@ -819,6 +820,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// would have to SELECT the customers table directly and skip
 	// decryption — which is exactly the bug this wiring prevents.
 	testClockSvc.SetCustomerReader(customerSvc)
+	testClockSvc.SetSubscriptionLister(subStore)
 
 	// Billing engine + manual trigger (with credit auto-application)
 	// PaymentReadiness combines customers.stripe_customer_id +

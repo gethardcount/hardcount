@@ -1,13 +1,13 @@
 # ADR-079: Provider cost tables + per-customer margin (COGS)
 
-**Status:** Accepted (2026-07-05; amended 2026-10-14)
+**Status:** Accepted (2026-07-05; amended 2026-10-14, 2026-10-22)
 **Context:** `docs/design/cost-tables.md` (locked design — 4-platform
 quote-verified sweep + 5-lens adversarial panel; this ADR records the
 decisions, the design doc holds the evidence).
 
 ## Summary
 
-Velox records what the operator pays LLM providers per token and reports usage margin per customer at `GET /v1/customers/{id}/margin`. Each usage event gets its cost stamped once, at ingest, in `provider_cost_micros`, so a later rate edit never changes past events and nothing recomputes history. Since 2026-08-06, LiteLLM usage carries LiteLLM's own cost for that event's tokens when it reports one; otherwise the cost comes from the operator's rate table. Revenue is split by model only where a price names the model, and the rest goes to `unattributed_revenue_cents` rather than a guessed split. Status: active, amended 2026-10-14: cache reads are now taken out of LiteLLM's input cost, so they are not counted twice.
+Velox records what the operator pays LLM providers per token and reports usage margin per customer at `GET /v1/customers/{id}/margin`. Each usage event gets its cost stamped once, at ingest, in `provider_cost_micros`, so a later rate edit never changes past events and nothing recomputes history. Since 2026-08-06, LiteLLM usage carries LiteLLM's own cost for that event's tokens when it reports one; otherwise the cost comes from the operator's rate table. Revenue is split by model only where a price names the model, and the rest goes to `unattributed_revenue_cents` rather than a guessed split. Status: active, amended 2026-10-14: cache reads are now taken out of LiteLLM's input cost, so they are not counted twice. Amended 2026-10-22: rates are in USD only.
 
 ## Decision
 
@@ -56,7 +56,13 @@ ledger, and report per-customer margin in-app:
 6. **Sourcing: operator CRUD only** (`/v1/provider-costs` + dashboard
    page). No import in phase 1 (trigger: first >10-model operator; file
    upload only, never live-URL fetch). Deleting a rate never rewrites
-   stamped history.
+   stamped history. *[Amended 2026-10-22] Rates are in USD only. The
+   stamp is micro-dollars and LiteLLM reports its cost in dollars, so a
+   rate saved in EUR was counted as dollars and the margin was off by the
+   exchange rate. `PUT /v1/provider-costs` now answers 422 for any
+   currency other than USD. LLM providers bill in USD, so no peer need
+   for another currency is known; adding one means converting at stamp
+   time.*
 7. **Exports:** the operator usage-events CSV carries
    `provider_cost_micros`/`provider_cost_source` (the verified
    warehouse-join fallback).
