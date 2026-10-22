@@ -99,13 +99,14 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	if got, want := len(inst.CreatedObjects.MeterIDs), 1; got != want {
 		t.Errorf("CreatedObjects.MeterIDs: got %d, want %d", got, want)
 	}
-	// anthropic_style v4 (ADR-044 matrix): 19 models × 5 token roles —
-	// 7 from the v2/v3 catalog + 12 added by the 2026-07-26 refresh
-	// (5-generation lineup, Opus 4.x line, legacy with published prices).
-	if got, want := len(inst.CreatedObjects.RatingRuleIDs), 95; got != want {
+	// anthropic_style v6 (ADR-044 matrix): 25 price sets × 5 token roles —
+	// 7 from the v2/v3 catalog, 12 added by the 2026-07-26 refresh, and 6
+	// added on 2026-10-22 (Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, and
+	// Haiku 5.5's two prompt tiers).
+	if got, want := len(inst.CreatedObjects.RatingRuleIDs), 125; got != want {
 		t.Errorf("CreatedObjects.RatingRuleIDs: got %d, want %d", got, want)
 	}
-	if got, want := len(inst.CreatedObjects.PricingRuleIDs), 95; got != want {
+	if got, want := len(inst.CreatedObjects.PricingRuleIDs), 125; got != want {
 		t.Errorf("CreatedObjects.PricingRuleIDs: got %d, want %d", got, want)
 	}
 	if got, want := len(inst.CreatedObjects.PlanIDs), 1; got != want {
@@ -122,11 +123,11 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	if n := countRows(t, f.db, tenantID, "meters"); n != 1 {
 		t.Errorf("meters row count: got %d, want 1", n)
 	}
-	if n := countRows(t, f.db, tenantID, "rating_rule_versions"); n != 95 {
-		t.Errorf("rating_rule_versions row count: got %d, want 95", n)
+	if n := countRows(t, f.db, tenantID, "rating_rule_versions"); n != 125 {
+		t.Errorf("rating_rule_versions row count: got %d, want 125", n)
 	}
-	if n := countRows(t, f.db, tenantID, "meter_pricing_rules"); n != 95 {
-		t.Errorf("meter_pricing_rules row count: got %d, want 95", n)
+	if n := countRows(t, f.db, tenantID, "meter_pricing_rules"); n != 125 {
+		t.Errorf("meter_pricing_rules row count: got %d, want 125", n)
 	}
 	if n := countRows(t, f.db, tenantID, "plans"); n != 1 {
 		t.Errorf("plans row count: got %d, want 1", n)

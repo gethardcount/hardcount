@@ -162,8 +162,23 @@ Each event also carries these labels (dimensions):
 
 - `model`: the model family name that prices are set on. Velox turns
   LiteLLM's model name into it, for example `claude-sonnet-4-5-20250929`
-  becomes `claude-sonnet-4.5`.
+  becomes `claude-sonnet-4.5`. It first removes provider and route
+  prefixes such as `bedrock/`, `converse/`, `vertex_ai/`, `azure_ai/` and
+  `anthropic.`, and Bedrock cross-region prefixes (`global.`, `us.`, `eu.`,
+  `apac.`, `jp.`, `au.`, `us-gov.`). So
+  `bedrock/global.anthropic.claude-opus-5-5` and
+  `vertex_ai/claude-opus-4-6@default` become `claude-opus-5.5` and
+  `claude-opus-4.6`. A Claude name matches only the model's id, or the id
+  with a date or version ending. A name Velox does not know, such as
+  `claude-opus-4-9`, keeps its own name here, has no price until you add
+  one, and is logged as a warning
+  ([how to price it](../ai-pricing.md#price-a-claude-model-velox-does-not-know)).
 - `model_raw`: the model name exactly as LiteLLM sent it.
+- `context_tier`, on Claude Haiku 5.5 events only: `prompt_up_to_100k` or
+  `prompt_over_100k`. Haiku 5.5 has a higher price when the prompt (input,
+  cache reads and cache writes) is over 100,000 tokens. Provider costs have
+  no `context_tier`, so one Haiku 5.5 cost covers both prices
+  ([more](../ai-pricing.md#see-your-margin)).
 - `provider`: the provider, from LiteLLM's `custom_llm_provider`.
 - `team_id`, when the call has one in `metadata`.
 - `request_tags`, only when the tags arrive under `metadata`. A current
@@ -348,6 +363,10 @@ of them.
     `cache_read_cost` on `input` (LiteLLM's `input_cost` includes cache
     reads and cache writes). If there were cache reads but no
     `cache_read_cost`, `input` and `cache_read` use your provider costs.
+- **A Bedrock application inference-profile ARN, a `bedrock/<region>/`
+  path, or an aggregator's own name** (such as
+  `openrouter/anthropic/claude-sonnet-4.6`) does not match a model. Its
+  usage keeps the raw name and has no price until you add one.
 - **Claude on AWS Bedrock or Google Vertex has a different provider.**
   The `provider` label comes from LiteLLM's `custom_llm_provider`. Claude
   through Bedrock arrives as `bedrock`, and through Vertex as `vertex_ai`,

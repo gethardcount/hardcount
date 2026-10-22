@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -75,18 +76,28 @@ type Mapping struct {
 // (claude-3-5-sonnet-20241022), a provider-prefixed string (azure/gpt-4o-eu),
 // or a friendly alias — and the matcher does exact `properties @> dimension_match`
 // (the industry-standard primitive: Orb/Lago/OpenMeter/Metronome all match
-// exact strings, none family-match). So we canonicalize HERE: longest-prefix
-// match the normalized id to a family, then emit the family on the `model`
-// dimension (and the raw string on `model_raw` for audit).
+// exact strings, none family-match). So we canonicalize HERE: match the
+// normalized id to a family, then emit the family on the `model` dimension
+// (and the raw string on `model_raw` for audit).
 //
-// Entries are detection-prefix → recipe-token. The detection prefix is in real
-// (dashed) API form; the recipe token is whatever the recipe rule uses (note
-// anthropic_style keys "claude-3.5-sonnet" with a DOT). Keep in sync with the
-// anthropic_style / openai_style recipe `dimension_match.model` values.
-var modelFamilies = []struct{ prefix, recipeToken string }{
-	// Current Anthropic lineup (5 generation + the Opus 4.x line; dated ids
-	// like claude-opus-4-8-20260301 match via the prefix+"-" rule, and
-	// longest-prefix keeps claude-opus-4-8 ahead of claude-opus-4).
+// Entries are id → recipe-token. The id is in real (dashed) API form; the
+// recipe token is whatever the recipe rule uses (note anthropic_style keys
+// "claude-3.5-sonnet" with a DOT). Keep in sync with the anthropic_style /
+// openai_style recipe `dimension_match.model` values.
+//
+// A Claude id matches only exactly, or with a date or version ending
+// (claudeSnapshot). An unknown version, such as claude-opus-4-9, keeps its
+// raw name and is not priced: it is never priced as an older model
+// (decision of 2026-10-22). So every Claude model with a price needs its
+// own entry here, and order does not matter for Claude.
+var modelFamilies = []modelFamily{
+	// Current Anthropic lineup (pricing page checked 2026-10-22).
+	{"claude-fable-5-1", "claude-fable-5.1"},
+	{"claude-mythos-5-1", "claude-mythos-5.1"},
+	{"claude-opus-5-5", "claude-opus-5.5"},
+	{"claude-sonnet-5-5", "claude-sonnet-5.5"},
+	{"claude-haiku-5-5", "claude-haiku-5.5"},
+	// The 5 generation and the Opus 4.x line.
 	{"claude-fable-5", "claude-fable-5"},
 	{"claude-mythos-5", "claude-mythos-5"},
 	{"claude-opus-5", "claude-opus-5"},
@@ -106,7 +117,12 @@ var modelFamilies = []struct{ prefix, recipeToken string }{
 	// carry an invented rate — its traffic keeps the raw id and surfaces
 	// as unmatched usage on the operator card instead (post-#551 loud).
 	{"claude-opus-4-1", "claude-opus-4.1"},
+	// claude-opus-4-0 and claude-sonnet-4-0 are Anthropic's aliases for
+	// Opus 4 and Sonnet 4. "-0" is not a snapshot ending, so each needs
+	// its own entry.
+	{"claude-opus-4-0", "claude-opus-4"},
 	{"claude-opus-4", "claude-opus-4"},
+	{"claude-sonnet-4-0", "claude-sonnet-4"},
 	{"claude-sonnet-4", "claude-sonnet-4"},
 	{"claude-3-5-sonnet", "claude-3.5-sonnet"},
 	{"claude-3-5-haiku", "claude-3.5-haiku"},
@@ -152,28 +168,108 @@ var modelFamilies = []struct{ prefix, recipeToken string }{
 	{"text-embedding-ada-002", "text-embedding-ada-002"},
 }
 
-// providerPrefixes are stripped before family matching — LiteLLM prepends the
-// routing provider to the model string for non-OpenAI deployments.
-var providerPrefixes = []string{"azure/", "bedrock/", "vertex_ai/", "openai/", "anthropic/", "anthropic.", "us.", "eu.", "apac."}
+// modelFamily is one entry of modelFamilies: the model's id in API form and
+// the token the recipes key their rules on.
+type modelFamily struct {
+	id, recipeToken string
+}
+
+// promptTiers lists, by recipe token, the models whose price depends on the
+// prompt's length. Their events carry context_tier; other models' events
+// never do, so no existing rule's match changes.
+var promptTiers = map[string]promptTier{
+	// Claude Haiku 5.5: prompts up to 100,000 tokens, and over.
+	"claude-haiku-5.5": {over: 100_000, upTo: ContextTierUpTo100k, above: ContextTierOver100k},
+}
+
+// promptTier is a model's two prices by prompt length. A prompt counts
+// input, cache reads and cache writes (Anthropic's pricing page, "Long
+// context pricing").
+type promptTier struct {
+	// over: a prompt of more tokens than this takes the higher price.
+	over int64
+	// upTo and above are the context_tier values of the two tiers.
+	upTo, above string
+}
+
+// The context_tier dimension: set on the events of a model whose price
+// depends on the prompt's length.
+const (
+	DimContextTier      = "context_tier"
+	ContextTierUpTo100k = "prompt_up_to_100k"
+	ContextTierOver100k = "prompt_over_100k"
+)
+
+// providerPrefixes are stripped before family matching, repeatedly and in
+// any order, until none is left. A LiteLLM spend log carries the routing
+// provider and the route (bedrock/converse/...), the Bedrock model prefix
+// (anthropic.) and a Bedrock cross-region prefix. The cross-region list is
+// LiteLLM 1.83.9's own (llms/bedrock/common_utils.py). azure_ai/ is
+// Microsoft Foundry, which Anthropic rates at its standard prices.
+var providerPrefixes = []string{
+	"bedrock/", "converse/", "invoke/", "vertex_ai/", "azure_ai/", "azure/",
+	"openai/", "anthropic/", "anthropic.",
+	"global.", "us-gov.", "us.", "eu.", "apac.", "jp.", "au.",
+}
+
+// bedrockThroughput is a Bedrock provisioned-throughput ending, such as the
+// ":51k" of anthropic.claude-3-5-sonnet-20241022-v2:0:51k. LiteLLM drops it
+// the same way.
+var bedrockThroughput = regexp.MustCompile(`(:\d+):\d+k$`)
+
+// claudeSnapshot is the ending a Claude id may carry and still be that model:
+// none, a date (-20250929), a Bedrock version (-v1, -v1:0, -20250929-v1:0), a
+// Google Cloud date or default (@20250805, @default, -v2@20241022), or the
+// old API -latest alias.
+var claudeSnapshot = regexp.MustCompile(`^(?:(?:-\d{8})?(?:-v\d+(?::\d+)?)?|(?:-v\d+)?@(?:\d{8}|default)|-latest)$`)
+
+// normalizeModel lower-cases the raw model string and strips provider
+// prefixes and a Bedrock throughput ending.
+func normalizeModel(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	for stripped := true; stripped; {
+		stripped = false
+		for _, p := range providerPrefixes {
+			if strings.HasPrefix(s, p) {
+				s, stripped = s[len(p):], true
+				break
+			}
+		}
+	}
+	return bedrockThroughput.ReplaceAllString(s, "$1")
+}
+
+// matchesFamily reports whether the normalized id s belongs to family f. A
+// Claude family takes its exact id plus a snapshot ending only. Other
+// families keep the earlier rule: the id, or the id plus "-" and anything.
+func matchesFamily(f modelFamily, s string) bool {
+	if strings.HasPrefix(f.id, "claude-") {
+		return strings.HasPrefix(s, f.id) && claudeSnapshot.MatchString(s[len(f.id):])
+	}
+	return s == f.id || strings.HasPrefix(s, f.id+"-")
+}
+
+// lookupFamily resolves a raw LiteLLM model string to its family, or false
+// if no known family matches. Match is longest-prefix so gpt-4o-mini-* beats
+// gpt-4o-*. At most one Claude family can match a name.
+func lookupFamily(raw string) (modelFamily, bool) {
+	s := normalizeModel(raw)
+	var best modelFamily
+	found := false
+	for _, f := range modelFamilies {
+		if matchesFamily(f, s) && len(f.id) > len(best.id) {
+			best, found = f, true
+		}
+	}
+	return best, found
+}
 
 // canonicalModel resolves a raw LiteLLM model string to its canonical recipe
 // family token, or "" if no known family matches (caller keeps the raw string
-// and logs loudly — we never invent a family, which would mis-price). Match is
-// longest-prefix so gpt-4o-mini-* beats gpt-4o-*.
+// and logs loudly — we never invent a family, which would mis-price).
 func canonicalModel(raw string) string {
-	s := strings.ToLower(strings.TrimSpace(raw))
-	for _, p := range providerPrefixes {
-		s = strings.TrimPrefix(s, p)
-	}
-	best := ""
-	bestToken := ""
-	for _, f := range modelFamilies {
-		if (s == f.prefix || strings.HasPrefix(s, f.prefix+"-")) && len(f.prefix) > len(best) {
-			best = f.prefix
-			bestToken = f.recipeToken
-		}
-	}
-	return bestToken
+	f, _ := lookupFamily(raw)
+	return f.recipeToken
 }
 
 // MapPayload converts a single LiteLLM StandardLoggingPayload into the
@@ -253,19 +349,24 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 
 	// Canonical model family on `model` (what recipe rules match), raw string
 	// preserved on `model_raw` for audit/reconciliation (ADR-044 model
-	// normalization in the mapper). An unrecognized model keeps its raw string
-	// on `model` and is logged loudly — we never invent a family, which would
-	// mis-price; it simply won't match a recipe rule (rates $0, loud by absence).
-	modelDim := canonicalModel(p.Model)
-	if modelDim == "" {
+	// normalization in the mapper). An unknown model keeps its raw string on
+	// `model` and is logged loudly — we never invent a family, which would
+	// mis-price; it has no price until a rule for that name exists, and shows
+	// as unpriced usage meanwhile.
+	fam, known := lookupFamily(p.Model)
+	modelDim := fam.recipeToken
+	if !known {
 		modelDim = p.Model
-		slog.Warn("litellm: unrecognized model — usage won't match recipe pricing rules until an alias is added (see modelFamilies)",
+		slog.Warn("litellm: unknown model, kept under its raw name; its usage has no price until a pricing rule for that name exists (an unknown version is never priced as an older model)",
 			"model", p.Model, "litellm_id", p.ID)
 	}
 	dims := map[string]any{
 		"model":     modelDim,
 		"model_raw": p.Model,
 		"provider":  p.CustomLLMProvider,
+	}
+	if tier, ok := promptTiers[fam.recipeToken]; known && ok {
+		dims[DimContextTier] = tier.of(usage)
 	}
 	// Forward useful operator-set metadata into dimensions for
 	// pricing-rule dispatch. We promote `team_id` and `tags`
@@ -368,6 +469,25 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 		Legacy:    mapping(uncached, 0, 0, costs.legacyInput),
 		LegacyKey: p.ID + ":" + TokenTypeInput,
 	}, nil
+}
+
+// of is the context_tier value of a call with these token counts. The prompt
+// is the larger of prompt_tokens and the cache reads plus writes: LiteLLM
+// 1.83.9 counts the cache in prompt_tokens, and on a record that does not
+// (see cacheWriteSplit), the cache alone still sets a floor. Either way the
+// value is the smallest prompt the record allows, so a call is never put in
+// the higher tier on a guess, and a long prompt is never billed at the lower
+// price because of how the record counted it. Exactly `over` tokens is the
+// lower tier ("up to 100,000").
+func (t promptTier) of(u *Usage) string {
+	prompt := u.PromptTokens
+	if c := u.cachedReadTokens() + u.cacheWriteTokens(); c > prompt {
+		prompt = c
+	}
+	if prompt > t.over {
+		return t.above
+	}
+	return t.upTo
 }
 
 // dimsWithTokenType returns a copy of base with token_type set, so the two

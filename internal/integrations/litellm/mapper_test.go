@@ -120,7 +120,8 @@ func TestCanonicalModel(t *testing.T) {
 		"gpt-5.1":                              "gpt-5.1",    // dotted id ≠ the bare gpt-5 entry
 		"gpt-4.1-mini":                         "gpt-4.1-mini",
 		"gpt-4.1-2025-04-14":                   "gpt-4.1",
-		"gpt-9-experimental":                   "", // unknown FUTURE model still falls through
+		"gpt-9-experimental":                   "",       // unknown FUTURE model still falls through
+		"azure_ai/gpt-4o":                      "gpt-4o", // Foundry prefix stripped (2026-10-22)
 	}
 	for raw, want := range cases {
 		if got := canonicalModel(raw); got != want {
