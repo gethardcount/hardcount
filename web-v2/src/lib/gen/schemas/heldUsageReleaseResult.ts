@@ -33,7 +33,9 @@ export interface HeldUsageReleaseResult {
   /**
      * Released rows inside an active subscription's current billing
      * period whose meter the subscription's plan prices. That period's
-     * invoice counts them.
+     * invoice counts them. A row after the period end, released before
+     * that period's invoice is built, counts here when the subscription
+     * continues and its plan from then on prices the meter.
      */
   in_open_period: number;
   /**

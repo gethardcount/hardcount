@@ -177,8 +177,11 @@ An event counts toward the billing period its `timestamp` falls in.
   hour) has passed after the period ends. An event that arrives within that
   time is on the invoice.
 - After that, the invoice does not change. A later event for that period is
-  stored, but it is not added to that invoice or to any later one, and
-  Velox does not alert you.
+  stored, but it is not added to that invoice or to any later one. The
+  answer says so: `billing_status: "after_close"` on the event's 201
+  (single and backfill), and an `after_close` count on a batch or a
+  LiteLLM delivery. A replay never carries it. No `billing_status` is not
+  a promise that the event will be billed.
 - To bill it, make a one-off invoice: `POST /v1/invoices`, then
   `POST /v1/invoices/{id}/line-items`, then
   `POST /v1/invoices/{id}/finalize`.
@@ -188,9 +191,11 @@ An event counts toward the billing period its `timestamp` falls in.
 - An immediate cancel, `retry-billing`, a spend-threshold invoice and a
   test-clock advance build their invoice at once, with no grace period.
 
-The metric `velox_usage_late_event_total` counts events, not sent through
-the backfill route, whose `timestamp` is more than 24 hours older than their
-arrival. It does not say whether an event missed an invoice.
+The metric `velox_usage_after_close_total{origin}` counts the events
+written after their period's invoice. `velox_usage_late_event_total`
+counts events, not sent through the backfill route, whose `timestamp` is
+more than 24 hours older than their arrival. It does not say whether an
+event missed an invoice.
 
 ## Errors
 

@@ -309,15 +309,17 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusCreated, event)
 }
 
-// errIngestUnavailable marks a NON-verdict from resolve: a customer or meter
-// lookup the store could not answer (failover, a lost pool, a cancelled
-// request). The three ingest doors answer it with 503 so the client retries,
-// the same contract as the LiteLLM door. Never returned to the caller as text.
+// errIngestUnavailable marks a NON-verdict: a customer or meter lookup from
+// resolve, or the service's open-period read (open_period.go), that the
+// store could not answer (failover, a lost pool, a cancelled request). The
+// three ingest doors answer it with 503 so the client retries, the same
+// contract as the LiteLLM door. Never returned to the caller as text.
 var errIngestUnavailable = errors.New("usage: lookup store unavailable")
 
 // respondIngestUnavailable writes the 503 for errIngestUnavailable. The raw
 // error is logged, never sent to the caller (ADR-026). "Nothing was recorded"
-// holds at every door because resolve runs before any write.
+// holds at every door because resolve and the open-period read run before
+// any write.
 func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID string, err error) {
 	slog.ErrorContext(r.Context(), "usage ingest: lookup store unavailable — request refused for client retry",
 		"tenant_id", tenantID,
@@ -336,6 +338,11 @@ func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID s
 // silent-success contract. Falls back to the plain error mapping if the
 // original row can't be read.
 func (h *Handler) respondIngestError(w http.ResponseWriter, r *http.Request, tenantID, idempotencyKey string, err error) {
+	if errors.Is(err, errIngestUnavailable) {
+		// The open-period read failed before the write: nothing recorded.
+		respondIngestUnavailable(w, r, tenantID, err)
+		return
+	}
 	if errors.Is(err, errs.ErrDuplicateKey) && idempotencyKey != "" {
 		if original, gerr := h.svc.GetByIdempotencyKey(r.Context(), tenantID, idempotencyKey); gerr == nil {
 			// A replay MUTATES NOTHING — it hands back the row the original
@@ -615,9 +622,17 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inserted, deduped, ingestErrs := h.svc.BatchIngest(r.Context(), tenantID, inputs)
+	res, ingestErrs := h.svc.BatchIngest(r.Context(), tenantID, inputs)
 
 	if len(ingestErrs) > 0 {
+		// A store that gave no answer refuses the batch for retry; nothing
+		// was written (the open-period read runs before the write).
+		for _, e := range ingestErrs {
+			if errors.Is(e, errIngestUnavailable) {
+				respondIngestUnavailable(w, r, tenantID, e)
+				return
+			}
+		}
 		errStrings := make([]string, len(ingestErrs))
 		for i, e := range ingestErrs {
 			errStrings[i] = e.Error()
@@ -626,9 +641,12 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// after_close counts written rows whose period was already invoiced:
+	// stored, billed on no invoice (ADR-120).
 	respond.JSON(w, r, http.StatusCreated, map[string]any{
-		"ingested":     inserted,
-		"deduplicated": deduped,
+		"ingested":     res.Inserted,
+		"deduplicated": res.Deduplicated,
+		"after_close":  res.AfterClose,
 		"total":        len(events),
 	})
 }

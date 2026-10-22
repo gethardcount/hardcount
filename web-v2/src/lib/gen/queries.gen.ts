@@ -8153,7 +8153,7 @@ export const postV1UsageEvents = async (postV1UsageEventsBody: PostV1UsageEvents
 
 
 
-export const getPostV1UsageEventsMutationOptions = <TError = void,
+export const getPostV1UsageEventsMutationOptions = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEvents>>, TError,{data: PostV1UsageEventsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEvents>>, TError,{data: PostV1UsageEventsBody}, TContext> => {
 
@@ -8182,12 +8182,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1UsageEventsMutationResult = NonNullable<Awaited<ReturnType<typeof postV1UsageEvents>>>
     export type PostV1UsageEventsMutationBody = PostV1UsageEventsBody
-    export type PostV1UsageEventsMutationError = void
+    export type PostV1UsageEventsMutationError = void | Error
 
     /**
  * @summary Ingest usage event
  */
-export const usePostV1UsageEvents = <TError = void,
+export const usePostV1UsageEvents = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEvents>>, TError,{data: PostV1UsageEventsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1UsageEvents>>,
@@ -8342,7 +8342,7 @@ export const postV1UsageEventsBatch = async (postV1UsageEventsBatchBodyItem: Pos
 
 
 
-export const getPostV1UsageEventsBatchMutationOptions = <TError = void,
+export const getPostV1UsageEventsBatchMutationOptions = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEventsBatch>>, TError,{data: PostV1UsageEventsBatchBodyItem[]}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEventsBatch>>, TError,{data: PostV1UsageEventsBatchBodyItem[]}, TContext> => {
 
@@ -8371,12 +8371,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PostV1UsageEventsBatchMutationResult = NonNullable<Awaited<ReturnType<typeof postV1UsageEventsBatch>>>
     export type PostV1UsageEventsBatchMutationBody = PostV1UsageEventsBatchBodyItem[]
-    export type PostV1UsageEventsBatchMutationError = void
+    export type PostV1UsageEventsBatchMutationError = void | Error
 
     /**
  * @summary Batch ingest usage events (max 1000, all-or-nothing)
  */
-export const usePostV1UsageEventsBatch = <TError = void,
+export const usePostV1UsageEventsBatch = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1UsageEventsBatch>>, TError,{data: PostV1UsageEventsBatchBodyItem[]}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof postV1UsageEventsBatch>>,
@@ -8404,8 +8404,9 @@ export const getBackfillUsageEventUrl = () => {
  *
  * The event counts toward the billing period its timestamp falls in
  * only if that period's invoice has not been built yet. An event for
- * an already-invoiced period is stored but never billed; bill it with
- * a one-off invoice.
+ * an already-invoiced period is stored but never billed, and its 201
+ * says so with `billing_status: after_close`; bill it with a one-off
+ * invoice.
  *
  * Shares idempotency keys with live ingest: a repeated
  * `idempotency_key` returns 200 with the original event and an

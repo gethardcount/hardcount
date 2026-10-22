@@ -33,8 +33,12 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
 - **Once the invoice is built it does not change.** Usage stamped inside
   its period that arrives later is stored, but billed on no invoice, now or
   later. After a spend-threshold invoice, usage stamped before it that
-  arrives later is not on the period-end invoice either. Velox does not
-  alert on it, and there is no list of such events yet.
+  arrives later is not on the period-end invoice either. Velox says so when
+  it writes such an event: the answer carries `billing_status:
+  "after_close"` (an `after_close` count on a batch or a LiteLLM
+  delivery), `velox_usage_after_close_total` counts it, and a WARN line
+  names the customer, meter and timestamp. There is no list of such events
+  yet. Usage on a canceled subscription is not flagged.
 - **During the grace the subscription still shows the ended period.** Spend
   thresholds and the live credit balance do not count the new period's
   usage until the invoice is built.
@@ -57,6 +61,15 @@ curl -sS "$API/v1/subscriptions/$SUB" -H "Authorization: Bearer $KEY" \
 Due means `next_billing_at` (or a `cancel_at` inside the period) is at
 least `INVOICE_GRACE_PERIOD` in the past. If it is, and `billing_failure`
 is set, go to [Billing failing](billing-failing.md).
+
+For usage that missed an invoice, look for the after-close signal:
+
+```bash
+# How many events arrived after their period's invoice, by origin:
+curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep velox_usage_after_close_total
+# Which ones: the WARN line per event.
+#   {"level":"WARN","msg":"usage event arrived after its period was invoiced — stored, billed on no invoice","customer_id":...,"meter_id":...,"timestamp":...}
+```
 
 ## Fix
 

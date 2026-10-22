@@ -24,7 +24,7 @@ it. Each line on the list is a price for one model and one kind of token.
 | Default price | The price a meter uses for events that no pricing rule picks. |
 | Prepaid commit | Usage credit the customer pays for up front, often at a discount. Later invoices draw it down. |
 | Provider cost | What your AI provider charges you per token. |
-| Margin | What you billed a customer, minus what their usage cost you, as a percent of what you billed. |
+| Margin | The price of a customer's usage rated in the window, invoiced or not, minus what that usage cost you, as a percent of that price. |
 
 ## Ready-made recipes
 
@@ -251,8 +251,9 @@ sell commits with tax on. The decision and its reasons are in
 
 ## See your margin
 
-Your margin on a customer is what you billed them, against what their
-usage cost you. Only you see it, never the customer.
+Your margin on a customer is the price of their usage rated in the window,
+invoiced or not, against what that usage cost you. Only you see it, never
+the customer.
 
 1. **Save what your provider charges you per token.** Do this before the
    usage arrives. Velox records the cost on each event when it arrives, so

@@ -92,6 +92,15 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > dedups on `(tenant_id, livemode, idempotency_key)`. Pair it with
 > `max_retries: 4` in the callback config (`docs/integrations/litellm.md`).
 
+> **Amendment (2026-10-22): a replay that misses the deadline is counted.**
+> The 2026-07-06 correction's "hard deadline at period finalize" stands:
+> a row replayed after its period's invoice is built (the grace,
+> ADR-120) is stored and billed on no invoice. It is no longer silent.
+> The 200 counts such rows in `after_close`, and
+> `velox_usage_after_close_total` counts them with a WARN line each
+> (ADR-120 amendment 2026-10-22). A row that comes back as
+> `deduplicated` is never counted.
+
 ### What's NOT in scope (deferred)
 
 - **Cost-table fallback**: when LiteLLM doesn't emit cost (custom model, older proxy version), Velox could fall back to a built-in cost table by model name. Deferred — most operators run a recent LiteLLM with cost tracking enabled; building a cost table is multi-day work for a niche case.

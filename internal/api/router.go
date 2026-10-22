@@ -905,6 +905,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// live POST, batch, backfill, LiteLLM). Live mode never pays the
 	// lookup — test clocks are test-mode-only by DB CHECK.
 	usageSvc.SetResolver(engine)
+	// Ingest reads the customer's open periods before it writes an event, to
+	// flag one whose period was already invoiced (billing_status
+	// "after_close", ADR-120). The engine supplies the threshold watermark.
+	usageSvc.SetOpenPeriodReader(usageOpenPeriods{subs: subStore, pricing: pricingSvc, thresholds: engine})
 	// subscription.Service uses the resolver at Create / Activate /
 	// ChangeItem / ScheduleCancel / PauseCollection / EndTrial /
 	// ExtendTrial so every per-sub timestamp the operator writes

@@ -382,6 +382,91 @@ func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID s
 	return subs, nil
 }
 
+// ListLiveByCustomer returns every active and trialing subscription of the
+// customer, items and thresholds hydrated, and the meter ids of every plan
+// their items carry or will change to (planMeters, by plan id; a deleted
+// plan is absent), in one transaction. It backs usage ingest's open-period
+// read (usage.OpenPeriodReader), which runs before every event write, so it
+// is one narrow read: no count, no page, no second transaction per plan.
+// Capped at 1000 subscriptions, far above the live ones one customer holds.
+func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, customerID string) (subs []domain.Subscription, planMeters map[string][]string, err error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
+		WHERE s.customer_id = $1 AND s.status IN ('active', 'trialing')
+		ORDER BY s.created_at ASC, s.id ASC LIMIT 1000
+	`, customerID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var sub domain.Subscription
+		if err := scanSubRow(rows, &sub); err != nil {
+			return nil, nil, err
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	_ = rows.Close()
+
+	var planIDs []string
+	seen := map[string]bool{}
+	for i := range subs {
+		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
+			return nil, nil, err
+		}
+		for _, it := range subs[i].Items {
+			for _, id := range []string{it.PlanID, it.PendingPlanID} {
+				if id != "" && !seen[id] {
+					seen[id] = true
+					planIDs = append(planIDs, id)
+				}
+			}
+		}
+	}
+	planMeters = map[string][]string{}
+	if len(planIDs) == 0 {
+		return subs, planMeters, nil
+	}
+	ids, err := json.Marshal(planIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	// meter_ids is 'null' (not '[]') for meterless plans (see
+	// FindMeterConflicts).
+	prow, err := tx.QueryContext(ctx, `
+		SELECT id, CASE WHEN jsonb_typeof(meter_ids) = 'array' THEN meter_ids ELSE '[]'::jsonb END
+		FROM plans WHERE id IN (SELECT jsonb_array_elements_text($1::jsonb))`, string(ids))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() { _ = prow.Close() }()
+	for prow.Next() {
+		var id string
+		var raw []byte
+		if err := prow.Scan(&id, &raw); err != nil {
+			return nil, nil, err
+		}
+		var meters []string
+		if err := json.Unmarshal(raw, &meters); err != nil {
+			return nil, nil, fmt.Errorf("plan %s meter_ids: %w", id, err)
+		}
+		planMeters[id] = meters
+	}
+	if err := prow.Err(); err != nil {
+		return nil, nil, err
+	}
+	return subs, planMeters, nil
+}
+
 func cancelSpec() transitionSpec {
 	return transitionSpec{
 		targetStatus: string(domain.SubscriptionCanceled),

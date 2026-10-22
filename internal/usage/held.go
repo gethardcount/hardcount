@@ -148,9 +148,15 @@ func (s *Service) IngestResolvingHeld(ctx context.Context, tenantID string, inpu
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
+	// The open periods are read BEFORE the write: see open_period.go.
+	class, err := s.classifyEvent(ctx, tenantID, prepared, periodCacheFrom(ctx))
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
 	event, err := s.held.IngestResolvingHeld(ctx, tenantID, prepared)
 	if err == nil {
 		mw.RecordUsageIngested(1)
+		markAfterClose(ctx, &event, class)
 	}
 	return event, err
 }
@@ -190,7 +196,9 @@ type ReleaseResult struct {
 	MoreToRelease int `json:"more_to_release"`
 	// InOpenPeriod counts released rows whose time falls in an active
 	// subscription's current billing period and whose meter that
-	// subscription's plan prices: that period's invoice counts them.
+	// subscription's plan prices: that period's invoice counts them. A row
+	// after the period end, released before that period's invoice is built
+	// (the grace), counts here when the next period's plan prices it.
 	InOpenPeriod int `json:"in_open_period"`
 	// NotOnPlan counts released rows whose time falls in an active
 	// subscription's current billing period, but whose meter no plan on that
@@ -323,57 +331,44 @@ type ReleasedUsage struct {
 	MeterID string
 }
 
-// ClassifyByOpenPeriod splits released rows three ways:
+// ClassifyByOpenPeriod splits released rows three ways, by classify
+// (open_period.go):
 //
 //   - inOpen: the time falls in an active or trialing subscription's
 //     current billing period [start, end), and a plan on one of that
 //     subscription's items prices the row's meter. That period's invoice
-//     charges it.
+//     charges it. A time at or after the period end, before that period's
+//     invoice is built (the grace), belongs to the next period: inOpen when
+//     the subscription continues past the end and its plan from then on
+//     (a change pending at the end, else the current one) prices the meter.
 //   - notOnPlan: the time falls in such a period, but no plan on the
 //     subscription prices the meter. No invoice charges it.
-//   - outside: the time falls in no current period. It reads only the
-//     current period: Velox never re-opens a built invoice, so a time in an
-//     earlier period is outside (ADR-120).
+//   - outside: everything else, including a time in a period whose invoice
+//     is already built (Velox never re-opens a built invoice, ADR-120) and
+//     a time after the end of a subscription that ends there.
 //
-// plans maps plan id to plan; a plan missing from it prices nothing.
+// plans maps plan id to plan, current and pending; a plan missing from it
+// prices nothing.
 func ClassifyByOpenPeriod(rows []ReleasedUsage, subs []domain.Subscription, plans map[string]domain.Plan) (inOpen, notOnPlan, outside int) {
-	for _, row := range rows {
-		inPeriod, priced := false, false
-		for _, sub := range subs {
-			if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
-				continue
-			}
-			if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-				continue
-			}
-			if row.At.Before(*sub.CurrentBillingPeriodStart) || !row.At.Before(*sub.CurrentBillingPeriodEnd) {
-				continue
-			}
-			inPeriod = true
-			if subPricesMeter(sub, plans, row.MeterID) {
-				priced = true
-				break
-			}
+	var periods []OpenPeriod
+	for _, sub := range subs {
+		if p, ok := OpenPeriodOf(sub, plans, nil); ok {
+			periods = append(periods, p)
 		}
-		switch {
-		case priced:
+	}
+	// The release does not read meters: AfterClose and Outside both count
+	// as outside, and with no watermark nothing else depends on the meter.
+	noMeter := func() (MeterBuckets, error) { return MeterBuckets{}, nil }
+	for _, row := range rows {
+		c, _ := classify(row.At, row.MeterID, periods, noMeter)
+		switch c {
+		case InOpen:
 			inOpen++
-		case inPeriod:
+		case NotOnPlan:
 			notOnPlan++
 		default:
 			outside++
 		}
 	}
 	return inOpen, notOnPlan, outside
-}
-
-func subPricesMeter(sub domain.Subscription, plans map[string]domain.Plan, meterID string) bool {
-	for _, it := range sub.Items {
-		for _, id := range plans[it.PlanID].MeterIDs {
-			if id == meterID {
-				return true
-			}
-		}
-	}
-	return false
 }

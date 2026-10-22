@@ -210,7 +210,8 @@ Velox customer yet, both of its events are held:
   "accepted": 0,
   "deduplicated": 0,
   "held": 2,
-  "skipped": 0
+  "skipped": 0,
+  "after_close": 0
 }
 ```
 
@@ -220,6 +221,7 @@ Velox customer yet, both of its events are held:
 | `deduplicated` | Events Velox already had, or already held, from an earlier send of the same call. |
 | `held` | Events Velox kept but did not bill, because the customer or the `tokens` meter does not exist yet. See the next section. |
 | `skipped` | Calls with no tokens to bill, such as image generation, moderation, or a failed call with zero tokens. |
+| `after_close` | Of `accepted`, events whose billing period was already invoiced, such as a replay after the invoice was built. They are saved but billed on no invoice; bill them with a one-off invoice. A resent event counted in `deduplicated` is never counted here. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the

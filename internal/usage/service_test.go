@@ -57,21 +57,22 @@ func (m *memStore) IngestAudited(ctx context.Context, tenantID string, e domain.
 	return out, nil
 }
 
-func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (int, int, error) {
+func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) ([]int, int, error) {
 	staged := newMemStore()
 	for k, v := range m.events {
 		staged.events[k] = v
 	}
-	inserted, deduped := 0, 0
+	var inserted []int
+	deduped := 0
 	for i, e := range events {
 		_, err := staged.Ingest(ctx, tenantID, e)
 		switch {
 		case errors.Is(err, errs.ErrDuplicateKey):
 			deduped++
 		case err != nil:
-			return 0, 0, fmt.Errorf("event[%d]: %w", i, err)
+			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)
 		default:
-			inserted++
+			inserted = append(inserted, i)
 		}
 	}
 	m.events = staged.events
@@ -459,13 +460,13 @@ func TestIngest_ZeroQuantityStaysZero(t *testing.T) {
 func TestBatchIngest_AllOrNothing_ErrorsIndexed(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store)
-	ingested, deduped, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
+	res, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1)},
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(2)},
 		{CustomerID: "", MeterID: "mtr_1", Quantity: dec(3)}, // row 2 (0-based): invalid
 	})
-	if ingested != 0 || deduped != 0 {
-		t.Fatalf("got ingested=%d deduped=%d, want 0/0 — a failing batch must write nothing", ingested, deduped)
+	if res.Inserted != 0 || res.Deduplicated != 0 {
+		t.Fatalf("got ingested=%d deduped=%d, want 0/0 — a failing batch must write nothing", res.Inserted, res.Deduplicated)
 	}
 	if len(store.events) != 0 {
 		t.Fatalf("store has %d events, want 0 (committed prefix = double-billing on retry)", len(store.events))
@@ -490,15 +491,15 @@ func TestBatchIngest_ReplayCountsAsDeduped(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed ingest: %v", err)
 	}
-	ingested, deduped, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
+	res, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "evt-a"}, // replay
 		{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(2), IdempotencyKey: "evt-b"}, // fresh
 	})
 	if len(errs) != 0 {
 		t.Fatalf("replay must not error: %v", errs)
 	}
-	if ingested != 1 || deduped != 1 {
-		t.Fatalf("got ingested=%d deduped=%d, want 1/1", ingested, deduped)
+	if res.Inserted != 1 || res.Deduplicated != 1 {
+		t.Fatalf("got ingested=%d deduped=%d, want 1/1", res.Inserted, res.Deduplicated)
 	}
 	if len(store.events) != 2 {
 		t.Fatalf("store has %d events, want 2 (no duplicate row)", len(store.events))

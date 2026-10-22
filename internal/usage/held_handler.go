@@ -165,20 +165,25 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// The plans say which meters each subscription prices: a released row
-	// whose meter its subscription does not price is not invoiced.
+	// whose meter its subscription does not price is not invoiced. A
+	// pending plan prices the rows from its effective time on: a row
+	// released in the grace after the period end belongs to the next
+	// period, on the plan in force then (ClassifyByOpenPeriod).
 	if h.heldPlans != nil {
 		for _, sub := range subs {
 			for _, it := range sub.Items {
-				if _, ok := plans[it.PlanID]; ok || it.PlanID == "" {
-					continue
+				for _, id := range []string{it.PlanID, it.PendingPlanID} {
+					if _, ok := plans[id]; ok || id == "" {
+						continue
+					}
+					p, err := h.heldPlans.GetPlan(r.Context(), tenantID, id)
+					if err != nil {
+						respond.InternalError(w, r)
+						slog.ErrorContext(r.Context(), "release held usage: get plan", "error", err)
+						return
+					}
+					plans[id] = p
 				}
-				p, err := h.heldPlans.GetPlan(r.Context(), tenantID, it.PlanID)
-				if err != nil {
-					respond.InternalError(w, r)
-					slog.ErrorContext(r.Context(), "release held usage: get plan", "error", err)
-					return
-				}
-				plans[it.PlanID] = p
 			}
 		}
 	}

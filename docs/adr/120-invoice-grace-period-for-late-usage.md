@@ -1,7 +1,7 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace)
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: late usage after the invoice is flagged)
 
 ## Summary
 
@@ -13,7 +13,9 @@ spend-threshold invoice was built after its timestamp (see Risks).
 
 Once the invoice is built it does not change. Usage for that period that
 arrives later is stored but billed on no invoice, now or later; the operator
-can bill it with a one-off invoice. Velox does not refuse late usage.
+can bill it with a one-off invoice. Velox does not refuse late usage, and
+since 2026-10-22 it says so on the answer: `billing_status: after_close`
+(see the amendment).
 
 The grace delays every period-end invoice, flat-fee ones too, and the final
 invoice of a cancel scheduled for a date. The invoice's dates and amounts do
@@ -185,17 +187,76 @@ pipeline lags longer raises it.
   collection. Only a period or threshold invoice issued before the expiry
   draws from it, at its first collection or a dunning retry (ADR-071 §2).
   Every other draw tests expiry at its own instant.
-- **Late usage after the invoice is silent.** There is no alert and no list
-  of the events that missed an invoice. `velox_usage_late_event_total`
-  counts events more than 24 hours old on arrival, which is a different
-  thing. **Deferred: an exact per-customer report** of events that arrived
-  after their period's invoice was built (design in velox-ops,
-  `research/late-usage-961-design-round2-2026-10-14.json`). Trigger: an
-  operator or a customer needs to know which events missed an invoice, and
-  comparing the customer's usage with the invoice lines is not enough.
+- **Late usage after the invoice is flagged per event, but not listed.**
+  Since 2026-10-22 (amendment below) the answer that writes such an event
+  says so, and `velox_usage_after_close_total` counts them. There is still
+  no list of them per customer and period, and no dashboard notice.
+  **Deferred: the per-customer list** (and a pre-filled one-off invoice).
+  Trigger: an operator needs to find which events missed an invoice after
+  the fact, and the counter, the WARN log and comparing the customer's
+  usage with the invoice lines are not enough.
 - **Walks and scripts** that close a wall-clock period with
   `POST /v1/billing/run` right after it ends must run with
   `INVOICE_GRACE_PERIOD=0`.
+
+## Amendment 2026-10-22: late usage after the invoice gets a signal
+
+Usage that arrives after its period's invoice is still stored, answered
+2xx, and billed on no invoice. What changed is that it is no longer silent:
+
+- `POST /v1/usage-events` and `POST /v1/usage-events/backfill` answer 201
+  with `billing_status: "after_close"`;
+- `POST /v1/usage-events/batch` and the LiteLLM callback count such rows in
+  `after_close`;
+- `velox_usage_after_close_total{origin}` counts them, with a WARN log line
+  per row.
+
+**The rule** (`internal/usage/open_period.go`, `classify`). An event is
+after_close when an active or trialing subscription that prices its meter
+already invoiced its time, and no active or trialing subscription's open
+period holds it. "Already invoiced" means either:
+
+- the event is before the subscription's current period start, and not
+  before its trial end (trial usage is free) or its start; or
+- the event is before the subscription's threshold watermark (a threshold
+  fire with no reset), and every bucket of the meter is sum or count.
+
+Two kinds of meter are never flagged, because a later close can still
+bill the event:
+
+- a meter with a `last_ever` rule has no lower time bound;
+- a max or last bucket that the threshold fire deferred is billed over the
+  whole period at close (ADR-066 §4).
+
+An event at or after the current period end (the grace) is never flagged:
+the next close bills it.
+
+**Why the flag is never false.** Ingest reads the periods before it writes
+the event. Every writer of a period start, and the threshold watermark
+invoice, commits in the transaction that froze that window, after reading
+its usage. So a read that shows the window frozen means it was frozen
+before the event existed. A close that commits between the read and the
+write is not seen, and that event goes unflagged; a missed flag is
+accepted, a wrong one is not. Only the write flags. A replay answers with
+the original row and no `billing_status`, because recomputing the status
+later could call an event the close did bill "after_close". A crash after
+the commit loses that row's flag; the client's retry dedups and is not
+flagged.
+
+**Scope.** Canceled subscriptions are not read: usage for a canceled
+subscription's final period that arrives after its final invoice stays
+silent. A failed read of the periods refuses the request with 503
+`ingest_unavailable`, like a failed customer or meter lookup, so nothing is
+written without its signal. The read costs one tenant transaction per
+customer per request (plus one per subscription with a threshold, and one
+per meter when an event could be after_close). Measured locally on the
+close-lag rig: single ingest went from about 2.5 ms to 3.4 ms per event; a
+1,000-event batch for one customer was unchanged (about 240 ms).
+
+The held-usage release (ADR-122) uses the same rule. A released row at or
+after the period end, before that period's invoice, belongs to the next
+period: `in_open_period` when the subscription continues past the end and
+its plan from then on prices the meter.
 
 ## References
 

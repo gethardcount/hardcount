@@ -1931,6 +1931,21 @@ func (e TestClockStatus) Valid() bool {
 	}
 }
 
+// Defines values for UsageEventBillingStatus.
+const (
+	AfterClose UsageEventBillingStatus = "after_close"
+)
+
+// Valid indicates whether the value is a known member of the UsageEventBillingStatus enum.
+func (e UsageEventBillingStatus) Valid() bool {
+	switch e {
+	case AfterClose:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UsageEventOrigin.
 const (
 	Api      UsageEventOrigin = "api"
@@ -4651,7 +4666,9 @@ type HeldUsageReleaseResult struct {
 
 	// InOpenPeriod Released rows inside an active subscription's current billing
 	// period whose meter the subscription's plan prices. That period's
-	// invoice counts them.
+	// invoice counts them. A row after the period end, released before
+	// that period's invoice is built, counts here when the subscription
+	// continues and its plan from then on prices the meter.
 	InOpenPeriod int `json:"in_open_period"`
 
 	// MoreToRelease Rows for this external ID still held only because one release
@@ -5395,6 +5412,11 @@ type LitellmSpendLog struct {
 type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
+
+	// AfterClose Of `accepted`, the events whose period a subscription already
+	// invoiced: stored, billed on no invoice. A replay never counts
+	// here.
+	AfterClose int `json:"after_close"`
 
 	// Deduplicated Usage events already recorded, or already held, by an earlier delivery.
 	Deduplicated int `json:"deduplicated"`
@@ -6511,7 +6533,14 @@ type UsageAggregate struct {
 
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
-	CustomerId string `json:"customer_id"`
+	// BillingStatus Sent only on the 201 that wrote the event. `after_close`: a
+	// subscription that prices this meter already invoiced the
+	// event's time, so the event is stored but billed on no invoice,
+	// now or later. Bill it with a one-off invoice if it should be
+	// charged. Absent otherwise, which is not a promise that the event
+	// will be billed. Never sent on a replay or a read.
+	BillingStatus UsageEventBillingStatus `json:"billing_status,omitempty"`
+	CustomerId    string                  `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
 	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
@@ -6539,6 +6568,14 @@ type UsageEvent struct {
 	TenantId  string    `json:"tenant_id,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
+
+// UsageEventBillingStatus Sent only on the 201 that wrote the event. `after_close`: a
+// subscription that prices this meter already invoiced the
+// event's time, so the event is stored but billed on no invoice,
+// now or later. Bill it with a one-off invoice if it should be
+// charged. Absent otherwise, which is not a promise that the event
+// will be billed. Never sent on a replay or a read.
+type UsageEventBillingStatus string
 
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 type UsageEventOrigin string

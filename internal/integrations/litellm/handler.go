@@ -84,7 +84,10 @@ func (h *Handler) Routes() chi.Router {
 // the existing /v1/usage-events/batch response so partners using
 // both surfaces see one shape:
 //
-//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "errors": [{ "id": "...", "error": "..." }] }
+//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "after_close": A, "errors": [{ "id": "...", "error": "..." }] }
+//
+// after_close counts accepted rows whose period was already invoiced: they
+// are stored and billed on no invoice (ADR-120). A replay never counts.
 //
 // held counts rows whose customer or meter does not exist yet. They are
 // kept in usage_held_events, not billed, and shown to the operator, who
@@ -102,6 +105,7 @@ type SpendResponse struct {
 	Deduplicated int             `json:"deduplicated"`
 	Held         int             `json:"held"`
 	Skipped      int             `json:"skipped"`
+	AfterClose   int             `json:"after_close"`
 	Errors       []SpendRowError `json:"errors,omitempty"`
 }
 
@@ -157,6 +161,8 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := SpendResponse{Errors: []SpendRowError{}}
+	// One open-period read per customer and meter for the whole request.
+	ctx := usage.WithPeriodCache(r.Context())
 
 	for _, payload := range body {
 		ingests, err := MapPayload(payload)
@@ -176,9 +182,13 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, ing := range ingests {
-			switch err := h.persist(r.Context(), tenantID, ing); {
+			afterClose, err := h.persist(ctx, tenantID, ing)
+			switch {
 			case err == nil:
 				resp.Accepted++
+				if afterClose {
+					resp.AfterClose++
+				}
 			case errors.Is(err, errHeldRow):
 				resp.Held++
 			case errors.Is(err, errDuplicateRow):
@@ -231,20 +241,23 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 // sql.ErrNoRows and the raw driver error otherwise, which is what makes
 // this split honest — a BeginTx failure used to be reported as
 // "customer not found".
-func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalIngest) error {
+//
+// afterClose is true when the row was written and its period was already
+// invoiced (usage.BillingStatusAfterClose).
+func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalIngest) (afterClose bool, err error) {
 	cust, err := h.customers.GetByExternalID(ctx, tenantID, ing.ExternalCustomerID)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
-			return h.hold(ctx, tenantID, ing, domain.HeldReasonCustomerNotFound)
+			return false, h.hold(ctx, tenantID, ing, domain.HeldReasonCustomerNotFound)
 		}
-		return fmt.Errorf("%w: customer lookup: %w", errIngestUnavailable, err)
+		return false, fmt.Errorf("%w: customer lookup: %w", errIngestUnavailable, err)
 	}
 	meter, err := h.meters.GetMeterByKey(ctx, tenantID, ing.MeterKey)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
-			return h.hold(ctx, tenantID, ing, domain.HeldReasonMeterNotFound)
+			return false, h.hold(ctx, tenantID, ing, domain.HeldReasonMeterNotFound)
 		}
-		return fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)
+		return false, fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)
 	}
 
 	input := usage.IngestInput{
@@ -260,7 +273,8 @@ func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalInge
 		ObservedCostMicros: ing.ObservedCostMicros,
 	}
 
-	if _, err := h.ingester.IngestResolvingHeld(ctx, tenantID, input); err != nil {
+	ev, err := h.ingester.IngestResolvingHeld(ctx, tenantID, input)
+	if err != nil {
 		// Idempotency replay is silent success: the usage store returns
 		// ErrDuplicateKey on the (tenant_id, livemode, idempotency_key) UNIQUE — a
 		// LiteLLM network-retry redelivering an already-ingested batch is
@@ -271,19 +285,20 @@ func (h *Handler) persist(ctx context.Context, tenantID string, ing ExternalInge
 		// a real persistence problem and bubbles to the partial-failure
 		// accounting.
 		if errors.Is(err, errs.ErrDuplicateKey) || errors.Is(err, errs.ErrAlreadyExists) {
-			return errDuplicateRow
+			return false, errDuplicateRow
 		}
 		// Verdicts on the row itself stay per-row: a bad payload must
 		// never 503, or LiteLLM retries it until max_retries is spent.
 		// Classified on Kind sentinels only — a DomainError's Code is not
 		// a verdict signal (a future infra error carrying a code would be
-		// misfiled as per-row).
+		// misfiled as per-row). A failed open-period read is neither, so
+		// it is a non-verdict: 503, nothing written.
 		if errors.Is(err, errs.ErrValidation) || errors.Is(err, errs.ErrNotFound) {
-			return err
+			return false, err
 		}
-		return fmt.Errorf("%w: ingest: %w", errIngestUnavailable, err)
+		return false, fmt.Errorf("%w: ingest: %w", errIngestUnavailable, err)
 	}
-	return nil
+	return ev.BillingStatus == usage.BillingStatusAfterClose, nil
 }
 
 // hold keeps a row whose customer or meter does not exist yet (#1044,

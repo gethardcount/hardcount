@@ -474,6 +474,7 @@ export * from './usageAggregate';
 export * from './usageAggregateByMeterItem';
 export * from './usageAggregateByMeterItemDailyItem';
 export * from './usageEvent';
+export * from './usageEventBillingStatus';
 export * from './usageEventDimensions';
 export * from './usageEventOrigin';
 export * from './usageEventProviderCostSource';

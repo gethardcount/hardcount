@@ -22,6 +22,12 @@ export interface LitellmSpendResult {
   held: number;
   /** Records that carry no billable tokens. */
   skipped: number;
+  /**
+     * Of `accepted`, the events whose period a subscription already
+     * invoiced: stored, billed on no invoice. A replay never counts
+     * here.
+     */
+  after_close: number;
   /** One entry per event or record that was not recorded. A record can appear more than once. */
   errors?: LitellmSpendResultErrorsItem[];
 }

@@ -406,10 +406,29 @@ func (w thresholdWatermark) exists() bool { return w.billedThrough != nil }
 // the sub's CURRENT period through — nil when none fired. The swap refuses to
 // re-anchor the period below that instant; see applyCrossIntervalPlanSwapTx.
 func (e *Engine) ThresholdBilledThroughTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (*time.Time, error) {
+	return e.thresholdBilledThrough(ctx, tx, sub)
+}
+
+// ThresholdBilledThrough is ThresholdBilledThroughTx on its own connection.
+// Usage ingest reads it, before writing an event, to tell whether a fire
+// already billed the event's time (usage.OpenPeriod.BilledThrough).
+func (e *Engine) ThresholdBilledThrough(ctx context.Context, sub domain.Subscription) (*time.Time, error) {
+	return e.thresholdBilledThrough(ctx, nil, sub)
+}
+
+// thresholdBilledThrough reads the watermark on tx, or on its own
+// connection when tx is nil.
+func (e *Engine) thresholdBilledThrough(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (*time.Time, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return nil, nil
 	}
-	wm, err := e.invoices.GetLatestThresholdInvoiceForCycleTx(ctx, tx, sub.TenantID, sub.ID, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
+	var wm domain.Invoice
+	var err error
+	if tx != nil {
+		wm, err = e.invoices.GetLatestThresholdInvoiceForCycleTx(ctx, tx, sub.TenantID, sub.ID, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
+	} else {
+		wm, err = e.invoices.GetLatestThresholdInvoiceForCycle(ctx, sub.TenantID, sub.ID, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
+	}
 	if errors.Is(err, errs.ErrNotFound) {
 		return nil, nil
 	}

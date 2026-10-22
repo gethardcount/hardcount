@@ -18,7 +18,13 @@ import (
 // earlier period whose invoice is built, it is outside: Velox never re-times
 // usage onto a later invoice (ADR-120). Inside the period it is invoiced
 // only when a plan on the subscription prices its meter; otherwise it is
-// not_on_plan, and no invoice charges it.
+// not_on_plan, and no invoice charges it. A row at or after the period end,
+// released before that period's invoice (the grace), belongs to the next
+// period when the subscription continues; it is outside when the
+// subscription ends at the period end. A row at or after the period end,
+// released before that period's invoice (the grace), belongs to the next
+// period when the subscription continues; it is outside when the
+// subscription ends at the period end.
 func TestClassifyByOpenPeriod(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
@@ -34,24 +40,27 @@ func TestClassifyByOpenPeriod(t *testing.T) {
 	seatsOnly.Items = []domain.SubscriptionItem{{PlanID: "pln_seats"}}
 	canceled := active
 	canceled.Status = domain.SubscriptionCanceled
+	ending := active
+	ending.CancelAtPeriodEnd = true
 
 	at := func(ts time.Time) ReleasedUsage { return ReleasedUsage{At: ts, MeterID: "mtr_tokens"} }
 	rows := []ReleasedUsage{
 		at(start.Add(-time.Hour)),     // before the subscription: outside
 		at(start),                     // period start is inside [start, end)
 		at(end.Add(-time.Nanosecond)), // last instant inside
-		at(end),                       // end is exclusive: outside
+		at(end),                       // end is exclusive: the next period's
 	}
 	cases := []struct {
 		name                  string
 		subs                  []domain.Subscription
 		wantIn, wantNot, wOut int
 	}{
-		{"active, plan prices the meter", []domain.Subscription{active}, 2, 0, 2},
+		{"active, plan prices the meter", []domain.Subscription{active}, 3, 0, 1},
 		// Review finding (#1151): a plan without the meter used to count
 		// these as "will be invoiced".
-		{"active, plan does not price the meter", []domain.Subscription{seatsOnly}, 0, 2, 2},
-		{"two subscriptions, one prices it", []domain.Subscription{seatsOnly, active}, 2, 0, 2},
+		{"active, plan does not price the meter", []domain.Subscription{seatsOnly}, 0, 3, 1},
+		{"two subscriptions, one prices it", []domain.Subscription{seatsOnly, active}, 3, 0, 1},
+		{"active, cancels at the period end", []domain.Subscription{ending}, 2, 0, 2},
 		{"no subscription", nil, 0, 0, 4},
 		{"canceled only", []domain.Subscription{canceled}, 0, 0, 4},
 		{"no period", []domain.Subscription{{Status: domain.SubscriptionActive, Items: active.Items}}, 0, 0, 4},
@@ -63,8 +72,8 @@ func TestClassifyByOpenPeriod(t *testing.T) {
 		}
 	}
 	// A plan the caller could not supply prices nothing.
-	if in, not, _ := ClassifyByOpenPeriod(rows, []domain.Subscription{active}, nil); in != 0 || not != 2 {
-		t.Errorf("no plans: in=%d not_on_plan=%d, want 0/2", in, not)
+	if in, not, _ := ClassifyByOpenPeriod(rows, []domain.Subscription{active}, nil); in != 0 || not != 3 {
+		t.Errorf("no plans: in=%d not_on_plan=%d, want 0/3", in, not)
 	}
 }
 

@@ -58,6 +58,7 @@ original text.
 
 ### Added
 
+- **Usage that arrives after its period was invoiced is now flagged (2026-10-22).** It is still stored and billed on no invoice. The event's 201 carries `billing_status: "after_close"`, batch and LiteLLM answers count `after_close`, and `velox_usage_after_close_total` counts them. If the billing-period read fails, ingest answers 503 `ingest_unavailable` ([late usage](docs/ops/runbook/invoice-timing-late-usage.md)) ([#1350](https://github.com/getvelox/velox/pull/1350)).
 - **Credit note numbers can now start with your own prefix (2026-10-22).** Set it under Settings → Invoicing, or send `credit_note_prefix` to `PUT /v1/settings`. The default stays `CN`, and it must differ from the invoice prefix, or an invoice and a note would share a number. New notes get the prefix; issued notes keep their numbers, and the count carries on ([#1339](https://github.com/getvelox/velox/pull/1339)).
 - **API: `GET /v1/credit-notes/stats` counts every credit note by status and sums the issued ones per currency (2026-10-22).** ([#1339](https://github.com/getvelox/velox/pull/1339))
 - **API: `GET` and `PUT /v1/settings` return `next_invoice_sequence` (2026-10-22).** It is the number the next invoice in the request's mode gets. Settings → Invoicing shows it in the prefix preview, which always said `-000001` before. ([#1323](https://github.com/getvelox/velox/pull/1323))
@@ -103,6 +104,8 @@ original text.
 
 ### Fixed
 
+- **A held-usage release inside the invoice grace counts rows stamped after the period end as `in_open_period` (2026-10-22).** The next period bills them; they were counted as outside. A subscription that ends at that period end still counts them as outside ([#1350](https://github.com/getvelox/velox/pull/1350)).
+- **The margin docs say what margin is (2026-10-22):** usage rated in the window, invoiced or not, not "what you billed" ([#1350](https://github.com/getvelox/velox/pull/1350)).
 - **Issue credit note on the Credit Notes page now opens the invoice page's dialog (2026-10-22).** Its own form offered only the newest 50 open and 50 paid invoices, showed amounts in the default currency, and allowed more than was left to credit. Its refund option always failed. Now you pick the customer, then the invoice. Written-off invoices no longer offer Issue credit note, which the server refused ([#1339](https://github.com/getvelox/velox/pull/1339)).
 - **A lowercase invoice prefix set through the API no longer blocks saving Settings (2026-10-22).** The form refused the value it loaded. Both prefixes are now stored in capitals, as numbers always printed them; `PUT /v1/settings` answers `ACME` for `acme` ([#1339](https://github.com/getvelox/velox/pull/1339)).
 - **The Credit Notes page's totals and tab counts now cover every note (2026-10-22).** They counted only the 100 notes on screen, and a tab hid the other tabs' counts. They now come from the server, and amounts in two currencies are shown side by side, not added ([#1339](https://github.com/getvelox/velox/pull/1339)).

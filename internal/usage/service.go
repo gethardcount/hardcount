@@ -28,6 +28,9 @@ type Service struct {
 	// held keeps usage rows that could not be ingested yet (#1044). Taken
 	// from the store when it implements HeldStore (PostgresStore does).
 	held HeldStore
+	// periods reads the customer's open periods, to flag an event that
+	// arrives after its period was invoiced; see SetOpenPeriodReader.
+	periods OpenPeriodReader
 }
 
 func NewService(store Store) *Service {
@@ -43,6 +46,11 @@ func NewService(store Store) *Service {
 // operator inserting BACKDATED usage is changing what a customer gets billed
 // for a period that may already have closed, so that action is recorded.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
+
+// SetOpenPeriodReader wires the open-period reads that flag an event
+// written after its period was invoiced (billing_status "after_close",
+// open_period.go). Optional: unwired, nothing is flagged (narrow tests).
+func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
 // SetResolver wires the unified clock.Resolver (implemented by
 // *billing.Engine). Ingest timestamps default to and gate against the
@@ -128,7 +136,8 @@ func (s *Service) Ingest(ctx context.Context, tenantID string, input IngestInput
 // invoice keeps the quantities it copied into its line items, and nothing
 // re-aggregates a closed period, so a backfill into one is stored but not
 // billed, the same outcome as a late live event (see KNOWN BEHAVIOR in
-// prepare). The operator bills it with a one-off invoice.
+// prepare), and its 201 says so (billing_status "after_close"). The
+// operator bills it with a one-off invoice.
 func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInput) (domain.UsageEvent, error) {
 	if input.Timestamp == nil {
 		return domain.UsageEvent{}, errs.Required("timestamp")
@@ -227,6 +236,11 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
+	// The open periods are read BEFORE the write: see open_period.go.
+	class, err := s.classifyEvent(ctx, tenantID, prepared, periodCacheFrom(ctx))
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
 	event, err := s.store.IngestAudited(ctx, tenantID, prepared, emit)
 	if err == nil {
 		// Count only rows that actually landed. An idempotency-replay errors
@@ -234,8 +248,20 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 		// is true ingest throughput, not request volume. Every path funnels
 		// here (live POST, batch, backfill, LiteLLM).
 		mw.RecordUsageIngested(1)
+		markAfterClose(ctx, &event, class)
 	}
 	return event, err
+}
+
+// markAfterClose sets billing_status on a row the write just inserted and
+// records it, when the row was classified AfterClose before the write. A
+// replay never reaches here: it is an error out of the store.
+func markAfterClose(ctx context.Context, event *domain.UsageEvent, class Class) {
+	if class != AfterClose {
+		return
+	}
+	event.BillingStatus = BillingStatusAfterClose
+	recordAfterClose(ctx, *event)
 }
 
 // prepare runs the full per-event validation + timestamp resolution and
@@ -247,8 +273,9 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 // logs a WARN for each. That is all it measures. It is a proxy for "missed
 // its invoice": an event one minute after its invoice was built is not
 // counted, and a 25h-old event in a period that is still open is. The exact
-// per-customer report of events that arrived after their period's invoice is
-// deferred (ADR-120, velox-ops register). Backfill-origin events are
+// per-event signal is velox_usage_after_close_total and billing_status
+// "after_close" (open_period.go); a per-customer list of those events is
+// deferred (ADR-120). Backfill-origin events are
 // excluded: an operator posting history on purpose is not the silent leak
 // this counter exists to surface.
 var lateUsageEvents *prometheus.CounterVec
@@ -330,8 +357,9 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 	// on no invoice, now or later. The operator bills it with a one-off
 	// invoice. Velox does not refuse late events (refusing would break
 	// retries and stream pipelines) and does not move them onto a later
-	// invoice. The counter below
-	// is a proxy (see lateUsageEvents), not a report of missed events.
+	// invoice; it flags them (billing_status "after_close", open_period.go).
+	// The counter below is a proxy (see lateUsageEvents), not a report of
+	// missed events.
 	if origin != domain.UsageOriginBackfill && ts.Before(now.Add(-24*time.Hour)) {
 		lateUsageEvents.WithLabelValues(string(origin)).Inc()
 		slog.WarnContext(ctx, "late usage event (>24h past) — may fall in an already-finalized period and go unbilled",
@@ -356,6 +384,17 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 	}, nil
 }
 
+// BatchResult is what one batch wrote.
+type BatchResult struct {
+	// Inserted counts rows newly written.
+	Inserted int
+	// Deduplicated counts rows already stored under the same key.
+	Deduplicated int
+	// AfterClose counts written rows whose period was already invoiced:
+	// stored, billed on no invoice (open_period.go).
+	AfterClose int
+}
+
 // BatchIngest validates every event, then writes them ALL in one store
 // transaction — all-or-nothing. Pre-fix each event committed in its own
 // tx: a mid-batch abort (client timeout, dropped connection) left a
@@ -364,11 +403,12 @@ func (s *Service) prepare(ctx context.Context, tenantID string, input IngestInpu
 // retry of a batch that did commit is deduped only by the events' keys,
 // which the HTTP door requires (#980).
 //
-// Returns (inserted, deduped, errs). Validation failures are collected
-// for EVERY failing index (a bare "quantity too large" across a 500-event
-// batch was undebuggable) and abort before any write. Idempotency replays
-// count as deduped — success, not failure — matching the LiteLLM door.
-func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []IngestInput) (int, int, []error) {
+// Validation failures are collected for EVERY failing index (a bare
+// "quantity too large" across a 500-event batch was undebuggable) and
+// abort before any write. Idempotency replays count as deduplicated —
+// success, not failure — matching the LiteLLM door. A failed open-period
+// read aborts before any write too (errIngestUnavailable).
+func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []IngestInput) (BatchResult, []error) {
 	prepared := make([]domain.UsageEvent, 0, len(events))
 	var batchErrs []error
 	for i, input := range events {
@@ -380,17 +420,37 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 		prepared = append(prepared, ev)
 	}
 	if len(batchErrs) > 0 {
-		return 0, 0, batchErrs
+		return BatchResult{}, batchErrs
+	}
+
+	// The open periods are read BEFORE the write: see open_period.go.
+	cache := periodCacheFrom(ctx)
+	classes := make([]Class, len(prepared))
+	for i, ev := range prepared {
+		c, err := s.classifyEvent(ctx, tenantID, ev, cache)
+		if err != nil {
+			return BatchResult{}, []error{err}
+		}
+		classes[i] = c
 	}
 
 	inserted, deduped, err := s.store.IngestBatch(ctx, tenantID, prepared)
 	if err != nil {
-		return 0, 0, []error{err}
+		return BatchResult{}, []error{err}
 	}
-	if inserted > 0 {
-		mw.RecordUsageIngested(inserted)
+	res := BatchResult{Inserted: len(inserted), Deduplicated: deduped}
+	if res.Inserted > 0 {
+		mw.RecordUsageIngested(res.Inserted)
 	}
-	return inserted, deduped, nil
+	// Only rows this batch inserted: a row deduplicated against an earlier
+	// write was flagged, or not, when that write happened.
+	for _, i := range inserted {
+		if classes[i] == AfterClose {
+			res.AfterClose++
+			recordAfterClose(ctx, prepared[i])
+		}
+	}
+	return res, nil
 }
 
 // GetByIdempotencyKey fetches the event a replayed key originally wrote —

@@ -85,8 +85,8 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dedup batch must succeed: %v", err)
 	}
-	if inserted != 2 || deduped != 2 {
-		t.Fatalf("got inserted=%d deduped=%d, want 2/2", inserted, deduped)
+	if len(inserted) != 2 || inserted[0] != 1 || inserted[1] != 2 || deduped != 2 {
+		t.Fatalf("got inserted=%v deduped=%d, want indices [1 2] and 2 deduplicated", inserted, deduped)
 	}
 	if got := countEvents(); got != 3 { // seed + key-b + key-c
 		t.Fatalf("event count: got %d, want 3 (no duplicate rows)", got)
@@ -97,8 +97,8 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	inserted, deduped, err = store.IngestBatch(ctx, tenantID, []domain.UsageEvent{
 		evt("", 5), evt("", 5),
 	})
-	if err != nil || inserted != 2 || deduped != 0 {
-		t.Fatalf("keyless batch: got inserted=%d deduped=%d err=%v, want 2/0/nil", inserted, deduped, err)
+	if err != nil || len(inserted) != 2 || deduped != 0 {
+		t.Fatalf("keyless batch: got inserted=%v deduped=%d err=%v, want 2/0/nil", inserted, deduped, err)
 	}
 
 	// (3) GetByIdempotencyKey returns the original row for

@@ -1666,3 +1666,69 @@ func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, custo
 		PromotionalRemainingCents: grants.PromotionalRemainingCents,
 	}, nil
 }
+
+// usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest
+// reads, before it writes an event, to tell whether the event's period was
+// already invoiced (billing_status "after_close", ADR-120). The rule itself
+// lives in usage (usage.OpenPeriodOf, usage.BucketsOf); this only reads.
+type usageOpenPeriods struct {
+	subs       usageLiveSubscriptions
+	pricing    usageMeterReader
+	thresholds usageThresholdReader
+}
+
+type usageLiveSubscriptions interface {
+	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, map[string][]string, error)
+}
+
+type usageMeterReader interface {
+	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
+	ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error)
+}
+
+type usageThresholdReader interface {
+	ThresholdBilledThrough(ctx context.Context, sub domain.Subscription) (*time.Time, error)
+}
+
+// OpenPeriods reads every active and trialing subscription of the customer
+// with the meters of its plans, current and pending (one transaction), and
+// the threshold watermark of those with a threshold. A deleted plan prices
+// nothing.
+func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
+	subs, planMeters, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("list live subscriptions: %w", err)
+	}
+	plans := make(map[string]domain.Plan, len(planMeters))
+	for id, meters := range planMeters {
+		plans[id] = domain.Plan{ID: id, MeterIDs: meters}
+	}
+	out := make([]usage.OpenPeriod, 0, len(subs))
+	for _, sub := range subs {
+		var billedThrough *time.Time
+		if sub.BillingThresholds != nil {
+			bt, err := a.thresholds.ThresholdBilledThrough(ctx, sub)
+			if err != nil {
+				return nil, fmt.Errorf("threshold watermark of %s: %w", sub.ID, err)
+			}
+			billedThrough = bt
+		}
+		if p, ok := usage.OpenPeriodOf(sub, plans, billedThrough); ok {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// MeterBuckets reads the meter and its pricing rules.
+func (a usageOpenPeriods) MeterBuckets(ctx context.Context, tenantID, meterID string) (usage.MeterBuckets, error) {
+	m, err := a.pricing.GetMeter(ctx, tenantID, meterID)
+	if err != nil {
+		return usage.MeterBuckets{}, fmt.Errorf("get meter: %w", err)
+	}
+	rules, err := a.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
+	if err != nil {
+		return usage.MeterBuckets{}, fmt.Errorf("list meter pricing rules: %w", err)
+	}
+	return usage.BucketsOf(m, rules), nil
+}
