@@ -40,7 +40,7 @@ export function pauseCollectionToast(resumesLabel: string | undefined): ToastCop
 // this dialog is where the operator decides, so it says so here.
 export const PAUSE_DIALOG_SENTENCE =
   'New invoices are saved as drafts and not charged. Drafts made while paused stay drafts after you resume; finalize them to collect. ' +
-  'Payment retries already running on unpaid invoices continue; void the invoice or mark it uncollectible to stop them.'
+  'Payment retries already running on unpaid invoices continue. To stop them, void each invoice or mark it uncollectible.'
 
 // The "Immediately" choice and the typed confirm after it. Cancelling now
 // bills a final invoice for time and usage so far (billing.Engine

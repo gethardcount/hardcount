@@ -49,7 +49,7 @@ test('pause words never promise a charge on resume', () => {
 // the retries continue and how to stop them.
 test('pause dialog says retries already running continue', () => {
   assert.match(PAUSE_DIALOG_SENTENCE, /retries already running on unpaid invoices continue/i)
-  assert.match(PAUSE_DIALOG_SENTENCE, /void the invoice or mark it uncollectible/)
+  assert.match(PAUSE_DIALOG_SENTENCE, /To stop them, void each invoice or mark it uncollectible\./)
 })
 
 // Mid-period item changes: only advance-billed plans settle the difference

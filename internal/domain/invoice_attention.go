@@ -1323,9 +1323,10 @@ func classifyAwaitingPayment(inv Invoice) *Attention {
 
 // pausedRetriesDetail explains a collection pause beside an open dunning run:
 // the pause keeps new invoices as drafts, and this invoice's retries keep
-// going until it is paid, voided or written off.
+// going until it is paid, voided or written off. Both actions sit in the
+// invoice page's ⋯ menu, above the banner that shows this detail.
 const pausedRetriesDetail = "Pausing collection keeps new invoices as drafts. Payment retries already under way for this invoice keep their schedule. " +
-	"To stop the retries, void this invoice or mark it uncollectible."
+	"To stop the retries, void this invoice or mark it uncollectible from the ⋯ menu above."
 
 // classifyNoPaymentMethod surfaces the finalized-unpaid invoice whose
 // customer has no PaymentSetup ready. The invoice IS queued

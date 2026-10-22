@@ -463,7 +463,7 @@ func TestPausedCollectionCopy_OpenRunKeepsRetrying(t *testing.T) {
 		noCardStopped    = "Collection is paused on the subscription, so adding a card won't charge this invoice until you resume it."
 		withCardRetrying = "Collection is paused, but payment retries for this invoice continue, so the next retry charges the card on file."
 		withCardStopped  = "Collection is paused on the subscription, so this invoice won't be charged automatically; use Charge now to collect it anyway."
-		howToStop        = "To stop the retries, void this invoice or mark it uncollectible."
+		howToStop        = "To stop the retries, void this invoice or mark it uncollectible from the ⋯ menu above."
 	)
 	cases := []struct {
 		name     string
