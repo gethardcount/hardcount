@@ -137,7 +137,9 @@ func TestProcessRun_HardDeclineOnRetry_AsksForADifferentCard(t *testing.T) {
 }
 
 // Control: any other decline keeps the ordinary warning, with its reason and
-// a promised retry date.
+// a promised retry date. The reason is Stripe's sentence alone: "payment
+// failed: " is the charge path's own wrapper, and the customer read it in
+// the email (min-charge check 2026-10-22, finding 4.1).
 func TestProcessRun_OrdinaryDecline_KeepsTheRetryWarning(t *testing.T) {
 	h := newHardDeclineHarness(t, &scriptedRetrier{results: []error{
 		&RetryError{PaymentIntentID: "pi_nsf", Err: errors.New("payment failed: Your card has insufficient funds.")},
@@ -145,7 +147,7 @@ func TestProcessRun_OrdinaryDecline_KeepsTheRetryWarning(t *testing.T) {
 
 	h.tick()
 
-	if h.emails.warnings != 1 || h.emails.lastWarnCardRefused || h.emails.lastWarnReason != "payment failed: Your card has insufficient funds." {
+	if h.emails.warnings != 1 || h.emails.lastWarnCardRefused || h.emails.lastWarnReason != "Your card has insufficient funds." {
 		t.Errorf("warnings %d (card refused %v, reason %q), want 1 ordinary warning carrying the decline reason",
 			h.emails.warnings, h.emails.lastWarnCardRefused, h.emails.lastWarnReason)
 	}

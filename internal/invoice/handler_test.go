@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/activity"
 )
 
 // TestRenderChargeAttempts locks the ADR-103 single-source rule: payment
@@ -90,6 +91,22 @@ func TestRenderChargeAttempts(t *testing.T) {
 	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{succ}, domain.Invoice{})
 	if count(out, "payment") != 1 || out[0].Line.Title != "Payment succeeded" {
 		t.Fatalf("succeeded+unpaid is an anomaly and must render: %+v", out)
+	}
+
+	// A dunning retry's below-minimum attempt defers to the retry's own
+	// "refused by Stripe" row, one attempt per row: two runs that each
+	// ended on such a retry, with one of their rows missing, still show
+	// the other refusal once.
+	refused := domain.InvoiceChargeAttempt{Outcome: domain.ChargeAttemptBelowMinimum, Trigger: domain.ChargeTriggerDunningRetry,
+		ProviderReason: "Amount must be at least $0.50 usd", AmountCents: 30, OccurredAt: wallT}
+	refusedRow := timelineEvent{Source: "dunning", EventType: "retry_attempted", Line: activity.Line{Kind: kindRetryRefused}}
+	out = renderChargeAttempts([]timelineEvent{refusedRow}, []domain.InvoiceChargeAttempt{refused}, domain.Invoice{})
+	if count(out, "payment") != 0 {
+		t.Fatalf("a retry's refusal with its own row must not render again: %+v", out)
+	}
+	out = renderChargeAttempts([]timelineEvent{refusedRow}, []domain.InvoiceChargeAttempt{refused, refused}, domain.Invoice{})
+	if count(out, "payment") != 1 {
+		t.Fatalf("two retry refusals and one row: got %d payment rows, want 1", count(out, "payment"))
 	}
 
 	// Pending never renders — the attention banner owns in-flight.

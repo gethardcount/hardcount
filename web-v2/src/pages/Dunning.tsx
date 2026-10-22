@@ -79,6 +79,8 @@ const RESOLUTION_LABELS: Record<string, string> = {
   invoice_not_collectible: 'Written off',
   retries_exhausted: 'Retries exhausted',
   action_failed: 'Final action failed',
+  // A retry Stripe refused because the amount is below its minimum charge.
+  amount_below_minimum: 'Below Stripe\u2019s minimum',
   // LEGACY, pre-0170: meant voided OR written off. Rows that could not be
   // mapped from their invoice's status keep it, so the label must too.
   manually_resolved: 'Closed unpaid',

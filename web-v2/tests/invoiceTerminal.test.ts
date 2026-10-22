@@ -13,6 +13,7 @@ import {
   invoiceAmountLine,
   invoiceAwaitingPayment,
   invoiceCanCollect,
+  invoiceShowsCollect,
   invoiceDueCents,
   invoiceHeadline,
   invoicePaymentInFlight,
@@ -165,4 +166,17 @@ test('payment predicates: collect, awaiting payment, in flight', () => {
   assert.equal(invoicePaymentInFlight(open), null)
   assert.equal(invoicePaymentSucceeded({ ...open, payment_status: 'succeeded' }), true)
   assert.equal(invoicePaymentSucceeded(open), false)
+})
+
+test('Collect payment is offered with a card, and on a below-minimum invoice without one', () => {
+  const open = { ...base, status: 'finalized', payment_status: 'pending' }
+  assert.equal(invoiceShowsCollect(open, true), true)
+  assert.equal(invoiceShowsCollect(open, false), false)
+  // Stripe refused the amount as below its minimum: Collect applies the
+  // credit balance and charges no card, so it is offered either way.
+  assert.equal(invoiceShowsCollect(open, true, 'amount_below_minimum'), true)
+  assert.equal(invoiceShowsCollect(open, false, 'amount_below_minimum'), true)
+  // Still nothing to collect on a closed or settled invoice.
+  assert.equal(invoiceShowsCollect({ ...open, status: 'voided' }, false, 'amount_below_minimum'), false)
+  assert.equal(invoiceShowsCollect({ ...open, amount_due_cents: 0 }, true, 'amount_below_minimum'), false)
 })

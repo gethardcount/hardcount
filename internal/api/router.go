@@ -593,7 +593,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// so `make dev` works without extra config.
 	// Constructed as a named var (not an inline literal) so the ADR-090
 	// boot gate below can verify its audit emitter is wired.
-	hostedInvoiceStripe := &hostedInvoiceStripeAdapter{clients: stripeClients, ensurer: paymentMethodsStripe, sessions: checkoutSessionStore, audit: auditLogger}
+	hostedInvoiceStripe := &hostedInvoiceStripeAdapter{clients: stripeClients, ensurer: paymentMethodsStripe, sessions: checkoutSessionStore, audit: auditLogger, belowMinimum: stripeAdapter}
 
 	hostedInvoiceH := hostedinvoice.New(hostedinvoice.Deps{
 		Invoices:    invoiceSvc,

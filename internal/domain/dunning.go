@@ -152,6 +152,11 @@ const (
 // way it shows a retry with no card (DunningCauseNoPaymentMethod).
 const DunningRetryReasonCardRefused = "card_refused"
 
+// DunningRetryReasonBelowMinimum is the reason on a retry_attempted event for
+// a retry Stripe refused because the amount is below its minimum charge
+// (ErrBelowMinimumCharge). Nothing was charged and the run ends on it.
+const DunningRetryReasonBelowMinimum = BelowMinimumCode
+
 // Valid reports whether the cause is a known enum value — StartDunning
 // refuses anything else (no-silent-fallbacks: an unlabeled run would
 // re-introduce the hardcoded-reason lie this type exists to end).
@@ -212,6 +217,12 @@ const (
 	// pickers re-attempt the action, rather than recording a clean
 	// "escalated" beside an invoice/sub that never actually got closed.
 	ResolutionActionFailed DunningResolution = "action_failed"
+	// ResolutionAmountBelowMinimum: a charge on the run's invoice got Stripe's
+	// "below the minimum charge" refusal (ErrBelowMinimumCharge). No retry
+	// can collect that amount by card, so recovery ends here instead of
+	// running out its retries and its final action; the invoice stays open
+	// for the operator.
+	ResolutionAmountBelowMinimum DunningResolution = BelowMinimumCode
 )
 
 // DunningPolicy is a named template that drives the retry state

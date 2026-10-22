@@ -3,6 +3,8 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -440,5 +442,57 @@ func TestCollect_DefiniteFailureWithoutDeclineCode_ClearsFlag(t *testing.T) {
 	}
 	if autoChargePending(t, invoices, inv.ID) {
 		t.Error("a definite failure must clear the queue flag: dunning owns the retries")
+	}
+}
+
+// The finalize-time collect's WARN says what really happens next (min-charge
+// check 2026-10-22, finding 4.2). It used to say "the auto-charge sweep will
+// retry" for every failure, but the sweep only charges a queued, pending
+// invoice: a definite refusal leaves the queue and an unclear answer moves
+// the invoice to 'unknown'.
+func TestCollectFailureNext(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"definite refusal", fmt.Errorf("charge invoice inv_1 refused: %w", &payment.PaymentError{Message: "Invalid integer"}), "out of the auto-charge queue"},
+		{"unclear answer", fmt.Errorf("charge invoice inv_1: %w", &payment.PaymentError{Message: "An unknown error occurred", Unknown: true}), "asks Stripe what happened"},
+		{"database error before the charge", fmt.Errorf("reload invoice inv_1 after claim: %w", errors.New("conn reset")), "auto-charge sweep will retry"},
+	} {
+		got := collectFailureNext(tc.err)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("%s: %q, want it to say %q", tc.name, got, tc.want)
+		}
+		if tc.want != "auto-charge sweep will retry" && strings.Contains(got, "sweep will retry") {
+			t.Errorf("%s: %q promises a sweep retry that never comes", tc.name, got)
+		}
+	}
+}
+
+// belowMinimumCharger answers as payment.Stripe does when Stripe refuses the
+// amount as below its minimum charge: the charger has already left the
+// invoice pending and out of the queue.
+type belowMinimumCharger struct{ calls int }
+
+func (c *belowMinimumCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+	c.calls++
+	return domain.Invoice{}, &payment.BelowMinimumError{Message: "Amount must be at least $0.50 usd"}
+}
+
+// A refusal below Stripe's minimum is a normal outcome of the sweep, not an
+// error: a test-clock advance that hit one used to fail with 422 (catchup
+// internal_failure) instead of finishing.
+func TestProcessAutoCharge_BelowMinimumIsNotAnError(t *testing.T) {
+	e, _, notifier, inv := collectFixture()
+	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
+	charger := &belowMinimumCharger{}
+	e.charger = charger
+
+	if _, errs := e.processAutoCharge(context.Background(), []domain.Invoice{inv}, nil, noPMTriggerSweep); len(errs) != 0 {
+		t.Fatalf("errs = %v, want none", errs)
+	}
+	if charger.calls != 1 || len(notifier.got) != 0 {
+		t.Errorf("charges %d, setup-link emails %d; want 1 and 0", charger.calls, len(notifier.got))
 	}
 }

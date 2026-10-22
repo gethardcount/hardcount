@@ -754,6 +754,94 @@
     ]
   },
   {
+    "case": "attempt/below_minimum/auto_charge",
+    "line": {
+      "id": "attempt/below_minimum/auto_charge",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "attempt/below_minimum/charge_now",
+    "line": {
+      "id": "attempt/below_minimum/charge_now",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "attempt/below_minimum/dunning_retry",
+    "line": {
+      "id": "attempt/below_minimum/dunning_retry",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "actor": {
+        "kind": "automatic"
+      },
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "meta: Automatic",
+      "tone: warning"
+    ]
+  },
+  {
+    "case": "attempt/below_minimum/external",
+    "line": {
+      "id": "attempt/below_minimum/external",
+      "kind": "payment.below_minimum",
+      "title": "Charge refused by Stripe",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "problem": "The amount is below Stripe's minimum charge. Nothing was charged.",
+      "detail": [],
+      "tone": "warning",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Charge refused by Stripe · $49.00",
+      "problem: The amount is below Stripe's minimum charge. Nothing was charged.",
+      "tone: warning"
+    ]
+  },
+  {
     "case": "attempt/failed/auto_charge",
     "line": {
       "id": "attempt/failed/auto_charge",

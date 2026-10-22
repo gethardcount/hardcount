@@ -4008,7 +4008,7 @@ export interface paths {
          * @description Returns everything that happened to an invoice, oldest first:
          *     lifecycle steps (created, finalized, paid, voided, marked
          *     uncollectible), charge attempts (source `payment`, event_type
-         *     `charge_attempt.succeeded|failed|unknown`), dunning retries, credit
+         *     `charge_attempt.succeeded|failed|unknown|below_minimum`), dunning retries, credit
          *     notes, customer emails, and card disputes (source `dispute`, a
          *     `payment.dispute_opened` row and, once Stripe closes the dispute, a
          *     `payment.dispute_closed` row; both at Stripe's own time).
@@ -7424,10 +7424,22 @@ export interface components {
          *     When the invoice also has `payment_anomaly`, that reason stays and
          *     its message asks the operator to check Stripe before any refund.
          *     The disputes themselves are at `GET /v1/invoices/{id}/disputes`
-         *     (2026-10-19).
+         *     (2026-10-19). `amount_below_minimum` reports an invoice Stripe
+         *     refused to charge, or refused a payment page for, because the amount
+         *     is below Stripe's minimum charge. The minimum depends on the
+         *     currency the Stripe account settles in; Stripe's reply, in
+         *     `provider_response`, names it. Nothing was charged, the invoice
+         *     stays `finalized` with `payment_status` `pending`, it is not
+         *     charged again automatically, dunning does not start (a run already
+         *     open ends), and the customer is not emailed. The operator voids it
+         *     or records a payment; Collect payment applies the customer's credit
+         *     balance and pays it if that covers the amount, and otherwise asks
+         *     Stripe again. Stripe's answer can change (for a converted charge the
+         *     minimum is the settlement currency's), and a different answer ends
+         *     this reason (2026-10-23).
          * @enum {string}
          */
-        AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost";
+        AttentionReason: "tax_calculation_failed" | "tax_location_required" | "payment_failed" | "payment_unconfirmed" | "payment_anomaly" | "payment_processing" | "payment_scheduled" | "awaiting_payment" | "no_payment_method" | "dunning_exhausted" | "collection_paused" | "commit_exposure" | "dispute_lost" | "amount_below_minimum";
         /**
          * @description What an operator must know BEFORE recording an OFFLINE payment on a
          *     written-off invoice (`status = uncollectible`) — a consequence that
@@ -7466,12 +7478,14 @@ export interface components {
          *     status unknown with no payment intent recorded), for a customer
          *     who paid another way: Velox records a payment that Stripe shows,
          *     and charges the invoice again if none appears within 24 hours.
-         *     Dashboards render it as a secondary action. `void_invoice` is offered only
-         *     on prepaid-commit exposure, and only while some of the granted
+         *     Dashboards render it as a secondary action. `void_invoice` is offered
+         *     on prepaid-commit exposure, only while some of the granted
          *     credit is still unspent: voiding retires the unspent balance
          *     (ADR-078) and is the sole recovery for an unpaid invoice whose
          *     credit is already live. Credit the customer has already spent
-         *     is never clawed back (2026-08-04).
+         *     is never clawed back (2026-08-04). It is also offered on
+         *     `amount_below_minimum`, an amount Stripe will not charge
+         *     (2026-10-23).
          * @enum {string}
          */
         AttentionAction: "edit_billing_profile" | "retry_tax" | "retry_payment" | "wait_provider" | "rotate_api_key" | "reconcile_payment" | "review_registration" | "charge_now" | "send_reminder" | "add_payment_method" | "update_payment_method" | "connect_tax_provider" | "void_invoice" | "mark_uncollectible";
@@ -9183,10 +9197,12 @@ export interface components {
              *     `action_failed` is set on a run that is still `active`. The
              *     final action (pause, cancel or mark uncollectible) failed and
              *     will be retried at `next_action_at`. `manually_resolved` appears
-             *     only on older runs.
+             *     only on older runs. `amount_below_minimum`: a charge on the
+             *     invoice was refused by Stripe because the amount is below its
+             *     minimum charge, so the run ended without its final action.
              * @enum {string}
              */
-            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved";
+            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved" | "amount_below_minimum";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -10173,16 +10189,21 @@ export interface components {
             };
             /**
              * @description True when the customer can pay online now: the invoice is
-             *     finalized, something is owed, no payment is in progress, and the
-             *     seller has Stripe connected for the invoice's mode.
+             *     finalized, something is owed, no payment is in progress, the
+             *     seller has Stripe connected for the invoice's mode, and Stripe's
+             *     latest answer for the amount was not that it is below its
+             *     minimum charge.
              */
             pay_enabled: boolean;
             /**
-             * @description Sent only when money is owed but the seller has no payment
-             *     provider connected for this mode.
+             * @description Sent only when money is owed but can't be paid online:
+             *     `online_payment_unavailable` when the seller has no payment
+             *     provider connected for this mode, `amount_below_minimum` when
+             *     Stripe's latest answer refused the amount as below its minimum
+             *     charge.
              * @enum {string}
              */
-            pay_unavailable_reason?: "online_payment_unavailable";
+            pay_unavailable_reason?: "online_payment_unavailable" | "amount_below_minimum";
             /** @description False for a test-mode invoice. The page shows a test-mode banner. */
             livemode: boolean;
         };
@@ -11422,7 +11443,9 @@ export interface operations {
              *     payment status is `processing` or `unknown`.
              *     `payment_in_progress` when another payment for it has started.
              *     `online_payment_unavailable` when the seller has no Stripe keys
-             *     for the invoice's mode.
+             *     for the invoice's mode. `amount_below_minimum` when Stripe's
+             *     latest answer for the amount was that it is below Stripe's
+             *     minimum charge, so no payment page is made for it.
              */
             409: {
                 headers: {
@@ -14385,7 +14408,13 @@ export interface operations {
              *     about an hour). Code `payment_unidentifiable`: Stripe's answer
              *     to the earlier charge was unclear and named no payment; Velox
              *     records a payment that appears, and the invoice is charged again
-             *     as usual if none has appeared 24 hours after that charge.
+             *     as usual if none has appeared 24 hours after that charge. Code
+             *     `amount_below_minimum`: the amount is below Stripe's minimum
+             *     charge, so nothing was charged; the invoice stays open with
+             *     `payment_status` `pending`, and no dunning starts. Collect
+             *     applies the credit balance first and asks Stripe each time
+             *     anything is still owed: for a converted charge, Stripe's minimum
+             *     follows the account's settlement currency.
              */
             409: {
                 headers: {

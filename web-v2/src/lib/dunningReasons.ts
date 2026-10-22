@@ -20,6 +20,7 @@ const LABELS: Record<string, string> = {
   manually_resolved: 'Resolved by hand',
   retries_exhausted: 'All retries used',
   action_failed: 'Final step failed, will try again',
+  amount_below_minimum: 'Below Stripe\u2019s minimum charge',
   // Final actions at exhaustion (DunningEscalationOutcome.Reason, joined by "+")
   subscription_paused: 'Subscription paused',
   subscription_canceled: 'Subscription canceled',

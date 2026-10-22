@@ -176,6 +176,10 @@ func attemptActor(a domain.InvoiceChargeAttempt) *activity.Actor {
 	return nil
 }
 
+// kindRetryRefused is the dunning retry row for a charge Stripe refused as
+// below its minimum; renderChargeAttempts lets it tell that charge.
+const kindRetryRefused = "payment_recovery.retry_refused"
+
 // attemptLine is I-7a/b/c: one charge attempt the timeline shows as its own
 // row.
 func attemptLine(a domain.InvoiceChargeAttempt, inv domain.Invoice) activity.Line {
@@ -184,6 +188,11 @@ func attemptLine(a domain.InvoiceChargeAttempt, inv domain.Invoice) activity.Lin
 	case domain.ChargeAttemptFailed:
 		l.Kind, l.Title, l.Tone = "payment.failed", "Payment failed", activity.ToneFailure
 		l.Problem = activity.DeclineReason(a.DeclineCode, a.ProviderReason)
+	case domain.ChargeAttemptBelowMinimum:
+		// Stripe refused the amount, not the card: a warning, not a failed
+		// payment, with the words the dunning retry row uses.
+		l.Kind, l.Title, l.Tone = "payment.below_minimum", "Charge refused by Stripe", activity.ToneWarning
+		l.Problem = "The amount is below Stripe's minimum charge. Nothing was charged."
 	case domain.ChargeAttemptUnknown:
 		l.Kind, l.Title, l.Tone = "payment.result_unknown", "Payment result unknown", activity.ToneWarning
 		l.Problem = "The payment provider has not confirmed whether this charge went through."
@@ -338,6 +347,8 @@ func recoveryOutcome(res domain.DunningResolution) (string, activity.Tone, bool)
 		return "Invoice voided", activity.ToneNeutral, true
 	case domain.ResolutionInvoiceNotCollectible:
 		return "Invoice marked uncollectible", activity.ToneNeutral, true
+	case domain.ResolutionAmountBelowMinimum:
+		return "Amount below Stripe's minimum charge", activity.ToneWarning, true
 	case domain.ResolutionManuallyResolved:
 		// Legacy, no writer since 0170. The one kind of run that still holds
 		// it is one whose invoice never changed state, so neither "voided"
@@ -394,6 +405,11 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 		case evt.Reason == domain.DunningRetryReasonCardRefused:
 			l.Kind, l.Title, l.Tone = "payment_recovery.retry_not_attempted", fmt.Sprintf("Payment retry %d not attempted", evt.AttemptCount), activity.ToneWarning
 			l.Problem = "The bank refused this card for good. The customer needs to add a different card."
+		case evt.Reason == domain.DunningRetryReasonBelowMinimum:
+			// Stripe refused the amount, not the card: nothing was charged
+			// and recovery ends on it.
+			l.Kind, l.Title, l.Tone = kindRetryRefused, fmt.Sprintf("Payment retry %d refused by Stripe", evt.AttemptCount), activity.ToneWarning
+			l.Problem = "The amount is below Stripe's minimum charge. Nothing was charged."
 		default:
 			// A real decline. The attempt row's decline code, when it is
 			// absorbed, replaces this provider text (renderChargeAttempts).

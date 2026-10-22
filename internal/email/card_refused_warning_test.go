@@ -58,6 +58,26 @@ func TestDunningWarning_OrdinaryDeclineStillPromisesTheRetry(t *testing.T) {
 	}
 }
 
+// The warning goes out for every retry that counted: a card decline, a retry
+// with no card on file, and a charge Stripe refused for another reason. Only
+// the first is a decline, so the sentence says the attempt didn't go
+// through, and the reason line (when there is one) says why (min-charge
+// check 2026-10-22, finding 4.1).
+func TestDunningWarning_DoesNotCallEveryFailedAttemptADecline(t *testing.T) {
+	_, rawHTML, _, _ := renderDunningWarningHTML("Ada", "INV-0042", 1, 3, "October 21, 2026", "", "https://pay.example.com/i/tok")
+	html := stdhtml.UnescapeString(rawHTML)
+	text := dunningWarningTextBody("Ada", "INV-0042", 1, 3, "October 21, 2026", "", "https://pay.example.com/i/tok")
+	for part, body := range map[string]string{"html": html, "text": text} {
+		plain := strings.NewReplacer(`<strong style="color:#111827;">`, "", "</strong>", "").Replace(body)
+		if !strings.Contains(plain, "Attempt 1 of 3 to charge invoice INV-0042 didn't go through.") {
+			t.Errorf("%s part does not say the attempt didn't go through:\n%s", part, body)
+		}
+		if strings.Contains(strings.ToLower(body), "declined") {
+			t.Errorf("%s part calls the attempt a decline:\n%s", part, body)
+		}
+	}
+}
+
 // Review of #1225: the payment-failed email's plain-text part labelled the
 // hosted invoice link "Update payment method:", while the HTML button on the
 // same link says "Pay invoice". The link opens the page that takes payment,

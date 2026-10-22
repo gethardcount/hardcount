@@ -342,7 +342,9 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // classifyDunningRetryResult is the one rule for which retry results use up a
 // dunning attempt: a decline Stripe returned (*payment.PaymentError with
 // Unknown=false), no card to charge (counted so a card-less invoice reaches
-// its dunning terminal, ADR-060), or a card the bank refused for good.
+// its dunning terminal, ADR-060), a card the bank refused for good, or an
+// amount below Stripe's minimum charge (domain.ErrBelowMinimumCharge, which
+// ends the run instead of counting toward its final action).
 // Everything else becomes dunning.ErrTransientSkip, which dunning does not
 // count: a database error, Stripe unreachable or rate limiting, an outcome
 // Stripe did not confirm, a settle that failed after Stripe took the money.
@@ -353,7 +355,8 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // #978, #1302).
 func classifyDunningRetryResult(ctx context.Context, invoiceID string, err error) error {
 	if err == nil || errors.Is(err, dunning.ErrTransientSkip) ||
-		errors.Is(err, domain.ErrNoPaymentMethodOnRetry) || errors.Is(err, domain.ErrCardNeedsReplacing) {
+		errors.Is(err, domain.ErrNoPaymentMethodOnRetry) || errors.Is(err, domain.ErrCardNeedsReplacing) ||
+		errors.Is(err, domain.ErrBelowMinimumCharge) {
 		return err
 	}
 	var pe *payment.PaymentError
@@ -1246,6 +1249,16 @@ type hostedInvoiceStripeAdapter struct {
 	// construction — a public customer-token money path must not silently
 	// run unaudited.
 	audit *audit.Logger
+	// belowMinimum records Stripe refusing the session as below its minimum
+	// charge, as a charge's refusal is recorded (payment.Stripe). For a
+	// customer with no card the Pay click is the only place Velox learns it.
+	belowMinimum checkoutBelowMinimumRecorder
+}
+
+// checkoutBelowMinimumRecorder is the one method of payment.Stripe the hosted
+// Pay flow needs.
+type checkoutBelowMinimumRecorder interface {
+	RecordCheckoutBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *payment.BelowMinimumError)
 }
 
 func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
@@ -1463,6 +1476,33 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 ) (string, error) {
 	sess, err := sc.V1CheckoutSessions.Create(ctx, hostedInvoiceCheckoutParams(claim, stripeCustomerID, inv, successURL, cancelURL))
 	if err != nil {
+		// A definite refusal made no session, so nothing can be paid on this
+		// claim: release it. Left open, an unfilled claim reads as a link
+		// about to reach the customer and holds every charge and dunning
+		// retry on the invoice for 65 minutes (domain.HostedCheckoutLiveSQL;
+		// min-charge check 2026-10-22, finding 4.3). An unclear answer keeps
+		// the claim: its re-drive replays the same idempotency key.
+		if payment.IsDefiniteRefusal(err) {
+			if rerr := a.sessions.ReleaseRefused(ctx, claim.TenantID, claim.ID); rerr != nil {
+				slog.WarnContext(ctx, "checkout: releasing a claim Stripe refused failed; it stops holding charges 65 minutes after it was made",
+					"claim_id", claim.ID, "invoice_id", claim.InvoiceID, "error", rerr)
+			}
+		}
+		// Below the minimum: the customer can't pay this amount online at
+		// all, and the page says so (409 amount_below_minimum). Recorded as
+		// a charge's refusal is: the invoice is stamped, so the page drops
+		// its Pay button and the operator sees the notice, and a payment
+		// recovery on it ends. Left unrecorded, a card-less invoice kept its
+		// Pay button and its no-card recovery ran on to the final action.
+		if bm := payment.BelowMinimumOf(err); bm != nil {
+			if a.belowMinimum == nil {
+				slog.ErrorContext(ctx, "checkout: Stripe refused the session as below its minimum, and no recorder is wired to record it",
+					"invoice_id", inv.ID)
+			} else {
+				a.belowMinimum.RecordCheckoutBelowMinimum(ctx, claim.TenantID, inv, bm)
+			}
+			return "", bm
+		}
 		return "", fmt.Errorf("checkout session: %w", err)
 	}
 	// Persist Stripe's ACTUAL expiry (it clamps requests) via CAS; losing the

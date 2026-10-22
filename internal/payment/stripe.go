@@ -269,6 +269,11 @@ type PaymentIntentResult struct {
 // InvoiceUpdater updates invoice payment status.
 type InvoiceUpdater interface {
 	StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error)
+	// StampBelowMinimum records Stripe's "below the minimum charge" refusal
+	// (domain.ErrBelowMinimumCharge): payment_status 'pending', the
+	// auto-charge queue cleared, below_minimum_at and Stripe's sentence, under
+	// the same seq CAS as StampChargeOutcome.
+	StampBelowMinimum(ctx context.Context, tenantID, id string, attemptSeq int64, lastPaymentError string) (domain.Invoice, bool, error)
 	UpdateStatus(ctx context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error)
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	// MarkPaidReportingTransition is MarkPaid plus a `transitioned` flag —
@@ -479,6 +484,10 @@ func IsUnknownPaymentFailure(err error) bool {
 	}
 	if errors.Is(err, ErrPaymentTransient) {
 		return false // nothing reached Stripe: not an incident signal
+	}
+	var bm *BelowMinimumError
+	if errors.As(err, &bm) {
+		return false // Stripe answered at once: the amount, not an outage
 	}
 	var pe *PaymentError
 	if errors.As(err, &pe) {
@@ -763,6 +772,10 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		}
 		return domain.Invoice{}, ErrPaymentTransient
 	}
+	var bm *BelowMinimumError
+	if errors.As(err, &bm) {
+		return domain.Invoice{}, s.recordBelowMinimum(ctx, tenantID, inv, hold, bm, trigger, stripePaymentMethodID)
+	}
 	if err == nil {
 		s.clearRejectedKey(ctx, tenantID)
 	}
@@ -992,6 +1005,114 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		logRefusedChargeOutcome(ctx, current, domain.PaymentProcessing, result.ID, idempotencyKey)
 	}
 	return current, nil
+}
+
+// recordBelowMinimum handles Stripe's "below the minimum charge" refusal
+// (domain.ErrBelowMinimumCharge), whichever charge got it: auto-charge,
+// Collect payment or a dunning retry. Stripe made no PaymentIntent, so
+// nothing was charged and no webhook or reconciler will report anything.
+// Unlike a decline it marks nothing failed, starts no dunning and sends no
+// email:
+//   - the attempt row records the try and Stripe's sentence (ADR-102), with
+//     outcome below_minimum, which the timeline shows as a refusal, not a
+//     failed payment;
+//   - markBelowMinimum stamps the invoice and ends a payment recovery
+//     running on it, and then the charge hold is released: the answer is
+//     final. A dunning retry's own run is ended by dunning
+//     (processRun), which owns that run's instant; any other charge ends it
+//     there, through the resolver.
+//
+// It returns the refusal for the caller (Collect answers 409
+// amount_below_minimum).
+func (s *Stripe) recordBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, bm *BelowMinimumError, trigger domain.ChargeAttemptTrigger, stripePaymentMethodID string) error {
+	recordChargeAttempt(ctx, s.invoices, tenantID, inv, "", trigger, domain.ChargeAttemptBelowMinimum, bm.Message,
+		chargedCard{paymentMethodID: stripePaymentMethodID})
+	// Stamped before the hold is released, so the sweep cannot claim the
+	// still-queued invoice in between and ask Stripe again.
+	s.markBelowMinimum(ctx, tenantID, inv, bm, trigger != domain.ChargeTriggerDunningRetry)
+	if rerr := s.invoices.ReleaseChargeHold(ctx, tenantID, inv.ID, hold); rerr != nil {
+		slog.WarnContext(ctx, "release charge hold after a below-minimum refusal failed — the stale-hold sweep clears it",
+			"invoice_id", inv.ID, "error", rerr)
+	}
+	return bm
+}
+
+// RecordCheckoutBelowMinimum records Stripe refusing the hosted page's
+// Checkout Session because the amount is below its minimum charge. For a
+// customer with no card it is the first time Velox learns this, so it is
+// recorded as a charge's refusal is: the invoice is stamped (no Pay button,
+// the operator's notice, out of the auto-charge queue) and the payment
+// recovery the card-less finalize started ends, so no reminder or final
+// action follows. No charge attempt row: no charge was made. inv is the
+// invoice as read for the Pay click; its charge_attempt_seq is the CAS.
+func (s *Stripe) RecordCheckoutBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *BelowMinimumError) {
+	s.markBelowMinimum(ctx, tenantID, inv, bm, true)
+}
+
+// markBelowMinimum is StampBelowMinimum plus, when endRecovery is set,
+// ending the invoice's payment recovery with resolution
+// amount_below_minimum.
+func (s *Stripe) markBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *BelowMinimumError, endRecovery bool) {
+	current, applied, serr := stampBelowMinimumWithRetry(ctx, s.invoices, tenantID, inv, bm.Message)
+	switch {
+	case serr != nil:
+		// Nothing was charged, but the invoice does not say so. A queued
+		// invoice stays queued, and the auto-charge sweep's next charge gets
+		// the same answer and records it. An invoice out of the queue (a
+		// dunning retry, Collect on a failed invoice, a card-less invoice's
+		// Pay click) keeps its earlier state, and its payment recovery keeps
+		// running, until it is charged or paid for again; this line is the
+		// record.
+		slog.ErrorContext(ctx, "could not record that Stripe refused a charge as below its minimum; the invoice keeps its earlier payment state until it is charged again",
+			"invoice_id", inv.ID, "tenant_id", tenantID, "error", serr)
+		return
+	case !applied:
+		slog.InfoContext(ctx, "below-minimum refusal not recorded: another outcome was recorded on this invoice during the call, or it is no longer finalized",
+			"invoice_id", inv.ID, "payment_status", current.PaymentStatus, "status", current.Status)
+		return
+	}
+	slog.WarnContext(ctx, "Stripe refused to charge this invoice because the amount is below its minimum charge; it stays open and unpaid, with no payment recovery or customer email, until the operator voids it or records a payment",
+		"invoice_id", inv.ID, "tenant_id", tenantID, "invoice_number", inv.InvoiceNumber,
+		"amount_due_cents", inv.AmountDueCents, "currency", inv.Currency, "stripe_message", bm.Message)
+
+	if endRecovery && s.dunningResolver != nil {
+		if derr := s.dunningResolver.ResolveByInvoice(ctx, tenantID, inv.ID, domain.ResolutionAmountBelowMinimum); derr != nil {
+			// The stamp above is committed, and dunning reads it at the
+			// run's next tick (domain.Invoice.BelowStripeMinimum) and ends
+			// the run there, before any retry or final action.
+			slog.ErrorContext(ctx, "could not end the invoice's payment recovery after a below-minimum refusal; its next dunning tick ends it",
+				"invoice_id", inv.ID, "error", derr)
+		}
+	}
+}
+
+// stampBelowMinimumWithRetry is StampBelowMinimum with the bounded retry of
+// persistChargeOutcomeWithRetry. A retry after a commit-ambiguous error is
+// refused by the first attempt's own seq bump; a refused retry whose row
+// carries this stamp at seq+1 is that first attempt, and counts as applied.
+func stampBelowMinimumWithRetry(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, message string) (domain.Invoice, bool, error) {
+	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
+	var lastErr error
+	for i, d := range delays {
+		if d > 0 {
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return domain.Invoice{}, false, fmt.Errorf("ctx canceled recording a below-minimum refusal (attempt %d): %w", i+1, ctx.Err())
+			}
+		}
+		current, applied, err := invoices.StampBelowMinimum(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, message)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if !applied && i > 0 && current.ChargeAttemptSeq == inv.ChargeAttemptSeq+1 && current.BelowMinimumAt != nil &&
+			current.PaymentStatus == domain.PaymentPending {
+			applied = true
+		}
+		return current, applied, nil
+	}
+	return domain.Invoice{}, false, fmt.Errorf("record below-minimum refusal failed after %d attempts: %w", len(delays), lastErr)
 }
 
 // releaseUnsentHold frees the hold of a charge that provably sent nothing to

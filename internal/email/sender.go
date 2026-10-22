@@ -743,7 +743,7 @@ func dunningWarningTextBody(customerName, invoiceNumber string, attemptNumber, m
 	// dunning service never sends a warning on the exhausting attempt.
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hi %s,\n\n", customerName)
-	fmt.Fprintf(&b, "Attempt %d of %d to charge invoice %s was declined.\n", attemptNumber, maxAttempts, invoiceNumber)
+	fmt.Fprintf(&b, "Attempt %d of %d to charge invoice %s didn't go through.\n", attemptNumber, maxAttempts, invoiceNumber)
 	if strings.TrimSpace(failureReason) != "" {
 		fmt.Fprintf(&b, "Reason: %s\n", failureReason)
 	}

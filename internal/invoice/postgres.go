@@ -239,7 +239,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
 	COALESCE(provider_payment_status,''), provider_synced_at,
-	bill_to_snapshot, supplier_snapshot`
+	bill_to_snapshot, supplier_snapshot, below_minimum_at`
 
 // invClockCol reads the test clock an invoice's dates follow from its
 // customer (domain.Invoice.TestClockID). It follows invCols on the list and
@@ -886,6 +886,9 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 // back into "unknown", and with no PaymentIntent id that parked the invoice
 // for good.
 //
+// It clears below_minimum_at: this answer from Stripe replaces an earlier
+// below-minimum one (StampBelowMinimum).
+//
 // attemptSeq is the charge_attempt_seq the attempt read — the value its
 // Stripe idempotency key was built from. Every writer that records an outcome
 // bumps the column in the same statement (TestChargeAttemptSeqBumpedByEveryPIStamp),
@@ -933,7 +936,7 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 	applied := true
 	err = tx.QueryRowContext(ctx, `
 		UPDATE invoices SET payment_status = $1, stripe_payment_intent_id = $2,
-			last_payment_error = $3, updated_at = $4,
+			last_payment_error = $3, updated_at = $4, below_minimum_at = NULL,
 			charge_attempt_seq = charge_attempt_seq + 1
 		WHERE id = $5 AND charge_attempt_seq = $6
 		RETURNING `+invCols,
@@ -950,6 +953,61 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 				return domain.Invoice{}, false, errs.ErrNotFound
 			}
 			return domain.Invoice{}, false, fmt.Errorf("re-read invoice after refused charge-outcome stamp: %w", err)
+		}
+	} else if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, false, err
+	}
+	return inv, applied, nil
+}
+
+// StampBelowMinimum records a charge Stripe refused because the invoice's
+// amount is below Stripe's minimum charge (domain.ErrBelowMinimumCharge). It
+// is not a failed payment, so payment_status goes to 'pending' (from
+// 'pending', or from 'failed' when an earlier decline left it there), and in
+// the same write:
+//   - auto_charge_pending is cleared, so the auto-charge sweep does not ask
+//     Stripe again every tick;
+//   - below_minimum_at is stamped, which the attention notice, the hosted
+//     page and dunning read (domain.Invoice.BelowStripeMinimum); the next
+//     charge outcome Stripe gives clears it (StampChargeOutcome, and
+//     MarkPaymentFailedReportingTransition when it moves the invoice);
+//   - last_payment_error keeps Stripe's sentence, which names the minimum;
+//   - stripe_payment_intent_id is cleared and charge_attempt_seq bumped, as
+//     for any attempt outcome with no PaymentIntent (StampChargeOutcome): the
+//     next charge gets a fresh idempotency key.
+//
+// attemptSeq is the seq CAS of StampChargeOutcome (P13): the write is refused,
+// applied=false with the row as it stands, when another outcome was recorded
+// during the call. Nothing moves an invoice that is no longer finalized.
+func (s *PostgresStore) StampBelowMinimum(ctx context.Context, tenantID, id string, attemptSeq int64, lastPaymentError string) (domain.Invoice, bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	defer postgres.Rollback(tx)
+
+	now := clock.Now(ctx)
+	var inv domain.Invoice
+	applied := true
+	err = tx.QueryRowContext(ctx, `
+		UPDATE invoices SET payment_status = 'pending', stripe_payment_intent_id = NULL,
+			last_payment_error = $1, auto_charge_pending = FALSE, below_minimum_at = $2, updated_at = $2,
+			charge_attempt_seq = charge_attempt_seq + 1
+		WHERE id = $3 AND charge_attempt_seq = $4 AND status = 'finalized'
+		RETURNING `+invCols,
+		postgres.NullableString(lastPaymentError), now, id, attemptSeq,
+	).Scan(s.scanInvDest(&inv)...)
+	if err == sql.ErrNoRows {
+		applied = false
+		if err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
+			Scan(s.scanInvDest(&inv)...); err != nil {
+			if err == sql.ErrNoRows {
+				return domain.Invoice{}, false, errs.ErrNotFound
+			}
+			return domain.Invoice{}, false, fmt.Errorf("re-read invoice after refused below-minimum stamp: %w", err)
 		}
 	} else if err != nil {
 		return domain.Invoice{}, false, err
@@ -1069,6 +1127,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 				stripe_payment_intent_id = $1,
 				last_payment_error = $2,
 				failure_notified_pi = $1,
+				below_minimum_at = NULL,
 				charge_attempt_seq = charge_attempt_seq + 1,
 				updated_at = $3
 			WHERE id = $4
@@ -3754,6 +3813,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot, Open: s.openBillTo},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &inv.SupplierSnapshot},
+		&inv.BelowMinimumAt,
 	}
 }
 
