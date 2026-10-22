@@ -25,8 +25,6 @@ import type { RecoveryWarningCode } from './recoveryWarningCode';
  * `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
  * tax provider and cannot be re-reported automatically; the recorded
  * payment collects tax already reported as not collected.
- * `recovery_superseded` — the invoice was billed on a usage threshold
- * and that usage has since been re-billed; the payment double-collects.
  * `relief_not_reissued` — a credit the invoice was owed was never
  * applied, so `amount_due_cents` is higher than what is owed and the
  * customer may have overpaid.

@@ -217,8 +217,8 @@ type ReleaseResult struct {
 	InOpenPeriod int `json:"in_open_period"`
 	// PendingThresholdInvoice counts released rows of a sum or count meter
 	// stamped before the time a threshold invoice of the current period
-	// billed through, while that invoice is not paid. If it is paid, no
-	// invoice counts them. If it is voided or written off before the period
+	// billed through, while that invoice is not paid. If it is paid or
+	// written off, no invoice counts them. If it is voided before the period
 	// closes, the period's invoice counts them.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 	// NotOnPlan counts released rows whose time falls in an active
@@ -394,8 +394,8 @@ func (s *Service) releasePeriods(ctx context.Context, tenantID string, in Releas
 //   - notOnPlan (NotOnPlan): the time falls in an open period, but no plan
 //     on the subscription prices the meter. No invoice counts it.
 //   - pending (Unsettled): before the time a threshold invoice that is not
-//     paid billed through. Counted if that invoice is voided or written
-//     off before the period closes, else on no invoice.
+//     paid billed through. Counted if that invoice is voided before the
+//     period closes, else on no invoice.
 //   - outside (Outside, AfterClose): everything else, including a time in a
 //     period whose invoice is already built (Velox never re-opens a built
 //     invoice, ADR-120), before a paid threshold invoice's end, and after

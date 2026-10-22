@@ -188,11 +188,12 @@ An event counts toward the billing period its `timestamp` falls in.
 - The same applies after a spend-threshold invoice (an invoice made early
   because spend crossed a limit). Usage of a sum or count meter stamped
   before it that arrives later is not on the period-end invoice either.
-  But if the spend-threshold invoice is voided or written off before the
-  period-end invoice is built, the period-end invoice bills all the
-  period's usage, late events included. So the answer flags such an event
-  only when the spend-threshold invoice is already paid: a paid invoice
-  cannot be voided or written off. Bill a flagged event the same way.
+  But if the spend-threshold invoice is voided before the period-end
+  invoice is built, the period-end invoice bills all the period's usage,
+  late events included. Writing it off does not do that: a written-off
+  spend-threshold invoice keeps its usage billed. So the answer flags such
+  an event only when the spend-threshold invoice is already paid: a paid
+  invoice cannot be voided. Bill a flagged event the same way.
 - These build the ended period's invoice at once, with no grace period:
   - an immediate cancel;
   - any other change to a subscription, through the API or the dashboard

@@ -658,13 +658,18 @@ type InvoiceWriter interface {
 	// credit-note cap. ErrNotFound when nothing funded the period (trial / pure
 	// in_arrears) so callers keep their existing no-op behavior.
 	FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error)
-	// GetLatestThresholdInvoiceForCycle returns the newest non-voided
-	// threshold-fired invoice whose billing_period_start falls inside
-	// [periodStart, periodEnd) — the same predicate as
-	// LatestThresholdPeriodEnd but the full row, so the fire-once probe can
-	// also HEAL a crash between invoice-create and the $0/credited MarkPaid
-	// (ADR-066). errs.ErrNotFound when the cycle has no threshold invoice.
+	// GetLatestThresholdInvoiceForCycle returns the threshold watermark: the
+	// newest threshold-fired invoice whose billing_period_start falls inside
+	// [periodStart, periodEnd) and that still bills its window — any status
+	// but voided; a written-off one keeps its window billed (ADR-066
+	// amendment 2026-10-23). errs.ErrNotFound when there is none.
 	GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
+	// GetThresholdInvoiceForCycleAnyStatus is the fire-once probe's read: the
+	// same window in ANY status, since the cycle's one threshold slot
+	// (idx_invoices_threshold_unique_per_cycle) is held whatever the status.
+	// The full row lets the probe also HEAL a crash between invoice-create
+	// and the $0/credited MarkPaid (ADR-066). Never a watermark.
+	GetThresholdInvoiceForCycleAnyStatus(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error)
 	// GetLatestThresholdInvoiceForCycleTx is the same read on the closer's tx
 	// (ADR-115): issued after the row-lock CAS it sees every fire that
 	// committed before the lock, so the closer proves the watermark it built

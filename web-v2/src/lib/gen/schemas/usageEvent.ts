@@ -45,8 +45,8 @@ export interface UsageEvent {
      * event's time, so the event is stored but billed on no invoice,
      * now or later. Bill it with a one-off invoice if it should be
      * charged. A spend-threshold invoice counts only once it is paid:
-     * until then it can be voided or written off, and then the
-     * period's invoice bills the event. Absent otherwise, which is not
+     * until then it can be voided, and then the period's invoice bills
+     * the event. Absent otherwise, which is not
      * a promise that the event will be billed. Never sent on a replay
      * or a read.
      */

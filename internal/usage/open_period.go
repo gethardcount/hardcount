@@ -27,11 +27,13 @@ import (
 // and nothing counted it. A close that commits between the read and the
 // write is not seen: that event goes unflagged, never wrongly flagged.
 //
-// A threshold invoice that is not paid can still be voided or written off,
-// and then the period's close bills usage from the period start again
-// (#243). So only a paid threshold invoice's watermark flags: a paid invoice
-// can be neither voided nor written off. An event before the watermark of a
-// threshold invoice still unpaid is Unsettled and not flagged.
+// A threshold invoice that is not paid can still be voided, and then the
+// period's close bills usage from the period start again (#243). A write-off
+// does not reopen the window (ADR-066 amendment 2026-10-23), but a
+// written-off invoice can still be voided. So only a paid threshold
+// invoice's watermark flags: a paid invoice can be neither voided nor
+// written off. An event before the watermark of a threshold invoice that is
+// open or written off is Unsettled and not flagged.
 
 // BillingStatusAfterClose is UsageEvent.BillingStatus for an event that
 // arrived after its period was invoiced.
@@ -53,8 +55,9 @@ const (
 	// its plans prices the meter.
 	NotOnPlan
 	// Unsettled: a threshold invoice that is not paid billed the row's time.
-	// If that invoice is paid, no invoice counts the row. If it is voided or
-	// written off before the period closes, the period's invoice counts it.
+	// If that invoice is paid or written off, no other invoice counts the
+	// row. If it is voided before the period closes, the period's invoice
+	// counts it.
 	Unsettled
 	// InOpen: an open period's invoice counts it.
 	InOpen
@@ -87,8 +90,9 @@ type OpenPeriod struct {
 // invoices, not on the setting.
 type ThresholdWatermark struct {
 	// BilledThrough is the close's watermark: the latest end of a threshold
-	// invoice that is not voided or written off. The close bills sum and
-	// count buckets from it. Nil when none.
+	// invoice that is not voided (a written-off one counts). The close bills
+	// sum and count buckets from it. Nil when none. It falls back only on a
+	// void, which is final.
 	BilledThrough *time.Time
 	// PaidThrough is the latest end of a paid threshold invoice, at or
 	// before BilledThrough. A paid invoice can be neither voided nor written

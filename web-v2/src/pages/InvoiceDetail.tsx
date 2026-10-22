@@ -1529,6 +1529,14 @@ export default function InvoiceDetailPage() {
             Void is for an invoice created by mistake. If the customer didn&apos;t pay, mark it uncollectible instead.
           </p>
         )}
+        {/* A threshold invoice's window goes back to the period's invoice
+            only while that invoice is not built yet (ADR-066 amendment
+            2026-10-23). */}
+        {invoice.billing_reason === 'threshold' && (
+          <p className="text-xs text-muted-foreground">
+            This is a spend-threshold invoice. Void it before this period&apos;s invoice is created and that invoice bills these charges instead. Void it after, and they are not billed again.
+          </p>
+        )}
       </TypedConfirmDialog>
 
       {/* Mark Uncollectible Confirm — Stripe-parity bad-debt write-off.
@@ -1545,6 +1553,13 @@ export default function InvoiceDetailPage() {
         onConfirm={() => markUncollectibleMutation.mutate()}
         loading={markUncollectibleMutation.isPending}
       >
+        {/* A written-off threshold invoice keeps its window billed; only a
+            void gives it back (ADR-066 amendment 2026-10-23). */}
+        {invoice.billing_reason === 'threshold' && (
+          <p className="text-xs text-muted-foreground">
+            The charges on this spend-threshold invoice will not be billed again. To bill them on this period&apos;s invoice instead, void this invoice before that one is created.
+          </p>
+        )}
         {canPauseSubOnWriteOff ? (
           <div className="rounded-md border p-3 space-y-2">
             <div className="flex items-start gap-2">

@@ -129,3 +129,83 @@ func TestThresholdBilledThroughTx_WriteOffKeepsVoidDrops(t *testing.T) {
 		t.Errorf("billed-through after the void = %v, want nil: a voided invoice billed nothing", bt)
 	}
 }
+
+// TestThresholdWriteOff_vs_Close_WriteOffInFlight is the concurrent-resolver
+// schedule (playbook §5.3) for a write-off: the close has built its lines
+// against the fire's watermark (residual [t1, P1) = 700c), and the operator
+// writes the threshold invoice off before the close's tx opens. A write-off
+// keeps the window billed, so the watermark the close re-reads on its tx is
+// unchanged and the close commits the residual. Before the fix the re-read
+// saw no watermark, the close re-planned, and it billed [P0, P1) = 1000c on
+// top of the threshold invoice's 300c.
+//
+// Mutation check: put 'uncollectible' back in the watermark predicate → the
+// cycle invoice's usage line starts at P0 and bills 1000c.
+func TestThresholdWriteOff_vs_Close_WriteOffInFlight(t *testing.T) {
+	r := newS1Rig(t, "Write-off vs close", 200, false)
+	if fired := r.runFire(t); fired != 1 {
+		t.Fatalf("fire reported %d, want 1", fired)
+	}
+	_, threshold, _ := r.liveInvoices(t)
+	if len(threshold) != 1 {
+		t.Fatalf("%d threshold invoices after the fire, want 1", len(threshold))
+	}
+	invSvc := invoice.NewService(r.f.invStore, clock.Real(), r.f.settings)
+	r.closer.subs.beforeTx = func() {
+		r.closer.subs.beforeTx = nil
+		if _, err := invSvc.MarkUncollectible(r.at(r.t1.Add(time.Hour)), r.f.tenantID, threshold[0].ID); err != nil {
+			t.Fatalf("write off in flight: %v", err)
+		}
+	}
+	if gen := r.runClose(t); gen != 1 {
+		t.Fatalf("close generated %d, want 1 (the residual)", gen)
+	}
+	cycle, _, _ := r.liveInvoices(t)
+	if len(cycle) != 1 {
+		t.Fatalf("%d cycle invoices, want 1", len(cycle))
+	}
+	lines := r.usageLines(t, cycle[0].ID)
+	if len(lines) != 1 || lines[0].BillingPeriodStart == nil || !lines[0].BillingPeriodStart.Equal(r.t1) || lines[0].AmountCents != 700 {
+		t.Fatalf("cycle usage lines = %+v, want one residual line [t1, P1) = 700c", lines)
+	}
+	assertUsageBilledOnce(t, r.base)
+}
+
+// TestThresholdVoid_vs_Close_VoidInFlight is the same schedule with a void,
+// the control: a void gives the window back, so the close's re-read sees the
+// watermark gone, re-plans and bills [P0, P1) = 1000c.
+func TestThresholdVoid_vs_Close_VoidInFlight(t *testing.T) {
+	r := newS1Rig(t, "Void vs close", 200, false)
+	if fired := r.runFire(t); fired != 1 {
+		t.Fatalf("fire reported %d, want 1", fired)
+	}
+	_, threshold, _ := r.liveInvoices(t)
+	if len(threshold) != 1 {
+		t.Fatalf("%d threshold invoices after the fire, want 1", len(threshold))
+	}
+	invSvc := invoice.NewService(r.f.invStore, clock.Real(), r.f.settings)
+	r.closer.subs.beforeTx = func() {
+		r.closer.subs.beforeTx = nil
+		if _, err := invSvc.Void(r.at(r.t1.Add(time.Hour)), r.f.tenantID, threshold[0].ID); err != nil {
+			t.Fatalf("void in flight: %v", err)
+		}
+	}
+	if gen := r.runClose(t); gen != 1 {
+		t.Fatalf("close generated %d, want 1", gen)
+	}
+	cycle, live, _ := r.liveInvoices(t)
+	if len(cycle) != 1 || len(live) != 0 {
+		t.Fatalf("invoices: cycle=%d live threshold=%d, want 1 and 0", len(cycle), len(live))
+	}
+	var billed int64
+	for _, l := range r.usageLines(t, cycle[0].ID) {
+		billed += l.AmountCents
+		if l.BillingPeriodStart == nil || !l.BillingPeriodStart.Equal(r.f.cycleStart) {
+			t.Errorf("cycle usage line starts %v, want P0 %v: the void gave the window back", l.BillingPeriodStart, r.f.cycleStart)
+		}
+	}
+	if billed != 1000 {
+		t.Fatalf("cycle usage = %dc, want 1000c", billed)
+	}
+	assertUsageBilledOnce(t, r.base)
+}

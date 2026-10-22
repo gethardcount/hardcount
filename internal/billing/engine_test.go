@@ -1151,50 +1151,33 @@ func keysetPage(rows []domain.Invoice, after domain.InvoiceKeyset, limit int) []
 	return out
 }
 
-// LatestThresholdPeriodEnd mirrors the postgres semantics: MAX
-// billing_period_end across non-voided threshold invoices whose
-// billing_period_start is inside [periodStart, periodEnd). Tests seed a
-// threshold invoice in m.invoices and the cycle-close watermark finds
-// it organically.
-func (m *mockInvoices) LatestThresholdPeriodEnd(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	var latest time.Time
-	found := false
-	for _, inv := range m.invoices {
-		if inv.SubscriptionID != subscriptionID || inv.BillingReason != domain.BillingReasonThreshold {
-			continue
-		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
-			continue
-		}
-		if inv.BillingPeriodStart.Before(periodStart) || !inv.BillingPeriodStart.Before(periodEnd) {
-			continue
-		}
-		if !found || inv.BillingPeriodEnd.After(latest) {
-			latest = inv.BillingPeriodEnd
-			found = true
-		}
-	}
-	if !found {
-		return time.Time{}, errs.ErrNotFound
-	}
-	return latest, nil
-}
-
 // GetLatestThresholdInvoiceForCycle mirrors the postgres semantics: the
-// newest (by billing_period_end) non-voided threshold invoice whose
-// billing_period_start is inside [periodStart, periodEnd).
+// newest (by billing_period_end) threshold invoice that still bills its
+// window — any status but voided; a written-off one counts (ADR-066
+// amendment 2026-10-23) — whose billing_period_start is inside
+// [periodStart, periodEnd).
 func (m *mockInvoices) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, _ *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
 	return m.GetLatestThresholdInvoiceForCycle(ctx, tenantID, subscriptionID, periodStart, periodEnd)
 }
 
 func (m *mockInvoices) GetLatestThresholdInvoiceForCycle(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	return m.latestThresholdInvoice(subscriptionID, periodStart, periodEnd, false)
+}
+
+// GetThresholdInvoiceForCycleAnyStatus mirrors the fire-once probe's read:
+// the same window, every status.
+func (m *mockInvoices) GetThresholdInvoiceForCycleAnyStatus(_ context.Context, _, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	return m.latestThresholdInvoice(subscriptionID, periodStart, periodEnd, true)
+}
+
+func (m *mockInvoices) latestThresholdInvoice(subscriptionID string, periodStart, periodEnd time.Time, anyStatus bool) (domain.Invoice, error) {
 	var latest domain.Invoice
 	found := false
 	for _, inv := range m.invoices {
 		if inv.SubscriptionID != subscriptionID || inv.BillingReason != domain.BillingReasonThreshold {
 			continue
 		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
+		if !anyStatus && inv.Status == domain.InvoiceVoided {
 			continue
 		}
 		if inv.BillingPeriodStart.Before(periodStart) || !inv.BillingPeriodStart.Before(periodEnd) {

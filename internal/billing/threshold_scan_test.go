@@ -725,7 +725,7 @@ func TestThresholdFire_ClockPinned_StampsIsSimulated(t *testing.T) {
 
 // TestScanThresholds_FireOnceProbe_NoReEvaluate locks the fire-once probe. A
 // reset=false threshold that has already fired keeps its crossed running total
-// on the next tick (the cycle stays put), so without the LatestThresholdPeriodEnd
+// on the next tick (the cycle stays put), so without the fire-once probe
 // short-circuit the scan re-evaluates and re-fires every tick — burning an
 // invoice number + a paid tax calculation before the dedup index rejects it.
 // The mock invoice store has NO unique index, so the SECOND scan would create a

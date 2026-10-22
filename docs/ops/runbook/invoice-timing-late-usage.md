@@ -46,12 +46,28 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   events yet.
 - **What is not flagged.** Usage on a canceled subscription. And usage
   stamped before a spend-threshold invoice that is not paid yet: if that
-  invoice is voided or written off before the period-end invoice is built,
-  the period-end invoice bills all the period's usage again, late events
-  included. So an event is flagged only after a paid spend-threshold
-  invoice, which cannot be voided or written off. If you void or write off
-  a spend-threshold invoice, do not bill its usage with a one-off invoice:
-  the period-end invoice does.
+  invoice is voided before the period-end invoice is built, the period-end
+  invoice bills all the period's usage again, late events included. So an
+  event is flagged only after a paid spend-threshold invoice, which cannot
+  be voided.
+- **Writing off or voiding a spend-threshold invoice.** A spend-threshold
+  invoice made with `reset_billing_cycle: false` bills the period's base
+  fee and usage up to when it fired. What happens to those charges depends
+  on what you do with it, and when:
+  - **Write it off** (mark uncollectible): they stay billed on it. The
+    period-end invoice does not bill them again, and if the customer pays
+    the written-off invoice later, it simply reads paid. Writing off means
+    you give up the money.
+  - **Void it before the period-end invoice is built**: the period-end
+    invoice bills them instead, from the period start. Do not also bill
+    them with a one-off invoice.
+  - **Void it after the period-end invoice is built**: they are billed
+    nowhere. That invoice does not change. If they should be charged,
+    bill them with a one-off invoice.
+
+  Before 2026-10-23 a write-off behaved like a void here, and the
+  period-end invoice billed the window again. If you relied on that, void
+  the threshold invoice instead, before the period-end invoice is built.
 - **During the grace the subscription still shows the ended period.** Spend
   thresholds and the live credit balance do not count the new period's
   usage until the invoice is built.

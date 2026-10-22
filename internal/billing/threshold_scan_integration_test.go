@@ -299,7 +299,7 @@ func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
 // against the re-fire burn. A second ScanThresholds tick over the same
 // reset=false cycle must emit zero new invoices — and, critically, do so
 // WITHOUT allocating an invoice number or a tax calculation. The fire-once
-// probe (LatestThresholdPeriodEnd) short-circuits before fireThreshold's
+// probe (GetThresholdInvoiceForCycleAnyStatus) short-circuits before fireThreshold's
 // NextInvoiceNumber/ApplyTax; the partial unique index remains the correctness
 // backstop for a genuinely concurrent retry (two ticks both passing the probe).
 // Pre-probe, each re-tick allocated (and committed) a number in its own tx, then

@@ -80,7 +80,7 @@ test('the release summary names unpriced rows and rows past the cap apart', () =
 test('the release summary says rows under an unpaid threshold invoice may or may not be billed', () => {
   const s = releaseSummary({ customer_id: 'c', released: 4, deduplicated: 0, still_held: 0, more_to_release: 0, in_open_period: 0, not_on_plan: 0, pending_threshold_invoice: 4, outside_open_period: 0 })
   assert.match(s.description, /4 fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet/)
-  assert.match(s.description, /If it is paid, no invoice charges them.*voided or written off/)
+  assert.match(s.description, /If it is paid or written off, no invoice charges them\. If it is voided before/)
   assert.doesNotMatch(s.description, /will be invoiced/)
 })
 

@@ -75,7 +75,9 @@ machinery — the mismatch ADR-111 spent an arc cleaning up.
 - **`RecoveryWarnsOnOfflinePayment`** and the `recovery_warning` API field —
   recording is never refused, but the operator is told when it will not
   reconcile (tax already reported uncollected / threshold re-billed / relief
-  unapplied). The OpenAPI schema is renamed `RecoveryWarning`.
+  unapplied). The OpenAPI schema is renamed `RecoveryWarning`. *(2026-10-23:
+  the threshold case is gone. A written-off threshold invoice keeps its
+  window billed, so nothing re-bills it; see the ADR-066 amendment.)*
 - **The setup-link on-ramp** (walk-d6, merged as #747) — card capture is
   account-scoped (ADR-110's own line); the card serves the recovery invoice
   and future billing. Its email already promises a person, not a machine.

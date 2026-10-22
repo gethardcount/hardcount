@@ -281,12 +281,19 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// invoice per sub+period_start) remains the correctness seam — the loser
 	// lands on errs.ErrAlreadyExists and short-circuits, exactly as before.
 	//
+	// The probe sees the cycle's threshold invoice in ANY status, not the
+	// watermark: the index holds the cycle's one slot whatever the status,
+	// so after a void (or a write-off) no later fire this cycle can insert.
+	// Probing with the watermark re-ran the evaluation and a paid tax
+	// calculation every tick after a void, only for the index to refuse the
+	// insert. A voided fire's window is billed by the cycle close instead.
+	//
 	// The probe fetches the full row (not just the watermark instant) so a
 	// hit can heal the $0/credited MarkPaid crash window: a crash between
 	// invoice-create and MarkPaid re-enters HERE on every later tick — the
 	// only re-entry this sub gets — so this is where the stranded
 	// payment_pending row is repaired (ADR-066).
-	if existing, err := e.invoices.GetLatestThresholdInvoiceForCycle(ctx, sub.TenantID, sub.ID, periodStart, *sub.CurrentBillingPeriodEnd); err == nil {
+	if existing, err := e.invoices.GetThresholdInvoiceForCycleAnyStatus(ctx, sub.TenantID, sub.ID, periodStart, *sub.CurrentBillingPeriodEnd); err == nil {
 		e.healStrandedZeroDue(ctx, sub.TenantID, existing, now)
 		return false, nil // already fired this cycle
 	} else if !errors.Is(err, errs.ErrNotFound) {
@@ -403,8 +410,10 @@ func (w thresholdWatermark) exists() bool { return w.billedThrough != nil }
 // ThresholdBilledThroughTx implements subscription.Biller for the atomic
 // plan swap (ADR-115, fire-vs-swap): on the swap's tx, after its period CAS
 // took the subscription row lock, the instant a threshold fire already billed
-// the sub's CURRENT period through — nil when none fired. The swap refuses to
-// re-anchor the period below that instant; see applyCrossIntervalPlanSwapTx.
+// the sub's CURRENT period through — nil when none fired. A written-off fire
+// still billed it; a voided one did not (the watermark predicate). The swap
+// refuses to re-anchor the period below that instant; see
+// applyCrossIntervalPlanSwapTx.
 func (e *Engine) ThresholdBilledThroughTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (*time.Time, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return nil, nil
