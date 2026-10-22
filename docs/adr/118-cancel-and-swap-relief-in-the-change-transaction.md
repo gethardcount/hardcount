@@ -1,10 +1,13 @@
 # ADR-118: Cancel and plan-swap relief is written in the change's transaction
 
 **Date:** 2026-10-12
-**Status:** Accepted (amended 2026-10-19: after a cancel commits, the relief
-is issued before the final invoice is collected, so the relief reduces the
-final invoice; see the
-[amendment](#amendment-2026-10-19-the-relief-is-issued-before-the-final-invoice-is-collected))
+**Status:** Accepted. Amendments:
+- 2026-10-19: after a cancel commits, the relief is issued before the final
+  invoice is collected, so the relief reduces the final invoice
+  ([amendment](#amendment-2026-10-19-the-relief-is-issued-before-the-final-invoice-is-collected)).
+- 2026-10-22: one crediting rule for every change that gives prepaid time
+  back, newest charging invoice first
+  ([amendment](#amendment-2026-10-22-one-crediting-rule-the-invoice-that-charged-it-newest-first)).
 
 ## Summary
 
@@ -70,7 +73,8 @@ an allocation failure, a draft or a void.
 
 One case is not an error: an all-paid funding set with less room left than
 the unused part. Amended 2026-10-20: the allocator places what fits and logs
-the residual at ERROR, and the change proceeds. Before, it returned
+the residual at ERROR, and the change proceeds. (Amended again 2026-10-22: the
+residual is recorded on the change as `uncredited_cents`, not logged.) Before, it returned
 `errHeadroomExhausted` and the change proceeded with no relief at all. A set
 already fully credited still gets none (ADR-061, decision 2026-10-20).
 
@@ -282,3 +286,75 @@ charge settles or the draft is finalized.
 - `internal/subscription/relief_before_collect_test.go` checks the order on
   all three callers, and that both legs still run on a live context when
   the caller's context ends right after the commit.
+
+## Amendment 2026-10-22: one crediting rule, the invoice that charged it, newest first
+
+**Decision** (Sagar, 2026-10-21). Every change that gives unused prepaid time
+back uses one rule: a quantity decrease, a downgrade, an item removal, a
+cancel and a cross-interval swap. The credit goes to the invoice that charged
+the unused time, newest charging invoice first. This is how Stripe credits a
+decrease: *"based on the last price billed"*, with each credit linked to its
+charge (`credited_items`).
+
+**What was wrong.** Two allocators split the same credit three ways:
+
+- `resolveClawbackPieces` (handler): newest first for a plan change, split by
+  subtotal for a quantity change or a removal.
+- `settleUnpaidSourceProration` (handler, base invoice unpaid): the base
+  invoice alone. After an async base charge that later failed, an upgrade
+  invoice paid in between was never credited.
+- `allocateUnusedAcrossFunding` (engine, cancel and swap): split by each
+  invoice's unused share of its window, weighted by subtotal. It capped an
+  in-flight invoice like an unpaid one.
+
+A split by subtotal is wrong in real cases. A renewal invoice's subtotal
+carries the previous period's usage, so it took most of the credit while an
+unpaid upgrade invoice kept the unused time it charged, and dunning kept
+chasing it. Example: 5 seats paid, 8 seats on Sep 16 ($15.00), 3 seats on
+Sep 21. The split gave $12.82 to the base and $3.85 to the upgrade; the rule
+gives $15.00 to the upgrade and $1.67 to the base. Totals are unchanged; the
+split and the paid/unpaid routing change.
+
+**The rule** (`domain.AllocateUnusedCredit`, one pure function, both callers):
+
+- **Candidates.** An item change credits only the invoices that charged that
+  item: the cycle invoices (no source item) and the item's own proration
+  invoices (`source_subscription_item_id`). A seat decrease never credits the
+  invoice that added another item; a global newest-first rule would, and an
+  unpaid add-on invoice would then soak up a refundable credit. A cancel or
+  swap covers the whole subscription, so every funding invoice is a
+  candidate.
+- **Order.** `created_at` newest first. On a tie the `subscription_update`
+  invoice goes first (FLOW B17c: a test-clock catchup stamps every invoice
+  with one instant), then the later row in the funding query's order.
+- **Room.** Paid or in flight: total − already credited (drafts included,
+  read off the change's transaction). Issue picks the channel once an
+  in-flight charge settles (ADR-059). Unpaid: amount due + credits applied
+  (ADR-061). An invoice with no room is skipped.
+- **Remainder.** What fits nowhere is not owed: every candidate is credited
+  up to its total, or relieved of all it asks for (the credit-note cap,
+  #276-#278). The change goes through and records it as `uncredited_cents`
+  on its audit row. The timeline reads "Credit $X (limited to what the
+  invoices had left)". The two "reconcile manually" log lines are gone. An
+  attention item was rejected: there is no operator action to take.
+- **Tax-pending draft.** A share on a draft whose tax is not calculated is
+  refused with `funding_invoice_tax_pending`, on every path. The item-change
+  path had no such refusal.
+
+**Deleted.** `resolveClawbackPieces`, the credit half of
+`settleUnpaidSourceProration`, the single-piece carrier
+(`ClawbackInvoiceID`/`ClawbackGrossCents`), the bare net ledger grant on the
+item-change path (unreachable in production: the credit-note issuer is always
+wired), `allocateUnusedAcrossFunding`, `unpaidRelief`,
+`money.AllocateByWeight` and `money.AllocateByWeightCapped`. The ADR-050 block
+on a net charge against an unpaid base invoice stays.
+
+**Not changed.** The amount owed (`prorationCents` for one item,
+`unusedBaseForPeriod` for the whole subscription), the void of a fully unused
+unpaid invoice before allocation, and every effect-firer and recovery sweep.
+A concurrent change still reads stale headroom and is rejected under the
+invoice lock by `CreateAdjustmentDraftTx`; newest-first puts both changes on
+the same invoice, so that rejection is more likely, and the retry re-reads.
+
+**Tests.** `internal/api/one_credit_rule_e2e_test.go` (real Postgres, HTTP)
+and `internal/domain/unused_credit_test.go`.

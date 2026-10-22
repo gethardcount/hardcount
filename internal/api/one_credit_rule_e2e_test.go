@@ -25,10 +25,13 @@ import (
 // advance, no meter. The subscription starts Sep 1, 2026 with 5 seats, so the
 // period is [Sep 1, Oct 1): 30 days. No tax.
 //
-// Mutation seams (each against the real store):
-//   - sort the candidates oldest first → T1 and T4 fail;
+// Mutation seams (each run against the real store):
+//   - sort the candidates oldest first → T1, T2, T4 and T5 fail;
 //   - drop the item filter → T3 fails (B's invoice is credited);
-//   - cap an in-flight invoice like an unpaid one → T6 fails.
+//   - cap an in-flight invoice like an unpaid one → only the domain table
+//     test fails. T6 still passes: a real in-flight invoice still has its
+//     full amount due, so both caps agree. They differ only on a paid
+//     invoice forced back to processing (FLOW C2), which no writer does.
 
 var (
 	ocP0   = time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -340,9 +343,11 @@ func (r *seatRig) auditInt(action, key string) int64 {
 	return int64(f)
 }
 
-// T8: two seat decreases at once. Each is applied in full or refused, and no
-// invoice is credited past its total. Applied in either order, 8 → 4 and the
-// other to 2 credit 6 seats x $10 x 10/30 in all, within a cent per change.
+// T8: two seat changes at once, 8 → 4 and 8 → 2. They serialize on the
+// subscription row: either both are decreases (8 → 4 → 2) or the second is an
+// increase (8 → 2 → 4) and bills its own invoice. Each is applied in full or
+// refused, no invoice is credited past its total, and what was credited minus
+// what was billed matches the seats removed, within a cent per change.
 func TestE2E_OneCreditRule_ConcurrentDecreases(t *testing.T) {
 	skipShort(t)
 	r := newSeatRig(t, ocP0, 5)
@@ -357,27 +362,32 @@ func TestE2E_OneCreditRule_ConcurrentDecreases(t *testing.T) {
 			code, raw := r.do(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, ocDown, map[string]any{"quantity": n})
 			codes[i] = code
 			if code != http.StatusOK {
-				t.Logf("decrease to %d: %d %s", n, code, raw)
+				t.Logf("change to %d: %d %s", n, code, raw)
 			}
 		}(i, n)
 	}
 	wg.Wait()
-
-	for _, id := range []string{up, r.baseID} {
-		total := int(flowInt(r.invoice(id), "total_amount_cents"))
-		if got := r.creditNoteTotalOn(id); got > total {
-			t.Errorf("invoice %s credited %dc, past its total %dc", id, got, total)
-		}
-	}
-	seats := r.sub().Items[0].Quantity
-	credited := r.creditNoteTotalOn(up) + r.creditNoteTotalOn(r.baseID)
-	want := int(8-seats) * 1000 * 10 / 30
-	if d := credited - want; d < -2 || d > 2 {
-		t.Errorf("credited %dc for 8 → %d seats, want %dc (codes %v)", credited, seats, want, codes)
-	}
 	for i, c := range codes {
 		if c != http.StatusOK && c != http.StatusConflict {
 			t.Errorf("request %d answered %d, want 200 or a clean 409", i, c)
 		}
+	}
+
+	var credited, billed int
+	for _, inv := range r.invoices() {
+		total := int(flowInt(r.invoice(inv.id), "total_amount_cents"))
+		notes := r.creditNoteTotalOn(inv.id)
+		if notes > total {
+			t.Errorf("invoice %s credited %dc, past its total %dc", inv.id, notes, total)
+		}
+		credited += notes
+		if inv.id != up && inv.id != r.baseID {
+			billed += total // an increase that ran second
+		}
+	}
+	seats := r.sub().Items[0].Quantity
+	want := int(8-seats) * 1000 * 10 / 30
+	if d := credited - billed - want; d < -2 || d > 2 {
+		t.Errorf("credited %dc and billed %dc for 8 → %d seats, want a net credit of %dc (codes %v)", credited, billed, seats, want, codes)
 	}
 }

@@ -79,7 +79,13 @@ func describeSubscriptionAction(action string, meta map[string]any, lb lineLabel
 			l.Detail = append(l.Detail, activity.Text(why))
 		}
 		if c, ok := metaInt(meta, "prorated_credit_cents"); ok && c > 0 {
-			l.Detail = append(l.Detail, activity.Segment{activity.T("Prorated credit "), activity.M(c, metaString(meta, "currency"))})
+			seg := activity.Segment{activity.T("Prorated credit "), activity.M(c, metaString(meta, "currency"))}
+			if limitedCredit(meta) {
+				seg = append(seg, activity.T(" (limited to what the invoices had left)"))
+			}
+			l.Detail = append(l.Detail, seg)
+		} else if limitedCredit(meta) {
+			l.Detail = append(l.Detail, activity.Text("Prorated credit limited to what the invoices had left"))
 		}
 	case domain.AuditActionUpdate:
 		return describeUpdate(meta, lb)
@@ -358,9 +364,15 @@ func prorationNotAppliedProblem(ct domain.ItemChangeType) string {
 func prorationSegment(meta map[string]any, lb lineLabels) activity.Segment {
 	amt, ok := metaInt(meta, "proration_amount_cents")
 	if !ok {
+		// A plan swap records no proration outcome on the row, only what its
+		// credit could not place.
+		if limitedCredit(meta) {
+			return activity.Segment{activity.T("Credit limited to what the invoices had left")}
+		}
 		return nil
 	}
 	money := activity.M(amt, metaString(meta, "currency"))
+	var seg activity.Segment
 	switch metaString(meta, "proration_type") {
 	case "invoice":
 		if id := metaString(meta, "proration_invoice_id"); lb.invoices[id] != "" {
@@ -368,14 +380,32 @@ func prorationSegment(meta map[string]any, lb lineLabels) activity.Segment {
 		}
 		return activity.Segment{activity.T("Proration invoice "), money}
 	case "credit":
-		return activity.Segment{activity.T("Credit "), money}
+		if amt == 0 && limitedCredit(meta) {
+			return activity.Segment{activity.T("No credit: the invoices had nothing left to credit")}
+		}
+		seg = activity.Segment{activity.T("Credit "), money}
 	case "adjustment":
 		if id := metaString(meta, "adjusted_invoice_id"); lb.invoices[id] != "" {
-			return activity.Segment{activity.T("Open invoice "), activity.L(activity.LinkInvoice, id, lb.invoices[id]), activity.T(" adjusted by "), money}
+			seg = activity.Segment{activity.T("Open invoice "), activity.L(activity.LinkInvoice, id, lb.invoices[id]), activity.T(" adjusted by "), money}
+		} else {
+			seg = activity.Segment{activity.T("Open invoice adjusted by "), money}
 		}
-		return activity.Segment{activity.T("Open invoice adjusted by "), money}
+	default:
+		return nil
 	}
-	return nil
+	if limitedCredit(meta) {
+		seg = append(seg, activity.T(" (limited to what the invoices had left)"))
+	}
+	return seg
+}
+
+// limitedCredit reports a row whose credit for unused time did not fit in the
+// invoices that charged it (uncredited_cents): earlier notes had credited them
+// up to their totals, or an unpaid one had nothing more to relieve. The rest
+// is not owed (ADR-118 amendment 2026-10-22).
+func limitedCredit(meta map[string]any) bool {
+	c, ok := metaInt(meta, "uncredited_cents")
+	return ok && c > 0
 }
 
 // planArrow is "Starter → Pro" from a row's old and new plan ids; empty when
