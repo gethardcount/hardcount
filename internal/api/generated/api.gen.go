@@ -4492,10 +4492,16 @@ type DunningRun struct {
 	// InvoiceNumber Filled in on list responses.
 	InvoiceNumber string    `json:"invoice_number,omitempty"`
 	LastAttemptAt time.Time `json:"last_attempt_at,omitempty"`
-	NextActionAt  time.Time `json:"next_action_at,omitempty"`
-	Paused        bool      `json:"paused"`
-	PolicyId      string    `json:"policy_id"`
-	Reason        string    `json:"reason,omitempty"`
+
+	// MaxRetryAttempts The run's policy's retry limit. Filled in on list responses.
+	// When `attempt_count` has reached it, no charge is retried:
+	// `next_action_at` is when the final action (pause, cancel or
+	// mark uncollectible) runs.
+	MaxRetryAttempts int       `json:"max_retry_attempts,omitempty"`
+	NextActionAt     time.Time `json:"next_action_at,omitempty"`
+	Paused           bool      `json:"paused"`
+	PolicyId         string    `json:"policy_id"`
+	Reason           string    `json:"reason,omitempty"`
 
 	// Resolution How the run ended, set when it is resolved. Exception:
 	// `action_failed` is set on a run that is still `active`. The

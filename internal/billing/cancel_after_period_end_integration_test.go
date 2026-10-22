@@ -362,8 +362,8 @@ type payingBiller struct {
 	next subscription.DueBiller
 }
 
-func (b payingBiller) BillDueNow(ctx context.Context, tenantID, id string) (int, error) {
-	n, err := b.next.BillDueNow(ctx, tenantID, id)
+func (b payingBiller) BillDue(ctx context.Context, tenantID, id string, grace time.Duration) (int, error) {
+	n, err := b.next.BillDue(ctx, tenantID, id, grace)
 	for _, inv := range b.r.f.listInvoices(b.t, b.r.base) {
 		if inv.PaymentStatus != domain.PaymentSucceeded && inv.Status != domain.InvoiceVoided {
 			if _, perr := b.r.f.invStore.MarkPaid(b.r.base, tenantID, inv.ID, "pi_"+inv.ID, b.at); perr != nil {

@@ -534,12 +534,18 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 	}
 	defer postgres.Rollback(tx)
 
+	// The bound policy's limit rides along (LEFT JOIN: a run is never
+	// dropped for its policy), so a reader can tell a run with a retry still
+	// to come from one whose next step is only its final action
+	// (InvoiceDunningRun.RetryScheduled).
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
-			COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
-			paused, resolved_at, COALESCE(resolution,''), created_at, updated_at
-		FROM invoice_dunning_runs
-		WHERE invoice_id = ANY($1::text[])
+		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
+			COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
+			r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
+			COALESCE(p.max_retry_attempts, 0)
+		FROM invoice_dunning_runs r
+		LEFT JOIN dunning_policies p ON p.id = r.policy_id
+		WHERE r.invoice_id = ANY($1::text[])
 	`, postgres.StringArray(invoiceIDs))
 	if err != nil {
 		return nil, err
@@ -551,7 +557,8 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 		var run domain.InvoiceDunningRun
 		if err := rows.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
 			&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
-			&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt); err != nil {
+			&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt,
+			&run.MaxRetryAttempts); err != nil {
 			return nil, err
 		}
 		out = append(out, run)
@@ -635,16 +642,20 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 	// the /dunning page (was: 1 list + N invoice fetches + N sub
 	// fetches + N clock fetches; now: 1 query). LEFT JOINs because
 	// invoice / sub / clock references can be NULL or unresolvable
-	// (RLS gap, deleted) without dropping the dunning row itself.
+	// (RLS gap, deleted) without dropping the dunning row itself. The bound
+	// policy's max_retry_attempts rides along too, so the page can tell a
+	// run with a retry still to come from one whose next step is only its
+	// final action (InvoiceDunningRun.RetryScheduled).
 	query := `SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
 		COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 		r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
 		COALESCE(i.invoice_number, ''), COALESCE(i.amount_due_cents, 0), COALESCE(i.currency, ''),
-		tc.frozen_time, COALESCE(tc.id, '')
+		tc.frozen_time, COALESCE(tc.id, ''), COALESCE(p.max_retry_attempts, 0)
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id
 		LEFT JOIN customers cu ON cu.id = i.customer_id
-		LEFT JOIN test_clocks tc ON tc.id = cu.test_clock_id` + whereClause + ` ORDER BY r.created_at DESC`
+		LEFT JOIN test_clocks tc ON tc.id = cu.test_clock_id
+		LEFT JOIN dunning_policies p ON p.id = r.policy_id` + whereClause + ` ORDER BY r.created_at DESC`
 	// Default 50, clamp to 100 — no-silent-fallbacks principle.
 	limit := filter.Limit
 	if limit <= 0 {
@@ -667,7 +678,8 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID, &r.PolicyID,
 			&r.State, &r.Reason, &r.AttemptCount, &r.LastAttemptAt, &r.NextActionAt,
 			&r.Paused, &r.ResolvedAt, &r.Resolution, &r.CreatedAt, &r.UpdatedAt,
-			&r.InvoiceNumber, &r.InvoiceAmountDue, &r.InvoiceCurrency, &r.EffectiveNow, &r.TestClockID); err != nil {
+			&r.InvoiceNumber, &r.InvoiceAmountDue, &r.InvoiceCurrency, &r.EffectiveNow, &r.TestClockID,
+			&r.MaxRetryAttempts); err != nil {
 			return nil, 0, err
 		}
 		runs = append(runs, r)

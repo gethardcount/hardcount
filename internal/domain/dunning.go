@@ -280,6 +280,21 @@ type InvoiceDunningRun struct {
 	// client-side subscription-map heuristic lost the badge on
 	// one-off-invoice runs and past page 1).
 	TestClockID string `json:"test_clock_id,omitempty"`
+	// MaxRetryAttempts is the bound policy's max_retry_attempts, read with
+	// the run on the list reads (ListRuns, ListRunsByInvoices); 0 where it
+	// was not read. The policy row is read every tick, so this is the limit
+	// the run's next tick applies.
+	MaxRetryAttempts int `json:"max_retry_attempts,omitempty"`
+}
+
+// RetryScheduled reports whether a charge retry is still to come: the run
+// is active, not paused, and has attempts left under its policy. A run with
+// every attempt used only runs its final action next, whether that action
+// waits for the invoice grace, is re-attempted after it failed, or the
+// policy's limit was lowered after the run started. A run read without its
+// policy (MaxRetryAttempts 0) reports false: no retry is promised.
+func (r InvoiceDunningRun) RetryScheduled() bool {
+	return r.State == DunningActive && !r.Paused && r.AttemptCount < r.MaxRetryAttempts
 }
 
 // CustomerDunningOverride was removed in ADR-036. The partial-field

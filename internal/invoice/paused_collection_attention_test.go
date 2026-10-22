@@ -23,14 +23,20 @@ func TestAttention_PausedCollectionReadsTheOpenRun(t *testing.T) {
 		run          *domain.InvoiceDunningRun
 		wantRetrying bool
 	}{
-		{"no card, active run", false, &domain.InvoiceDunningRun{State: domain.DunningActive}, true},
-		{"card on file, active run", true, &domain.InvoiceDunningRun{State: domain.DunningActive}, true},
+		{"no card, active run", false, &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 1, MaxRetryAttempts: 3}, true},
+		{"card on file, active run", true, &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 1, MaxRetryAttempts: 3}, true},
 		{"card on file, no run", true, nil, false},
 		{"no card, no run", false, nil, false},
 		// A final action that failed leaves the run active with every attempt
 		// used; the next tick re-attempts only the action, never a charge.
-		{"no card, final action failed", false, &domain.InvoiceDunningRun{State: domain.DunningActive, Resolution: domain.ResolutionActionFailed}, false},
-		{"card on file, final action failed", true, &domain.InvoiceDunningRun{State: domain.DunningActive, Resolution: domain.ResolutionActionFailed}, false},
+		{"no card, final action failed", false, &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 3, MaxRetryAttempts: 3, Resolution: domain.ResolutionActionFailed}, false},
+		{"card on file, final action failed", true, &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 3, MaxRetryAttempts: 3, Resolution: domain.ResolutionActionFailed}, false},
+		// A final action waiting for the invoice grace (ADR-120 amendment
+		// 2026-10-22) leaves the run active with every attempt used and no
+		// resolution; its next tick runs only the action. Mutation check:
+		// key retrying on the resolution again → these say retries continue.
+		{"no card, final action waits for the grace", false, &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 3, MaxRetryAttempts: 3}, false},
+		{"card on file, final action waits for the grace", true, &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 3, MaxRetryAttempts: 3}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

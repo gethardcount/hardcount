@@ -49,9 +49,12 @@ func TestRefusedCardAttention_PromisesRetriesOnlyWhileARetryIsScheduled(t *testi
 		run          *domain.InvoiceDunningRun
 		wantRetrying bool
 	}{
-		{"active run", &domain.InvoiceDunningRun{State: domain.DunningActive}, true},
-		{"escalated run", &domain.InvoiceDunningRun{State: domain.DunningEscalated}, false},
-		{"paused run", &domain.InvoiceDunningRun{State: domain.DunningActive, Paused: true}, false},
+		{"active run", &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 1, MaxRetryAttempts: 3}, true},
+		{"escalated run", &domain.InvoiceDunningRun{State: domain.DunningEscalated, AttemptCount: 3, MaxRetryAttempts: 3}, false},
+		{"paused run", &domain.InvoiceDunningRun{State: domain.DunningActive, Paused: true, AttemptCount: 1, MaxRetryAttempts: 3}, false},
+		// Every attempt used, the final action still to run (waiting for the
+		// invoice grace, or re-attempted after it failed): no retry charges.
+		{"retries used up", &domain.InvoiceDunningRun{State: domain.DunningActive, AttemptCount: 3, MaxRetryAttempts: 3}, false},
 		{"no run", nil, false},
 	}
 	for _, tc := range cases {
