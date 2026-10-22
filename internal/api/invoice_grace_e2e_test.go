@@ -336,6 +336,19 @@ func (d *graceDunning) waiting(when string, until time.Time) {
 		d.r.t.Fatalf("%s: run state=%s resolution=%q next_action_at=%v, want active, not action_failed, due again at %v",
 			when, run.State, run.Resolution, run.NextActionAt, until)
 	}
+	// The dashboard labels next_action_at by whether a retry is still to
+	// come: the list read carries the policy's limit, which the run has
+	// reached, so the wait reads as the final step, not a retry.
+	out := d.r.must(http.MethodGet, "/v1/dunning/runs?invoice_id="+d.invID, d.r.clk.Now(context.Background()), nil, http.StatusOK)
+	rows, _ := out["data"].([]any)
+	if len(rows) != 1 {
+		d.r.t.Fatalf("%s: GET /v1/dunning/runs returned %d rows, want 1", when, len(rows))
+	}
+	row, _ := rows[0].(map[string]any)
+	if row["max_retry_attempts"] != float64(d.pol.MaxRetryAttempts) || row["attempt_count"] != float64(d.pol.MaxRetryAttempts) {
+		d.r.t.Fatalf("%s: listed run attempt_count=%v max_retry_attempts=%v, want both %d: every retry is used",
+			when, row["attempt_count"], row["max_retry_attempts"], d.pol.MaxRetryAttempts)
+	}
 	if n := d.escalations(); n != 0 {
 		d.r.t.Fatalf("%s: %d escalated rows, want none while the action waits", when, n)
 	}
@@ -361,8 +374,10 @@ func (d *graceDunning) escalated() {
 // it pauses.
 //
 // Mutation checks: remove the grace guard from closeEndedPeriods → the pause
-// closes April at B+5m (April usage 100); send the wait down the
-// action_failed path → the run is due a day later.
+// is refused unbilled_period and the run is action_failed, due a day later;
+// pass 0 to BillDue from closeEndedPeriods → the pause closes April at B+5m
+// (April usage 100); send the wait down the action_failed path → the run is
+// due a day later.
 func TestInvoiceGrace_DunningPauseWaitsForTheGrace(t *testing.T) {
 	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))

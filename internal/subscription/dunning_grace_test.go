@@ -104,15 +104,17 @@ func wantGraceWait(t *testing.T, err error, until time.Time) {
 	}
 }
 
-// Mutation check: remove the guard from closeEndedPeriods → the biller is
-// called and the period closes.
+// The close is asked with the grace and closes nothing; the guard after it
+// answers the wait. Mutation checks: remove the guard from closeEndedPeriods
+// → the pause is refused unbilled_period and the cancel applies; pass 0 to
+// BillDue → April closes.
 func TestDunningActions_InsideTheGrace_WaitAndBillNothing(t *testing.T) {
 	for _, action := range []string{"pause", "cancel"} {
 		t.Run(action, func(t *testing.T) {
 			f := newGraceFixture(t, graceB, graceB.Add(5*time.Minute), "")
 			wantGraceWait(t, f.dunningAction(action), graceB.Add(testGrace))
-			if len(f.biller.graces) != 0 {
-				t.Fatalf("biller called %v, want not at all: nothing is past its grace", f.biller.graces)
+			if len(f.biller.graces) != 1 || f.biller.graces[0] != testGrace {
+				t.Fatalf("graces=%v, want one close with the grace", f.biller.graces)
 			}
 			if f.applied(action) || !f.sub().CurrentBillingPeriodStart.Equal(graceB.AddDate(0, -1, 0)) {
 				t.Fatalf("status=%s pause=%+v period start=%v, want nothing changed", f.sub().Status, f.sub().PauseCollection, f.sub().CurrentBillingPeriodStart)

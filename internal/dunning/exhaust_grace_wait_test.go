@@ -198,3 +198,38 @@ func TestExhaust_NotYet_StaleLeaseLoses(t *testing.T) {
 		t.Fatalf("escalated rows %d, write-offs %d; want none", h.escalatedRows(), len(h.writer.calls))
 	}
 }
+
+// TestExhaust_NotYet_ActionFailedReattemptKeepsItsMark: an earlier final
+// action failed, so the run is active as action_failed and due a day later.
+// That re-attempt lands inside a new period's grace and waits. The wait
+// writes only next_action_at: the run keeps action_failed, which stays true
+// (the last attempt of the action failed; the wait attempted nothing) until
+// the action runs after the grace and the run escalates (ADR-112 amendment
+// 2026-10-22).
+func TestExhaust_NotYet_ActionFailedReattemptKeepsItsMark(t *testing.T) {
+	h := newGraceWaitHarness(domain.SubActionPause)
+	ctx := context.Background()
+	run := exhaustedRun(t, h.store, h.svc)
+	r := h.store.runs[run.ID]
+	r.Resolution = domain.ResolutionActionFailed
+	h.store.runs[run.ID] = r
+
+	h.svc.ProcessDueRuns(ctx, "t1", 20)
+
+	got := h.store.runs[run.ID]
+	if got.State != domain.DunningActive || got.Resolution != domain.ResolutionActionFailed || got.ResolvedAt != nil {
+		t.Fatalf("run = state %q resolution %q resolved_at %v, want active and still action_failed", got.State, got.Resolution, got.ResolvedAt)
+	}
+	if got.NextActionAt == nil || !got.NextActionAt.Equal(h.action.until) {
+		t.Fatalf("next_action_at = %v, want the end of the grace %v, not a day out", got.NextActionAt, h.action.until)
+	}
+
+	h.action.wait = false
+	past := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	got.NextActionAt = &past
+	h.store.runs[run.ID] = got
+	h.svc.ProcessDueRuns(ctx, "t1", 20)
+	if got = h.store.runs[run.ID]; got.State != domain.DunningEscalated || got.Resolution != domain.ResolutionRetriesExhausted {
+		t.Fatalf("after the grace: run = state %q resolution %q, want escalated as retries_exhausted", got.State, got.Resolution)
+	}
+}

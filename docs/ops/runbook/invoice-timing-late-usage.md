@@ -27,7 +27,9 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   has ended, and a test-clock advance.
 - **Dunning's final pause or cancel waits for the grace.** When retries run
   out inside it, the dunning run stays active and is due again when the
-  grace ends. Its next action date shows that time.
+  grace ends. The invoice page shows that time as "Final step" and the
+  Dunning page as "Final step in …": no charge is retried then, the pause or
+  cancel runs.
 - **A cancel or plan change scheduled for a date** takes effect at that
   close, up to the grace after its date. Until then the subscription is
   `active` on its old plan. `subscription.canceled` is sent at the close,

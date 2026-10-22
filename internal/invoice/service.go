@@ -966,7 +966,7 @@ type attentionFacts struct {
 	paused          map[string]bool                  // subscription id → pause_collection in force
 	pageLive        map[string]bool                  // invoice id → hosted payment page live
 	refusedCard     map[string]string                // invoice id → hard decline code on the default card
-	retrying        map[string]bool                  // invoice id → dunning run active and not paused
+	retrying        map[string]bool                  // invoice id → a charge retry is still to come (RetryScheduled)
 	lostDispute     map[string]domain.InvoiceDispute // invoice id → newest dispute closed as lost
 }
 
@@ -1090,8 +1090,9 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// direction of drift.
 	//
 	// The refused-card notice (#966) joins the same read: it may say that
-	// retries keep their schedule only while the run is active, not paused
-	// and not waiting on a failed final action. No run, or a read error, leaves retrying false, and the notice
+	// retries keep their schedule only while a charge retry is still to come
+	// (InvoiceDunningRun.RetryScheduled: active, not paused, attempts left
+	// under the bound policy). No run, or a read error, leaves retrying false, and the notice
 	// then says no retry is scheduled — the direction that still sends the
 	// operator to get a new card, rather than waiting on a retry that may
 	// never run.
@@ -1114,10 +1115,10 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 				f.retrying = make(map[string]bool, len(runs))
 				for _, run := range runs {
 					f.escalated[run.InvoiceID] = run.State == domain.DunningEscalated
-					// A run whose final action failed stays active with every attempt
-					// used; its next tick re-attempts only the action, never a charge.
-					f.retrying[run.InvoiceID] = run.State == domain.DunningActive && !run.Paused &&
-						run.Resolution != domain.ResolutionActionFailed
+					// A run with every attempt used stays active while its final
+					// action waits for the invoice grace or is re-attempted after
+					// it failed; its next tick runs only the action, never a charge.
+					f.retrying[run.InvoiceID] = run.RetryScheduled()
 				}
 			}
 		}

@@ -1498,8 +1498,11 @@ func graceWaitUntil(err error) (time.Time, bool) {
 // waitForInvoiceGrace defers an exhaustion whose subscription action waits
 // for the invoice grace (SubscriptionActionNotYet): the run's next_action_at
 // moves from this exhaustion's lease to until, the end of the grace, and
-// nothing else is written. The run stays active, keeps its attempt count and
-// is not labelled action_failed; no write-off, escalation row, email or
+// nothing else is written. The run stays active and keeps its attempt count.
+// A first exhaustion is not labelled action_failed; a re-attempt of an
+// earlier failed action keeps that resolution, which stays true (the last
+// attempt of the action failed, and this wait did not attempt it) until the
+// action runs and replaces it. No write-off, escalation row, email or
 // webhook fires. When until comes, the due-run pickers list the run again and
 // exhaust-on-entry runs both final actions, now closing the period with the
 // usage that arrived inside the grace (ADR-120 amendment 2026-10-22).

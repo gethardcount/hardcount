@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import {
   api,
   formatDateTime,
+  dunningFinalStepNext,
   type DunningRun,
   type DunningEvent,
   type Invoice,
@@ -340,7 +341,7 @@ function RunsTab() {
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Progress</TableHead>
-                    <TableHead>Next Retry</TableHead>
+                    <TableHead>Next step</TableHead>
                     <TableHead>Started</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -413,7 +414,7 @@ function RunsTab() {
                           </TableCell>
                           <TableCell>
                             {run.next_action_at
-                              ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{futureRelativeTime(run.next_action_at, effectiveNow(run.effective_now))}</span>
+                              ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{futureRelativeTime(run.next_action_at, effectiveNow(run.effective_now))}</span>
                               : <span className="text-xs text-muted-foreground">{'\u2014'}</span>
                             }
                           </TableCell>

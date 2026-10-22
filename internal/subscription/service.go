@@ -2212,8 +2212,8 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 // 2026-10-22): periods past their grace are closed, and a period still
 // inside it is left open and answered with *InsideInvoiceGraceError, so the
 // action runs when the grace ends and usage arriving inside the grace is on
-// the invoice. One read of the row and one now decide it, and the close
-// itself honours the same grace, so no period inside its grace is closed
+// the invoice. The close itself honours the grace, and the check after it
+// reads the row at the same now, so no period inside its grace is closed
 // however the boundary and this call interleave. A test clock has no grace
 // (ADR-120): its advance decides when usage arrives.
 //
@@ -2232,9 +2232,10 @@ func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string, gr
 	if sub.TestClockID != "" {
 		grace = 0
 	}
-	if insideInvoiceGrace(sub, now, grace) {
-		return sub, false, graceWait(sub, grace)
-	}
+	// The close honours the grace (BillDue closes no period still inside it),
+	// so the one guard is the check after it: whatever is still due at now but
+	// not at now less the grace waits. A period inside its grace on the first
+	// read is left as it was and answered the same way.
 	if _, billErr := s.dueBiller.BillDue(ctx, tenantID, id, grace); billErr != nil {
 		slog.WarnContext(ctx, "billing the ended period before a subscription write failed",
 			"subscription_id", id, "tenant_id", tenantID, "error", billErr)
@@ -2244,7 +2245,8 @@ func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string, gr
 		return domain.Subscription{}, true, err
 	}
 	if insideInvoiceGrace(sub, now, grace) {
-		// A catch-up closed the periods past their grace; the newest waits.
+		// The periods past their grace are closed (none, or several on a
+		// catch-up); the newest waits.
 		return sub, true, graceWait(sub, grace)
 	}
 	return sub, true, nil

@@ -86,9 +86,11 @@ difference on a later invoice
    (`subscription.Service.PauseCollectionForDunning`, `CancelForDunning`).
    Periods past their grace are closed. A period still inside it is left
    open, and nothing is paused or canceled. The dunning run's
-   `next_action_at` moves to the end of the grace. The run is not marked
-   `action_failed`, and no write-off, escalation, email or webhook fires
-   then. Test clocks still pass no grace.
+   `next_action_at` moves to the end of the grace. A first exhaustion is
+   not marked `action_failed` (a re-attempt of an earlier failed action
+   keeps that mark, see ADR-112), and no write-off, escalation, email or
+   webhook fires then. The dashboard labels the wait "Final step". Test
+   clocks still pass no grace.
 4. **Gauges.** `velox_billing_due_subscriptions` and
    `velox_billing_oldest_due_age_seconds` use the same shifted instant. The
    age is counted from the due instant plus the grace.

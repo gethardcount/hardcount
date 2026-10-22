@@ -403,4 +403,6 @@ with final invoice action `none` escalated over the voided invoice. See the
 
 ## Amendment 2026-10-22 — the subscription action can wait for the invoice grace
 
-A pause or cancel that would close a period still inside its invoice grace waits: both actions run when the grace ends ([ADR-120 amendment of 2026-10-22](120-invoice-grace-period-for-late-usage.md#decision)); the run stays active, not `action_failed`.
+A pause or cancel that would close a period still inside its invoice grace waits: both actions run when the grace ends ([ADR-120 amendment of 2026-10-22](120-invoice-grace-period-for-late-usage.md#decision)). The run stays active and the wait writes only `next_action_at`. A first exhaustion that waits is not marked `action_failed`. A re-attempt of an earlier failed action that waits keeps its `action_failed` resolution until the action runs: the last attempt of that action did fail, and the wait did not attempt it.
+
+The list reads of a run (`GET /v1/dunning/runs`, and the invoice notices) carry the bound policy's `max_retry_attempts`. A run whose `attempt_count` has reached it retries no charge, so its `next_action_at` is labelled the final step, not a retry, and the invoice notices no longer promise a retry for it. Before, they keyed on `action_failed` alone and promised a retry during the grace wait and the exhaustion lease.
