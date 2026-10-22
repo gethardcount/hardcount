@@ -13,6 +13,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 )
 
@@ -383,17 +384,13 @@ func TestUsageAfterClose_LastEverMeterIsNotFlagged(t *testing.T) {
 	}
 }
 
-// TestUsageAfterClose_ThresholdWatermark: a spend threshold (no reset) fires
-// on April 20. A sum-meter event stamped April 15 that arrives after the fire
-// is billed nowhere: the fire billed through April 20 and the close bills
-// sum buckets from there. It is flagged. A max-meter reading stamped April 15
-// is not: the fire deferred the max bucket, and April's close bills it over
-// the whole month.
-//
-// Mutation check: drop the sum/count-only condition → the max reading is
-// flagged.
-func TestUsageAfterClose_ThresholdWatermark(t *testing.T) {
-	skipShort(t)
+// thresholdFired is April on one subscription pricing a sum meter (calls)
+// and a max meter (peak): 100 calls and a peak of 5 on April 10, and a spend
+// threshold of 100c with no reset that fires on April 20 and bills April 1
+// to 20. It returns the fire instant and the threshold invoice, which is not
+// paid yet.
+func thresholdFired(t *testing.T) (*lagRig, time.Time, string) {
+	t.Helper()
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	peak := r.newMeter("peak", "max")
 	r.newSub("thr", r.planWith("plan_p", 3000, r.meterID, peak), lagP0, nil)
@@ -405,9 +402,34 @@ func TestUsageAfterClose_ThresholdWatermark(t *testing.T) {
 	if n := r.scanThresholds(fireAt); n != 1 {
 		t.Fatalf("threshold scan fired %d invoices, want 1", n)
 	}
+	for _, inv := range r.invoices() {
+		if inv.reason == string(domain.BillingReasonThreshold) {
+			if inv.status == string(domain.InvoicePaid) {
+				t.Fatalf("threshold invoice is already paid; the tests need it unpaid")
+			}
+			return r, fireAt, inv.id
+		}
+	}
+	t.Fatal("no threshold invoice")
+	return nil, time.Time{}, ""
+}
+
+// TestUsageAfterClose_ThresholdWatermark: the April 20 fire's invoice is
+// paid. A sum-meter event stamped April 15 that arrives after that is
+// billed nowhere: the fire billed through April 20, the close bills sum
+// buckets from there, and a paid invoice can be neither voided nor written
+// off. It is flagged. A max-meter reading stamped April 15 is not: the fire
+// deferred the max bucket, and April's close bills it over the whole month.
+//
+// Mutation check: drop the sum/count-only condition → the max reading is
+// flagged.
+func TestUsageAfterClose_ThresholdWatermark(t *testing.T) {
+	skipShort(t)
+	r, fireAt, thr := thresholdFired(t)
+	r.must(http.MethodPost, "/v1/invoices/"+thr+"/record-payment", fireAt.Add(30*time.Minute), map[string]any{"note": "wire"}, http.StatusOK)
 
 	out := r.postEvent("/v1/usage-events", "calls", "calls-apr15", lagP0.AddDate(0, 0, 14), fireAt.Add(time.Hour), 30, http.StatusCreated)
-	wantStatus(t, "sum event before the threshold watermark", out, "after_close")
+	wantStatus(t, "sum event before a paid threshold invoice's watermark", out, "after_close")
 	out = r.postEvent("/v1/usage-events", "peak", "peak-apr15", lagP0.AddDate(0, 0, 14), fireAt.Add(time.Hour), 9, http.StatusCreated)
 	wantStatus(t, "max reading before the threshold watermark", out, "")
 	out = r.postEvent("/v1/usage-events", "calls", "calls-apr25", lagP0.AddDate(0, 0, 24), lagP0.AddDate(0, 0, 24), 3, http.StatusCreated)
@@ -421,11 +443,84 @@ func TestUsageAfterClose_ThresholdWatermark(t *testing.T) {
 	}
 }
 
+// TestUsageAfterClose_ThresholdWatermark_Unpaid: review finding 1 on #1350.
+// While the threshold invoice is unpaid it can still be voided or written
+// off, and then April's close bills usage from April 1 (#243). So a sum
+// event stamped before the watermark that arrives while the invoice is
+// unpaid is not flagged: after a void or a write-off April's invoice bills
+// it, and a flag would have told the operator to bill it a second time. If
+// the invoice is paid instead, the event is billed nowhere and was not
+// flagged: a missed flag, never a wrong one.
+//
+// Mutation check: flag before the watermark of any threshold invoice, paid
+// or not → the event is flagged in all three cases.
+func TestUsageAfterClose_ThresholdWatermark_Unpaid(t *testing.T) {
+	skipShort(t)
+	for _, tc := range []struct {
+		action    string
+		wantUsage int64 // on April's cycle invoice; the 5 peak is billed there either way
+	}{
+		{"void", 100 + 30 + 5},
+		{"mark-uncollectible", 100 + 30 + 5},
+		{"record-payment", 5},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			r, fireAt, thr := thresholdFired(t)
+			out := r.postEvent("/v1/usage-events", "calls", "calls-apr15", lagP0.AddDate(0, 0, 14), fireAt.Add(time.Hour), 30, http.StatusCreated)
+			wantStatus(t, "sum event before an unpaid threshold invoice's watermark", out, "")
+
+			if code, body, _ := r.doH(http.MethodPost, "/v1/invoices/"+thr+"/"+tc.action, fireAt.Add(2*time.Hour), map[string]any{"note": "wire"}); code >= 300 {
+				t.Fatalf("%s the threshold invoice: %d %v", tc.action, code, body)
+			}
+			r.run(lagB.Add(2 * time.Hour))
+			invs := r.invoices()
+			if got := r.cycleInvoice(invs, lagP0).sum("usage"); got != tc.wantUsage {
+				r.logInvoices(invs)
+				t.Errorf("April cycle usage after %s = %dc, want %dc", tc.action, got, tc.wantUsage)
+			}
+		})
+	}
+}
+
+// TestUsageAfterClose_ThresholdWatermark_ThresholdsCleared: review finding 2
+// on #1350. The close keys the watermark on the fire's invoice, not on the
+// subscription's threshold setting. So after the thresholds are removed, a
+// sum event stamped before the (paid) fire's watermark is still billed
+// nowhere, and it is flagged.
+//
+// Mutation check: read the watermark only for a subscription that still has
+// thresholds → the event is not flagged.
+func TestUsageAfterClose_ThresholdWatermark_ThresholdsCleared(t *testing.T) {
+	skipShort(t)
+	r, fireAt, thr := thresholdFired(t)
+	r.must(http.MethodPost, "/v1/invoices/"+thr+"/record-payment", fireAt.Add(10*time.Minute), map[string]any{"note": "wire"}, http.StatusOK)
+	r.must(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(30*time.Minute), nil, http.StatusOK)
+	if r.sub().BillingThresholds != nil {
+		t.Fatal("thresholds still set after DELETE")
+	}
+
+	out := r.postEvent("/v1/usage-events", "calls", "calls-apr15", lagP0.AddDate(0, 0, 14), fireAt.Add(time.Hour), 30, http.StatusCreated)
+	wantStatus(t, "sum event before the watermark, thresholds removed", out, "after_close")
+
+	r.run(lagB.Add(2 * time.Hour))
+	invs := r.invoices()
+	if got := usageBilled(invs); got != 100+5 {
+		r.logInvoices(invs)
+		t.Errorf("usage on all invoices = %dc, want 105c: 100 calls on the fire, the 5 peak at the close; the flagged 30 nowhere", got)
+	}
+}
+
 // heldRelease holds one LiteLLM call for the unknown user lag_typo, ended at
 // end, then releases it into the rig's customer at at and returns the answer.
 func (r *lagRig) heldRelease(end, at time.Time) map[string]any {
 	r.t.Helper()
-	out := r.must(http.MethodPost, "/v1/integrations/litellm/spend", end.Add(time.Minute),
+	return r.heldReleaseVia(end, end.Add(time.Minute), at)
+}
+
+// heldReleaseVia is heldRelease with the call reaching Velox at arrive.
+func (r *lagRig) heldReleaseVia(end, arrive, at time.Time) map[string]any {
+	r.t.Helper()
+	out := r.must(http.MethodPost, "/v1/integrations/litellm/spend", arrive,
 		litellmCall(fmt.Sprintf("held-%d", end.Unix()), "lag_typo", end, 10, 5), http.StatusOK)
 	if count(out, "held") != 2 {
 		r.t.Fatalf("hold answer = %v, want held 2", out)
@@ -484,6 +579,53 @@ func TestUsageAfterClose_HeldReleaseInTheGrace_PendingPlan(t *testing.T) {
 	out := r.heldRelease(lagB.Add(10*time.Minute), lagB.Add(20*time.Minute))
 	if count(out, "released") != 2 || count(out, "in_open_period") != 2 || count(out, "not_on_plan") != 0 {
 		t.Errorf("release answer = %v, want released 2, in_open_period 2", out)
+	}
+}
+
+// TestUsageAfterClose_HeldReleaseAroundThresholdWatermark: review finding 3
+// on #1350. The release classifies with the same rule as ingest, threshold
+// watermark included. A threshold (no reset) fires on April 20 and bills
+// April 1 to 20. Rows stamped April 15 released while that invoice is
+// unpaid count as pending_threshold_invoice: April's invoice bills them only
+// if the threshold invoice is voided or written off. Once it is paid, rows
+// stamped April 16 count as outside_open_period: no invoice bills them.
+// Rows stamped April 25 are in_open_period.
+//
+// Mutation checks: classify the release with no watermark → the April 15
+// and 16 rows count in_open_period; flag before an unpaid watermark → the
+// April 15 rows count outside_open_period.
+func TestUsageAfterClose_HeldReleaseAroundThresholdWatermark(t *testing.T) {
+	skipShort(t)
+	r, planT := newTokensRig(t)
+	r.newSub("held", planT, lagP0, nil)
+	r.postEvent("/v1/usage-events", "tokens", "tokens-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
+	fireAt := lagP0.AddDate(0, 0, 19)
+	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(-time.Hour),
+		map[string]any{"amount_gte": 100, "reset_billing_cycle": false}, http.StatusOK)
+	if n := r.scanThresholds(fireAt); n != 1 {
+		t.Fatalf("threshold scan fired %d invoices, want 1", n)
+	}
+	var thr string
+	for _, inv := range r.invoices() {
+		if inv.reason == string(domain.BillingReasonThreshold) {
+			thr = inv.id
+		}
+	}
+
+	out := r.heldReleaseVia(lagP0.AddDate(0, 0, 14), fireAt.Add(10*time.Minute), fireAt.Add(time.Hour))
+	if count(out, "released") != 2 || count(out, "pending_threshold_invoice") != 2 || count(out, "in_open_period") != 0 {
+		t.Errorf("release before an unpaid watermark = %v, want released 2, pending_threshold_invoice 2", out)
+	}
+
+	r.must(http.MethodPost, "/v1/invoices/"+thr+"/record-payment", fireAt.Add(90*time.Minute), map[string]any{"note": "wire"}, http.StatusOK)
+	out = r.heldReleaseVia(lagP0.AddDate(0, 0, 15), fireAt.Add(100*time.Minute), fireAt.Add(2*time.Hour))
+	if count(out, "released") != 2 || count(out, "outside_open_period") != 2 || count(out, "in_open_period") != 0 {
+		t.Errorf("release before a paid watermark = %v, want released 2, outside_open_period 2", out)
+	}
+
+	out = r.heldRelease(lagP0.AddDate(0, 0, 24), lagP0.AddDate(0, 0, 24).Add(time.Hour))
+	if count(out, "released") != 2 || count(out, "in_open_period") != 2 {
+		t.Errorf("release after the watermark = %v, want released 2, in_open_period 2", out)
 	}
 }
 
