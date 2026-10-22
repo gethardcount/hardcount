@@ -13,5 +13,11 @@ export type PostV1UsageEventsBatch201 = {
   ingested?: number;
   /** Idempotency replays — already ingested, counted as success. */
   deduplicated?: number;
+  /**
+     * Of `ingested`, the events whose period a subscription
+     * already invoiced: stored, billed on no invoice. A
+     * replayed event never counts here.
+     */
+  after_close?: number;
   total?: number;
 };

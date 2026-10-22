@@ -19,8 +19,9 @@ type Store interface {
 	// IngestBatch writes every event in ONE transaction — all-or-nothing,
 	// so a client retry after a mid-batch abort never re-ingests a
 	// committed prefix. Idempotency replays are counted in deduped, not
-	// errors. Returns (inserted, deduped, err).
-	IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (int, int, error)
+	// errors. Returns the indices of the events it inserted, the number
+	// deduplicated, and the error.
+	IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) ([]int, int, error)
 	// GetByIdempotencyKey returns the event a replayed key originally
 	// wrote (errs.ErrNotFound when absent). Backs replay-as-success on
 	// the public ingest door.

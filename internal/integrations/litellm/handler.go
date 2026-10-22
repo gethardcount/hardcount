@@ -85,7 +85,10 @@ func (h *Handler) Routes() chi.Router {
 // the existing /v1/usage-events/batch response so partners using
 // both surfaces see one shape:
 //
-//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "cache_hits": C, "errors": [{ "id": "...", "error": "..." }] }
+//	{ "accepted": N, "deduplicated": D, "held": H, "skipped": M, "cache_hits": C, "after_close": A, "errors": [{ "id": "...", "error": "..." }] }
+//
+// after_close counts accepted rows whose period was already invoiced: they
+// are stored and billed on no invoice (ADR-120). A replay never counts.
 //
 // held counts rows whose customer or meter does not exist yet. They are
 // kept in usage_held_events, not billed, and shown to the operator, who
@@ -109,6 +112,7 @@ type SpendResponse struct {
 	Held         int             `json:"held"`
 	Skipped      int             `json:"skipped"`
 	CacheHits    int             `json:"cache_hits"`
+	AfterClose   int             `json:"after_close"`
 	Errors       []SpendRowError `json:"errors,omitempty"`
 }
 
@@ -165,6 +169,8 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := SpendResponse{Errors: []SpendRowError{}}
+	// One open-period read per customer and meter for the whole request.
+	ctx := usage.WithPeriodCache(r.Context())
 
 	for _, payload := range body {
 		m, err := MapPayload(payload)
@@ -186,13 +192,14 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 			resp.Skipped++
 			continue
 		}
-		res, err := h.persist(r.Context(), tenantID, m)
+		res, err := h.persist(ctx, tenantID, m)
 		switch {
 		case err == nil:
 			if res.held {
 				resp.Held += res.Inserted
 			} else {
 				resp.Accepted += res.Inserted
+				resp.AfterClose += res.AfterClose
 			}
 			// Rows the store already had, or already held. Still a
 			// success — LiteLLM retrying a delivered batch is the happy
@@ -277,7 +284,8 @@ func (h *Handler) persist(ctx context.Context, tenantID string, m Mapping) (call
 		// never 503, or LiteLLM retries it until max_retries is spent.
 		// Classified on Kind sentinels only — a DomainError's Code is not
 		// a verdict signal (a future infra error carrying a code would be
-		// misfiled as per-row).
+		// misfiled as per-row). A failed open-period read is neither, so
+		// it is a non-verdict: 503, nothing written.
 		if errors.Is(err, errs.ErrValidation) || errors.Is(err, errs.ErrNotFound) {
 			return callOutcome{}, err
 		}
