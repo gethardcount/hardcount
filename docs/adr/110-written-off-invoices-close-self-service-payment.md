@@ -185,7 +185,7 @@ to answer *why* with a typed 409 rather than a bare claim miss.
 | Refusal | Code | Why |
 |---|---|---|
 | tax already reversed | `tax_reversed_unrecoverable` | `MarkUncollectible` always attempts an upstream tax reversal — irreversible at the provider, and not re-committable here (23h calculation TTL; tax computation is draft-only). Charging would collect tax the tenant has already reported as not collected. |
-| threshold usage re-billed | `recovery_superseded` | Writing off a threshold invoice does not stop the next cycle close re-billing that usage window; collecting this one double-bills it. |
+| threshold usage re-billed | `recovery_superseded` | Writing off a threshold invoice does not stop the next cycle close re-billing that usage window; collecting this one double-bills it. *(Removed 2026-10-23: a written-off threshold invoice now keeps its window billed, so nothing re-bills it. See the [ADR-066 amendment](066-threshold-money-semantics.md#amendment-2026-10-23-a-write-off-keeps-the-window-billed).)* |
 | unapplied clawback relief | `relief_not_reissued` | An `issue_pending` credit note that was voided before issuing never reduced `amount_due`, so the figure is stale-HIGH and charging over-collects. |
 
 The tax gate keys on the **structural** fact (`tax_transaction_id != ''`), not
@@ -212,6 +212,10 @@ tax-registered tenant to hit `tax_reversed_unrecoverable`.
   the money already arrived, and refusing to record it would only make the
   books wrong too. Governing rule — *refuse to CREATE a bad money event; never
   refuse to RECORD one that already happened.* Tracked as its own defect.
+  *The threshold half is closed (2026-10-23): the cause was the re-bill, not
+  the payment. A written-off threshold invoice keeps its window billed, so a
+  payment on it settles that window once, on any route (ADR-066 amendment).
+  The tax half stands.*
 
 ## Consequences
 

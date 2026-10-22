@@ -202,33 +202,6 @@ func (m *memStore) ListChargeAttemptsByInvoice(_ context.Context, _, _ string) (
 	return nil, nil
 }
 
-func (m *memStore) LatestThresholdPeriodEnd(_ context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (time.Time, error) {
-	var latest time.Time
-	found := false
-	for _, inv := range m.invoices {
-		if inv.TenantID != tenantID || inv.SubscriptionID != subscriptionID {
-			continue
-		}
-		if inv.BillingReason != domain.BillingReasonThreshold {
-			continue
-		}
-		if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
-			continue
-		}
-		if inv.BillingPeriodStart.Before(periodStart) || !inv.BillingPeriodStart.Before(periodEnd) {
-			continue
-		}
-		if !found || inv.BillingPeriodEnd.After(latest) {
-			latest = inv.BillingPeriodEnd
-			found = true
-		}
-	}
-	if !found {
-		return time.Time{}, errs.ErrNotFound
-	}
-	return latest, nil
-}
-
 func (m *memStore) UpdateStatus(_ context.Context, tenantID, id string, status domain.InvoiceStatus) (domain.Invoice, error) {
 	inv, ok := m.invoices[id]
 	if !ok || inv.TenantID != tenantID {

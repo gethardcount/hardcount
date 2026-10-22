@@ -43,7 +43,11 @@ Velox has no SSO, and no roles: every team member has full access
 | Billing thresholds | Set a spend or usage level, and Velox makes an invoice early once the period's total reaches it. It bills earlier; it does not stop usage. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
 
 A threshold fires at most once per period, unless `reset_billing_cycle`
-starts a new one. It is checked on each billing run.
+starts a new one. It is checked on each billing run. Without
+`reset_billing_cycle`, the period's own invoice does not bill again what the
+threshold invoice billed, even after you write the threshold invoice off.
+Voiding it before the period's invoice is built does: that invoice then
+bills those charges too ([runbook](ops/runbook/invoice-timing-late-usage.md)).
 
 ## Credits and refunds
 

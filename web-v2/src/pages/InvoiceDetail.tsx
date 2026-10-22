@@ -1529,6 +1529,16 @@ export default function InvoiceDetailPage() {
             Void is for an invoice created by mistake. If the customer didn&apos;t pay, mark it uncollectible instead.
           </p>
         )}
+        {/* Whether a later invoice bills a voided threshold invoice's
+            charges depends on reset_billing_cycle and on when the void
+            lands, which this page does not know; the runbook
+            (invoice-timing-late-usage.md) and ADR-066's 2026-10-23
+            amendment give each case. This line is true in all of them. */}
+        {invoice.billing_reason === 'threshold' && (
+          <p className="text-xs text-muted-foreground">
+            This is a spend-threshold invoice. After a void, its charges may not be billed on any other invoice.
+          </p>
+        )}
       </TypedConfirmDialog>
 
       {/* Mark Uncollectible Confirm — Stripe-parity bad-debt write-off.
@@ -1545,6 +1555,16 @@ export default function InvoiceDetailPage() {
         onConfirm={() => markUncollectibleMutation.mutate()}
         loading={markUncollectibleMutation.isPending}
       >
+        {/* A written-off threshold invoice keeps its charges billed, with
+            either reset_billing_cycle setting (ADR-066 amendment
+            2026-10-23). A later void can give them back to the period's
+            invoice (reset_billing_cycle: false, before that invoice is
+            built), so the line names it. */}
+        {invoice.billing_reason === 'threshold' && (
+          <p className="text-xs text-muted-foreground">
+            The charges on this spend-threshold invoice will not be billed again. Voiding it later can change that.
+          </p>
+        )}
         {canPauseSubOnWriteOff ? (
           <div className="rounded-md border p-3 space-y-2">
             <div className="flex items-start gap-2">

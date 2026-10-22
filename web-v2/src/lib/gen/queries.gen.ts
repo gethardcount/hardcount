@@ -9628,6 +9628,13 @@ export const getVoidInvoiceUrl = (id: string,) => {
  * it) and resolves any active dunning run with `invoice_voided`.
  * Fires the `invoice.voided` webhook event.
  *
+ * A spend-threshold invoice (`billing_reason = threshold`) that fired
+ * with `reset_billing_cycle: false` and is voided before its period's
+ * invoice is built gives its charges back: that invoice bills them
+ * too. Voided after that, or
+ * fired with `reset_billing_cycle: true`, its charges are billed on no
+ * invoice; bill them with a one-off invoice if they should be charged.
+ *
  * A paid invoice cannot be voided: issue a credit note instead.
  * @summary Void an invoice
  */
@@ -9786,6 +9793,10 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  * Resolves any active dunning run with `invoice_not_collectible`, so
  * payment retries stop. Fires the `invoice.marked_uncollectible`
  * webhook event.
+ *
+ * A written-off spend-threshold invoice keeps its charges billed: no
+ * later invoice bills them again unless the invoice is then voided.
+ * `POST /v1/invoices/{id}/void` says when a void gives them back.
  * @summary Write off an invoice as uncollectible
  */
 export const markInvoiceUncollectible = async (id: string, options?: RequestInit): Promise<Invoice> => {

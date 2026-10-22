@@ -3809,6 +3809,13 @@ export interface paths {
          *     it) and resolves any active dunning run with `invoice_voided`.
          *     Fires the `invoice.voided` webhook event.
          *
+         *     A spend-threshold invoice (`billing_reason = threshold`) that fired
+         *     with `reset_billing_cycle: false` and is voided before its period's
+         *     invoice is built gives its charges back: that invoice bills them
+         *     too. Voided after that, or
+         *     fired with `reset_billing_cycle: true`, its charges are billed on no
+         *     invoice; bill them with a one-off invoice if they should be charged.
+         *
          *     A paid invoice cannot be voided: issue a credit note instead.
          */
         post: operations["voidInvoice"];
@@ -3863,6 +3870,10 @@ export interface paths {
          *     Resolves any active dunning run with `invoice_not_collectible`, so
          *     payment retries stop. Fires the `invoice.marked_uncollectible`
          *     webhook event.
+         *
+         *     A written-off spend-threshold invoice keeps its charges billed: no
+         *     later invoice bills them again unless the invoice is then voided.
+         *     `POST /v1/invoices/{id}/void` says when a void gives them back.
          */
         post: operations["markInvoiceUncollectible"];
         delete?: never;
@@ -7296,11 +7307,11 @@ export interface components {
              *     subscription that prices this meter already invoiced the
              *     event's time, so the event is stored but billed on no invoice,
              *     now or later. Bill it with a one-off invoice if it should be
-             *     charged. A spend-threshold invoice counts only once it is paid:
-             *     until then it can be voided or written off, and then the
-             *     period's invoice bills the event. Absent otherwise, which is not
-             *     a promise that the event will be billed. Never sent on a replay
-             *     or a read.
+             *     charged. A spend-threshold invoice that fired with
+             *     `reset_billing_cycle: false` counts only once it is paid: until
+             *     then it can be voided, and then the period's invoice bills the
+             *     event. Absent otherwise, which is not a promise that the event
+             *     will be billed. Never sent on a replay or a read.
              * @enum {string}
              */
             billing_status?: "after_close";
@@ -7433,8 +7444,6 @@ export interface components {
          *     `tax_reversed_unrecoverable` — the invoice's tax was reversed with the
          *     tax provider and cannot be re-reported automatically; the recorded
          *     payment collects tax already reported as not collected.
-         *     `recovery_superseded` — the invoice was billed on a usage threshold
-         *     and that usage has since been re-billed; the payment double-collects.
          *     `relief_not_reissued` — a credit the invoice was owed was never
          *     applied, so `amount_due_cents` is higher than what is owed and the
          *     customer may have overpaid.
@@ -7443,7 +7452,7 @@ export interface components {
             /** @description Always false — this shape only ever warns. */
             blocked: boolean;
             /** @enum {string} */
-            code?: "tax_reversed_unrecoverable" | "recovery_superseded" | "relief_not_reissued";
+            code?: "tax_reversed_unrecoverable" | "relief_not_reissued";
             /** @description Operator-facing sentence naming the consequence that will go unreconciled if the payment is recorded. */
             message?: string;
         };
@@ -9634,8 +9643,8 @@ export interface components {
             /**
              * @description Released rows of a sum or count meter stamped before the end of
              *     this period's spend-threshold invoice, while that invoice is not
-             *     paid. If it is paid, no invoice counts them. If it is voided or
-             *     written off before the period closes, the period's invoice
+             *     paid. If it is paid or written off, no invoice counts them. If
+             *     it is voided before the period closes, the period's invoice
              *     counts them.
              */
             pending_threshold_invoice: number;

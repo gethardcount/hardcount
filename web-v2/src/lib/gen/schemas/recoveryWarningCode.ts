@@ -13,6 +13,5 @@ export type RecoveryWarningCode = typeof RecoveryWarningCode[keyof typeof Recove
 
 export const RecoveryWarningCode = {
   tax_reversed_unrecoverable: 'tax_reversed_unrecoverable',
-  recovery_superseded: 'recovery_superseded',
   relief_not_reissued: 'relief_not_reissued',
 } as const;

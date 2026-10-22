@@ -379,9 +379,9 @@ period its time falls in, the same rule as any late usage (see
   invoice if it should be charged.
 - Inside the current period, but before the end of a spend-threshold
   invoice of that period: that invoice already covered the time. If it is
-  paid, no invoice includes the event, as above. If it is not paid yet, the
-  period's invoice includes it only if the spend-threshold invoice is
-  voided or written off first.
+  paid or written off, no invoice includes the event, as above. If it is
+  not paid yet, the period's invoice includes it only if the
+  spend-threshold invoice is voided first.
 
 The release answer counts each kind (`in_open_period`, `not_on_plan`,
 `outside_open_period`, and `pending_threshold_invoice` for the unpaid

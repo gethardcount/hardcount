@@ -299,7 +299,7 @@ func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
 // against the re-fire burn. A second ScanThresholds tick over the same
 // reset=false cycle must emit zero new invoices — and, critically, do so
 // WITHOUT allocating an invoice number or a tax calculation. The fire-once
-// probe (LatestThresholdPeriodEnd) short-circuits before fireThreshold's
+// probe (GetThresholdInvoiceForCycleAnyStatus) short-circuits before fireThreshold's
 // NextInvoiceNumber/ApplyTax; the partial unique index remains the correctness
 // backstop for a genuinely concurrent retry (two ticks both passing the probe).
 // Pre-probe, each re-tick allocated (and committed) a number in its own tx, then
@@ -915,9 +915,34 @@ type failableInvoiceAdapter struct {
 	// alreadyExists counts inserts that hit an invoice unique index — the
 	// pre-ADR-115 loser's exit, which no racing closer should reach now.
 	alreadyExists atomic.Int32
+	// createTxCalls counts every insert attempt, failed or not.
+	createTxCalls atomic.Int32
+	// afterWatermark and afterWatermarkTx run after each threshold
+	// watermark read (its own connection, or the caller's tx) returns: the
+	// seam where a competing void commits between a closer's read and its
+	// commit.
+	afterWatermark   func()
+	afterWatermarkTx func()
+}
+
+func (a *failableInvoiceAdapter) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	inv, err := a.invoiceStoreAdapter.GetLatestThresholdInvoiceForCycle(ctx, tenantID, subscriptionID, periodStart, periodEnd)
+	if a.afterWatermark != nil {
+		a.afterWatermark()
+	}
+	return inv, err
+}
+
+func (a *failableInvoiceAdapter) GetLatestThresholdInvoiceForCycleTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {
+	inv, err := a.invoiceStoreAdapter.GetLatestThresholdInvoiceForCycleTx(ctx, tx, tenantID, subscriptionID, periodStart, periodEnd)
+	if a.afterWatermarkTx != nil {
+		a.afterWatermarkTx()
+	}
+	return inv, err
 }
 
 func (a *failableInvoiceAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
+	a.createTxCalls.Add(1)
 	if a.createTxErr != nil {
 		return domain.Invoice{}, a.createTxErr
 	}
