@@ -42,7 +42,7 @@ func CheckSchemaReady(db *sql.DB) error {
 		// overlap or a rollback. It WARNs and continues: old code may not
 		// understand new columns or enum values, and no expand/contract
 		// rule is enforced yet. Whether to refuse instead is open; see
-		// docs/records/ha-readiness-2026-07-06.md (item 3) before tightening.
+		// docs/dev/records/ha-readiness-2026-07-06.md (item 3) before tightening.
 		var ahead []int64
 		for _, a := range p.Ahead {
 			ahead = append(ahead, a.Version)

@@ -49,7 +49,7 @@ turns that four-round discovery into one checklist.
 
 When the design or review runs as a panel of AI agents prompted in parallel,
 prompt them per
-[docs/records/agent-prompting-standards.md](../records/agent-prompting-standards.md).
+[docs/dev/records/agent-prompting-standards.md](records/agent-prompting-standards.md).
 It covers grounded claims, the reasoning sent with each request
 (reason-with-request), effort routing, and the optional mid-build
 spec-conformance verifier.
@@ -344,4 +344,4 @@ Six non-negotiable patterns:
 ## 6. Current posture (as of 2026-07-11)
 
 The dated census of each class's status moved to
-[docs/records/money-path-census-2026-07.md](../records/money-path-census-2026-07.md).
+[docs/dev/records/money-path-census-2026-07.md](records/money-path-census-2026-07.md).

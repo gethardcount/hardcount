@@ -52,59 +52,13 @@ Things to know:
 - **Background jobs run once, not once per copy.** Billing runs, payment retries and webhook delivery are background jobs. The copies agree, through a row in Postgres, on which one runs each job. The others stand by, and one takes over within about 15 seconds if the first dies.
 - **Connection poolers.** PgBouncer in transaction mode works for the server, and CI runs the test suite through it. RDS Proxy is expected to behave the same way but has not been tested ([details](ops/postgres-requirements.md)). Run database upgrades (migrations) over a direct connection.
 - **Give each copy 120 seconds to shut down.** On a stop signal, a copy first tells the load balancer it is leaving, then finishes its work. The worst case is 90 seconds.
-- **A few features still assume one copy.** The live event stream in the dashboard is one. None of them touch money. The full list is in the [readiness review](records/ha-readiness-2026-07-06.md).
+- **A few features still assume one copy.** The live event stream in the dashboard is one. None of them touch money.
 
 Load balancer setup, health checks, shutdown and rolling upgrades: [High availability](ops/high-availability.md).
 
 ## Working on Velox locally
 
-This runs the API from source on your machine. It is for development, not for hosting.
-
-```bash
-git clone https://github.com/getvelox/velox.git
-cd velox
-
-cp .env.example .env   # make dev reads it; the defaults work as they are
-docker compose up -d postgres redis mailpit
-VELOX_BOOTSTRAP_EMAIL=you@example.com VELOX_BOOTSTRAP_PASSWORD=change-me-please1 \
-  make bootstrap
-make dev
-```
-
-The email and password are optional. Without them, the owner is `admin@velox.local` and bootstrap prints a generated password. A password needs at least 12 characters, and Velox refuses common passwords from leaked-password lists.
-
-You now have:
-
-| Service | Where | Notes |
-|---|---|---|
-| Postgres | `:5432` | Password `velox`. Data is kept in a Docker volume. |
-| Redis | `:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
-| Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Velox sends, so nothing leaves your machine. |
-| The API | `:8080` | Started by `make dev`. Not a container. |
-
-The dashboard runs separately:
-
-```bash
-cd web-v2 && npm install && npm run dev
-# → http://localhost:5173
-```
-
-### Add a second account
-
-One Velox server can hold many accounts (tenants), each with its own data,
-dashboard users and API keys. To add another one, run the bootstrap tool
-again with a different owner email:
-
-```bash
-make bootstrap VELOX_BOOTSTRAP_EMAIL=tenant-b@velox.local \
-  VELOX_BOOTSTRAP_PASSWORD='choose-a-password' \
-  VELOX_BOOTSTRAP_TENANT='Tenant B'
-```
-
-The tool runs from source, so it needs Go and this repository. It is not in
-the Docker image. There is no button for this in the dashboard, and a
-secret key cannot do it: only a platform key can manage accounts, and a
-standard Velox server issues none.
+Running Velox from source for development: [CONTRIBUTING](../CONTRIBUTING.md#development-setup).
 
 ## Postgres
 
@@ -157,7 +111,7 @@ A migration is a versioned script that changes the database schema. Velox applie
 - If several copies start at once, they take turns: one applies the migrations and the others wait, then find nothing left to do.
 - **A failed migration leaves nothing to repair.** Each one runs in one transaction, so a failure undoes all of it. Fix the cause the error names and run the upgrade again. An index build runs without a transaction and may leave an INVALID index; running the upgrade again drops it and builds it again. See [A database upgrade stopped](ops/runbook/migration-failed-midway.md).
 - **Never roll back in production.** `velox migrate rollback` runs only with `APP_ENV=local`. To go back after an upgrade, restore the backup you took before it; see [Going back](production-one-vm.md#going-back).
-- **Each migration waits at most 5 seconds for a table lock.** While a migration waits for a lock, other queries on that table wait behind it, so Velox stops the upgrade instead of letting the table stall. The migration leaves nothing behind; run the upgrade again when the table is quieter. `MIGRATION_LOCK_TIMEOUT` changes the limit. See [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md).
+- **Each migration waits at most 5 seconds for a table lock.** While a migration waits for a lock, other queries on that table wait behind it, so Velox stops the upgrade instead of letting the table stall. The migration leaves nothing behind; run the upgrade again when the table is quieter. `MIGRATION_LOCK_TIMEOUT` changes the limit. See [An upgrade waited for a table lock](ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock).
 - **From v0.8.x,** v0.9.0 takes over a database at version 180 (v0.8.0, v0.8.1 or v0.8.2) without changing a table. Older databases upgrade to v0.8.1 first. The [changelog](../CHANGELOG.md) has the steps.
 
 ## Upgrading

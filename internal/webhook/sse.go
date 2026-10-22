@@ -40,7 +40,7 @@ import (
 // refresh shows the truth. Sticky sessions do not fix this, because
 // retry ticks move between replicas. Cross-replica fan-out (for example
 // Postgres LISTEN/NOTIFY inside EventBus) is deferred: item 8 of
-// docs/records/ha-readiness-2026-07-06.md. It affects only the
+// docs/dev/records/ha-readiness-2026-07-06.md. It affects only the
 // dashboard's live view, never delivery.
 const (
 	sseHeartbeatInterval = 15 * time.Second

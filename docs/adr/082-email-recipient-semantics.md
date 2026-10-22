@@ -2,7 +2,7 @@
 
 Date: 2026-07-06
 Status: Accepted. Amended 2026-07-19 by [ADR-098](098-postmark-delivery-webhook-ingestion.md). Amended 2026-10-18: [addresses must be bare](#amendment-2026-10-18-every-address-must-be-one-bare-address).
-Design basis: docs/design/cc-emails.md (two-lens divergent panel +
+Design basis: docs/dev/design/cc-emails.md (two-lens divergent panel +
 adversarial judge; plumbing claims verified against the code before
 acceptance).
 Register items: "Invoice/receipt/dunning emails go to exactly one

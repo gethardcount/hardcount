@@ -2,7 +2,7 @@
 
 > - **Decided:** a paid prepaid-commit invoice can be refunded with a credit note that retires its unused credits and refunds their cash at the purchase rate, not at face value. One cumulative rounding anchor makes any series of partial refunds add up exactly.
 > - **Shipped:** v0.2.0, in [#391](https://github.com/getvelox/velox/pull/391) (migration `0138_commit_cn_relief`). Design written 2026-07-06.
-> - **Current docs:** no guide covers it yet. The current rules are [ADR-080](../adr/080-paid-commit-cn-relief.md) and the `commit_relief` block of `POST /v1/credit-notes` in [`api/openapi.yaml`](../../api/openapi.yaml). Where this page and the code disagree, the code wins.
+> - **Current docs:** no guide covers it yet. The current rules are [ADR-080](../../adr/080-paid-commit-cn-relief.md) and the `commit_relief` block of `POST /v1/credit-notes` in [`api/openapi.yaml`](../../../api/openapi.yaml). Where this page and the code disagree, the code wins.
 
 > **Where the body is out of date** (checked against code 2026-10-18):
 >

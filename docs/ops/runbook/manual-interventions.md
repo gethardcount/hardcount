@@ -1,8 +1,7 @@
 # Manual fixes
 
-Operator actions for incidents, when the dashboard action is not available.
-Each one writes to the database directly, so record it in the audit log
-yourself. Back to the [runbook index](index.md).
+Operator actions for incidents. Where a fix below writes to the database
+directly, record it in the audit log yourself. Back to the [runbook index](index.md).
 
 ## Force-resolve a stuck dunning run
 
@@ -42,21 +41,15 @@ this only when the dashboard **Resolve** action is unavailable.
 
 4. **Record the action in the audit log.**
 
-## Force-mark an invoice paid (offline payment received)
+## Mark an invoice paid (offline payment received)
 
-Use the dashboard's **Mark as paid** action. The SQL alternative:
-
-```sql
--- payment_status has a CHECK (pending/processing/succeeded/failed/unknown);
--- 'paid' is an INVOICE status, not a payment_status. Mirror what MarkPaid does:
-UPDATE invoices
-SET status = 'paid', payment_status = 'succeeded',
-    amount_paid_cents = amount_due_cents, amount_due_cents = 0,
-    paid_at = now(), auto_charge_pending = false, updated_at = now()
-WHERE id = '<invoice_id>';
-```
-
-Record the action in the audit log yourself if you run SQL directly.
+Use **Record payment** on the invoice page, or
+`POST /v1/invoices/{id}/record-payment` (optional body
+`{"note": "Cheque #1234"}`). It also closes the dunning run, sends
+`invoice.paid` and writes the audit row, which an SQL update would skip.
+Do not mark an invoice paid with SQL. It is refused while a charge on the
+invoice is still being confirmed with Stripe: see
+[A charge's result is unclear](unclear-charge.md).
 
 ## A customer has no usable payment method on file
 

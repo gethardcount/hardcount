@@ -2,11 +2,11 @@
 
 > - **Decided:** add `GET /v1/customers/{id}/usage`. One call returns a customer's usage and its cost, per meter and per pricing rule, matched to rules the same way the cycle close does. It covers the current billing period unless you pass `from` and `to`.
 > - **Shipped:** v0.1.0, in [#26](https://github.com/getvelox/velox/pull/26); the dashboard view came in [#27](https://github.com/getvelox/velox/pull/27).
-> - **Current docs:** the [usage routes](../api-surface.md#usage) in The Velox API, and `/v1/customers/{id}/usage` in [`api/openapi.yaml`](../../api/openapi.yaml). Where this page and the code disagree, the code wins.
+> - **Current docs:** the [usage routes](../../api-surface.md#usage) in The Velox API, and `/v1/customers/{id}/usage` in [`api/openapi.yaml`](../../../api/openapi.yaml). Where this page and the code disagree, the code wins.
 
 > **Design document, written 2026-04-26 before the build.** The endpoint (`GET /v1/customers/{id}/usage`) has shipped; no ADR decided it, so the code is the current record: `internal/usage/customer_usage.go` and `customer_usage_handler.go`, with the dashboard in `web-v2/src/components/CostDashboard.tsx`.
-> Later decisions that changed it: [ADR-032](../adr/032-public-cost-dashboard-projection.md) added the public, token-protected cost-dashboard view of this data; [ADR-044](../adr/044-canonical-ai-token-metering-model.md) made one `token_type` dimension the canonical token shape (the example response already uses it; leftover names like `gpt4_input_uncached` predate it); [ADR-045](../adr/045-decimal-per-unit-pricing-rates.md) made per-unit rates decimal; [ADR-054](../adr/054-effective-unit-price-decimal-display.md) added the full-precision per-unit price to each rule row; [ADR-070](../adr/070-price-change-semantics.md) prices each rule (and any customer override) at the version in force at the start of the window, the same way invoices do. The [ADR-012 amendment of 2026-10-22](../adr/012-day-grade-calendar-billing.md#amendment-2026-10-22-one-usage-window-for-every-closer) starts an invoice's usage at the trial end, or where another subscription of the customer stopped covering the meter. This report still starts at the period start. Take the first paid period after a trial that ends mid-day, or a subscription created the day another one ended. For those, the report also shows that day's earlier usage, which the invoice does not bill.
-> Related designs: `docs/design/multi-dim-meters.md`, `docs/design/recipes.md`.
+> Later decisions that changed it: [ADR-032](../../adr/032-public-cost-dashboard-projection.md) added the public, token-protected cost-dashboard view of this data; [ADR-044](../../adr/044-canonical-ai-token-metering-model.md) made one `token_type` dimension the canonical token shape (the example response already uses it; leftover names like `gpt4_input_uncached` predate it); [ADR-045](../../adr/045-decimal-per-unit-pricing-rates.md) made per-unit rates decimal; [ADR-054](../../adr/054-effective-unit-price-decimal-display.md) added the full-precision per-unit price to each rule row; [ADR-070](../../adr/070-price-change-semantics.md) prices each rule (and any customer override) at the version in force at the start of the window, the same way invoices do. The [ADR-012 amendment of 2026-10-22](../../adr/012-day-grade-calendar-billing.md#amendment-2026-10-22-one-usage-window-for-every-closer) starts an invoice's usage at the trial end, or where another subscription of the customer stopped covering the meter. This report still starts at the period start. Take the first paid period after a trial that ends mid-day, or a subscription created the day another one ended. For those, the report also shows that day's earlier usage, which the invoice does not bill.
+> Related designs: `docs/dev/design/multi-dim-meters.md`, `docs/dev/design/recipes.md`.
 
 ## Motivation
 
@@ -49,7 +49,7 @@ This endpoint is **composition, not new aggregation logic**. The hard SQL alread
 
 ## API surface
 
-> **Wire-contract conventions** (consistent with `/v1/*`, see `docs/design/recipes.md` § wire-contract):
+> **Wire-contract conventions** (consistent with `/v1/*`, see `docs/dev/design/recipes.md` § wire-contract):
 >
 > - **Snake-case JSON keys**, struct-tag enforced. Picker-side TS types match.
 > - **Customer identity is the customer ID** (`vlx_cus_…`), not the external ID (the identifier the tenant's own system uses for the customer). Use `?external_id=` if you need external-ID lookup; defer for v2 or wrap as a separate endpoint.

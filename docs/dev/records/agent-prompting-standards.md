@@ -9,7 +9,7 @@ prompting guide (2026) plus what our own
 panels proved works. Copy the fragments; don't re-derive them per workflow.
 
 Scope: this is a **tooling** discipline. Money-path methodology stays in
-[money-path-robustness-playbook.md](../dev/money-path-robustness-playbook.md); this
+[money-path-robustness-playbook.md](../money-path-robustness-playbook.md); this
 doc is only about how we *prompt the agents* that execute that methodology.
 
 ## 1. Ground every claim (finders, auditors, status reporters)

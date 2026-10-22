@@ -7,7 +7,7 @@
 **RFM-001 — WAL recycled-pool exhaustion.** Your database looks healthy on
 every dashboard. It is stalling every few seconds anyway.
 
-> Entry 001 of the [failure-mode catalog](README.md). Diagnosed on AWS during
+> Entry 001 of the [failure-mode catalog](rfm-001-wal-pool-exhaustion.md). Diagnosed on AWS during
 > Velox's [sustained-throughput benchmark](../benchmarks/sustained-throughput.md);
 > reproducible with the rig scripts in [`scripts/bench-rig/`](../../scripts/bench-rig/).
 
@@ -82,7 +82,7 @@ Three observations, together, distinguish it from every other suspect:
 2. **Negative coincidence.** Zero of those freeze-seconds coincide with a
    logged autovacuum completion. (Vacuum storms produce a different
    fingerprint: average I/O size collapsing ~107 KB → ~6 KB with queue depth
-   in the hundreds — that's [RFM-002](README.md), a different entry.)
+   in the hundreds — that's [RFM-002](rfm-001-wal-pool-exhaustion.md), a different entry.)
 3. **Arithmetic.** Measured WAL rate × checkpoint interval, compared against
    configured `min_wal_size`. If one checkpoint cycle writes more WAL than
    the pool holds, the pool must run dry inside every cycle.
