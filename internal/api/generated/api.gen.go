@@ -1334,6 +1334,21 @@ func (e PlanStatus) Valid() bool {
 	}
 }
 
+// Defines values for ProviderCostRateCurrency.
+const (
+	ProviderCostRateCurrencyUSD ProviderCostRateCurrency = "USD"
+)
+
+// Valid indicates whether the value is a known member of the ProviderCostRateCurrency enum.
+func (e ProviderCostRateCurrency) Valid() bool {
+	switch e {
+	case ProviderCostRateCurrencyUSD:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RatingRuleLifecycleState.
 const (
 	RatingRuleLifecycleStateActive   RatingRuleLifecycleState = "active"
@@ -2216,6 +2231,24 @@ func (e ListCreditNotesParamsDir) Valid() bool {
 	}
 }
 
+// Defines values for PostV1CreditNotesJSONBodyRefundType.
+const (
+	PostV1CreditNotesJSONBodyRefundTypeCredit PostV1CreditNotesJSONBodyRefundType = "credit"
+	PostV1CreditNotesJSONBodyRefundTypeRefund PostV1CreditNotesJSONBodyRefundType = "refund"
+)
+
+// Valid indicates whether the value is a known member of the PostV1CreditNotesJSONBodyRefundType enum.
+func (e PostV1CreditNotesJSONBodyRefundType) Valid() bool {
+	switch e {
+	case PostV1CreditNotesJSONBodyRefundTypeCredit:
+		return true
+	case PostV1CreditNotesJSONBodyRefundTypeRefund:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PostV1CreditNotesIdSend200JSONResponseBodyStatus.
 const (
 	PostV1CreditNotesIdSend200JSONResponseBodyStatusSent PostV1CreditNotesIdSend200JSONResponseBodyStatus = "sent"
@@ -2248,22 +2281,22 @@ func (e PostV1CreditsGrantJSONBodyGrantKind) Valid() bool {
 
 // Defines values for ListCreditLedgerEntriesParamsEntryType.
 const (
-	ListCreditLedgerEntriesParamsEntryTypeAdjustment ListCreditLedgerEntriesParamsEntryType = "adjustment"
-	ListCreditLedgerEntriesParamsEntryTypeExpiry     ListCreditLedgerEntriesParamsEntryType = "expiry"
-	ListCreditLedgerEntriesParamsEntryTypeGrant      ListCreditLedgerEntriesParamsEntryType = "grant"
-	ListCreditLedgerEntriesParamsEntryTypeUsage      ListCreditLedgerEntriesParamsEntryType = "usage"
+	Adjustment ListCreditLedgerEntriesParamsEntryType = "adjustment"
+	Expiry     ListCreditLedgerEntriesParamsEntryType = "expiry"
+	Grant      ListCreditLedgerEntriesParamsEntryType = "grant"
+	Usage      ListCreditLedgerEntriesParamsEntryType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the ListCreditLedgerEntriesParamsEntryType enum.
 func (e ListCreditLedgerEntriesParamsEntryType) Valid() bool {
 	switch e {
-	case ListCreditLedgerEntriesParamsEntryTypeAdjustment:
+	case Adjustment:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeExpiry:
+	case Expiry:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeGrant:
+	case Grant:
 		return true
-	case ListCreditLedgerEntriesParamsEntryTypeUsage:
+	case Usage:
 		return true
 	default:
 		return false
@@ -2582,6 +2615,21 @@ func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
 	}
 }
 
+// Defines values for PostV1PlansJSONBodyStatus.
+const (
+	PostV1PlansJSONBodyStatusActive PostV1PlansJSONBodyStatus = "active"
+)
+
+// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyStatus enum.
+func (e PostV1PlansJSONBodyStatus) Valid() bool {
+	switch e {
+	case PostV1PlansJSONBodyStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPlan200JSONResponseBodyBaseBillTiming.
 const (
 	GetPlan200JSONResponseBodyBaseBillTimingInAdvance GetPlan200JSONResponseBodyBaseBillTiming = "in_advance"
@@ -2714,6 +2762,21 @@ func (e DeletePriceOverride200JSONResponseBodyActive) Valid() bool {
 	}
 }
 
+// Defines values for PutV1ProviderCostsJSONBodyCurrency.
+const (
+	PutV1ProviderCostsJSONBodyCurrencyUSD PutV1ProviderCostsJSONBodyCurrency = "USD"
+)
+
+// Valid indicates whether the value is a known member of the PutV1ProviderCostsJSONBodyCurrency enum.
+func (e PutV1ProviderCostsJSONBodyCurrency) Valid() bool {
+	switch e {
+	case PutV1ProviderCostsJSONBodyCurrencyUSD:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource.
 const (
 	GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSourceNoSubscription GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource = "no_subscription"
@@ -2734,19 +2797,19 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 
 // Defines values for GetV1RatingRulesParamsLifecycleState.
 const (
-	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
-	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
-	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
+	Active   GetV1RatingRulesParamsLifecycleState = "active"
+	Archived GetV1RatingRulesParamsLifecycleState = "archived"
+	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
 func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 	switch e {
-	case GetV1RatingRulesParamsLifecycleStateActive:
+	case Active:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateArchived:
+	case Archived:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateDraft:
+	case Draft:
 		return true
 	default:
 		return false
@@ -3719,7 +3782,7 @@ type CreditLedgerEntry struct {
 	// AmountCents Positive adds credit, negative removes it.
 	AmountCents int64 `json:"amount_cents"`
 
-	// BalanceAfter Customer's credit balance after this entry.
+	// BalanceAfter Customer's credit balance after this entry, in cents.
 	BalanceAfter int64 `json:"balance_after"`
 
 	// ConsumedCents For entries that add credit, how much has been used or expired.
@@ -4037,7 +4100,9 @@ type CustomerPriceOverride struct {
 
 	// FlatAmountCents Per-unit rate in cents, as a decimal string.
 	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers  []struct {
+
+	// GraduatedTiers Empty (`[]`) unless `mode` is `graduated`.
+	GraduatedTiers []struct {
 		// UnitAmountCents Per-unit rate in cents, as a decimal string.
 		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 
@@ -5377,14 +5442,19 @@ type ProviderCostRate struct {
 	// CostPerToken Decimal dollars per token.
 	CostPerToken string    `json:"cost_per_token"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
-	Currency     string    `json:"currency"`
-	Id           string    `json:"id"`
-	Model        string    `json:"model"`
-	Provider     string    `json:"provider"`
-	TenantId     string    `json:"tenant_id,omitempty"`
-	TokenType    string    `json:"token_type"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+
+	// Currency Always USD. Cost and margin count every rate in dollars.
+	Currency  ProviderCostRateCurrency `json:"currency"`
+	Id        string                   `json:"id"`
+	Model     string                   `json:"model"`
+	Provider  string                   `json:"provider"`
+	TenantId  string                   `json:"tenant_id,omitempty"`
+	TokenType string                   `json:"token_type"`
+	UpdatedAt time.Time                `json:"updated_at,omitempty"`
 }
+
+// ProviderCostRateCurrency Always USD. Cost and margin count every rate in dollars.
+type ProviderCostRateCurrency string
 
 // PublicPaymentUpdate What the payment-update page shows before the customer adds a card.
 type PublicPaymentUpdate struct {
@@ -5835,9 +5905,6 @@ type Subscription struct {
 	Items         []SubscriptionItem `json:"items,omitempty"`
 	NextBillingAt time.Time          `json:"next_billing_at,omitempty"`
 
-	// OverageAction `block` or `charge` (the default).
-	OverageAction string `json:"overage_action,omitempty"`
-
 	// PauseCollection Present on a subscription while collection is paused. Invoices are
 	// still created, but stay drafts and are not charged.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
@@ -5848,9 +5915,6 @@ type Subscription struct {
 	TrialEndAt      time.Time                   `json:"trial_end_at,omitempty"`
 	TrialStartAt    time.Time                   `json:"trial_start_at,omitempty"`
 	UpdatedAt       time.Time                   `json:"updated_at"`
-
-	// UsageCapUnits Most usage units per billing period. Absent means no cap.
-	UsageCapUnits int64 `json:"usage_cap_units,omitempty"`
 }
 
 // SubscriptionBillingTime defines model for Subscription.BillingTime.
@@ -5874,9 +5938,9 @@ type SubscriptionItem struct {
 	CreatedAt time.Time `json:"created_at"`
 	Id        string    `json:"id"`
 
-	// Metadata The item's stored metadata JSON, base64-encoded. Absent when empty.
-	Metadata               []byte    `json:"metadata,omitempty"`
-	PendingPlanEffectiveAt time.Time `json:"pending_plan_effective_at,omitempty"`
+	// Metadata The item's stored metadata. Absent when empty.
+	Metadata               map[string]interface{} `json:"metadata,omitempty"`
+	PendingPlanEffectiveAt time.Time              `json:"pending_plan_effective_at,omitempty"`
 
 	// PendingPlanId Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled.
 	PendingPlanId string `json:"pending_plan_id,omitempty"`
@@ -6768,9 +6832,18 @@ type ListCreditNotesParamsDir string
 type PostV1CreditNotesJSONBody struct {
 	AutoIssue bool `json:"auto_issue,omitempty"`
 
-	// CommitRelief Mutually exclusive with lines/credit_amount_cents.
+	// CommitRelief Mutually exclusive with lines and credit_amount_cents. The
+	// relief's split goes in here, not at the top level: a top-level
+	// `refund_amount_cents`, `out_of_band_amount_cents` or
+	// `refund_type` is a 422. Example after a lost dispute:
+	// `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
 	CommitRelief struct {
-		OutOfBandAmountCents int `json:"out_of_band_amount_cents,omitempty"`
+		// InvoiceId Optional. Defaults to the top-level invoice_id.
+		InvoiceId            string `json:"invoice_id,omitempty"`
+		OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
+
+		// Reason Optional. Defaults to the top-level reason.
+		Reason string `json:"reason,omitempty"`
 
 		// RefundAmountCents Optional allocation; must sum with out_of_band to the derived cash.
 		RefundAmountCents int `json:"refund_amount_cents,omitempty"`
@@ -6784,13 +6857,25 @@ type PostV1CreditNotesJSONBody struct {
 	CreditAmountCents int    `json:"credit_amount_cents,omitempty"`
 	InvoiceId         string `json:"invoice_id"`
 	Lines             []struct {
-		Description     string `json:"description,omitempty"`
-		Quantity        int    `json:"quantity,omitempty"`
-		UnitAmountCents int    `json:"unit_amount_cents,omitempty"`
+		Description string `json:"description,omitempty"`
+
+		// InvoiceLineItemId Optional. The invoice line this credit line reverses.
+		InvoiceLineItemId string `json:"invoice_line_item_id,omitempty"`
+		Quantity          int    `json:"quantity,omitempty"`
+		UnitAmountCents   int    `json:"unit_amount_cents,omitempty"`
 	} `json:"lines,omitempty"`
+
+	// OutOfBandAmountCents Not with commit_relief; put the relief's split inside commit_relief.
 	OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
 	Reason               string `json:"reason,omitempty"`
-	RefundAmountCents    int    `json:"refund_amount_cents,omitempty"`
+
+	// RefundAmountCents Not with commit_relief; put the relief's split inside commit_relief.
+	RefundAmountCents int `json:"refund_amount_cents,omitempty"`
+
+	// RefundType Older single-channel form. On a paid invoice whose three
+	// `*_amount_cents` fields are all 0, `refund` or `credit`
+	// puts the whole note in that channel. Not with commit_relief.
+	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
 }
 
 // PostV1CreditNotesParams defines parameters for PostV1CreditNotes.
@@ -6802,6 +6887,9 @@ type PostV1CreditNotesParams struct {
 	// error cases are in docs/api-surface.md.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
+
+// PostV1CreditNotesJSONBodyRefundType defines parameters for PostV1CreditNotes.
+type PostV1CreditNotesJSONBodyRefundType string
 
 // IssueCreditNoteParams defines parameters for IssueCreditNote.
 type IssueCreditNoteParams struct {
@@ -6958,6 +7046,9 @@ type PostV1CustomersJSONBody struct {
 	DisplayName      string   `json:"display_name"`
 	Email            string   `json:"email,omitempty"`
 	ExternalId       string   `json:"external_id"`
+
+	// TestClockId Test mode only. Attaches the customer to a test clock.
+	TestClockId string `json:"test_clock_id,omitempty"`
 }
 
 // PostV1CustomersParams defines parameters for PostV1Customers.
@@ -7551,7 +7642,7 @@ type UpsertMeterPricingRuleJSONBodyAggregationMode string
 
 // PostV1PlansJSONBody defines parameters for PostV1Plans.
 type PostV1PlansJSONBody struct {
-	BaseAmountCents int `json:"base_amount_cents,omitempty"`
+	BaseAmountCents int64 `json:"base_amount_cents,omitempty"`
 
 	// BaseBillTiming Optional. Defaults to in_arrears. See Plan.base_bill_timing
 	// for semantics (ADR-031).
@@ -7559,8 +7650,17 @@ type PostV1PlansJSONBody struct {
 	BillingInterval PostV1PlansJSONBodyBillingInterval `json:"billing_interval"`
 	Code            string                             `json:"code"`
 	Currency        string                             `json:"currency"`
+	Description     string                             `json:"description,omitempty"`
 	MeterIds        []string                           `json:"meter_ids,omitempty"`
 	Name            string                             `json:"name"`
+
+	// Status Optional. A plan is created active; archive it with PATCH.
+	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
+
+	// TaxCode Stripe product tax code for the base fee, such as
+	// `txcd_10103001`. Empty or omitted means the tenant's
+	// `default_product_tax_code`.
+	TaxCode string `json:"tax_code,omitempty"`
 }
 
 // PostV1PlansParams defines parameters for PostV1Plans.
@@ -7579,6 +7679,9 @@ type PostV1PlansJSONBodyBaseBillTiming string
 // PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyBillingInterval string
 
+// PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
+type PostV1PlansJSONBodyStatus string
+
 // GetPlan200JSONResponseBodyBaseBillTiming defines parameters for GetPlan.
 type GetPlan200JSONResponseBodyBaseBillTiming string
 
@@ -7594,7 +7697,7 @@ type UpdatePlanJSONBody struct {
 	BaseAmountCents int64                            `json:"base_amount_cents,omitempty"`
 	BaseBillTiming  UpdatePlanJSONBodyBaseBillTiming `json:"base_bill_timing,omitempty"`
 
-	// Description Omitting it clears the stored description.
+	// Description Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
 	Description string `json:"description,omitempty"`
 
 	// MeterIds Replaces the plan's meters. Omit to keep them.
@@ -7604,7 +7707,7 @@ type UpdatePlanJSONBody struct {
 	Name   string                   `json:"name,omitempty"`
 	Status UpdatePlanJSONBodyStatus `json:"status,omitempty"`
 
-	// TaxCode Stripe product tax code. Omitting it clears the stored code.
+	// TaxCode Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
 	TaxCode string `json:"tax_code,omitempty"`
 }
 
@@ -7681,7 +7784,10 @@ type DeletePriceOverride200JSONResponseBodyActive bool
 type PutV1ProviderCostsJSONBody struct {
 	// CostPerToken Decimal dollars per token (e.g. "0.000003").
 	CostPerToken string `json:"cost_per_token"`
-	Currency     string `json:"currency,omitempty"`
+
+	// Currency Rates are in USD only, the currency LiteLLM reports cost
+	// in. Any other value is 422.
+	Currency PutV1ProviderCostsJSONBodyCurrency `json:"currency,omitempty"`
 
 	// Model Model family token or raw snapshot id — raw ids match first at ingest.
 	Model    string `json:"model"`
@@ -7700,6 +7806,9 @@ type PutV1ProviderCostsParams struct {
 	// error cases are in docs/api-surface.md.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
+
+// PutV1ProviderCostsJSONBodyCurrency defines parameters for PutV1ProviderCosts.
+type PutV1ProviderCostsJSONBodyCurrency string
 
 // GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource defines parameters for GetV1PublicCostDashboardToken.
 type GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource string
@@ -7972,7 +8081,7 @@ type EndSubscriptionTrialParams struct {
 
 // ExtendSubscriptionTrialJSONBody defines parameters for ExtendSubscriptionTrial.
 type ExtendSubscriptionTrialJSONBody struct {
-	// TrialEnd The new trial end. Must be in the future and after the current `trial_end_at`.
+	// TrialEnd The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
 	TrialEnd time.Time `json:"trial_end"`
 }
 
@@ -8145,13 +8254,13 @@ type GetV1UsageEventsParams struct {
 	// `model=gpt-4o,token_type=input`.
 	Dimensions string `form:"dimensions,omitempty" json:"dimensions,omitempty"`
 
-	// From Only events at or after this time (RFC 3339). A value that does not parse is ignored.
-	From time.Time `form:"from,omitempty" json:"from,omitempty"`
+	// From Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
+	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
-	To     time.Time `form:"to,omitempty" json:"to,omitempty"`
-	Limit  int       `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset int       `form:"offset,omitempty" json:"offset,omitempty"`
+	// To Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
+	To     string `form:"to,omitempty" json:"to,omitempty"`
+	Limit  int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset int    `form:"offset,omitempty" json:"offset,omitempty"`
 
 	// After Opaque cursor from `next_cursor`. Takes precedence over `offset`.
 	After string `form:"after,omitempty" json:"after,omitempty"`
@@ -8180,8 +8289,10 @@ type PostV1UsageEventsJSONBody struct {
 	// 255 characters. The `Idempotency-Key` header does not
 	// count as this key: it caches one HTTP response for 24
 	// hours.
-	IdempotencyKey string                 `json:"idempotency_key"`
-	Properties     map[string]interface{} `json:"properties,omitempty"`
+	IdempotencyKey string `json:"idempotency_key"`
+
+	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
+	Properties map[string]interface{} `json:"properties,omitempty"`
 
 	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
 	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
@@ -8214,11 +8325,11 @@ type AggregateUsageEventsParams struct {
 	CustomerId string `form:"customer_id,omitempty" json:"customer_id,omitempty"`
 	MeterId    string `form:"meter_id,omitempty" json:"meter_id,omitempty"`
 
-	// From Events at or after this time (RFC 3339).
-	From time.Time `form:"from,omitempty" json:"from,omitempty"`
+	// From Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
+	From string `form:"from,omitempty" json:"from,omitempty"`
 
-	// To Events before this time (RFC 3339).
-	To time.Time `form:"to,omitempty" json:"to,omitempty"`
+	// To Events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
+	To string `form:"to,omitempty" json:"to,omitempty"`
 
 	// Dimensions Comma-separated key=value pairs matched against event dimensions,
 	// same syntax as `GET /v1/usage-events`. Example:
@@ -8309,6 +8420,9 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// count as this key: it caches one HTTP response for 24
 	// hours.
 	IdempotencyKey string `json:"idempotency_key"`
+
+	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
+	Properties map[string]interface{} `json:"properties,omitempty"`
 
 	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
 	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
@@ -18313,7 +18427,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 
 	// ------------- Optional query parameter "from" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -18326,7 +18440,7 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 
 	// ------------- Optional query parameter "to" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -18477,7 +18591,7 @@ func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r
 
 	// ------------- Optional query parameter "from" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -18490,7 +18604,7 @@ func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r
 
 	// ------------- Optional query parameter "to" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {

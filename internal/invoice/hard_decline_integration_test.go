@@ -40,9 +40,9 @@ func (r *hardDeclineStoreRig) customer(key string) string {
 
 func (r *hardDeclineStoreRig) card(custID, pm string) paymentmethods.PaymentMethod {
 	r.t.Helper()
-	got, err := r.pms.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
+	got, _, err := r.pms.Upsert(r.ctx, r.tenantID, paymentmethods.PaymentMethod{
 		CustomerID: custID, StripePaymentMethodID: pm, Type: "card", CardFingerprint: "fp_" + pm,
-	})
+	}, false)
 	if err != nil {
 		r.t.Fatalf("add card %s: %v", pm, err)
 	}

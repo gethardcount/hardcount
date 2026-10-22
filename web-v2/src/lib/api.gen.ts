@@ -165,6 +165,8 @@ export interface paths {
                         display_name: string;
                         email?: string;
                         additional_emails?: string[];
+                        /** @description Test mode only. Attaches the customer to a test clock. */
+                        test_clock_id?: string;
                     };
                 };
             };
@@ -184,6 +186,19 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /**
+                 * @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 *     `dunning_policy_id` is not a create field: assign a policy with
+                 *     `PATCH /v1/customers/{id}`.
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -357,8 +372,7 @@ export interface paths {
          *     days, newest first: invoice, payment receipt, payment failed,
          *     payment setup request, dunning, and credit note emails. Emails
          *     not tied to an invoice (such as a setup link sent from the
-         *     payment-methods page) are not listed. No paging. An unknown
-         *     customer ID returns an empty list, not 404.
+         *     payment-methods page) are not listed. No paging.
          */
         get: operations["listCustomerSentEmails"];
         put?: never;
@@ -641,9 +655,7 @@ export interface paths {
          * @description An older route the dashboard no longer uses. Prefer
          *     `GET /v1/customers/{customer_id}/payment-methods`.
          *
-         *     Any read error, an unknown customer included, returns 200 with
-         *     `setup_status: missing` and zero timestamps. Needs the
-         *     `customer:write` permission.
+         *     An unknown customer is 404. Needs the `customer:write` permission.
          */
         get: operations["getCheckoutSetupStatus"];
         put?: never;
@@ -1096,8 +1108,7 @@ export interface paths {
          * List a meter's pricing rules
          * @description Every pricing rule on the meter, highest priority first, then oldest
          *     first. At billing time each usage event is billed by the first rule
-         *     in this order whose `dimension_match` it matches. The meter id is
-         *     not checked: an unknown id returns an empty list.
+         *     in this order whose `dimension_match` it matches.
          */
         get: operations["listMeterPricingRules"];
         put?: never;
@@ -1216,16 +1227,37 @@ export interface paths {
                         invoice_id: string;
                         reason?: string;
                         lines?: {
+                            /** @description Optional. The invoice line this credit line reverses. */
+                            invoice_line_item_id?: string;
                             description?: string;
                             quantity?: number;
                             unit_amount_cents?: number;
                         }[];
+                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
                         refund_amount_cents?: number;
                         credit_amount_cents?: number;
+                        /** @description Not with commit_relief; put the relief's split inside commit_relief. */
                         out_of_band_amount_cents?: number;
+                        /**
+                         * @description Older single-channel form. On a paid invoice whose three
+                         *     `*_amount_cents` fields are all 0, `refund` or `credit`
+                         *     puts the whole note in that channel. Not with commit_relief.
+                         * @enum {string}
+                         */
+                        refund_type?: "refund" | "credit";
                         auto_issue?: boolean;
-                        /** @description Mutually exclusive with lines/credit_amount_cents. */
+                        /**
+                         * @description Mutually exclusive with lines and credit_amount_cents. The
+                         *     relief's split goes in here, not at the top level: a top-level
+                         *     `refund_amount_cents`, `out_of_band_amount_cents` or
+                         *     `refund_type` is a 422. Example after a lost dispute:
+                         *     `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+                         */
                         commit_relief?: {
+                            /** @description Optional. Defaults to the top-level invoice_id. */
+                            invoice_id?: string;
+                            /** @description Optional. Defaults to the top-level reason. */
+                            reason?: string;
                             /** @description Commit credits to retire (1..remaining). */
                             retire_cents?: number;
                             /** @description Retire the LIVE remaining (absorbs racing drawdowns). */
@@ -1254,7 +1286,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice) */
+                /** @description Validation (over-retire with live remaining; allocation mismatch; zero-cash slice), or an unknown field (`param` names it; the body must use only the fields listed here) */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -1310,6 +1342,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["CreditGrants"];
+                    };
+                };
+                /** @description No customer with this ID in this tenant and mode. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -1383,8 +1424,7 @@ export interface paths {
          * List a customer's credit ledger
          * @description Ledger entries for one customer. `balance_after` is the running
          *     balance in time order over the whole ledger, so it stays right
-         *     when you filter by `entry_type`. An unknown customer returns an
-         *     empty list, not 404.
+         *     when you filter by `entry_type`.
          */
         get: operations["listCreditLedgerEntries"];
         put?: never;
@@ -1990,9 +2030,11 @@ export interface paths {
                     "application/json": {
                         code: string;
                         name: string;
+                        description?: string;
                         currency: string;
                         /** @enum {string} */
                         billing_interval: "monthly" | "yearly";
+                        /** Format: int64 */
                         base_amount_cents?: number;
                         /**
                          * @description Optional. Defaults to in_arrears. See Plan.base_bill_timing
@@ -2001,6 +2043,17 @@ export interface paths {
                          */
                         base_bill_timing?: "in_advance" | "in_arrears";
                         meter_ids?: string[];
+                        /**
+                         * @description Optional. A plan is created active; archive it with PATCH.
+                         * @enum {string}
+                         */
+                        status?: "active";
+                        /**
+                         * @description Stripe product tax code for the base fee, such as
+                         *     `txcd_10103001`. Empty or omitted means the tenant's
+                         *     `default_product_tax_code`.
+                         */
+                        tax_code?: string;
                     };
                 };
             };
@@ -2012,6 +2065,19 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Plan"];
+                    };
+                };
+                /**
+                 * @description A field failed validation, `status` is set to anything but
+                 *     `active` (a plan is created active; archive it with PATCH), or
+                 *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -2038,10 +2104,9 @@ export interface paths {
         head?: never;
         /**
          * Update plan
-         * @description `name`, `base_amount_cents`, `base_bill_timing`, `meter_ids` and
-         *     `status` are left unchanged when omitted. `description` and
-         *     `tax_code` are always written: omitting them clears them. `code`,
-         *     `currency` and `billing_interval` cannot be changed and are ignored.
+         * @description A field left out keeps its current value. To clear `description`
+         *     or `tax_code`, send an empty string. `code`, `currency` and
+         *     `billing_interval` cannot be changed and are ignored.
          *
          *     `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
          *     subscriptions are billed. Changing any of them is refused while a
@@ -2137,6 +2202,28 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["RatingRule"];
+                    };
+                };
+                /** @description The body is not valid JSON. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description A field failed validation, or the body has an unknown field at
+                 *     any depth (`param` names it; the body must use only the fields
+                 *     listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -2264,6 +2351,18 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Subscription"];
+                    };
+                };
+                /**
+                 * @description A field failed validation (`param` names it), for example
+                 *     `trial_days` outside 0 to 730, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -2829,9 +2928,9 @@ export interface paths {
                      *     `model=gpt-4o,token_type=input`.
                      */
                     dimensions?: string;
-                    /** @description Only events at or after this time (RFC 3339). A value that does not parse is ignored. */
+                    /** @description Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
                     from?: string;
-                    /** @description Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored. */
+                    /** @description Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
                     to?: string;
                     limit?: number;
                     offset?: number;
@@ -2861,12 +2960,14 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Malformed dimensions filter */
+                /** @description `validation_error`: a malformed `dimensions` pair, or a `from` or `to` that cannot be parsed, or `to` before `from` (param names the field). */
                 422: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
             };
         };
@@ -2901,6 +3002,7 @@ export interface paths {
                         dimensions?: {
                             [key: string]: unknown;
                         };
+                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
                         properties?: {
                             [key: string]: unknown;
                         };
@@ -3015,6 +3117,10 @@ export interface paths {
                         /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
                         quantity: number | string;
                         dimensions?: {
+                            [key: string]: unknown;
+                        };
+                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
+                        properties?: {
                             [key: string]: unknown;
                         };
                         /**
@@ -3210,8 +3316,7 @@ export interface paths {
          *     customer's latest reading (Latest value), added across customers.
          *     `total` stays the plain sum of reported quantities. `total_units`
          *     adds quantities across all meters whatever their units, and is kept
-         *     for compatibility only. A `from` or `to` value that is not RFC 3339
-         *     is ignored, not rejected.
+         *     for compatibility only.
          */
         get: operations["aggregateUsageEvents"];
         put?: never;
@@ -3234,8 +3339,7 @@ export interface paths {
          * @description Per-meter quantity totals and the event count for one customer over
          *     a window. Without `from` and `to` the window is the current calendar
          *     month in UTC (the test clock's month when the customer is on one).
-         *     Quantities are plain sums, whatever the meter's aggregation. An
-         *     unknown customer id returns zero totals, not 404.
+         *     Quantities are plain sums, whatever the meter's aggregation.
          */
         get: operations["getUsageSummary"];
         put?: never;
@@ -3361,9 +3465,7 @@ export interface paths {
          *     trial-end invoice when a plan bills in advance, otherwise the close
          *     of the first paid period, prorated the same way. With an
          *     explicit `period`, it is a flat estimate over that window and warns
-         *     when a mid-period change makes the invoice differ. Neither applies
-         *     usage-cap scaling (ADR-045): a capped subscription's `warnings[]`
-         *     says the invoice can be lower. Composes across customer / subscription / pricing;
+         *     when a mid-period change makes the invoice differ. Composes across customer / subscription / pricing;
          *     registered as a sibling of `/v1/invoices` (chi picks the more
          *     specific pattern, otherwise `/{id}` would capture
          *     `create_preview` as an invoice ID). See
@@ -5038,8 +5140,13 @@ export interface paths {
                         token_type: string;
                         /** @description Decimal dollars per token (e.g. "0.000003"). */
                         cost_per_token: string;
-                        /** @default USD */
-                        currency?: string;
+                        /**
+                         * @description Rates are in USD only, the currency LiteLLM reports cost
+                         *     in. Any other value is 422.
+                         * @default USD
+                         * @enum {string}
+                         */
+                        currency?: "USD";
                     };
                 };
             };
@@ -5051,6 +5158,15 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ProviderCostRate"];
+                    };
+                };
+                /** @description `validation_error`: a required field is missing, `cost_per_token` is negative, or `currency` is not USD (param names the field). */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };
@@ -5244,6 +5360,15 @@ export interface paths {
                         "application/json": components["schemas"]["CreditLedgerEntry"];
                     };
                 };
+                /** @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -5280,6 +5405,15 @@ export interface paths {
                         "application/json": components["schemas"]["CreditBalance"];
                     };
                 };
+                /** @description No customer with this ID in this tenant and mode. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
@@ -5311,8 +5445,7 @@ export interface paths {
          *     A top-up shows on the next read.
          *
          *     Not included, so the figure can read high: tax, base fees billed at
-         *     period end, and amounts due on unpaid invoices. A subscription with a
-         *     blocking usage cap can read low. Requires a secret key.
+         *     period end, and amounts due on unpaid invoices. Requires a secret key.
          */
         get: {
             parameters: {
@@ -6983,13 +7116,6 @@ export interface components {
             next_billing_at?: string;
             /** @description Day of the month the subscription bills on (1-31). Absent for calendar-monthly subscriptions. */
             billing_anchor_day?: number;
-            /**
-             * Format: int64
-             * @description Most usage units per billing period. Absent means no cap.
-             */
-            usage_cap_units?: number;
-            /** @description `block` or `charge` (the default). */
-            overage_action?: string;
             test_clock_id?: string;
             billing_failure?: components["schemas"]["BillingFailure"];
             /** Format: date-time */
@@ -7638,7 +7764,11 @@ export interface components {
             token_type: string;
             /** @description Decimal dollars per token. */
             cost_per_token: string;
-            currency: string;
+            /**
+             * @description Always USD. Cost and margin count every rate in dollars.
+             * @enum {string}
+             */
+            currency: "USD";
             /** Format: date-time */
             created_at?: string;
             /** Format: date-time */
@@ -8143,7 +8273,7 @@ export interface components {
             amount_cents: number;
             /**
              * Format: int64
-             * @description Customer's credit balance after this entry.
+             * @description Customer's credit balance after this entry, in cents.
              */
             balance_after: number;
             description: string;
@@ -8187,11 +8317,10 @@ export interface components {
             plan_id: string;
             /** Format: int64 */
             quantity: number;
-            /**
-             * Format: byte
-             * @description The item's stored metadata JSON, base64-encoded. Absent when empty.
-             */
-            metadata?: string;
+            /** @description The item's stored metadata. Absent when empty. */
+            metadata?: {
+                [key: string]: unknown;
+            };
             /** @description Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled. */
             pending_plan_id?: string;
             /** Format: date-time */
@@ -8975,6 +9104,7 @@ export interface components {
             mode: "flat" | "graduated" | "package";
             /** @description Per-unit rate in cents, as a decimal string. */
             flat_amount_cents?: string;
+            /** @description Empty (`[]`) unless `mode` is `graduated`. */
             graduated_tiers?: {
                 /**
                  * Format: int64
@@ -8983,7 +9113,7 @@ export interface components {
                 up_to?: number;
                 /** @description Per-unit rate in cents, as a decimal string. */
                 unit_amount_cents?: string;
-            }[] | null;
+            }[];
             /** Format: int64 */
             package_size?: number;
             /** Format: int64 */
@@ -10292,7 +10422,11 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description A field failed validation (`param` names it). */
+            /**
+             * @description A field failed validation, or the body has a key the profile does
+             *     not have, such as `tax_exempt` (set `tax_status` instead). `param`
+             *     names the field. A body read back from GET is accepted.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -10323,6 +10457,15 @@ export interface operations {
                     "application/json": {
                         sent_emails: components["schemas"]["SentEmail"][];
                     };
+                };
+            };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -10867,6 +11010,15 @@ export interface operations {
                     "application/json": components["schemas"]["CustomerPaymentSetup"];
                 };
             };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     getHostedInvoice: {
@@ -11170,6 +11322,15 @@ export interface operations {
                     };
                 };
             };
+            /** @description No meter with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     upsertMeterPricingRule: {
@@ -11457,7 +11618,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Validation failed (see description). */
+            /** @description Validation failed (see description), or an unknown field (`param` names it; the body must use only the fields listed here). */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -11520,6 +11681,15 @@ export interface operations {
                         data: components["schemas"]["CreditLedgerEntry"][];
                         total: number;
                     };
+                };
+            };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -12023,7 +12193,7 @@ export interface operations {
                 "application/json": {
                     /** @description Whitespace is trimmed. Empty or omitted keeps the current name. */
                     name?: string;
-                    /** @description Omitting it clears the stored description. */
+                    /** @description Whitespace is trimmed. Omit to keep the current description; an empty string clears it. */
                     description?: string;
                     /**
                      * Format: int64
@@ -12036,7 +12206,7 @@ export interface operations {
                     meter_ids?: string[];
                     /** @enum {string} */
                     status?: "draft" | "active" | "archived";
-                    /** @description Stripe product tax code. Omitting it clears the stored code. */
+                    /** @description Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`. */
                     tax_code?: string;
                 };
             };
@@ -12303,6 +12473,7 @@ export interface operations {
              * @description Code `validation_error`: neither or both of `at_period_end` and
              *     `cancel_at` are set, or `cancel_at` is in the past or breaks the
              *     date rules above.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12433,6 +12604,7 @@ export interface operations {
             /**
              * @description Code `validation_error`: `behavior` is missing or not
              *     `keep_as_draft`, or `resumes_at` is not in the future.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12562,7 +12734,7 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: date-time
-                     * @description The new trial end. Must be in the future and after the current `trial_end_at`.
+                     * @description The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
                      */
                     trial_end: string;
                 };
@@ -12610,8 +12782,8 @@ export interface operations {
                 };
             };
             /**
-             * @description `trial_end` is missing, in the past, or not after the current
-             *     `trial_end_at`.
+             * @description `trial_end` is missing, in the past, not after the current
+             *     `trial_end_at`, or more than 730 days after `trial_start_at`.
              */
             422: {
                 headers: {
@@ -12708,6 +12880,7 @@ export interface operations {
              *     not on this subscription; a `usage_gte` is not a number or is
              *     negative; or the subscription's plans use more than one
              *     currency.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12831,6 +13004,7 @@ export interface operations {
              * @description Code `validation_error`: `plan_id` is missing or not found,
              *     `quantity` is less than 1, or the plan's billing interval
              *     differs from the other items'.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -12977,6 +13151,7 @@ export interface operations {
              *     `new_plan_id` are set; the value equals the current one;
              *     `quantity` is less than 1; the new plan is not found; or the new
              *     plan's billing timing or interval does not fit the subscription.
+             *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13313,9 +13488,9 @@ export interface operations {
             query?: {
                 customer_id?: string;
                 meter_id?: string;
-                /** @description Events at or after this time (RFC 3339). */
+                /** @description Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
                 from?: string;
-                /** @description Events before this time (RFC 3339). */
+                /** @description Events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
                 to?: string;
                 /**
                  * @description Comma-separated key=value pairs matched against event dimensions,
@@ -13344,7 +13519,7 @@ export interface operations {
                     "application/json": components["schemas"]["UsageAggregate"];
                 };
             };
-            /** @description `validation_error`: a malformed `dimensions` pair or an unknown `tz`. */
+            /** @description `validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -13379,6 +13554,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
+                };
+            };
+            /** @description No customer with this ID in this tenant and mode. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description `validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field). */
@@ -13457,8 +13641,9 @@ export interface operations {
                 };
             };
             /**
-             * @description Validation error: missing `customer_id`, unsupported currency, or
-             *     an invalid line item (the message names the line number).
+             * @description Validation error: missing `customer_id`, unsupported currency,
+             *     an invalid line item (the message names the line number), or
+             *     an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -13565,8 +13750,9 @@ export interface operations {
                 };
             };
             /**
-             * @description Validation error: the invoice is not a draft, or a line field is
-             *     invalid (for example a quantity of 0, or a second commit line).
+             * @description Validation error: the invoice is not a draft, a line field is
+             *     invalid (for example a quantity of 0, or a second commit line), or
+             *     the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {
@@ -14026,8 +14212,10 @@ export interface operations {
             };
             /**
              * @description Validation error: missing or unknown `reason`, a negative
-             *     amount, an amount above what is left to refund, or refunds are
-             *     not configured.
+             *     amount, an amount above what is left to refund, refunds are
+             *     not configured, or an unknown field (`param` names it; the body
+             *     must use only the fields listed here). A misspelled amount such
+             *     as `amount` is refused rather than read as a full refund.
              */
             422: {
                 headers: {
@@ -15647,9 +15835,10 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: a missing field, an unknown rating rule, or a
+             * @description `validation_error`: a missing field, an unknown rating rule, a
              *     price shape that cannot be billed (negative rate, bad tier table,
-             *     package size of 0).
+             *     package size of 0), or an unknown field at any depth (`param`
+             *     names it; the body must use only the fields listed here).
              */
             422: {
                 headers: {

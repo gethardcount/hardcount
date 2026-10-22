@@ -14,4 +14,6 @@ export type PostV1CustomersBody = {
   email?: string;
   /** @maxItems 10 */
   additional_emails?: string[];
+  /** Test mode only. Attaches the customer to a test clock. */
+  test_clock_id?: string;
 };

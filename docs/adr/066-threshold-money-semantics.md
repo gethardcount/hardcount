@@ -189,10 +189,11 @@ share is F(seed) recomputed under the rule.
   tax).
 - **Flat rules keep per-slice pricing.** Flat pricing is linear, so the seed
   changes nothing. Leaving flat untouched keeps it exact, as it already was.
-- **A usage cap turns the ladder off.** The fire is uncapped, while the
-  close scales its quantities by the cap. Continuing an uncapped seed would
-  price the capped units at the top tier, making the existing cap+threshold
-  gap worse. Capped closes price as before.
+- **Nothing turns the ladder off** (amended 2026-10-22). A block usage cap
+  used to. The fire was uncapped, and the close scaled its quantities by the
+  cap and priced them from tier 0. Fire + close could then bill more than
+  the usage cost (#973). The cap is cut, so every close after a fire
+  continues the ladder.
 - **Package pricing can be non-monotone.** Nothing checks
   `overage × size ≤ package price`, so a larger quantity can cost less. A
   slice is then clamped at 0, and the period bills max(F(fire), F(total)).
@@ -220,7 +221,7 @@ share is F(seed) recomputed under the rule.
   Changing that is a separate decision.
 
 **Out of scope (registered):**
-- Usage caps with thresholds: the fire is uncapped while the close is
-  cap-scaled over the whole period.
+- Usage caps with thresholds: closed 2026-10-22, when the block usage cap
+  was cut (#973).
 - An authoring guard against the ambiguous configs.
 - Package monotonicity validation.

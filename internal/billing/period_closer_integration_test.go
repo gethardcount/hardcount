@@ -185,7 +185,7 @@ func (r *s1Rig) assertPeriod(t *testing.T, wantStart time.Time, wantNext *time.T
 }
 
 // assertDoctorClean runs the read-side twin of the CAS: no usage instant of
-// one (subscription, meter, bucket) on two live invoices.
+// one (customer, meter, bucket) on two live invoices.
 func assertUsageBilledOnce(t *testing.T, ctx context.Context) {
 	t.Helper()
 	res := doctor.Run(ctx, testutil.AdminPool(t), doctor.Checks)
@@ -193,7 +193,7 @@ func assertUsageBilledOnce(t *testing.T, ctx context.Context) {
 		t.Errorf("doctor check failed to run: %v", e)
 	}
 	for _, v := range res.Violations {
-		if v.Check.Name == "usage_billed_once_per_subscription_meter_window" {
+		if v.Check.Name == "usage_billed_once_per_customer_meter_window" {
 			t.Errorf("doctor: usage billed twice: %s %s", v.RowID, v.Detail)
 		}
 	}

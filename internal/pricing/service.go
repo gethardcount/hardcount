@@ -256,7 +256,7 @@ func validatePricingShape(mode domain.PricingMode, flat decimal.Decimal, tiers [
 			lastUpper = tier.UpTo
 		}
 		if tiers[len(tiers)-1].UpTo != 0 {
-			return errs.Invalid("graduated_tiers", "the final tier must be a catch-all (up_to=0): a bounded last tier makes any usage beyond it unpriceable and blocks invoice generation at cycle close — use usage caps to limit consumption instead")
+			return errs.Invalid("graduated_tiers", "the final tier must be a catch-all (up_to=0): a bounded last tier makes any usage beyond it unpriceable and blocks invoice generation at cycle close — to invoice early when usage runs high, set a spend threshold on the subscription")
 		}
 	case domain.PricingPackage:
 		if pkgSize <= 0 {
@@ -491,8 +491,11 @@ type CreatePlanInput struct {
 	// first-invoice-on-create + cancel-proration semantics per ADR-031.
 	BaseBillTiming domain.BillTiming `json:"base_bill_timing,omitempty"`
 	MeterIDs       []string          `json:"meter_ids"`
-	Status         string            `json:"status,omitempty"`
-	TaxCode        string            `json:"tax_code,omitempty"`
+	// Status is optional and may only be "active": create always makes an
+	// active plan. It stays a field so a caller sending "active" is not
+	// refused as an unknown field.
+	Status  string `json:"status,omitempty"`
+	TaxCode string `json:"tax_code,omitempty"`
 }
 
 func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreatePlanInput) (domain.Plan, error) {
@@ -523,6 +526,11 @@ func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreateP
 	}
 	if input.BaseAmountCents < 0 {
 		return domain.Plan{}, errs.Invalid("base_amount_cents", "base fee must be 0 or more")
+	}
+	// Create always makes the plan active. A caller sending another status
+	// used to get a 201 that ignored it.
+	if input.Status != "" && domain.PlanStatus(input.Status) != domain.PlanActive {
+		return domain.Plan{}, errs.Invalid("status", "a plan is created active; archive it with PATCH")
 	}
 
 	baseBillTiming := input.BaseBillTiming
@@ -585,7 +593,24 @@ func (s *Service) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan
 	return s.store.ListPlans(ctx, tenantID)
 }
 
-func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input CreatePlanInput) (domain.Plan, error) {
+// UpdatePlanInput is the PATCH /v1/plans/{id} body. A field left out keeps
+// its stored value. Description and TaxCode are pointers because an empty
+// string is a real value for them (it clears the field), so "left out" has
+// to be told apart from "set to empty". The dashboard's meter attach sends
+// only meter_ids: a write-on-omit here cleared a tax code set through the
+// API, and the plan's base fee then fell back to the tenant default code.
+// code, currency and billing_interval cannot change, so they are not here.
+type UpdatePlanInput struct {
+	Name            string            `json:"name,omitempty"`
+	Description     *string           `json:"description,omitempty"`
+	BaseAmountCents int64             `json:"base_amount_cents,omitempty"`
+	BaseBillTiming  domain.BillTiming `json:"base_bill_timing,omitempty"`
+	MeterIDs        []string          `json:"meter_ids,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	TaxCode         *string           `json:"tax_code,omitempty"`
+}
+
+func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input UpdatePlanInput) (domain.Plan, error) {
 	existing, err := s.store.GetPlan(ctx, tenantID, id)
 	if err != nil {
 		return domain.Plan{}, err
@@ -636,7 +661,9 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Cre
 	if name := strings.TrimSpace(input.Name); name != "" {
 		existing.Name = name
 	}
-	existing.Description = strings.TrimSpace(input.Description)
+	if input.Description != nil {
+		existing.Description = strings.TrimSpace(*input.Description)
+	}
 	if input.BaseAmountCents > 0 {
 		existing.BaseAmountCents = input.BaseAmountCents
 	}
@@ -650,13 +677,22 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Cre
 		existing.MeterIDs = input.MeterIDs
 	}
 	if input.Status != "" {
-		existing.Status = domain.PlanStatus(input.Status)
+		// Checked here, not left to plans_status_check: the constraint's
+		// error is a 500, which the idempotency middleware caches.
+		switch st := domain.PlanStatus(input.Status); st {
+		case domain.PlanDraft, domain.PlanActive, domain.PlanArchived:
+			existing.Status = st
+		default:
+			return domain.Plan{}, errs.Invalid("status", "must be draft, active or archived")
+		}
 	}
-	taxCode := strings.TrimSpace(input.TaxCode)
-	if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {
-		return domain.Plan{}, err
+	if input.TaxCode != nil {
+		taxCode := strings.TrimSpace(*input.TaxCode)
+		if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {
+			return domain.Plan{}, err
+		}
+		existing.TaxCode = taxCode
 	}
-	existing.TaxCode = taxCode
 
 	return s.store.UpdatePlan(ctx, tenantID, existing)
 }

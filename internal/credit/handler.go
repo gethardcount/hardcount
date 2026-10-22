@@ -1,7 +1,6 @@
 package credit
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -37,22 +36,24 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
+// GrantRequest is the POST /v1/credits/grant body. It carries only the
+// documented fields. GrantInput also has invoice and source_* ids the engine
+// sets on its own grants; decoding the body straight into it let a caller
+// stamp those onto a ledger row unchecked, including ids from another tenant
+// or the other mode.
+type GrantRequest struct {
+	CustomerID  string           `json:"customer_id"`
+	AmountCents int64            `json:"amount_cents"`
+	Description string           `json:"description"`
+	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
+	GrantKind   domain.GrantKind `json:"grant_kind,omitempty"`
+}
+
 func (h *Handler) grant(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	// The request carries only the documented fields. GrantInput also has
-	// invoice and source_* ids the engine sets on its own grants; decoding the
-	// body straight into it let a caller stamp those onto a ledger row
-	// unchecked, including ids from another tenant or the other mode.
-	var req struct {
-		CustomerID  string           `json:"customer_id"`
-		AmountCents int64            `json:"amount_cents"`
-		Description string           `json:"description"`
-		ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
-		GrantKind   domain.GrantKind `json:"grant_kind,omitempty"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	var req GrantRequest
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 
@@ -77,8 +78,7 @@ func (h *Handler) adjust(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	var input AdjustInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
 
@@ -160,7 +160,7 @@ func (h *Handler) listGrants(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.ListGrants(r.Context(), tenantID, customerID, includeExhausted)
 	if err != nil {
-		respond.FromError(w, r, err, "credit_grants")
+		respond.FromError(w, r, err, "customer")
 		return
 	}
 	respond.JSON(w, r, http.StatusOK, resp)
@@ -194,6 +194,10 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 		Offset:     offset,
 	}
 	entries, err := h.svc.ListEntries(r.Context(), filter)
+	if errors.Is(err, errs.ErrNotFound) {
+		respond.NotFound(w, r, "customer")
+		return
+	}
 	if err != nil {
 		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "list credit entries", "error", err)

@@ -265,6 +265,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	usageH := usage.NewHandler(usageSvc, customerStore, pricingSvc)
 	usageH.SetMeterLister(pricingSvc)
 	usageH.SetHeldDeps(customerStore, subStore, pricingSvc)
+	usageH.SetSummaryCustomerLookup(customerStore)
 	customerUsageSvc := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
 	customerUsageH := usage.NewCustomerUsageHandler(customerUsageSvc)
 	// Provider cost rates + margin (ADR-079).
@@ -819,6 +820,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// would have to SELECT the customers table directly and skip
 	// decryption — which is exactly the bug this wiring prevents.
 	testClockSvc.SetCustomerReader(customerSvc)
+	testClockSvc.SetSubscriptionLister(subStore)
 
 	// Billing engine + manual trigger (with credit auto-application)
 	// PaymentReadiness combines customers.stripe_customer_id +
@@ -1155,11 +1157,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// billing.TaxApplication and subscription.ProrationTaxResult.
 	subH.SetProrationTaxApplier(&prorationTaxApplierAdapter{engine: engine})
 
-	// ADR-048: route downgrade clawbacks (plan downgrade / quantity decrease /
-	// item remove) on a PAID in_advance invoice through the tax-reversing
-	// credit-note primitive instead of a bare net ledger grant — credits the
-	// GROSS the customer paid for the unused slice AND reverses the proportional
-	// output tax. *creditnote.Service satisfies CreditNoteIssuer directly.
+	// ADR-048, ADR-118: the credit for unused prepaid time on a plan
+	// downgrade, quantity decrease or item removal is a tax-reversing credit
+	// note on each invoice that charged it — the GROSS the customer paid for
+	// the unused slice, with the proportional output tax reversed.
+	// *creditnote.Service satisfies CreditNoteIssuer directly.
 	subH.SetCreditNoteIssuer(creditNoteSvc)
 
 	billingH := billing.NewHandler(engine, subStore)

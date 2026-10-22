@@ -8,4 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * Older name for `dimensions`. When both are sent, `dimensions` wins.
+ */
 export type PostV1UsageEventsBodyProperties = { [key: string]: unknown };

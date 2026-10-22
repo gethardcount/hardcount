@@ -83,19 +83,21 @@ func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
 }
 
 // TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx: a paid base plus an unpaid,
-// partly-used upgrade invoice. Before ADR-118 any unpaid source sent the whole
-// relief to a post-commit path whose failure was only logged; now both shares
-// are drafts on the cancel tx. Only the paid share is customer-balance credit.
+// partly-used upgrade invoice. Both shares are drafts on the cancel tx
+// (ADR-118). The newest charging invoice, the upgrade, is relieved first (its
+// 3000 due), and the rest of the 5000 unused goes to the paid base. Only the
+// paid share is customer-balance credit.
 func TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
+	baseInv.CreatedAt = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	changeAt := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	upInv := domain.Invoice{
 		ID: "inv_up", TenantID: "t1", SubscriptionID: "sub_1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
-		SubtotalCents: 8000, TotalAmountCents: 8000, AmountDueCents: 8000,
+		SubtotalCents: 3000, TotalAmountCents: 3000, AmountDueCents: 3000,
 		BillingReason: domain.BillingReasonSubscriptionUpdate, SourcePlanChangedAt: &changeAt,
-		BillingPeriodStart: changeAt, BillingPeriodEnd: periodEnd,
+		BillingPeriodStart: changeAt, BillingPeriodEnd: periodEnd, CreatedAt: changeAt,
 	}
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv, upInv}, []domain.InvoiceLineItem{baseLine})
 	adjuster := &fakeCreditNoteAdjuster{}
@@ -109,14 +111,14 @@ func TestBillOnCancelDraftsTx_MixedPaidUnpaid_AllInTx(t *testing.T) {
 	for _, c := range adjuster.draftCall {
 		drafted[c.invoiceID] += c.gross
 	}
-	if drafted["inv_base"] <= 0 || drafted["inv_up"] <= 0 {
-		t.Fatalf("drafts=%+v, want a draft on BOTH the paid base and the unpaid upgrade", adjuster.draftCall)
+	if drafted["inv_up"] != 3000 || drafted["inv_base"] != 2000 {
+		t.Fatalf("drafts=%+v, want 3000 on the unpaid upgrade (newest) and the 2000 rest on the paid base", adjuster.draftCall)
 	}
-	if drafted["inv_up"] >= 8000 {
-		t.Errorf("unpaid upgrade draft %d, want less than its 8000 amount due (partly used → reduce, not void)", drafted["inv_up"])
+	if r.CreditedCents != 2000 {
+		t.Errorf("credited=%d, want only the paid share 2000 (unpaid relief reduces amount due, it is not credit)", r.CreditedCents)
 	}
-	if r.CreditedCents != drafted["inv_base"] {
-		t.Errorf("credited=%d, want only the paid share %d (unpaid relief reduces amount due, it is not credit)", r.CreditedCents, drafted["inv_base"])
+	if r.UncreditedCents != 0 {
+		t.Errorf("uncredited=%d, want 0", r.UncreditedCents)
 	}
 }
 
@@ -227,7 +229,7 @@ func TestBillOnCancelDraftsTx_MultiPaidSource_RespectsHeadroom(t *testing.T) {
 // outright, and leaves the allocation. Its applied customer credits come back
 // through the void; they must not also spill onto a paid invoice as balance
 // credit (a double relief, when the allocator capped the unpaid share at its
-// amount due and water-filled the credits-applied part elsewhere).
+// amount due and spilled the credits-applied part elsewhere).
 func TestReliefTx_FullyUnusedUnpaidWithAppliedCredits_NoDoubleRelief(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice() // paid 15000, window Jun1→Jul1
 	upgradeAt := time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC)
@@ -332,11 +334,12 @@ func TestReliefTx_AllocationErrors(t *testing.T) {
 // TestReliefTx_PartialHeadroom_PlacesWhatFits: a paid funding invoice already
 // credited down to 2000 of room (an operator note, or a partial waive whose
 // credits applied are now its only headroom) and a cancel whose unused part
-// is 5000. The relief places the 2000 that fits and logs the rest. Before, an
-// all-paid set with any remainder gave no relief at all.
+// is 5000. The relief places the 2000 that fits and records the rest as
+// UncreditedCents. Before 2026-10-20, an all-paid set with any remainder gave
+// no relief at all.
 //
-// Mutation seam: restore the all-paid `return nil, errHeadroomExhausted` arm
-// in allocateUnusedAcrossFunding → zero drafts.
+// Mutation seam: in domain.AllocateUnusedCredit, return no shares when
+// anything is unplaced → zero drafts.
 func TestReliefTx_PartialHeadroom_PlacesWhatFits(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
@@ -354,5 +357,8 @@ func TestReliefTx_PartialHeadroom_PlacesWhatFits(t *testing.T) {
 	}
 	if r.CreditedCents != want {
 		t.Errorf("credited = %d, want %d", r.CreditedCents, want)
+	}
+	if r.UncreditedCents != 3000 {
+		t.Errorf("uncredited = %d, want 3000 (the 5000 unused minus the 2000 that fit)", r.UncreditedCents)
 	}
 }

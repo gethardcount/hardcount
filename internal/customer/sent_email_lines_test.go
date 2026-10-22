@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
 // The activity line standard (ADR-128) on the customer's Sent emails list:
@@ -31,7 +32,9 @@ func (f sentEmailsFake) ListByCustomer(context.Context, string, string) ([]SentE
 // returns each row as JSON.
 func fetchSentEmails(t *testing.T, rows []SentEmailOutboxRow) []map[string]any {
 	t.Helper()
-	h := NewHandler(nil)
+	store := newMemoryStore()
+	store.customers["vlx_cus_1"] = domain.Customer{ID: "vlx_cus_1", TenantID: "t1"}
+	h := NewHandler(NewService(store))
 	h.SetSentEmailsLister(sentEmailsFake{rows: rows})
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rctx := chi.NewRouteContext()
