@@ -1,0 +1,111 @@
+{
+ "api_base": "http://127.0.0.1:64187/v1/messages",
+ "cache_hit": false,
+ "cache_key": null,
+ "call_type": "acompletion",
+ "completionStartTime": 1792671448.329986,
+ "completion_tokens": 0,
+ "cost_breakdown": null,
+ "custom_llm_provider": "anthropic",
+ "endTime": 1792671448.329986,
+ "end_user": "cus_acme_corp",
+ "error_information": {
+  "error_class": "InternalServerError",
+  "error_code": "500",
+  "error_message": "litellm.InternalServerError: AnthropicError - {\"type\": \"error\", \"error\": {\"type\": \"overloaded_error\", \"message\": \"Overloaded\"}}",
+  "llm_provider": "anthropic",
+  "traceback": "  File \"/private/tmp/claude-501/-Users-superuser-projects-golang-velox/21841b11-6883-4de0-a78d-99e9d64d667f/scratchpad/mf-ll/venv/lib/python3.9/site-packages/litellm/utils.py\", line 1896, in wrapper_async\n    result = await original_function(*args, **kwargs)\n  File \"/private/tmp/claude-501/-Users-superuser-projects-golang-velox/21841b11-6883-4de0-a78d-99e9d64d667f/scratchpad/mf-ll/venv/lib/python3.9/site-packages/litellm/main.py\", line 641, in acompletion\n    raise exception_type(\n  File \"/private/tmp/claude-501/-Users-superuser-projects-golang-velox/21841b11-6883-4de0-a78d-99e9d64d667f/scratchpad/mf-ll/venv/lib/python3.9/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py\", line 2456, in exception_type\n    raise e\n  File \"/private/tmp/claude-501/-Users-superuser-projects-golang-velox/21841b11-6883-4de0-a78d-99e9d64d667f/scratchpad/mf-ll/venv/lib/python3.9/site-packages/litellm/litellm_core_utils/exception_mapping_utils.py\", line 657, in exception_type\n    raise InternalServerError(\n"
+ },
+ "error_str": "litellm.InternalServerError: AnthropicError - {\"type\": \"error\", \"error\": {\"type\": \"overloaded_error\", \"message\": \"Overloaded\"}}",
+ "guardrail_information": null,
+ "hidden_params": {
+  "additional_headers": {
+   "content-length": "81",
+   "content-type": "application/json",
+   "date": "Thu, 22 Oct 2026 12:17:28 GMT",
+   "server": "BaseHTTP/0.6 Python/3.9.6"
+  },
+  "api_base": null,
+  "batch_models": null,
+  "cache_key": null,
+  "litellm_model_name": null,
+  "litellm_overhead_time_ms": null,
+  "model_id": null,
+  "response_cost": null,
+  "usage_object": null
+ },
+ "id": "e26b264d-0894-45b9-823f-a71745e58ac6",
+ "messages": [
+  {
+   "content": "fail",
+   "role": "user"
+  }
+ ],
+ "metadata": {
+  "applied_guardrails": [],
+  "cold_storage_object_key": null,
+  "mcp_tool_call_metadata": null,
+  "prompt_management_metadata": null,
+  "requester_custom_headers": null,
+  "requester_ip_address": null,
+  "requester_metadata": null,
+  "spend_logs_metadata": null,
+  "team_alias": null,
+  "team_id": null,
+  "usage_object": {
+   "completion_tokens": 0,
+   "prompt_tokens": 0,
+   "total_tokens": 0
+  },
+  "user_agent": null,
+  "user_api_key_alias": null,
+  "user_api_key_auth_metadata": null,
+  "user_api_key_budget_reset_at": null,
+  "user_api_key_end_user_id": "cus_acme_corp",
+  "user_api_key_hash": null,
+  "user_api_key_max_budget": null,
+  "user_api_key_org_alias": null,
+  "user_api_key_org_id": null,
+  "user_api_key_project_alias": null,
+  "user_api_key_project_id": null,
+  "user_api_key_request_route": null,
+  "user_api_key_spend": null,
+  "user_api_key_team_alias": null,
+  "user_api_key_team_id": null,
+  "user_api_key_user_email": null,
+  "user_api_key_user_id": null,
+  "vector_store_request_metadata": null
+ },
+ "model": "claude-sonnet-4-5-20250929",
+ "model_group": "",
+ "model_id": "",
+ "model_map_information": {
+  "model_map_key": "",
+  "model_map_value": null
+ },
+ "model_parameters": {
+  "user": "cus_acme_corp"
+ },
+ "prompt_tokens": 0,
+ "request_tags": [],
+ "requester_ip_address": null,
+ "response": {},
+ "response_cost": 0.0,
+ "response_cost_failure_debug_info": null,
+ "response_time": 0.03049302101135254,
+ "saved_cache_cost": 0.0,
+ "standard_built_in_tools_params": {
+  "file_search": null,
+  "web_search_options": null
+ },
+ "startTime": 1792671448.299493,
+ "status": "failure",
+ "status_fields": {
+  "guardrail_status": "not_run",
+  "llm_api_status": "failure"
+ },
+ "stream": null,
+ "total_tokens": 0,
+ "trace_id": "f4b7c650-114e-49bf-baa3-2d1d63d3f40e",
+ "user_agent": null
+}

@@ -129,7 +129,7 @@ export default function ProviderCostsPage() {
           </div>
           <p className="text-xs text-muted-foreground mt-2">
             Token type is the <code>token_type</code> value your usage events carry:
-            input, output, or cache_read.
+            input, output, cache_read, cache_write_5m, or cache_write_1h.
           </p>
         </CardContent>
       </Card>

@@ -15,8 +15,9 @@ export interface HeldUsageReleaseResult {
   released: number;
   /**
      * Rows that were already usage events under the same idempotency
-     * key (LiteLLM resent the call after the customer existed). Marked
-     * released, not written again.
+     * key (LiteLLM resent the call after the customer existed), and
+     * LiteLLM cache-write rows whose call is already billed with the
+     * writes inside its input row. Marked released, not written again.
      */
   deduplicated: number;
   /**

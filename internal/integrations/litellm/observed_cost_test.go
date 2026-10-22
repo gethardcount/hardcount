@@ -33,13 +33,13 @@ func costOf(t *testing.T, evs []ExternalIngest, half string) *int64 {
 }
 
 // TestObservedCost_PerHalfOnly is the money assertion behind ADR-079 D4.
-// One LiteLLM call fans out to up to three usage events. Stamping a
-// whole-call figure on each would multi-count COGS by up to 3x, which is
+// One LiteLLM call fans out to up to five usage events. Stamping a
+// whole-call figure on each would multi-count COGS by up to 5x, which is
 // precisely why phase 1 stamped nothing. Each half must carry only its own
 // side's cost. The cached case is TestObservedCost_CachedCallCountsEachTokenOnce.
 func TestObservedCost_PerHalfOnly(t *testing.T) {
 	t.Parallel()
-	evs, err := MapPayload(payloadWithBreakdown(0.012, 0.045, 0))
+	evs, err := mapEvents(payloadWithBreakdown(0.012, 0.045, 0))
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestObservedCost_ResponseCostNeverStamped(t *testing.T) {
 	p.CostBreakdown = nil
 	p.ResponseCost = 0.057
 
-	evs, err := MapPayload(p)
+	evs, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestObservedCost_RejectsNonFinite(t *testing.T) {
 		"negative": -0.01,
 	} {
 		t.Run(name, func(t *testing.T) {
-			evs, err := MapPayload(payloadWithBreakdown(v, 0.045, 0))
+			evs, err := mapEvents(payloadWithBreakdown(v, 0.045, 0))
 			if err != nil {
 				t.Fatalf("map: %v", err)
 			}
@@ -120,7 +120,7 @@ func TestObservedCost_RejectsNonFinite(t *testing.T) {
 // margin card cannot tell "cost was zero" from "we don't know the cost".
 func TestObservedCost_ZeroIsARealAnswer(t *testing.T) {
 	t.Parallel()
-	evs, err := MapPayload(payloadWithBreakdown(0, 0, 0))
+	evs, err := mapEvents(payloadWithBreakdown(0, 0, 0))
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestObservedCost_ZeroIsARealAnswer(t *testing.T) {
 func TestObservedCost_RoundsHalfUp(t *testing.T) {
 	t.Parallel()
 	// 0.0000155 USD = 15.5 micros -> 16
-	evs, err := MapPayload(payloadWithBreakdown(0.0000155, 0, 0))
+	evs, err := mapEvents(payloadWithBreakdown(0.0000155, 0, 0))
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestObservedCost_AbsentBreakdownFallsToTable(t *testing.T) {
 	p := payloadWithBreakdown(0, 0, 0)
 	p.CostBreakdown = nil
 
-	evs, err := MapPayload(p)
+	evs, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -214,7 +214,7 @@ func cachedAnthropicCall() StandardLoggingPayload {
 // Mutation-verify: give the input event the whole input_cost again → red.
 func TestObservedCost_CachedCallCountsEachTokenOnce(t *testing.T) {
 	t.Parallel()
-	evs, err := MapPayload(cachedAnthropicCall())
+	evs, err := mapEvents(cachedAnthropicCall())
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestObservedCost_CacheReadWithoutItsCostFallsToTable(t *testing.T) {
 	t.Parallel()
 	p := cachedAnthropicCall()
 	p.CostBreakdown.CacheReadCost = nil
-	evs, err := MapPayload(p)
+	evs, err := mapEvents(p)
 	if err != nil {
 		t.Fatalf("map: %v", err)
 	}
@@ -270,5 +270,137 @@ func TestObservedCost_CacheReadWithoutItsCostFallsToTable(t *testing.T) {
 	}
 	if c := costOf(t, evs, TokenTypeOutput); c == nil || *c != 1500 {
 		t.Errorf("output cost = %v, want 1500", c)
+	}
+}
+
+// costsByRole is each event's observed cost, nil kept as nil.
+func costsByRole(t *testing.T, evs []ExternalIngest) map[string]*int64 {
+	t.Helper()
+	out := map[string]*int64{}
+	for tt, e := range byRole(t, evs) {
+		out[tt] = e.ObservedCostMicros
+	}
+	return out
+}
+
+// TestObservedCost_CacheWriteSplit5m: for a call with 5-minute writes only,
+// LiteLLM's cache_creation_cost is exactly the writes' cost and is part of
+// input_cost, so the write event takes it and the input event takes the
+// rest. The events add up to LiteLLM's total, and no token is costed twice.
+// Mutation-verify: leave cache_creation_cost in the input cost → input
+// 153000 and a sum of 313500.
+func TestObservedCost_CacheWriteSplit5m(t *testing.T) {
+	p := mockAnthropicRecord(t, "cache-write-5m")
+	m, err := MapPayload(p)
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	want := map[string]int64{TokenTypeInput: 3000, TokenTypeCacheWrite5m: 150000, TokenTypeOutput: 7500}
+	got := costsByRole(t, m.Events)
+	var sum int64
+	for tt, w := range want {
+		if got[tt] == nil || *got[tt] != w {
+			t.Errorf("%s cost = %v, want %d micros", tt, got[tt], w)
+			continue
+		}
+		sum += *got[tt]
+	}
+	if len(got) != len(want) {
+		t.Errorf("events %v, want exactly %v", got, want)
+	}
+	if sum != 160500 {
+		t.Errorf("summed cost = %d micros, want 160500 (LiteLLM's total_cost)", sum)
+	}
+	// The pre-split mapping keeps the pre-split cost: input carries the writes.
+	if c := costsByRole(t, m.Legacy)[TokenTypeInput]; c == nil || *c != 153000 {
+		t.Errorf("legacy input cost = %v, want 153000 (input_cost)", c)
+	}
+}
+
+// TestObservedCost_CacheWrite1hFallsToTable: LiteLLM 1.83.9 prices every
+// cache write at the 5-minute rate in cache_creation_cost (0.375 for 100,000
+// writes here), and its input_cost leaves the 1-hour writes out (0.153), so
+// with 1-hour writes neither figure is the provider's cost and the two do
+// not even nest. The input and write events fall to the rate table; the
+// output cost is unaffected.
+func TestObservedCost_CacheWrite1hFallsToTable(t *testing.T) {
+	p := mockAnthropicRecord(t, "cache-write-5m-1h")
+	if p.CostBreakdown == nil || p.CostBreakdown.CacheCreationCost == nil || *p.CostBreakdown.CacheCreationCost <= p.CostBreakdown.InputCost {
+		t.Fatalf("fixture no longer shows LiteLLM's cache_creation_cost above input_cost: %+v", p.CostBreakdown)
+	}
+	m, err := MapPayload(p)
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	got := costsByRole(t, m.Events)
+	for _, tt := range []string{TokenTypeInput, TokenTypeCacheWrite5m, TokenTypeCacheWrite1h} {
+		if c, ok := got[tt]; !ok || c != nil {
+			t.Errorf("%s cost = %v (present %v), want nil: the rate table prices it", tt, c, ok)
+		}
+	}
+	if c := got[TokenTypeOutput]; c == nil || *c != 7500 {
+		t.Errorf("output cost = %v, want 7500", c)
+	}
+
+	// The same when the figures do nest: a model whose 1-hour rate LiteLLM
+	// knows prices input_cost right (0.513), yet cache_creation_cost still
+	// prices all 100,000 writes at the 5-minute rate (0.375). Subtracting it
+	// would cost the input at 0.138 instead of 0.003.
+	// Mutation-verify: drop the w1h > 0 condition in roleCosts → stamped.
+	p.ID = "nested-1h"
+	p.CostBreakdown.InputCost = 0.513
+	m, err = MapPayload(p)
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	got = costsByRole(t, m.Events)
+	for _, tt := range []string{TokenTypeInput, TokenTypeCacheWrite5m, TokenTypeCacheWrite1h} {
+		if c, ok := got[tt]; !ok || c != nil {
+			t.Errorf("nesting figures: %s cost = %v (present %v), want nil", tt, c, ok)
+		}
+	}
+}
+
+// Without cache_creation_cost, input_cost holds write costs it cannot
+// separate, so input and the write event fall to the rate table rather
+// than input counting the writes again.
+func TestObservedCost_CacheWriteWithoutItsCostFallsToTable(t *testing.T) {
+	p := mockAnthropicRecord(t, "cache-write-5m")
+	p.CostBreakdown.CacheCreationCost = nil
+	m, err := MapPayload(p)
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	got := costsByRole(t, m.Events)
+	if c, ok := got[TokenTypeInput]; !ok || c != nil {
+		t.Errorf("input cost = %v, want nil", c)
+	}
+	if c, ok := got[TokenTypeCacheWrite5m]; !ok || c != nil {
+		t.Errorf("cache_write_5m cost = %v, want nil", c)
+	}
+}
+
+// When cache_creation_cost exceeds input_cost (less the reads), the two
+// figures do not nest, so neither is the provider's cost: the input event
+// AND the 5-minute write event fall to the rate table. Stamping the write
+// with LiteLLM's figure while the input is priced from the table would mix
+// two sources that do not add up.
+// Mutation-verify: drop the `c.input == nil → c.write5m = nil` guard in
+// roleCosts → the write row keeps 150000.
+func TestObservedCost_CacheWriteNotNestedFallsToTable(t *testing.T) {
+	p := mockAnthropicRecord(t, "cache-write-5m")
+	p.CostBreakdown.InputCost = 0.1 // below cache_creation_cost (0.15)
+	m, err := MapPayload(p)
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	got := costsByRole(t, m.Events)
+	for _, tt := range []string{TokenTypeInput, TokenTypeCacheWrite5m} {
+		if c, ok := got[tt]; !ok || c != nil {
+			t.Errorf("%s cost = %v (present %v), want nil: the rate table prices it", tt, c, ok)
+		}
+	}
+	if c := got[TokenTypeOutput]; c == nil || *c != 7500 {
+		t.Errorf("output cost = %v, want 7500", c)
 	}
 }

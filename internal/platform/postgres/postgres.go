@@ -235,6 +235,14 @@ func IsUniqueViolation(err error) bool {
 	return false
 }
 
+// IsDeadlock reports whether err is Postgres aborting the transaction to
+// break a deadlock (SQLSTATE 40P01). Nothing the transaction wrote is kept,
+// so running it again from the start is safe.
+func IsDeadlock(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
+}
+
 // IsExclusionViolation reports whether err is a Postgres EXCLUDE-constraint
 // violation (SQLSTATE 23P01) — the signature of two writers reconstructing
 // the same range, e.g. two replicas running the boot-time billing_intervals

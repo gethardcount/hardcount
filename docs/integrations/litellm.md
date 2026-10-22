@@ -141,19 +141,22 @@ of the 200 response (see [Response](#response)).
 
 ## 4. What lands in Velox
 
-Each AI call becomes up to three usage events on the `tokens` meter. The
+Each AI call becomes up to five usage events on the `tokens` meter. The
 `token_type` label tells them apart, and no token is counted twice.
-LiteLLM's `prompt_tokens` already includes tokens read from the cache, so
-Velox takes those out of `input`.
+LiteLLM's `prompt_tokens` already includes the tokens read from and written
+to the cache, so Velox takes those out of `input`.
 
 | `token_type` | Quantity | Idempotency key |
 |---|---|---|
-| `input` | `prompt_tokens` minus the cached tokens | `<litellm_id>:input` |
+| `input` | `prompt_tokens` minus the cache reads and cache writes | `<litellm_id>:input` |
 | `cache_read` | `prompt_tokens_details.cached_tokens` or `cache_read_input_tokens`, if any | `<litellm_id>:cache_read` |
+| `cache_write_5m` | cache writes with the 5-minute lifetime, if any | `<litellm_id>:cache_write_5m` |
+| `cache_write_1h` | cache writes with the 1-hour lifetime, if any | `<litellm_id>:cache_write_1h` |
 | `output` | `usage.completion_tokens` | `<litellm_id>:output` |
 
 The idempotency key is a unique ID for each event. If LiteLLM sends the same
-call again, Velox counts it once.
+call again, Velox counts it once. Velox saves a call's events together, or
+none of them.
 
 Each event also carries these labels (dimensions):
 
@@ -170,11 +173,33 @@ Each event also keeps the LiteLLM call ID, LiteLLM's own cost figure (for
 reference only), and the call's original metadata under
 `litellm_metadata.*`.
 
-**Cache-write tokens** (`cache_creation`) have no `token_type` of their own
-yet, because LiteLLM does not say which cache lifetime they used (5 minutes
-or 1 hour). LiteLLM 1.83.9 counts them in `prompt_tokens` for Anthropic and
-Bedrock, so they are in the `input` event and billed at your input price.
-Velox logs a warning when it sees them.
+**Cache writes** (Anthropic prompt caching) cost more than input: 1.25
+times for the 5-minute lifetime and 2 times for the 1-hour one. LiteLLM
+1.83.9 reports how many write tokens used each lifetime, under
+`metadata.usage_object.prompt_tokens_details.cache_creation_token_details`,
+and Velox bills each lifetime as its own `token_type`. The
+`anthropic_style` recipe prices both. If you set your own prices, add a
+`cache_write_5m` and a `cache_write_1h` price for each model, or those
+tokens are billed at $0 and show as unmatched usage.
+
+If a record has cache writes but no usable split, Velox bills them as
+`input`, below what the provider charges, and counts the call in
+`velox_litellm_cache_write_unsplit_total`.
+
+For the cost side (your margin), a call with only 5-minute writes takes
+LiteLLM's own cost figures. A call with 1-hour writes takes its input and
+write costs from your [provider cost rates](../ai-pricing.md#see-your-margin) instead:
+LiteLLM 1.83.9's figures do not price the 1-hour writes correctly.
+
+A call sent again that Velox first saved before this split (as one `input`
+event with the writes inside) is saved the old way again, and a cache-write
+row of it that Velox was holding is not billed when released, so its writes
+are not billed twice.
+
+**Calls that bill nothing.** A call LiteLLM reports as failed (`status`
+`failure`) and a call LiteLLM answered from its own response cache
+(`cache_hit` `true`) are skipped: the provider charged nothing for them.
+Prompt-cache reads (`cache_read`) are a different thing, and are billed.
 
 ## 5. Check that it worked
 
@@ -210,7 +235,8 @@ Velox customer yet, both of its events are held:
   "accepted": 0,
   "deduplicated": 0,
   "held": 2,
-  "skipped": 0
+  "skipped": 0,
+  "cache_hits": 0
 }
 ```
 
@@ -219,7 +245,8 @@ Velox customer yet, both of its events are held:
 | `accepted` | New events Velox saved. |
 | `deduplicated` | Events Velox already had, or already held, from an earlier send of the same call. |
 | `held` | Events Velox kept but did not bill, because the customer or the `tokens` meter does not exist yet. See the next section. |
-| `skipped` | Calls with no tokens to bill, such as image generation, moderation, or a failed call with zero tokens. |
+| `skipped` | Calls that bill nothing: image generation, moderation, a call with zero tokens, a failed call, or a LiteLLM response-cache hit. |
+| `cache_hits` | The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the

@@ -41,6 +41,10 @@ import (
 //   - CACHE_READ additive-disjoint split: prompt_tokens includes the cached
 //     tokens; the mapper emits input = prompt − cached and cache_read = cached,
 //     each priced at its own recipe rate.
+//   - CACHE_WRITE 5m/1h split: a second call, shaped like a LiteLLM 1.83.9
+//     record (top-level counts, end_user, the split under
+//     metadata.usage_object), is the flag-2 probe call scaled by 100 so every
+//     line is whole cents. Before the split it billed input 10.1M at 1.0x.
 //
 // This is the test that would have caught the S2/X15 wedge breakage at CI time.
 func TestLiteLLM_WedgeE2E(t *testing.T) {
@@ -127,16 +131,38 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}`, eventTS)
 
 	handler := litellm.New(customerStore, pricingSvc, usageSvc, usageSvc)
-	req := httptest.NewRequest(http.MethodPost, "/spend", strings.NewReader(body)).WithContext(authCtx)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("/spend: status %d, body %s", rec.Code, rec.Body.String())
+	post := func(body string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/spend", strings.NewReader(body)).WithContext(authCtx)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		handler.Routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("/spend: status %d, body %s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
 	}
 	// input + cache_read + output = 3 accepted events.
-	if got := rec.Body.String(); !strings.Contains(got, `"accepted":3`) {
+	if got := post(body); !strings.Contains(got, `"accepted":3`) {
 		t.Fatalf("/spend body: got %s, want accepted=3 (input+cache_read+output)", got)
+	}
+
+	// The cache-write call, at claude-sonnet-4.5's recipe rates (input
+	// $3.00/M, 5m write $3.75/M, 1h write $6.00/M, output $15.00/M): 100,000
+	// fresh input → 30¢, 4M 5m writes → 1500¢, 6M 1h writes → 3600¢, 50,000
+	// output → 75¢: 5205¢, the probe's $0.5205 times 100.
+	writeBody := fmt.Sprintf(`{
+		"id":"wedge_call_writes","call_type":"acompletion","status":"success","cache_hit":null,
+		"model":"anthropic/claude-sonnet-4-5-20250929","custom_llm_provider":"anthropic",
+		"end_user":"cus_wedge","prompt_tokens":10100000,"completion_tokens":50000,"total_tokens":10150000,
+		"metadata":{"usage_object":{"prompt_tokens":10100000,"completion_tokens":50000,"total_tokens":10150000,
+			"cache_creation_input_tokens":10000000,"cache_read_input_tokens":0,
+			"prompt_tokens_details":{"cached_tokens":0,"cache_creation_tokens":10000000,"text_tokens":100000,
+				"cache_creation_token_details":{"ephemeral_5m_input_tokens":4000000,"ephemeral_1h_input_tokens":6000000}}}},
+		"endTime":%d
+	}`, eventTS)
+	if got := post(writeBody); !strings.Contains(got, `"accepted":4`) {
+		t.Fatalf("/spend body: got %s, want accepted=4 (input+cache_write_5m+cache_write_1h+output)", got)
 	}
 
 	// 3b. Verify the events landed with the canonical family + token roles.
@@ -170,11 +196,13 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	if inv.ID == "" {
 		t.Fatal("no cycle invoice for the wedge sub")
 	}
-	// input 300¢ + cache_read 30¢ + output 1500¢ = 1830¢ (base $0, no tax).
-	const wantCents = 1830
+	// Call 1: input 300¢ + cache_read 30¢ + output 1500¢ = 1830¢. Call 2:
+	// 30¢ + 1500¢ + 3600¢ + 75¢ = 5205¢ (it billed 3105¢ before the split).
+	// Base $0, no tax.
+	const wantCents = 1830 + 5205
 	if inv.SubtotalCents != wantCents {
 		items, _ := invoiceStore.ListLineItems(ctx, tenantID, inv.ID)
-		t.Errorf("invoice subtotal: got %d¢, want %d¢ (input 300 + cache_read 30 + output 1500). Lines: %+v", inv.SubtotalCents, wantCents, items)
+		t.Errorf("invoice subtotal: got %d¢, want %d¢ (1830 for the cache-read call + 5205 for the cache-write call). Lines: %+v", inv.SubtotalCents, wantCents, items)
 	}
-	t.Logf("wedge e2e: claude-3-5-sonnet-20241022 → claude-3.5-sonnet, 3 token roles rated, invoice $%.2f", float64(inv.SubtotalCents)/100)
+	t.Logf("wedge e2e: dated model ids normalized, 5 token roles rated, invoice $%.2f", float64(inv.SubtotalCents)/100)
 }

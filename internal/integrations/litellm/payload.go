@@ -78,6 +78,22 @@ type StandardLoggingPayload struct {
 	CompletionTokens int64 `json:"completion_tokens,omitempty"`
 	TotalTokens      int64 `json:"total_tokens,omitempty"`
 
+	// Status is "success" or "failure". LiteLLM sends a failed call (a 429,
+	// a 5xx, a timeout) to the same callback. MapPayload skips a failure
+	// whatever token counts it carries: the provider charged nothing.
+	Status string `json:"status,omitempty"`
+
+	// CacheHit is true when LiteLLM answered from its own response cache
+	// (not the provider's prompt cache). The record then carries the cached
+	// response's full token counts, response_cost 0 and an id ending in
+	// "_cache_hit<time>", and the provider charged nothing. MapPayload skips
+	// it. Null and false both mean a call that reached the provider.
+	CacheHit *bool `json:"cache_hit,omitempty"`
+
+	// SavedCacheCost is what a cache hit would have cost had it reached the
+	// provider. Decoded so the field is named here; it is never a cost.
+	SavedCacheCost float64 `json:"saved_cache_cost,omitempty"`
+
 	// ResponseCost is LiteLLM's pre-computed dollar cost for this
 	// call (legacy single-field; cost_breakdown is the newer
 	// per-component shape). NOTE (ADR-079 census correction): this is
@@ -85,10 +101,10 @@ type StandardLoggingPayload struct {
 	// metadata, but the ingest path DROPS it — usage_events has no
 	// metadata column and IngestInput carries none, so it is never
 	// persisted. It is also a WHOLE-CALL figure: a call maps to up to
-	// three per-half events, so stamping it per event would multi-count
+	// five per-role events, so stamping it per event would multi-count
 	// COGS. Velox's COGS comes from the operator's provider_cost_rates
-	// table at ingest (ADR-079); per-half observed-cost stamping (from
-	// CostBreakdown, never from this field) is the named fast-follow.
+	// table at ingest (ADR-079), or per role from CostBreakdown (never
+	// from this field; see observedCostMicros).
 	ResponseCost float64 `json:"response_cost,omitempty"`
 
 	// CostBreakdown is LiteLLM's per-component cost split. Same
@@ -118,29 +134,28 @@ type StandardLoggingPayload struct {
 //
 // Prompt-cache fields (ADR-044 cache roles): LiteLLM normalizes every
 // provider's cache accounting into this OpenAI-compatible shape. Two facts the
-// mapper relies on, confirmed against LiteLLM's usage object:
+// mapper relies on, checked against LiteLLM 1.83.9:
 //   - prompt_tokens INCLUDES cached (read) tokens, so the uncached input is
 //     prompt_tokens − prompt_tokens_details.cached_tokens (additive-disjoint).
 //   - cache_creation (write) tokens are ALSO in prompt_tokens for Anthropic
-//     and Bedrock in LiteLLM 1.83.9 (llms/anthropic/chat/transformation.py
-//     adds them), so they land in the input quantity. LiteLLM does not yet
-//     expose the 5m-vs-1h cache-write TTL split (BerriAI/litellm#15056), so
-//     the mapper has no cache_write role (it logs when cache_creation tokens
-//     appear).
+//     (llms/anthropic/chat/transformation.py adds them), and
+//     prompt_tokens_details.cache_creation_token_details carries their 5m/1h
+//     split (ephemeral_5m_input_tokens, ephemeral_1h_input_tokens), copied
+//     from Anthropic's usage.cache_creation. The mapper splits them off the
+//     input into cache_write_5m and cache_write_1h (see cacheWriteSplit).
 type Usage struct {
 	PromptTokens     int64 `json:"prompt_tokens"`
 	CompletionTokens int64 `json:"completion_tokens"`
 	TotalTokens      int64 `json:"total_tokens"`
 
-	// PromptTokensDetails carries the OpenAI-shape cache-read count. Present
-	// for OpenAI and for Anthropic-via-LiteLLM (LiteLLM mirrors cache reads
-	// here for cross-provider consistency).
+	// PromptTokensDetails carries the OpenAI-shape cache-read count, and for
+	// Anthropic the cache-write count and its 5m/1h split.
 	PromptTokensDetails *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
 
 	// CacheReadInputTokens / CacheCreationInputTokens are Anthropic's top-level
 	// cache fields, surfaced verbatim by LiteLLM. CacheReadInputTokens mirrors
-	// PromptTokensDetails.CachedTokens (we take the max defensively).
-	// CacheCreationInputTokens is the cache-WRITE count (no role of its own — see above).
+	// PromptTokensDetails.CachedTokens and CacheCreationInputTokens mirrors
+	// PromptTokensDetails.CacheCreationTokens (we take the max of each pair).
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
 }
@@ -189,6 +204,80 @@ type PromptTokensDetails struct {
 	// CachedTokens is the subset of prompt_tokens served from cache (a cache
 	// hit / read). prompt_tokens already includes these.
 	CachedTokens int64 `json:"cached_tokens,omitempty"`
+	// CacheCreationTokens is the subset of prompt_tokens written to the
+	// provider's prompt cache (Anthropic). Mirrors cache_creation_input_tokens.
+	CacheCreationTokens int64 `json:"cache_creation_tokens,omitempty"`
+	// CacheCreationTokenDetails splits CacheCreationTokens by cache lifetime.
+	CacheCreationTokenDetails *CacheCreationTokenDetails `json:"cache_creation_token_details,omitempty"`
+}
+
+// CacheCreationTokenDetails is LiteLLM's copy of Anthropic's
+// usage.cache_creation: the cache-write tokens by lifetime. Each is null
+// when Anthropic did not send it.
+type CacheCreationTokenDetails struct {
+	Ephemeral5mInputTokens *int64 `json:"ephemeral_5m_input_tokens,omitempty"`
+	Ephemeral1hInputTokens *int64 `json:"ephemeral_1h_input_tokens,omitempty"`
+}
+
+// Reasons a call's cache writes could not be split by lifetime. The mapper
+// then bills them as input, as before the split existed, and counts the
+// reason on velox_litellm_cache_write_unsplit_total.
+const (
+	// UnsplitNoSplit: the record has cache-write tokens but no 5m/1h split.
+	UnsplitNoSplit = "no_split"
+	// UnsplitSumMismatch: the split does not add up to the cache-write count.
+	UnsplitSumMismatch = "sum_mismatch"
+	// UnsplitNotInPrompt: the cache writes do not fit inside prompt_tokens
+	// minus the cache reads, so prompt_tokens cannot include them.
+	UnsplitNotInPrompt = "not_in_prompt"
+)
+
+// cacheWriteTokens is the cache-write count: the larger of the two places
+// LiteLLM reports it.
+func (u *Usage) cacheWriteTokens() int64 {
+	w := u.CacheCreationInputTokens
+	if u.PromptTokensDetails != nil && u.PromptTokensDetails.CacheCreationTokens > w {
+		w = u.PromptTokensDetails.CacheCreationTokens
+	}
+	if w < 0 {
+		return 0
+	}
+	return w
+}
+
+// cacheWriteSplit returns the call's 5-minute and 1-hour cache-write tokens,
+// or a reason they cannot be split off the input. uncached is prompt_tokens
+// minus the cache reads, which LiteLLM 1.83.9 makes include the writes.
+//
+// It succeeds only when the split is present, neither part is negative, and
+// the parts add up to the cache-write count: a split that does not account
+// for every write token would bill some of them at the wrong price. A call
+// with no cache writes returns 0, 0 and no reason.
+func (u *Usage) cacheWriteSplit(uncached int64) (w5m, w1h int64, reason string) {
+	total := u.cacheWriteTokens()
+	var d *CacheCreationTokenDetails
+	if u.PromptTokensDetails != nil {
+		d = u.PromptTokensDetails.CacheCreationTokenDetails
+	}
+	if d != nil {
+		if d.Ephemeral5mInputTokens != nil {
+			w5m = *d.Ephemeral5mInputTokens
+		}
+		if d.Ephemeral1hInputTokens != nil {
+			w1h = *d.Ephemeral1hInputTokens
+		}
+	}
+	switch {
+	case total == 0 && w5m == 0 && w1h == 0:
+		return 0, 0, ""
+	case d == nil || (d.Ephemeral5mInputTokens == nil && d.Ephemeral1hInputTokens == nil):
+		return 0, 0, UnsplitNoSplit
+	case w5m < 0 || w1h < 0 || w5m+w1h != total:
+		return 0, 0, UnsplitSumMismatch
+	case w5m+w1h > uncached:
+		return 0, 0, UnsplitNotInPrompt
+	}
+	return w5m, w1h, ""
 }
 
 // cachedReadTokens returns the cache-read token count, taking the max of the
@@ -221,8 +310,13 @@ type CostBreakdown struct {
 	// leaves it out when it is zero or when it could not price cache reads,
 	// so nil means "unknown", not "free".
 	CacheReadCost *float64 `json:"cache_read_cost,omitempty"`
-	ToolUsageCost float64  `json:"tool_usage_cost,omitempty"`
-	TotalCost     float64  `json:"total_cost"`
+	// CacheCreationCost is LiteLLM's figure for the cache writes. LiteLLM
+	// 1.83.9 computes it as every write token at the 5-minute rate
+	// (cost_calculator.py), so it is the writes' real cost only when the call
+	// has no 1-hour writes. Nil means "unknown", as for CacheReadCost.
+	CacheCreationCost *float64 `json:"cache_creation_cost,omitempty"`
+	ToolUsageCost     float64  `json:"tool_usage_cost,omitempty"`
+	TotalCost         float64  `json:"total_cost"`
 }
 
 // SpendRequest is the wire shape POSTed to /v1/integrations/litellm/spend.
