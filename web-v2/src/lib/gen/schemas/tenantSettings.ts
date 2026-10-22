@@ -11,11 +11,27 @@ import type { TenantSettingsInput } from './tenantSettingsInput';
 
 export type TenantSettings = TenantSettingsInput & {
   tenant_id: string;
+  /**
+     * The number the next invoice in this mode (test or live) gets,
+     * before the prefix: 43 means the next invoice is
+     * `<invoice_prefix>-000043`. Test and live count separately, and
+     * changing `invoice_prefix` keeps the count. Not a setting:
+     * sending it on `PUT` does nothing.
+     */
+  next_invoice_sequence: number;
   /** Zero time when the tenant has never saved settings. */
   created_at: string;
   updated_at: string;
 } & Required<Pick<TenantSettingsInput & {
   tenant_id: string;
+  /**
+     * The number the next invoice in this mode (test or live) gets,
+     * before the prefix: 43 means the next invoice is
+     * `<invoice_prefix>-000043`. Test and live count separately, and
+     * changing `invoice_prefix` keeps the count. Not a setting:
+     * sending it on `PUT` does nothing.
+     */
+  next_invoice_sequence: number;
   /** Zero time when the tenant has never saved settings. */
   created_at: string;
   updated_at: string;

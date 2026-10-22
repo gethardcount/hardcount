@@ -9,7 +9,11 @@
  */
 
 /**
- * Mutually exclusive with lines/credit_amount_cents.
+ * Mutually exclusive with lines and credit_amount_cents. The
+ * relief's split goes in here, not at the top level: a top-level
+ * `refund_amount_cents`, `out_of_band_amount_cents` or
+ * `refund_type` is a 422. Example after a lost dispute:
+ * `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
  */
 export type PostV1CreditNotesBodyCommitRelief = {
   /** Optional. Defaults to the top-level invoice_id. */

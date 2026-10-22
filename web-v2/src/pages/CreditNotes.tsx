@@ -9,6 +9,7 @@ import type { CreditNote, Invoice, Customer } from '@/lib/api'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
+import { CREDIT_NOTE_CSV_HEADERS, creditNoteCsvRow } from '@/lib/creditNoteCsv'
 import { creditNoteStatFigures, creditNotesListView } from '@/lib/creditNoteStats'
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { Layout } from '@/components/Layout'
@@ -256,22 +257,12 @@ export default function CreditNotesPage() {
   const paginated = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const handleExport = () => {
-    const rows = filtered.map(n => [
-      n.credit_note_number,
+    const rows = filtered.map(n => creditNoteCsvRow(
+      n,
       customerMap[n.customer_id]?.display_name || '',
       invoiceMap[n.invoice_id]?.invoice_number || '',
-      n.status,
-      (n.refund_amount_cents / 100).toFixed(2),
-      // Without this column a failed refund's amount reads as returned money
-      // in the spreadsheet — the same lie the stat card told on screen.
-      n.refund_amount_cents > 0 ? (n.refund_status || '') : '',
-      (n.credit_amount_cents / 100).toFixed(2),
-      ((n.out_of_band_amount_cents ?? 0) / 100).toFixed(2),
-      n.reason,
-      (n.total_cents / 100).toFixed(2),
-      n.issued_at || n.created_at,
-    ])
-    downloadCSV('credit-notes.csv', ['Number', 'Customer', 'Invoice', 'Status', 'Refund', 'Refund status', 'Credit', 'Out of band', 'Reason', 'Amount', 'Date'], rows)
+    ))
+    downloadCSV('credit-notes.csv', CREDIT_NOTE_CSV_HEADERS, rows)
   }
 
   return (

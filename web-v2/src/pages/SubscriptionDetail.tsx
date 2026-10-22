@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { cancelImmediatelyText, changePlanNowHelper, changeQuantityText, PAUSE_DIALOG_SENTENCE, pauseCollectionToast, planChangeToast, removeItemText, scheduleCancelToast } from '@/lib/subscriptionCopy'
-import { api, formatCents, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
+import { api, formatCents, formatCentsBare, prorationText, formatDate, formatDateTime, getTenantTimezone, type Subscription, type SubscriptionItem, type Plan, type ItemChangeResult } from '@/lib/api'
 import { civilDateFrom, formatCivilDate, formatCivilPeriod, startOfDayInTZ } from '@/lib/dates'
 import { showApiError } from '@/lib/formErrors'
 import { Layout } from '@/components/Layout'
@@ -846,7 +846,7 @@ export default function SubscriptionDetailPage() {
                 <div className="flex items-center justify-between px-6 py-3">
                   <span className="text-sm text-muted-foreground w-40 shrink-0">Period total</span>
                   <span className="text-sm text-foreground">
-                    {formatCents(sub.billing_thresholds.amount_gte, items[0] ? planById(items[0].plan_id)?.currency : undefined)}
+                    {firstItemPlan ? formatCents(sub.billing_thresholds.amount_gte, firstItemPlan.currency) : formatCentsBare(sub.billing_thresholds.amount_gte)}
                     <span className="text-xs text-muted-foreground ml-2">
                       ({sub.billing_thresholds.reset_billing_cycle ? 'starts a new billing period' : 'keeps the billing period'})
                     </span>
@@ -940,12 +940,6 @@ export default function SubscriptionDetailPage() {
             ) : (
               <DetailRow label={sub.status === 'trialing' ? 'First billing period' : 'Current period'} labelClassName="sm:w-40">
                 {sub.current_billing_period_display || '\u2014'}
-              </DetailRow>
-            )}
-            {sub.usage_cap_units != null && (
-              <DetailRow label="Usage cap" labelClassName="sm:w-40">
-                <span>{sub.usage_cap_units.toLocaleString()} units / period</span>
-                <span className="text-xs text-muted-foreground">({sub.overage_action === 'block' ? 'hard cap' : 'charge overage'})</span>
               </DetailRow>
             )}
             <DetailRow label="Created" labelClassName="sm:w-40">{formatDateTime(sub.created_at)}</DetailRow>

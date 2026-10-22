@@ -30,9 +30,6 @@ It does not carry the negative amount into a later period.
 - The rule applies to each meter, or to each pricing rule of a meter such
   as one model of a tokens meter, on its own. Another meter's usage is not
   reduced.
-- A block-mode usage cap counts it as 0 too. The cap totals what the
-  invoice bills: a meter priced by pricing rules counts the usage of each
-  pricing rule that is above zero.
 - A common cause is a correction for usage that an earlier invoice already
   billed. The correction then lands in a later period, where there is less
   usage to offset.

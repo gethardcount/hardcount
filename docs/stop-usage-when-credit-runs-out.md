@@ -168,10 +168,8 @@ has left, because these are not subtracted:
   until its expiry date. If the period's invoice is issued after that date,
   the invoice cannot draw on it.
 
-It can read lower than the truth in two cases:
+It can read lower than the truth in one case:
 
-- **A subscription with a usage cap that blocks overage.** The invoice
-  applies the cap and the estimate does not.
 - **A period has ended and its invoice is not built yet.** This lasts
   through `INVOICE_GRACE_PERIOD`, or longer while a failed close waits for
   its next attempt. The estimate subtracts that period's usage but no

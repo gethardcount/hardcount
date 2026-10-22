@@ -11,7 +11,7 @@
 /**
  * Older single-channel form. On a paid invoice whose three
  * `*_amount_cents` fields are all 0, `refund` or `credit`
- * puts the whole note in that channel.
+ * puts the whole note in that channel. Not with commit_relief.
  */
 export type PostV1CreditNotesBodyRefundType = typeof PostV1CreditNotesBodyRefundType[keyof typeof PostV1CreditNotesBodyRefundType];
 

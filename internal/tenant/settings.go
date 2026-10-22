@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"reflect"
@@ -282,6 +283,33 @@ func (s *SettingsStore) nextInvoiceNumberInTx(ctx context.Context, tx *sql.Tx, t
 	return strings.ToUpper(prefix) + "-" + padSeq(seq), nil
 }
 
+// NextInvoiceSequence returns the sequence number the next invoice in the
+// ctx mode gets, without allocating it: what the dashboard's prefix preview
+// shows. A tenant with no settings row has issued nothing, so its next number
+// is 1 (the column default). Read-only, so a concurrent allocation can make it
+// stale by the time it is shown; it is a preview, not a reservation.
+func (s *SettingsStore) NextInvoiceSequence(ctx context.Context, tenantID string) (int, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer postgres.Rollback(tx)
+	col := "invoice_next_seq_test"
+	if postgres.Livemode(ctx) {
+		col = "invoice_next_seq_live"
+	}
+	// col is one of the two fixed names above, never caller input.
+	var seq int
+	err = tx.QueryRowContext(ctx, `SELECT `+col+` FROM tenant_settings WHERE tenant_id = $1`, tenantID).Scan(&seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return seq, tx.Commit()
+}
+
 // NextCreditNoteNumberTx allocates the next credit note number in the mode
 // carried on ctx, on the CALLER's transaction — the one that inserts the
 // credit note. A rolled-back create (a failed cancel, a refused swap) rolls
@@ -375,7 +403,23 @@ func (h *SettingsHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respond.JSON(w, r, http.StatusOK, ts)
+	seq, err := h.store.NextInvoiceSequence(r.Context(), tenantID)
+	if err != nil {
+		slog.Error("read next invoice sequence", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	respond.JSON(w, r, http.StatusOK, settingsResponse{TenantSettings: ts, NextInvoiceSequence: seq})
+}
+
+// settingsResponse is the settings body both routes return: the stored
+// settings plus next_invoice_sequence, which is per mode and not a setting.
+// It stays out of domain.TenantSettings so the PUT body cannot carry it and
+// the audit diff never reports an invoice issued between the read and the
+// save as a settings change.
+type settingsResponse struct {
+	domain.TenantSettings
+	NextInvoiceSequence int `json:"next_invoice_sequence"`
 }
 
 func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
@@ -394,6 +438,14 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	ts, err := h.store.Get(r.Context(), tenantID)
 	if err != nil {
 		slog.Error("get settings for merge", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	// Read before the write, so a failed read cannot turn a committed save
+	// into an error response. The save does not change the sequence.
+	seq, err := h.store.NextInvoiceSequence(r.Context(), tenantID)
+	if err != nil {
+		slog.Error("read next invoice sequence", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -452,7 +504,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	respond.JSON(w, r, http.StatusOK, result)
+	respond.JSON(w, r, http.StatusOK, settingsResponse{TenantSettings: result, NextInvoiceSequence: seq})
 }
 
 // diffSettings returns {json_field: {"from": old, "to": new}} for every field

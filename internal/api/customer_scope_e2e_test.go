@@ -579,10 +579,11 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 	// Credit grant: fixed. The body used to be decoded into the service's
 	// input, which also carries invoice and source_* ids the engine sets on
 	// its own grants, so a caller could stamp any of them on a ledger row.
-	// The endpoint now reads only its documented fields: the grant is made
-	// and none of those ids reach the database.
+	// The endpoint now reads only its documented fields and refuses any
+	// other key (422): no grant is made and none of those ids reach the
+	// database.
 	for _, f := range foreign {
-		t.Run("fixed: credit grant ignores engine-only ids/"+f.name, func(t *testing.T) {
+		t.Run("fixed: credit grant refuses engine-only ids/"+f.name, func(t *testing.T) {
 			ids := []string{f.refs.sub, f.refs.item, f.refs.draftInv, f.refs.creditNote}
 			mentions := func() (n int) {
 				for _, l := range strings.Split(snapshot(ids), "\n") {
@@ -601,8 +602,8 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 				"source_subscription_id": f.refs.sub, "source_subscription_item_id": f.refs.item,
 				"source_plan_changed_at": "2026-03-01T00:00:00Z", "source_change_type": "plan",
 			})
-			if code != 201 {
-				t.Fatalf("status = %d, want 201; body: %v", code, out)
+			if code != 422 {
+				t.Fatalf("status = %d, want 422; body: %v", code, out)
 			}
 			if wrote := mentions() - before; wrote != 0 {
 				t.Errorf("%d row(s) now mention an id the request body named, want 0", wrote)

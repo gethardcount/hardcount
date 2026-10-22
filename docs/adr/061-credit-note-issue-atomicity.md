@@ -299,6 +299,8 @@ The cap is now `Invoice.UnpaidRelievableCents()`: amount due plus the customer c
 - `unpaidRelief` and the allocator's unpaid cap in the billing engine (cancel and swap relief);
 - the two downgrade paths in the subscription handler (one source invoice, and the split across several).
 
+Since 2026-10-22 one function, `domain.AllocateUnusedCredit`, sizes the note for cancel, swap and item changes; it keeps this cap and also never exceeds total − already credited (ADR-118 amendment 2026-10-22).
+
 Example: a 49.00 prebill with 30.00 of credits applied (19.00 due), cancelled halfway. The unused half is 24.50. Before, relief stopped at the 19.00 due and 5.50 of the customer's credits stayed spent on unused time. Now the note is 24.50: it clears the 19.00 and returns 5.50.
 
 A fully unused unpaid invoice is still voided, which hands back all its credits. The cap on the sum of an invoice's credit notes (the invoice total) is unchanged.

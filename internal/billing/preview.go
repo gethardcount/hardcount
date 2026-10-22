@@ -69,9 +69,10 @@ type PreviewTotal struct {
 
 // PreviewResult is the response shape for both the in-app
 // GET /v1/billing/preview/{subscription_id} debug route and the public
-// POST /v1/invoices/create_preview surface. PlanName is a joined list of
-// the subscription's item plans (comma-separated) — the previous
-// single-plan shape can't represent a multi-item sub.
+// POST /v1/invoices/create_preview surface. PlanName is a comma-separated
+// list of the item plans the estimate reads (after any change due at the
+// close), then, in the cycle estimate, each plan only a segment of the
+// period still bills (a pre-swap plan, a removed item).
 type PreviewResult struct {
 	CustomerID         string         `json:"customer_id"`
 	SubscriptionID     string         `json:"subscription_id"`
@@ -126,6 +127,10 @@ func (e *Engine) Preview(ctx context.Context, sub domain.Subscription) (PreviewR
 func (e *Engine) previewCycle(ctx context.Context, sub domain.Subscription) (PreviewResult, error) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
+	// The close applies the plan changes due at this boundary before it
+	// reads plans (applyDueScheduledPlanChanges), so its estimate reads the
+	// items as the close will (A5).
+	sub = withDuePlanChanges(sub, periodEnd)
 	if sub.Status == domain.SubscriptionTrialing && sub.TrialEndAt != nil && sub.TrialEndAt.After(periodEnd) {
 		return e.previewWithWindow(ctx, sub, periodStart, periodEnd)
 	}
@@ -183,7 +188,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 				return PreviewResult{}, err
 			}
 			invoiceStart = periodEnd
-			invoiceEnd = advanceBillingPeriod(periodEnd, plans[it.PlanID].BillingInterval, loc, sub.BillingAnchorDay)
+			invoiceEnd = domain.NextBillingPeriodEnd(periodEnd, sub.BillingTime, plans[it.PlanID].BillingInterval, loc, sub.BillingAnchorDay)
 			break
 		}
 	}
@@ -262,7 +267,6 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		return PreviewResult{}, err
 	}
 	result.floors = floors
-	usageLineCount := 0
 	for _, meterID := range allMeterIDs {
 		from := floors.start(meterID, periodStart, periodEnd)
 		if !from.Before(periodEnd) {
@@ -275,24 +279,13 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		result.Lines = append(result.Lines, meterLines...)
 		result.Warnings = append(result.Warnings, warnings...)
 		result.leftOut = append(result.leftOut, leftOut...)
-		usageLineCount += len(meterLines)
 	}
 
-	// Estimate-scope warnings (ADR-045): create_preview is a full-period
-	// estimate that does NOT replicate the two overlays the cycle scan
-	// applies — usage-cap scaling and mid-period segment proration. Rather
-	// than silently overstating a capped sub or misstating one that changed
-	// mid-period, surface the divergence on the existing warnings channel so
-	// the estimate is honest about its own scope. (Replicating the overlays
-	// is the deferred ADR-045 follow-up; this is honesty now, precision when
-	// a design partner turns the features on.)
+	// Estimate-scope warning (ADR-045): create_preview is a full-period
+	// estimate that does NOT replicate the cycle's mid-period segment
+	// proration. Rather than misstating a subscription that changed
+	// mid-period, it says so on the warnings channel.
 	//
-	// Cap: only when there's billable usage the cap could scale — a
-	// configured cap on a zero-usage period can't bind, so no warning.
-	if msg, ok := capWarning(sub, usageLineCount); ok {
-		result.Warnings = append(result.Warnings, msg)
-	}
-
 	// Segment proration: a mid-LIFE change within [periodStart, periodEnd]
 	// makes the cycle bill base fees and usage per segment (each at its own
 	// rate × duration), which the full-period estimate flattens. Only plan
@@ -329,26 +322,14 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	return result, nil
 }
 
-// capWarning is the estimate-scope note for a block-mode usage cap, which
-// neither preview replicates (ADR-045). Only when there is billable usage
-// the cap could scale — a cap on a zero-usage period can't bind.
-func capWarning(sub domain.Subscription, usageLineCount int) (string, bool) {
-	if usageLineCount > 0 && sub.UsageCapUnits != nil && *sub.UsageCapUnits > 0 && sub.OverageAction == "block" {
-		return fmt.Sprintf(
-			"Estimate excludes the subscription's usage cap (%d units per period); if billable usage exceeds the cap, the actual invoice will be lower.",
-			*sub.UsageCapUnits), true
-	}
-	return "", false
-}
-
 // previewAsClose is previewCycle's composition: the lines the cycle close
 // would build for [periodStart, periodEnd] from the usage recorded so far.
 // It reads the same inputs the close reads — billing_intervals segments,
 // the threshold watermark, the invoice currency, the tenant zone — and
 // shares the base-fee math (closeBaseFeeLines) and the usage windows
 // (meterUsageIntervals) with buildLineItems. What it does not replicate is
-// named in a warning: the usage cap (capWarning), and the tier ladder and
-// deferred max/last buckets after a threshold fire (watermark warning).
+// named in a warning: the deferred max/last buckets after a threshold fire
+// (watermark warning).
 func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, plans map[string]domain.Plan, meterOrder []string, periodStart, periodEnd time.Time, result PreviewResult) (PreviewResult, error) {
 	loc, err := e.tenantLocation(ctx, sub.TenantID)
 	if err != nil {
@@ -397,6 +378,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 				return PreviewResult{}, fmt.Errorf("get segment plan %s: %w", seg.planID, err)
 			}
 			plans[seg.planID] = pl
+			result.PlanName += ", " + pl.Name
 		}
 	}
 
@@ -437,25 +419,9 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
-	// The tier ladder runs only after a threshold fire, and the close turns
-	// it off only when the block usage cap binds; the preview works the cap
-	// out the same way for that switch (usage_cap.go). It does not scale its
-	// lines by the cap (capWarning says so).
-	capBinds := false
-	if wm.exists() {
-		meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
-		if err != nil {
-			return PreviewResult{}, fmt.Errorf("preview: %w", err)
-		}
-		usageCap, err := e.usageCapFor(ctx, sub, meterIntervalsFull, newWindowUsage(e, sub, meterAggs))
-		if err != nil {
-			return PreviewResult{}, fmt.Errorf("preview: %w", err)
-		}
-		capBinds = usageCap.binds()
-	}
-	ladder := newUsageLadder(wm, capBinds)
-	usageLineCount := 0
+	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
+	// The tier ladder continues from a threshold fire, as in the close.
+	ladder := newUsageLadder(wm)
 	for _, meterID := range order {
 		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
 			return ladder.price(rule, meterID, bucketKey, mode, qty)
@@ -471,13 +437,9 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 			result.Lines = append(result.Lines, lines...)
 			result.Warnings = append(result.Warnings, warnings...)
 			result.leftOut = append(result.leftOut, leftOut...)
-			usageLineCount += len(lines)
 		}
 	}
 
-	if msg, ok := capWarning(sub, usageLineCount); ok {
-		result.Warnings = append(result.Warnings, msg)
-	}
 	if wm.billedThrough != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf(
 			"A spend-threshold invoice already billed this period through %s; this estimate shows only what is left. Tiered prices and max or last-value meters may differ on the actual invoice.",

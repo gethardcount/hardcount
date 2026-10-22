@@ -436,13 +436,10 @@ func (c *LiveStripeClient) FetchCardDetails(ctx context.Context, stripeCustomerI
 		return CardDetails{}, fmt.Errorf("customer %s: %w", stripeCustomerID, ErrNoSavedCard)
 	}
 
-	// Set this card as the customer's default payment method
-	_, _ = sc.V1Customers.Update(ctx, stripeCustomerID, &stripe.CustomerUpdateParams{
-		InvoiceSettings: &stripe.CustomerUpdateInvoiceSettingsParams{
-			DefaultPaymentMethod: stripe.String(latest.ID),
-		},
-	})
-
+	// Read only. This used to set the newest card as Stripe's default,
+	// ignoring errors, which split Stripe's copy from Velox's default (the
+	// card Velox charges). Stripe's default now follows Velox's, set by the
+	// payment-methods service whenever Velox's default changes (ADR-053).
 	return CardDetails{
 		PaymentMethodID: latest.ID,
 		Brand:           string(latest.Card.Brand),
@@ -454,7 +451,7 @@ func (c *LiveStripeClient) FetchCardDetails(ctx context.Context, stripeCustomerI
 
 // FetchCardForPaymentIntent retrieves the card actually charged on
 // a specific PaymentIntent. Unlike FetchCardDetails (which returns
-// the customer's default PM), this works for one-off Checkout
+// the newest card on the Stripe customer), this works for one-off Checkout
 // payments where the customer didn't save the PM — Stripe still
 // creates an ephemeral PaymentMethod object for the charge that
 // stays accessible through the PI's `payment_method` field. ADR-020.

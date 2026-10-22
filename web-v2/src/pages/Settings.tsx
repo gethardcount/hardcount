@@ -56,6 +56,7 @@ import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
+import { COMPANY_EMAIL_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -166,6 +167,12 @@ export default function SettingsPage() {
   const [error, setError] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
+  // The number the next invoice in this mode gets, for the prefix preview.
+  // Not a form field: the server counts it, and a save does not change it.
+  const [nextInvoiceSeq, setNextInvoiceSeq] = useState<number | null>(null)
+  const { user } = useAuth()
+  const livemode = user?.livemode ?? false
+  const sharedNotice = sharedSettingsNotice(livemode)
 
   const formMethods = useForm<SettingsFormData>({
     resolver: zodResolver(settingsSchema),
@@ -220,6 +227,7 @@ export default function SettingsPage() {
           : '',
       }
       reset(f)
+      setNextInvoiceSeq(s.next_invoice_sequence)
       setLoading(false)
     }).catch(err => { setError(err ?? new Error('Failed to load settings')); setLoading(false) })
   }
@@ -285,6 +293,7 @@ export default function SettingsPage() {
           : '',
       }
       reset(f)
+      setNextInvoiceSeq(updated.next_invoice_sequence)
       if (updated.default_currency) setActiveCurrency(updated.default_currency)
       // Synchronously reseed the module-scoped tenant TZ so the very
       // next render of any page (including a navigation that happens
@@ -388,6 +397,7 @@ export default function SettingsPage() {
               (timezone). "Business" was misleading — timezone affects
               every formatDate in the dashboard, not just invoicing. */}
           <TabsContent value="general" className="space-y-6">
+            {sharedNotice && <Callout>{sharedNotice}</Callout>}
             <Card>
               <CardContent className="p-6">
                 <div className="mb-5">
@@ -402,7 +412,7 @@ export default function SettingsPage() {
                       className={cn('mt-1', formErrors.company_name && 'border-destructive')} />
                     {formErrors.company_name
                       ? <p className="text-xs text-destructive mt-1">{formErrors.company_name.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Displayed on invoice headers</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">Printed on invoices and credit notes, and the sender name on emails</p>}
                   </div>
                   <div>
                     <Label htmlFor="settings-company-email">Email</Label>
@@ -411,7 +421,7 @@ export default function SettingsPage() {
                       className={cn('mt-1', formErrors.company_email && 'border-destructive')} />
                     {formErrors.company_email
                       ? <p className="text-xs text-destructive mt-1">{formErrors.company_email.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Reply-to address on invoice emails</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">{COMPANY_EMAIL_HINT}</p>}
                   </div>
                   <div>
                     <Label htmlFor="settings-company-phone">Phone</Label>
@@ -427,7 +437,7 @@ export default function SettingsPage() {
                       className={cn('mt-1', formErrors.support_url && 'border-destructive')} />
                     {formErrors.support_url
                       ? <p className="text-xs text-destructive mt-1">{formErrors.support_url.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1">Shown in invoice footers so customers can find help</p>}
+                      : <p className="text-xs text-muted-foreground mt-1">Linked in emails and on the payment page, and printed on invoice and credit-note PDFs</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-logo-url">Logo URL</Label>
@@ -438,7 +448,7 @@ export default function SettingsPage() {
                       ? <p className="text-xs text-destructive mt-1">{formErrors.logo_url.message}</p>
                       : form.logo_url && /^https?:\/\//i.test(form.logo_url)
                         ? <LogoPreview key={form.logo_url} url={form.logo_url} />
-                        : <p className="text-xs text-muted-foreground mt-1">Public HTTPS URL — e.g. Cloudinary, S3 public object, or your CDN. Rendered at the top of invoice PDFs.</p>}
+                        : <p className="text-xs text-muted-foreground mt-1">Public HTTPS URL — e.g. Cloudinary, S3 public object, or your CDN. Shown in emails and on the payment page.</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-brand-color">Brand color</Label>
@@ -567,6 +577,7 @@ export default function SettingsPage() {
 
           {/* Invoicing: numbering, currency, locale, footer */}
           <TabsContent value="invoicing" className="space-y-6">
+            {sharedNotice && <Callout>{sharedNotice}</Callout>}
             <Card>
               <CardContent className="p-6">
                 <div className="mb-5">
@@ -595,8 +606,8 @@ export default function SettingsPage() {
                       placeholder="INV" />
                     {formErrors.invoice_prefix
                       ? <p className="text-xs text-destructive mt-1">{formErrors.invoice_prefix.message}</p>
-                      : form.invoice_prefix
-                        ? <p className="text-xs text-muted-foreground mt-1">New invoice numbers start <span className="font-mono">{form.invoice_prefix.toUpperCase()}-</span></p>
+                      : form.invoice_prefix && nextInvoiceSeq != null
+                        ? <p className="text-xs text-muted-foreground mt-1">{invoiceNumberPreview(form.invoice_prefix.toUpperCase(), nextInvoiceSeq, livemode)}</p>
                         : <p className="text-xs text-muted-foreground mt-1">Letters, numbers, and hyphens only</p>}
                   </div>
                   <div>
@@ -675,7 +686,7 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between mt-1">
                       {formErrors.invoice_footer
                         ? <p className="text-xs text-destructive">{formErrors.invoice_footer.message}</p>
-                        : <p className="text-xs text-muted-foreground">Default footer on every invoice. Per-invoice overrides take precedence.</p>}
+                        : <p className="text-xs text-muted-foreground">Printed on invoice PDFs and the payment page. Each invoice keeps the footer it was issued with.</p>}
                       <p className="text-xs text-muted-foreground tabular-nums">{(form.invoice_footer || '').length}/1000</p>
                     </div>
                   </div>
@@ -686,6 +697,7 @@ export default function SettingsPage() {
 
           {/* Tax: tax ID, provider selection, rate (manual) or default tax code (stripe_tax) */}
           <TabsContent value="tax" className="space-y-6">
+            {sharedNotice && <Callout>{sharedNotice}</Callout>}
             <Card>
               <CardContent className="p-6">
                 <div className="mb-5">

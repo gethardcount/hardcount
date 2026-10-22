@@ -151,7 +151,9 @@ type TenantSettings struct {
 	CompanyCountry string `json:"company_country,omitempty"`
 	CompanyEmail   string `json:"company_email,omitempty"`
 	CompanyPhone   string `json:"company_phone,omitempty"`
-	LogoURL        string `json:"logo_url,omitempty"`
+	// LogoURL is shown in emails and on the hosted invoice page. The PDFs
+	// do not print it.
+	LogoURL string `json:"logo_url,omitempty"`
 	// BrandColor is a 7-char hex accent color (#rrggbb) applied to the
 	// company name and a thin bar on invoice PDFs. Empty = no brand —
 	// the PDF falls back to its neutral default palette.
@@ -160,12 +162,14 @@ type TenantSettings struct {
 	// printed in the invoice "From" block. Separate from customer.TaxID /
 	// billing_profile.TaxID which hold the BUYER's identifier.
 	TaxID string `json:"tax_id,omitempty"`
-	// SupportURL appears in the invoice footer so customers have a
-	// self-serve channel for billing questions.
+	// SupportURL is where customers get help with a bill: linked in emails
+	// and on the hosted invoice page, and printed at the foot of invoice and
+	// credit-note PDFs.
 	SupportURL string `json:"support_url,omitempty"`
-	// InvoiceFooter is the tenant-level default footer text applied to
-	// newly issued invoices. Per-invoice override via invoices.footer is
-	// already supported and takes precedence.
+	// InvoiceFooter is printed under the totals on invoice PDFs and on the
+	// hosted invoice page. Each invoice keeps the footer it was issued with
+	// (copied into invoices.footer at issue, ADR-109), so an edit applies to
+	// invoices issued after it. A draft shows the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 	// audit_fail_closed was retired by ADR-089 (the post-commit 503 swap it
 	// controlled was cached by the Idempotency layer, permanently stranding

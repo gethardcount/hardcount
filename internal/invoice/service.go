@@ -183,6 +183,10 @@ type Service struct {
 	settings       TenantSettingsReader
 	audit          AuditLogger
 	events         domain.EventDispatcher
+	// collectionStopper and dunningResolver are AfterVoid's Stripe and
+	// dunning legs. Only a test leaves them unwired.
+	collectionStopper PaymentCanceler
+	dunningResolver   DunningResolver
 	// setupLinkEmailOff is true when this server cannot email a setup link
 	// (SMTP_HOST or PAYMENT_UPDATE_URL unset). Read only by the
 	// no-payment-method and recovery-ended notices, which must not say a
@@ -196,6 +200,16 @@ type Service struct {
 // when one can be. Wired at boot from both things the sender needs: SMTP and
 // PAYMENT_UPDATE_URL.
 func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmailOff = !configured }
+
+// SetCollectionStopper wires the Stripe leg every committed void runs
+// (AfterVoid): expire the invoice's live Checkout sessions, then cancel its
+// PaymentIntent. Satisfied by *payment.Stripe.
+func (s *Service) SetCollectionStopper(p PaymentCanceler) { s.collectionStopper = p }
+
+// SetDunningResolver wires the dunning leg every committed void runs
+// (AfterVoid): close the invoice's active run as invoice_voided. Satisfied
+// by *dunning.Service.
+func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d }
 
 // AuditLogger is the narrow audit-write interface the service uses to
 // record state-changing operations that are reachable from multiple
@@ -549,18 +563,27 @@ func (s *Service) customerOnTestClock(ctx context.Context, tenantID, customerID 
 }
 
 // requireSubscription confirms an operator-supplied subscription id exists in
-// the caller's tenant and mode. Same reason as the customer read above: the
-// foreign key on invoices.subscription_id is on the id alone. Unwired reader
-// (narrow unit tests) skips the read.
-func (s *Service) requireSubscription(ctx context.Context, tenantID, subscriptionID string) error {
+// the caller's tenant and mode, and that it belongs to this customer. Same
+// reason as the customer read above: the foreign key on
+// invoices.subscription_id is on the id alone, so it says nothing about
+// tenant, mode or owner. Dunning, the collection-paused gate, the test clock
+// and the cycle slot all act on the invoice's subscription, so another
+// customer's id would make this invoice act on that customer's account.
+// Both columns are write-once, so checking here at create closes it.
+// Unwired reader (narrow unit tests) skips the read.
+func (s *Service) requireSubscription(ctx context.Context, tenantID, customerID, subscriptionID string) error {
 	if s.subPauseReader == nil || subscriptionID == "" {
 		return nil
 	}
-	if _, err := s.subPauseReader.Get(ctx, tenantID, subscriptionID); err != nil {
+	sub, err := s.subPauseReader.Get(ctx, tenantID, subscriptionID)
+	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return errs.NotFound("subscription")
 		}
 		return fmt.Errorf("get subscription: %w", err)
+	}
+	if sub.CustomerID != customerID {
+		return errs.Invalid("subscription_id", "subscription does not belong to the requested customer")
 	}
 	return nil
 }
@@ -608,7 +631,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	if err := s.requireSubscription(ctx, tenantID, input.SubscriptionID); err != nil {
+	if err := s.requireSubscription(ctx, tenantID, input.CustomerID, input.SubscriptionID); err != nil {
 		return domain.Invoice{}, err
 	}
 	// SubscriptionID is OPTIONAL: cycle invoices carry a subscription, one-off
@@ -672,6 +695,36 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 
 	ctx = s.bindForCreate(ctx, tenantID, input)
 	now := s.clock.Now(ctx)
+
+	// Validate and build every line before the invoice number is taken: a
+	// refused line must not use one up. The commit-expiry check reads the
+	// clock bound just above.
+	items := make([]domain.InvoiceLineItem, 0, len(input.LineItems))
+	var subtotal int64
+	commitLines := 0
+	for i, liInput := range input.LineItems {
+		li, err := buildLineItem(liInput, currency)
+		if err != nil {
+			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1, err)
+		}
+		// Compose-time expiry sanity (ADR-078); re-checked at finalize.
+		if li.CommitExpiresAt != nil && !li.CommitExpiresAt.After(now) {
+			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1,
+				errs.Invalid("commit_expires_at", "must be in the future"))
+		}
+		if li.IsCommitLine() {
+			commitLines++
+		}
+		subtotal += li.AmountCents
+		items = append(items, li)
+	}
+	// One commit per invoice (ADR-078). The store enforces it too, on both
+	// create (createWithLineItemsInTx) and AddLineItem (under the row lock);
+	// checking here as well keeps a refused pair from using up a number,
+	// which the store's check runs too late to prevent.
+	if commitLines > 1 {
+		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "invoice already has a commit line — one commit per invoice; use a separate invoice")
+	}
 	// One-off invoices that omit a billing window default to "now → now" so
 	// the NOT NULL period columns get sane values. Cycle invoices always
 	// pass an explicit window from the engine.
@@ -728,28 +781,13 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		return s.store.CreateAudited(ctx, tenantID, inv, s.createEmission(ctx, 0))
 	}
 
-	// Atomic create-with-lines: validate + build every line, sum the
-	// subtotal, and persist header + items in one transaction. This closes
-	// the partial-failure window the old create-then-loop-AddLineItem flow
-	// had (a network drop mid-loop left a draft with some-but-not-all lines).
-	// Tax stays 0 here by design — it's computed at finalize for manual
-	// invoices (see Finalize → ComputeTaxForInvoice). Totals therefore equal
-	// the subtotal; finalize rewrites them once tax is known.
-	items := make([]domain.InvoiceLineItem, 0, len(input.LineItems))
-	var subtotal int64
-	for i, liInput := range input.LineItems {
-		li, err := buildLineItem(liInput, currency)
-		if err != nil {
-			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1, err)
-		}
-		// Compose-time expiry sanity (ADR-078); re-checked at finalize.
-		if li.CommitExpiresAt != nil && !li.CommitExpiresAt.After(s.clock.Now(ctx)) {
-			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1,
-				errs.Invalid("commit_expires_at", "must be in the future"))
-		}
-		subtotal += li.AmountCents
-		items = append(items, li)
-	}
+	// Atomic create-with-lines: header + items persist in one transaction
+	// (lines were validated above). This closes the partial-failure window
+	// the old create-then-loop-AddLineItem flow had (a network drop mid-loop
+	// left a draft with some-but-not-all lines). Tax stays 0 here by design —
+	// it's computed at finalize for manual invoices (see Finalize →
+	// ComputeTaxForInvoice). Totals therefore equal the subtotal; finalize
+	// rewrites them once tax is known.
 	inv.SubtotalCents = subtotal
 	inv.TotalAmountCents = subtotal
 	inv.AmountDueCents = subtotal
@@ -965,6 +1003,15 @@ func awaitsPaymentNoCard(inv domain.Invoice, ready bool) bool {
 	return !ready && inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentPending
 }
 
+// pauseCandidate reports whether a row's notice depends on the subscription's
+// collection pause: an unpaid finalized invoice that is queued for the
+// auto-charge, or that waits for a card. Its notice also depends on the
+// invoice's dunning run, which the pause does not stop.
+func pauseCandidate(inv domain.Invoice, ready bool) bool {
+	return (inv.AutoChargePending || !ready) && inv.Status == domain.InvoiceFinalized &&
+		inv.PaymentStatus == domain.PaymentPending
+}
+
 // readAttentionFacts reads one tenant's attention facts for a page of
 // invoices. Every read is display-only: a read error leaves its fact false
 // for the page, the same safe direction a per-row error took before.
@@ -1043,14 +1090,20 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// direction of drift.
 	//
 	// The refused-card notice (#966) joins the same read: it may say that
-	// retries keep their schedule only while the run is active and not
-	// paused. No run, or a read error, leaves retrying false, and the notice
+	// retries keep their schedule only while the run is active, not paused
+	// and not waiting on a failed final action. No run, or a read error, leaves retrying false, and the notice
 	// then says no retry is scheduled — the direction that still sends the
 	// operator to get a new card, rather than waiting on a retry that may
 	// never run.
+	//
+	// The paused-collection notices join it too (sweep A2): a collection
+	// pause does not stop a run already open on the invoice, so every row the
+	// pause state is read for (pauseCandidate) needs the run as well. No run,
+	// or a read error, leaves retrying false and the notice says nothing
+	// charges the invoice until collection resumes.
 	if s.dunningReader != nil {
 		ids := distinct(page, func(inv domain.Invoice) string {
-			if awaitsPaymentNoCard(inv, f.paymentReady[inv.CustomerID]) || f.refusedCard[inv.ID] != "" {
+			if pauseCandidate(inv, f.paymentReady[inv.CustomerID]) || f.refusedCard[inv.ID] != "" {
 				return inv.ID
 			}
 			return ""
@@ -1061,7 +1114,10 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 				f.retrying = make(map[string]bool, len(runs))
 				for _, run := range runs {
 					f.escalated[run.InvoiceID] = run.State == domain.DunningEscalated
-					f.retrying[run.InvoiceID] = run.State == domain.DunningActive && !run.Paused
+					// A run whose final action failed stays active with every attempt
+					// used; its next tick re-attempts only the action, never a charge.
+					f.retrying[run.InvoiceID] = run.State == domain.DunningActive && !run.Paused &&
+						run.Resolution != domain.ResolutionActionFailed
 				}
 			}
 		}
@@ -1073,11 +1129,10 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// while collection is paused (the sweep that charges on attach skips
 	// paused subscriptions). Healthy, paid, draft and failed rows skip it.
 	// Display-only: a read error shows the not-paused banner (logged); the
-	// collector itself refuses to charge a paused subscription.
+	// charge sweeps themselves skip a paused subscription. Dunning retries do
+	// not, which is why these rows also read their dunning run above.
 	subIDs := distinct(page, func(inv domain.Invoice) string {
-		ready := f.paymentReady[inv.CustomerID]
-		if (inv.AutoChargePending || !ready) && inv.Status == domain.InvoiceFinalized &&
-			inv.PaymentStatus == domain.PaymentPending {
+		if pauseCandidate(inv, f.paymentReady[inv.CustomerID]) {
 			return inv.SubscriptionID
 		}
 		return ""
@@ -1166,8 +1221,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 		atc.CustomerHasEmail = f.hasEmail[inv.CustomerID]
 		atc.DunningEscalated = f.escalated[inv.ID]
 	}
-	if (inv.AutoChargePending || !atc.HasPaymentMethod) && inv.Status == domain.InvoiceFinalized &&
-		inv.PaymentStatus == domain.PaymentPending {
+	if pauseCandidate(inv, atc.HasPaymentMethod) {
 		atc.CollectionPaused = f.paused[inv.SubscriptionID]
 	}
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
@@ -1781,13 +1835,36 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 	return nil
 }
 
-// AfterVoid runs a committed void's post-commit legs: the upstream tax
-// reversal and the invoice.voided webhook. Void calls it itself; a caller of
-// VoidUnchangedTx calls it once its transaction commits. A crash before it
-// runs loses nothing durable: RetryPendingTaxReversal re-drives the reversal
-// (the voided row keeps tax_reversed_at NULL); the webhook is best-effort, as
-// on every void.
+// AfterVoid runs a committed void's post-commit legs, the same for every
+// void: Void calls it itself, and a caller of VoidUnchangedTx (the cancel and
+// plan-swap relief, Engine.FinishRelief) calls it once its transaction
+// commits. Before 2026-10-22 the Stripe and dunning legs ran only in the two
+// HTTP handlers, so a relief void left the invoice payable on a live
+// Checkout session and its dunning run active until the run's next due tick.
+//
+// In order:
+//  1. Stop collection at Stripe: expire the invoice's live Checkout
+//     sessions, then cancel its PaymentIntent. Money first.
+//  2. Reverse the upstream tax.
+//  3. Send invoice.voided.
+//  4. Resolve the invoice's active dunning run as invoice_voided. A caller
+//     that resolves the run itself afterwards (the dunning handler) loses
+//     the resolve CAS and gets the resolved row back.
+//
+// Each leg is best-effort, and a crash before one loses nothing durable:
+// the void's own transaction closed Velox's checkout claims, a Checkout
+// session expires within an hour at Stripe, and a payment that still lands
+// raises the paid-on-voided anomaly (ADR-068); RetryPendingTaxReversal
+// re-drives the reversal (tax_reversed_at stays NULL); dunning's next tick
+// on the run resolves it (processRun reads the voided invoice).
 func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.Invoice) {
+	// The void has committed, so every leg runs to the end even if the
+	// caller's context ends now (an API timeout, a client disconnect, a
+	// dunning tick stopping): the same rule as finishReliefThenCollect.
+	ctx = context.WithoutCancel(ctx)
+	if s.collectionStopper != nil {
+		s.collectionStopper.StopCollection(ctx, tenantID, voided)
+	}
 	// Invoice-stable reversal reference (inv_taxrev_<id>). Void permits an
 	// `uncollectible` source (annulling a bad debt is a legitimate operator
 	// action), and MarkUncollectible already reversed the tax under THIS same
@@ -1812,6 +1889,12 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 			"amount_due_cents":   voided.AmountDueCents,
 			"currency":           voided.Currency,
 		})
+	}
+	if s.dunningResolver != nil {
+		if err := s.dunningResolver.ResolveByInvoice(ctx, tenantID, voided.ID, domain.ResolutionInvoiceVoided); err != nil {
+			slog.WarnContext(ctx, "resolve the voided invoice's dunning run failed; its next dunning tick resolves it",
+				"invoice_id", voided.ID, "error", err)
+		}
 	}
 }
 
@@ -2186,8 +2269,8 @@ func (s *Service) lineItemAddedEmission(ctx context.Context) func(tx *sql.Tx, it
 // buildLineItem validates an AddLineItemInput and returns the domain line
 // item with its amount computed. Shared by AddLineItem (incremental add) and
 // Create (atomic create-with-lines) so both paths apply identical rules:
-// description required, quantity > 0, unit_amount > 0, line_type defaulting
-// to add_on. currency stamps the per-line currency column the store
+// description required, quantity > 0, unit_amount > 0, line_type one of
+// add_on (the default), base_fee, usage. currency stamps the per-line currency column the store
 // persists; pass "" when a downstream store call derives it from the
 // invoice.
 func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineItem, error) {
@@ -2205,18 +2288,17 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	lineType := strings.TrimSpace(input.LineType)
 	if lineType == "" {
 		// add_on is the default for operator-added line items (one-off invoice
-		// composer, ad-hoc charges). Engine-driven cycle invoices always pass
-		// an explicit type (base_fee / usage). The DB CHECK accepts only:
-		// base_fee, usage, add_on, discount, tax — so the previous "manual"
-		// fallback would have been rejected by Postgres on insert.
+		// composer, ad-hoc charges).
 		lineType = string(domain.LineTypeAddOn)
 	}
 	switch domain.InvoiceLineItemType(lineType) {
-	case domain.LineTypeBaseFee, domain.LineTypeUsage, domain.LineTypeAddOn, domain.LineTypeDiscount, domain.LineTypeTax:
-		// Matches the DB CHECK — an unknown value used to sail through
-		// here and surface as a raw constraint violation (500).
+	case domain.LineTypeBaseFee, domain.LineTypeUsage, domain.LineTypeAddOn:
+		// Quantity and unit amount are positive, so every line adds money.
+		// A "discount" line would raise the total, and a "tax" line would
+		// be taxed again at finalize, so neither is accepted. The DB CHECK
+		// still allows both: rows written before this rule may exist.
 	default:
-		return domain.InvoiceLineItem{}, errs.Invalid("line_type", "must be one of: base_fee, usage, add_on, discount, tax")
+		return domain.InvoiceLineItem{}, errs.Invalid("line_type", "must be one of: add_on, base_fee, usage")
 	}
 
 	amountCents := input.Quantity * input.UnitAmountCents

@@ -386,3 +386,16 @@ either action:
 That closes the first item under "Not covered yet" above, for a Collect in
 progress and for a crash on the final retry. Pinned by
 `internal/dunning/stale_hold_integration_test.go`.
+
+## Amendment 2026-10-22 — money-path create routes refuse unknown fields
+
+Money-path create routes and the subscription change routes refuse unknown fields (422, `param` = key); policy routes keep the by-name refusal.
+
+## Amendment 2026-10-22 — a cancel that voids the run's invoice resolves the run
+
+When the final action's cancel voids the run's own invoice (a wholly unused
+prebill, ADR-118), the void now resolves the run as `invoice_voided`
+itself, in its post-commit legs. The run then neither escalates nor sends an
+escalation email, whatever the final invoice action is. Before, a policy
+with final invoice action `none` escalated over the voided invoice. See the
+[ADR-118 amendment of 2026-10-22](118-cancel-and-swap-relief-in-the-change-transaction.md#amendment-2026-10-22-a-relief-void-runs-every-voids-post-commit-legs).

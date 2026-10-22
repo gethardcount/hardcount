@@ -934,11 +934,9 @@ func (e InvoiceDisputeStatus) Valid() bool {
 
 // Defines values for InvoiceLineItemInputLineType.
 const (
-	InvoiceLineItemInputLineTypeAddOn    InvoiceLineItemInputLineType = "add_on"
-	InvoiceLineItemInputLineTypeBaseFee  InvoiceLineItemInputLineType = "base_fee"
-	InvoiceLineItemInputLineTypeDiscount InvoiceLineItemInputLineType = "discount"
-	InvoiceLineItemInputLineTypeTax      InvoiceLineItemInputLineType = "tax"
-	InvoiceLineItemInputLineTypeUsage    InvoiceLineItemInputLineType = "usage"
+	InvoiceLineItemInputLineTypeAddOn   InvoiceLineItemInputLineType = "add_on"
+	InvoiceLineItemInputLineTypeBaseFee InvoiceLineItemInputLineType = "base_fee"
+	InvoiceLineItemInputLineTypeUsage   InvoiceLineItemInputLineType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceLineItemInputLineType enum.
@@ -947,10 +945,6 @@ func (e InvoiceLineItemInputLineType) Valid() bool {
 	case InvoiceLineItemInputLineTypeAddOn:
 		return true
 	case InvoiceLineItemInputLineTypeBaseFee:
-		return true
-	case InvoiceLineItemInputLineTypeDiscount:
-		return true
-	case InvoiceLineItemInputLineTypeTax:
 		return true
 	case InvoiceLineItemInputLineTypeUsage:
 		return true
@@ -2621,6 +2615,21 @@ func (e PostV1PlansJSONBodyBillingInterval) Valid() bool {
 	}
 }
 
+// Defines values for PostV1PlansJSONBodyStatus.
+const (
+	PostV1PlansJSONBodyStatusActive PostV1PlansJSONBodyStatus = "active"
+)
+
+// Valid indicates whether the value is a known member of the PostV1PlansJSONBodyStatus enum.
+func (e PostV1PlansJSONBodyStatus) Valid() bool {
+	switch e {
+	case PostV1PlansJSONBodyStatusActive:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetPlan200JSONResponseBodyBaseBillTiming.
 const (
 	GetPlan200JSONResponseBodyBaseBillTimingInAdvance GetPlan200JSONResponseBodyBaseBillTiming = "in_advance"
@@ -2788,19 +2797,19 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 
 // Defines values for GetV1RatingRulesParamsLifecycleState.
 const (
-	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
-	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
-	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
+	Active   GetV1RatingRulesParamsLifecycleState = "active"
+	Archived GetV1RatingRulesParamsLifecycleState = "archived"
+	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
 func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 	switch e {
-	case GetV1RatingRulesParamsLifecycleStateActive:
+	case Active:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateArchived:
+	case Archived:
 		return true
-	case GetV1RatingRulesParamsLifecycleStateDraft:
+	case Draft:
 		return true
 	default:
 		return false
@@ -3473,8 +3482,10 @@ type Attention struct {
 	// without collecting (2026-07-22). `collection_paused` reports an
 	// invoice that is queued for auto-charge but whose subscription
 	// has `pause_collection` set, so the charge sweeps deliberately
-	// skip it — it will not be charged automatically until
-	// collection resumes (2026-07-28). `commit_exposure` reports an
+	// skip it (2026-07-28). A dunning run already open on the invoice
+	// keeps retrying it through the pause, and `message` then says so;
+	// with no open run it is not charged automatically until
+	// collection resumes. `commit_exposure` reports an
 	// unpaid invoice that funded a prepaid commit whose credit is
 	// already spendable (ADR-078 funds commits at issue, not at
 	// payment) — note this reason is only returned when no other
@@ -3558,8 +3569,10 @@ type AttentionActionItem struct {
 // without collecting (2026-07-22). `collection_paused` reports an
 // invoice that is queued for auto-charge but whose subscription
 // has `pause_collection` set, so the charge sweeps deliberately
-// skip it — it will not be charged automatically until
-// collection resumes (2026-07-28). `commit_exposure` reports an
+// skip it (2026-07-28). A dunning run already open on the invoice
+// keeps retrying it through the pause, and `message` then says so;
+// with no open run it is not charged automatically until
+// collection resumes. `commit_exposure` reports an
 // unpaid invoice that funded a prepaid commit whose credit is
 // already spendable (ADR-078 funds commits at issue, not at
 // payment) — note this reason is only returned when no other
@@ -3695,8 +3708,11 @@ type BootstrapResult struct {
 
 // CreditBalance A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
 type CreditBalance struct {
-	BalanceCents int64  `json:"balance_cents"`
-	CustomerId   string `json:"customer_id"`
+	BalanceCents int64 `json:"balance_cents"`
+
+	// Currency The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default.
+	Currency   string `json:"currency"`
+	CustomerId string `json:"customer_id"`
 
 	// TotalDeducted Credit an operator deducted (a negative adjustment).
 	TotalDeducted int64 `json:"total_deducted"`
@@ -3733,8 +3749,12 @@ type CreditGrantBlock struct {
 	EntryType string `json:"entry_type"`
 
 	// ExpiredCents The part that expired unused.
-	ExpiredCents int64     `json:"expired_cents"`
-	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	ExpiredCents int64 `json:"expired_cents"`
+
+	// ExpiresAt The credit can be drawn up to and including this instant; a
+	// period invoice draws it when its period ends at or before it.
+	// The dashboard sends the local midnight after the picked day.
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
 	// GrantKind Absent for unclassified credit.
 	GrantKind CreditGrantBlockGrantKind `json:"grant_kind,omitempty"`
@@ -3782,11 +3802,16 @@ type CreditLedgerEntry struct {
 	CustomerId    string                     `json:"customer_id"`
 	Description   string                     `json:"description"`
 	EntryType     CreditLedgerEntryEntryType `json:"entry_type"`
-	ExpiresAt     time.Time                  `json:"expires_at,omitempty"`
-	GrantKind     CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
-	Id            string                     `json:"id"`
-	InvoiceId     string                     `json:"invoice_id,omitempty"`
-	Metadata      map[string]interface{}     `json:"metadata,omitempty"`
+
+	// ExpiresAt On a grant, its expiry. The credit can be drawn up to and
+	// including this instant; a period invoice draws it when its
+	// period ends at or before it. The dashboard sends the local
+	// midnight after the picked day.
+	ExpiresAt time.Time                  `json:"expires_at,omitempty"`
+	GrantKind CreditLedgerEntryGrantKind `json:"grant_kind,omitempty"`
+	Id        string                     `json:"id"`
+	InvoiceId string                     `json:"invoice_id,omitempty"`
+	Metadata  map[string]interface{}     `json:"metadata,omitempty"`
 
 	// SourceChangeType Classifies per-item proration artifacts so the dedup index can
 	// distinguish a plan-change and a quantity-change that happen to
@@ -4627,11 +4652,13 @@ type HostedInvoice struct {
 		Currency            string    `json:"currency"`
 		DiscountCents       int64     `json:"discount_cents"`
 		DueAt               time.Time `json:"due_at,omitempty"`
-		Footer              string    `json:"footer,omitempty"`
-		InvoiceNumber       string    `json:"invoice_number"`
-		IssuedAt            time.Time `json:"issued_at,omitempty"`
-		Memo                string    `json:"memo,omitempty"`
-		PaidAt              time.Time `json:"paid_at,omitempty"`
+
+		// Footer The footer this invoice was issued with.
+		Footer        string    `json:"footer,omitempty"`
+		InvoiceNumber string    `json:"invoice_number"`
+		IssuedAt      time.Time `json:"issued_at,omitempty"`
+		Memo          string    `json:"memo,omitempty"`
+		PaidAt        time.Time `json:"paid_at,omitempty"`
 
 		// PaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
 		// returned an ambiguous error (5xx, timeout, connection reset) where
@@ -4735,8 +4762,12 @@ type Invoice struct {
 	CustomerId          string    `json:"customer_id"`
 	DiscountCents       int64     `json:"discount_cents"`
 	DueAt               time.Time `json:"due_at,omitempty"`
-	Footer              string    `json:"footer,omitempty"`
-	Id                  string    `json:"id"`
+
+	// Footer The tenant's `invoice_footer` as it was when this invoice was
+	// issued. Printed on the PDF and the hosted invoice page. Empty on
+	// a draft.
+	Footer string `json:"footer,omitempty"`
+	Id     string `json:"id"`
 
 	// InvoiceNumber Set when the invoice is created, including drafts.
 	InvoiceNumber string `json:"invoice_number"`
@@ -4927,7 +4958,7 @@ type InvoiceCreateRequest struct {
 	// NetPaymentTermDays Days until the invoice is due. 0 means due on receipt. Defaults to the tenant's net payment terms.
 	NetPaymentTermDays int `json:"net_payment_term_days,omitempty"`
 
-	// SubscriptionId Optional. Leave out for a one-off invoice.
+	// SubscriptionId Optional. Must belong to `customer_id`. Leave out for a one-off invoice.
 	SubscriptionId string `json:"subscription_id,omitempty"`
 }
 
@@ -4988,8 +5019,11 @@ type InvoiceLineItem struct {
 	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// CommitExpiresAt Expiry of the granted commit block. Absent/null = the credits
-	// never expire (the default).
+	// CommitExpiresAt Expiry of the granted commit block. The credit can be drawn up
+	// to and including this instant; a period invoice draws it when
+	// its period ends at or before it. The dashboard sends the local
+	// midnight after the picked day. Absent/null = the credits never
+	// expire (the default).
 	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
 
 	// CommitGrantedCents Marks the line as a prepaid-commit purchase (ADR-078): when the
@@ -5042,7 +5076,10 @@ type InvoiceLineItem struct {
 
 // InvoiceLineItemInput A line to add to a draft invoice.
 type InvoiceLineItemInput struct {
-	// CommitExpiresAt When the granted credit expires. Must be in the future. Needs
+	// CommitExpiresAt When the granted credit expires. The credit can be drawn up to
+	// and including this instant; a period invoice draws it when its
+	// period ends at or before it. The dashboard sends the local
+	// midnight after the picked day. Must be in the future. Needs
 	// `commit_granted_cents`. Absent means it never expires.
 	CommitExpiresAt time.Time `json:"commit_expires_at,omitempty"`
 
@@ -5925,11 +5962,8 @@ type Subscription struct {
 	Items         []SubscriptionItem `json:"items,omitempty"`
 	NextBillingAt time.Time          `json:"next_billing_at,omitempty"`
 
-	// OverageAction `block` or `charge` (the default).
-	OverageAction string `json:"overage_action,omitempty"`
-
-	// PauseCollection Present on a subscription while collection is paused. Invoices are
-	// still created, but stay drafts and are not charged.
+	// PauseCollection Present on a subscription while collection is paused. New invoices
+	// are still created, but stay drafts and are not charged.
 	PauseCollection SubscriptionPauseCollection `json:"pause_collection,omitempty"`
 	StartedAt       time.Time                   `json:"started_at,omitempty"`
 	Status          SubscriptionStatus          `json:"status"`
@@ -5938,9 +5972,6 @@ type Subscription struct {
 	TrialEndAt      time.Time                   `json:"trial_end_at,omitempty"`
 	TrialStartAt    time.Time                   `json:"trial_start_at,omitempty"`
 	UpdatedAt       time.Time                   `json:"updated_at"`
-
-	// UsageCapUnits Most usage units per billing period. Absent means no cap.
-	UsageCapUnits int64 `json:"usage_cap_units,omitempty"`
 }
 
 // SubscriptionBillingTime defines model for Subscription.BillingTime.
@@ -6020,8 +6051,8 @@ type SubscriptionItemThreshold struct {
 	UsageGte string `json:"usage_gte"`
 }
 
-// SubscriptionPauseCollection Present on a subscription while collection is paused. Invoices are
-// still created, but stay drafts and are not charged.
+// SubscriptionPauseCollection Present on a subscription while collection is paused. New invoices
+// are still created, but stay drafts and are not charged.
 type SubscriptionPauseCollection struct {
 	Behavior SubscriptionPauseCollectionBehavior `json:"behavior"`
 
@@ -6139,17 +6170,31 @@ type TenantSettings struct {
 	// trimmed before the check.
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
-	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
+	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
+	// invoice page. Each invoice keeps the footer it was issued with,
+	// so a change applies to invoices issued after it. A draft shows
+	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
 	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
 	InvoicePrefix string `json:"invoice_prefix"`
-	LogoUrl       string `json:"logo_url,omitempty"`
+
+	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
+	LogoUrl string `json:"logo_url,omitempty"`
 
 	// NetPaymentTerms Days until an invoice is due. 0 means due on issue.
 	NetPaymentTerms int `json:"net_payment_terms"`
 
-	// SupportUrl Must start with `http://` or `https://`. Printed in the invoice footer.
+	// NextInvoiceSequence The number the next invoice in this mode (test or live) gets,
+	// before the prefix: 43 means the next invoice is
+	// `<invoice_prefix>-000043`. Test and live count separately, and
+	// changing `invoice_prefix` keeps the count. Not a setting:
+	// sending it on `PUT` does nothing.
+	NextInvoiceSequence int `json:"next_invoice_sequence"`
+
+	// SupportUrl Must start with `http://` or `https://`. Linked in emails and on
+	// the hosted invoice page, and printed at the foot of invoice and
+	// credit-note PDFs.
 	SupportUrl string `json:"support_url,omitempty"`
 
 	// TaxId Your own tax number (VAT, EIN, GSTIN), printed on invoices.
@@ -6222,17 +6267,24 @@ type TenantSettingsInput struct {
 	// trimmed before the check.
 	DefaultProductTaxCode string `json:"default_product_tax_code,omitempty"`
 
-	// InvoiceFooter Default footer for new invoices. An invoice's own footer takes precedence.
+	// InvoiceFooter Printed under the totals on invoice PDFs and on the hosted
+	// invoice page. Each invoice keeps the footer it was issued with,
+	// so a change applies to invoices issued after it. A draft shows
+	// the current text.
 	InvoiceFooter string `json:"invoice_footer,omitempty"`
 
 	// InvoicePrefix Starts every invoice number, such as `VLX-000001`.
 	InvoicePrefix string `json:"invoice_prefix,omitempty"`
-	LogoUrl       string `json:"logo_url,omitempty"`
+
+	// LogoUrl Shown in emails and on the hosted invoice page. PDFs do not print it.
+	LogoUrl string `json:"logo_url,omitempty"`
 
 	// NetPaymentTerms Days until an invoice is due. 0 means due on issue.
 	NetPaymentTerms int `json:"net_payment_terms,omitempty"`
 
-	// SupportUrl Must start with `http://` or `https://`. Printed in the invoice footer.
+	// SupportUrl Must start with `http://` or `https://`. Linked in emails and on
+	// the hosted invoice page, and printed at the foot of invoice and
+	// credit-note PDFs.
 	SupportUrl string `json:"support_url,omitempty"`
 
 	// TaxId Your own tax number (VAT, EIN, GSTIN), printed on invoices.
@@ -6870,7 +6922,11 @@ type ListCreditNotesParamsDir string
 type PostV1CreditNotesJSONBody struct {
 	AutoIssue bool `json:"auto_issue,omitempty"`
 
-	// CommitRelief Mutually exclusive with lines/credit_amount_cents.
+	// CommitRelief Mutually exclusive with lines and credit_amount_cents. The
+	// relief's split goes in here, not at the top level: a top-level
+	// `refund_amount_cents`, `out_of_band_amount_cents` or
+	// `refund_type` is a 422. Example after a lost dispute:
+	// `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
 	CommitRelief struct {
 		// InvoiceId Optional. Defaults to the top-level invoice_id.
 		InvoiceId            string `json:"invoice_id,omitempty"`
@@ -6898,13 +6954,17 @@ type PostV1CreditNotesJSONBody struct {
 		Quantity          int    `json:"quantity,omitempty"`
 		UnitAmountCents   int    `json:"unit_amount_cents,omitempty"`
 	} `json:"lines,omitempty"`
+
+	// OutOfBandAmountCents Not with commit_relief; put the relief's split inside commit_relief.
 	OutOfBandAmountCents int    `json:"out_of_band_amount_cents,omitempty"`
 	Reason               string `json:"reason,omitempty"`
-	RefundAmountCents    int    `json:"refund_amount_cents,omitempty"`
+
+	// RefundAmountCents Not with commit_relief; put the relief's split inside commit_relief.
+	RefundAmountCents int `json:"refund_amount_cents,omitempty"`
 
 	// RefundType Older single-channel form. On a paid invoice whose three
 	// `*_amount_cents` fields are all 0, `refund` or `credit`
-	// puts the whole note in that channel.
+	// puts the whole note in that channel. Not with commit_relief.
 	RefundType PostV1CreditNotesJSONBodyRefundType `json:"refund_type,omitempty"`
 }
 
@@ -6994,7 +7054,11 @@ type PostV1CreditsGrantJSONBody struct {
 	CustomerId  string `json:"customer_id"`
 	Description string `json:"description,omitempty"`
 
-	// ExpiresAt Optional expiry; must be in the future. Omitted = never expires.
+	// ExpiresAt Optional expiry; must be in the future. Omitted = never
+	// expires. The credit can be drawn up to and including this
+	// instant; a period invoice draws it when its period ends
+	// at or before it. The dashboard sends the local midnight
+	// after the picked day.
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 
 	// GrantKind Optional cost-basis class (ADR-078). `promotional` marks
@@ -7684,6 +7748,9 @@ type PostV1PlansJSONBody struct {
 	MeterIds        []string                           `json:"meter_ids,omitempty"`
 	Name            string                             `json:"name"`
 
+	// Status Optional. A plan is created active; archive it with PATCH.
+	Status PostV1PlansJSONBodyStatus `json:"status,omitempty"`
+
 	// TaxCode Stripe product tax code for the base fee, such as
 	// `txcd_10103001`. Empty or omitted means the tenant's
 	// `default_product_tax_code`.
@@ -7705,6 +7772,9 @@ type PostV1PlansJSONBodyBaseBillTiming string
 
 // PostV1PlansJSONBodyBillingInterval defines parameters for PostV1Plans.
 type PostV1PlansJSONBodyBillingInterval string
+
+// PostV1PlansJSONBodyStatus defines parameters for PostV1Plans.
+type PostV1PlansJSONBodyStatus string
 
 // GetPlan200JSONResponseBodyBaseBillTiming defines parameters for GetPlan.
 type GetPlan200JSONResponseBodyBaseBillTiming string
@@ -8105,7 +8175,7 @@ type EndSubscriptionTrialParams struct {
 
 // ExtendSubscriptionTrialJSONBody defines parameters for ExtendSubscriptionTrial.
 type ExtendSubscriptionTrialJSONBody struct {
-	// TrialEnd The new trial end. Must be in the future and after the current `trial_end_at`.
+	// TrialEnd The new trial end. Must be in the future, after the current `trial_end_at`, and at most 730 days after `trial_start_at`.
 	TrialEnd time.Time `json:"trial_end"`
 }
 

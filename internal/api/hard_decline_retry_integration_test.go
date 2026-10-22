@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -67,6 +68,7 @@ type hardDeclineRig struct {
 	invoices  *invoice.PostgresStore
 	pmSvc     *paymentmethods.Service
 	pmStripe  *pmCardStripe
+	cards     *latestCardFetcher
 	charges   *scriptedCharges
 	charger   *payment.Stripe
 	retrier   *paymentRetrierAdapter
@@ -88,6 +90,14 @@ func newHardDeclineRig(t *testing.T, name string) *hardDeclineRig {
 	// Production wiring (router.go), minus the dunning starter: these tests
 	// drive the retry directly.
 	r.charger = payment.NewStripe(r.charges, r.invoices, payment.NewPostgresWebhookStore(db), setups)
+	// The card-saving webhooks, wired as router.go does: setup_intent.succeeded
+	// and checkout.session.completed attach through the payment-methods
+	// service; a SetupIntent with no Velox metadata is matched by its Stripe
+	// customer.
+	r.cards = &latestCardFetcher{}
+	r.charger.SetCardFetcher(r.cards)
+	r.charger.SetPaymentMethodAttacher(r.pmSvc)
+	r.charger.SetCustomerResolver(&stripeCustomerResolverAdapter{customers: r.customers})
 	r.retrier = &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: setups}
 	r.invSvc = invoice.NewService(r.invoices, nil, nil)
 	r.invSvc.SetPaymentMethodReader(setups)
@@ -110,16 +120,57 @@ func (r *hardDeclineRig) customerWithCard(key, pm string) string {
 	return c.ID
 }
 
-// addCard records a card the way the payment-update link's
-// setup_intent.succeeded does (AttachForWebhook → AttachFromSetupIntent).
+// addCard records a card by the store's default rule, as every attach that
+// is not a Velox setup flow does (a hosted-page payment, a SetupIntent Velox
+// did not create): the first card, or one replacing a default the bank
+// refused for good, becomes the default; any other is added beside.
 func (r *hardDeclineRig) addCard(custID, pm string) paymentmethods.PaymentMethod {
 	r.t.Helper()
 	r.pmStripe.last4, r.pmStripe.fingerprint = "4242", "fp_"+pm
-	got, err := r.pmSvc.AttachFromSetupIntent(r.ctx, r.tenantID, custID, pm)
+	got, err := r.pmSvc.AttachFromSetupIntent(r.ctx, r.tenantID, custID, pm, false)
 	if err != nil {
 		r.t.Fatalf("attach card %s: %v", pm, err)
 	}
 	return got
+}
+
+// setupIntentSucceeded delivers Stripe's setup_intent.succeeded for a card
+// saved on the Stripe customer to the real webhook handler. metadata is the
+// SetupIntent's own: a Velox setup session stamps velox_customer_id (and the
+// flow's velox_purpose); nil is a SetupIntent Velox did not create.
+func (r *hardDeclineRig) setupIntentSucceeded(evtID, stripeCustomerID, pm string, metadata map[string]string) {
+	r.t.Helper()
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	r.pmStripe.last4, r.pmStripe.fingerprint = "4242", "fp_"+pm
+	body, _ := json.Marshal(map[string]any{"id": evtID, "object": "event", "type": "setup_intent.succeeded",
+		"data": map[string]any{"object": map[string]any{
+			"id": "seti_" + evtID, "object": "setup_intent", "status": "succeeded",
+			"payment_method": pm, "customer": stripeCustomerID, "metadata": metadata,
+		}}})
+	if err := r.charger.HandleWebhook(r.ctx, r.tenantID, domain.StripeWebhookEvent{
+		StripeEventID: evtID, EventType: "setup_intent.succeeded", Payload: map[string]any{"raw": string(body)},
+	}); err != nil {
+		r.t.Fatalf("setup_intent.succeeded %s: %v", evtID, err)
+	}
+}
+
+// hostedPayCompleted delivers checkout.session.completed for a hosted-page
+// payment that saved pm on the Stripe customer (setup_future_usage, ADR-021).
+func (r *hardDeclineRig) hostedPayCompleted(evtID, custID, stripeCustomerID, pm string) {
+	r.t.Helper()
+	r.cards.card = payment.CardDetails{PaymentMethodID: pm, Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2034}
+	r.pmStripe.last4, r.pmStripe.fingerprint = "4242", "fp_"+pm
+	body, _ := json.Marshal(map[string]any{"id": evtID, "type": "checkout.session.completed", "data": map[string]any{"object": map[string]any{
+		"id": "cs_" + evtID, "mode": "payment", "customer": stripeCustomerID,
+		"metadata": map[string]string{"velox_customer_id": custID, "velox_purpose": payment.PurposeHostedInvoicePay},
+	}}})
+	if err := r.charger.HandleWebhook(r.ctx, r.tenantID, domain.StripeWebhookEvent{
+		StripeEventID: evtID, EventType: "checkout.session.completed", Payload: map[string]any{"raw": string(body)},
+	}); err != nil {
+		r.t.Fatalf("checkout.session.completed %s: %v", evtID, err)
+	}
 }
 
 // chargeAsCycle charges the invoice the way the cycle's collector does: under
@@ -248,6 +299,11 @@ func TestHardDecline_RetrySkipsTheRefusedCardUntilANewCardArrives_RealStore(t *t
 		t.Fatal("the new card was added beside the refused default; it must replace it as the default")
 	}
 	r.assertOnlyDefault(custID, "pm_new")
+	// The hard decline is recorded on the old card only: it does not block
+	// the new one.
+	if code, err := r.invoices.HardDeclineOnCard(r.ctx, r.tenantID, inv.ID, "pm_new"); err != nil || code != "" {
+		t.Fatalf("HardDeclineOnCard(pm_new) = %q, %v; want none — the refusal was on pm_lost", code, err)
+	}
 	if code := r.attentionCode(inv.ID); code != "payment.declined" {
 		t.Errorf("attention after the card was replaced: %q, want payment.declined", code)
 	}
@@ -263,7 +319,11 @@ func TestHardDecline_RetrySkipsTheRefusedCardUntilANewCardArrives_RealStore(t *t
 }
 
 // Control: an ordinary decline does not stop the next retry from charging
-// the same card.
+// the same card. A card saved by a path that is not a Velox setup flow is
+// added beside the working default and does not change which card the retry
+// charges: a hosted-page payment's card (checkout.session.completed, which
+// takes the newest card on the Stripe customer as a guess) and a SetupIntent
+// Velox did not create (no velox metadata, matched by its Stripe customer).
 func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.T) {
 	r := newHardDeclineRig(t, "Ordinary Decline Retry")
 	custID := r.customerWithCard("nsf", "pm_nsf")
@@ -277,12 +337,14 @@ func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.
 	if code := r.attentionCode(inv.ID); code != "payment.declined" {
 		t.Errorf("attention %q, want payment.declined", code)
 	}
-	// A card added after an ordinary decline is added beside the default, as
-	// before (ADR-021): only a default the bank refused for good is replaced.
-	if other := r.addCard(custID, "pm_other"); other.IsDefault {
-		t.Error("a card added after an ordinary decline became the default; ADR-021 keeps it beside")
-	}
+	r.hostedPayCompleted("evt_nsf_hosted", custID, "cus_stripe_nsf", "pm_hosted")
 	r.assertOnlyDefault(custID, "pm_nsf")
+	r.setupIntentSucceeded("evt_nsf_foreign", "cus_stripe_nsf", "pm_foreign", nil)
+	r.assertOnlyDefault(custID, "pm_nsf")
+	if pms, err := r.pmSvc.List(r.ctx, r.tenantID, custID); err != nil || len(pms) != 3 {
+		t.Fatalf("cards on file = %d (%v), want 3: the default and the two saved beside it", len(pms), err)
+	}
+
 	err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID)
 	var re *dunning.RetryError
 	if !errors.As(err, &re) || re.PaymentIntentID != "pi_nsf_2" || re.CardNeedsReplacing {
@@ -290,6 +352,55 @@ func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.
 	}
 	if len(r.charges.charged) != 2 || r.charges.charged[1] != "pm_nsf" {
 		t.Errorf("Stripe charges %v, want the same card charged again", r.charges.charged)
+	}
+}
+
+// E2/H3 (Stripe sandbox walk, 2026-10-22): after an ordinary decline the
+// customer, or the operator for them, saves a new card through a Velox setup
+// flow. That card becomes the default (ADR-021, amended), as the success
+// page promises, and the next retry charges it. Before, it sat beside the
+// declining card, and every retry charged the old card again. Driven through
+// the real setup_intent.succeeded handler, once per setup flow: the
+// operator's Add payment method link, the customer's payment-update link,
+// and legacy POST /v1/checkout/setup (no purpose).
+func TestSetupLinkCard_AfterOrdinaryDecline_NextRetryChargesIt_RealStore(t *testing.T) {
+	for _, purpose := range []string{"portal_add_payment_method", "payment_update_token", ""} {
+		name := purpose
+		if name == "" {
+			name = "legacy_no_purpose"
+		}
+		t.Run(name, func(t *testing.T) {
+			r := newHardDeclineRig(t, "Setup Link Card "+name)
+			custID := r.customerWithCard("e2", "pm_0341")
+			inv := r.finalizedInvoice(custID, "INV-E2-1")
+			r.charges.answers = []scriptedCharge{
+				{err: stripeDeclined("pi_e2_1", "generic_decline", "Your card was declined.")},
+				{pi: "pi_e2_paid"},
+			}
+			if _, err := r.chargeAsCycle(inv, "cus_stripe_e2", "pm_0341"); err == nil {
+				t.Fatal("the declined charge returned no error")
+			}
+			if code := r.attentionCode(inv.ID); code != "payment.declined" {
+				t.Errorf("attention %q, want payment.declined", code)
+			}
+
+			meta := map[string]string{"velox_customer_id": custID, "velox_tenant_id": r.tenantID}
+			if purpose != "" {
+				meta["velox_purpose"] = purpose
+			}
+			r.setupIntentSucceeded("evt_e2_"+name, "cus_stripe_e2", "pm_4242", meta)
+			r.assertOnlyDefault(custID, "pm_4242")
+
+			if err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID); err != nil {
+				t.Fatalf("retry on the new card: %v", err)
+			}
+			if len(r.charges.charged) != 2 || r.charges.charged[1] != "pm_4242" {
+				t.Fatalf("Stripe charges %v, want the retry to charge pm_4242", r.charges.charged)
+			}
+			if got := r.invoice(inv.ID); got.Status != domain.InvoicePaid {
+				t.Errorf("invoice %s after the retry on the new card, want paid", got.Status)
+			}
+		})
 	}
 }
 
