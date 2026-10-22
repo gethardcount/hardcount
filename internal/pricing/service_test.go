@@ -654,7 +654,7 @@ func TestUpdatePlan(t *testing.T) {
 		Code: "basic", Name: "Basic", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
 	})
 
-	updated, err := svc.UpdatePlan(ctx, "tenant1", created.ID, CreatePlanInput{
+	updated, err := svc.UpdatePlan(ctx, "tenant1", created.ID, UpdatePlanInput{
 		Name:            "Basic Plus",
 		BaseAmountCents: 5900,
 	})
@@ -725,7 +725,7 @@ func TestPlanAttachGuard_UnpricedMeter_ADR096(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		if _, err := svc.UpdatePlan(ctx, "t", p.ID, plan("p", []string{"m1", "m2"})); err == nil {
+		if _, err := svc.UpdatePlan(ctx, "t", p.ID, UpdatePlanInput{MeterIDs: []string{"m1", "m2"}}); err == nil {
 			t.Fatal("expected rejection: unpriced meter added on update")
 		}
 	})
@@ -768,7 +768,7 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 
 	t.Run("no live subs: billing-affecting fields ARE mutable", func(t *testing.T) {
 		svc, p := setup(0)
-		updated, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		updated, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			BaseAmountCents: 9900,
 			BaseBillTiming:  domain.BillInAdvance,
 			MeterIDs:        []string{"meter_a", "meter_b"},
@@ -786,7 +786,7 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 
 	t.Run("live subs: base_amount_cents change rejected", func(t *testing.T) {
 		svc, p := setup(1)
-		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			BaseAmountCents: 9900,
 		})
 		if err == nil {
@@ -800,7 +800,7 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 
 	t.Run("live subs: base_bill_timing flip rejected", func(t *testing.T) {
 		svc, p := setup(2)
-		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			BaseBillTiming: domain.BillInAdvance,
 		})
 		if err == nil {
@@ -824,7 +824,7 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 
 	t.Run("live subs: meter_ids change rejected", func(t *testing.T) {
 		svc, p := setup(1)
-		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			MeterIDs: []string{"meter_a", "meter_b"},
 		})
 		if err == nil {
@@ -835,7 +835,7 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 	t.Run("live subs: meter_ids same set (different order) NOT a change", func(t *testing.T) {
 		svc, p := setup(5)
 		// Plan was created with [meter_a]; pass [meter_a] again.
-		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			MeterIDs: []string{"meter_a"},
 		})
 		if err != nil {
@@ -845,10 +845,10 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 
 	t.Run("live subs: display-only fields STILL mutable", func(t *testing.T) {
 		svc, p := setup(3)
-		updated, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		updated, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			Name:        "Renamed",
-			Description: "New description",
-			TaxCode:     "txcd_10000000",
+			Description: new("New description"),
+			TaxCode:     new("txcd_10000000"),
 		})
 		if err != nil {
 			t.Fatalf("display-only mutation should be allowed: %v", err)
@@ -856,11 +856,14 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 		if updated.Name != "Renamed" {
 			t.Errorf("name not applied: %q", updated.Name)
 		}
+		if updated.Description != "New description" || updated.TaxCode != "txcd_10000000" {
+			t.Errorf("description/tax_code not applied: %q / %q", updated.Description, updated.TaxCode)
+		}
 	})
 
 	t.Run("live subs: no-op same value passes", func(t *testing.T) {
 		svc, p := setup(1)
-		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			BaseAmountCents: 4900, // same as seed
 		})
 		if err != nil {
@@ -875,7 +878,7 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 			Code: "unwired", Name: "Unwired", Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
 		})
-		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, CreatePlanInput{
+		_, err := svc.UpdatePlan(ctx, "tenant1", p.ID, UpdatePlanInput{
 			BaseAmountCents: 9900,
 		})
 		if err != nil {

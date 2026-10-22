@@ -89,14 +89,25 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 			type, is_default, detached_at, created_at, updated_at)
 		VALUES ('vlx_pm_doc1', $1, false, 'cus_doc1', 'pm_doc1', 'card', true, now(), now(), now())`, tenantID)
 
-	// ADR-115 read-side alarm: the same usage instant of one (subscription,
-	// meter, rating-rule bucket) on two live invoices. Three seeds:
+	// ADR-115 read-side alarm: the same usage instant of one (customer,
+	// meter, rating-rule bucket) on two live invoices. Each seed has its own
+	// meter, so the seeds do not pair with each other. Five seeds:
 	//   doc_dbl — threshold [P0,t1) + cycle [P0,P1) usage lines, SAME bucket
 	//             → the double charge the period CAS exists to prevent: flagged.
 	//   doc_res — threshold [P0,t1) + cycle residual [t1,P1), same bucket
 	//             → half-open windows touch, do not overlap: NOT flagged.
 	//   doc_max — threshold sum bucket [P0,t1) + cycle max bucket [P0,P1) on
 	//             ONE meter (ADR-066 §4 deferred bucket): NOT flagged.
+	//   doc_xa/doc_xb — two subscriptions of the customer, the second
+	//             recreated the same day on the meter: A's final [P0,t1) and
+	//             B's cycle [P0,P1) overlap → flagged (usage is aggregated per
+	//             customer and meter, so both bill the same events).
+	//   doc_ya/doc_yb — the same pair with B starting where A ended
+	//             [t1,P1): NOT flagged.
+	//   doc_za/doc_zb — the doc_x pair with a rule version published between
+	//             A's period start and B's, so the two lines carry different
+	//             buckets → still flagged (the bucket exemption is one
+	//             subscription's).
 	p0, t1, p1 := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC), time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	seedSub := func(id string) {
 		mustExec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time,
@@ -116,18 +127,36 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	seedSub("vlx_sub_doc_dbl")
 	seedInvoice("vlx_inv_doc_dbl_t", "vlx_sub_doc_dbl", "threshold", p0, t1)
 	seedInvoice("vlx_inv_doc_dbl_c", "vlx_sub_doc_dbl", "subscription_cycle", p0, p1)
-	seedUsageLine("vlx_inv_doc_dbl_t", "mtr_doc", "rrv_doc_sum", p0, t1)
-	seedUsageLine("vlx_inv_doc_dbl_c", "mtr_doc", "rrv_doc_sum", p0, p1)
+	seedUsageLine("vlx_inv_doc_dbl_t", "mtr_doc_dbl", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_dbl_c", "mtr_doc_dbl", "rrv_doc_sum", p0, p1)
 	seedSub("vlx_sub_doc_res")
 	seedInvoice("vlx_inv_doc_res_t", "vlx_sub_doc_res", "threshold", p0, t1)
 	seedInvoice("vlx_inv_doc_res_c", "vlx_sub_doc_res", "subscription_cycle", p0, p1)
-	seedUsageLine("vlx_inv_doc_res_t", "mtr_doc", "rrv_doc_sum", p0, t1)
-	seedUsageLine("vlx_inv_doc_res_c", "mtr_doc", "rrv_doc_sum", t1, p1)
+	seedUsageLine("vlx_inv_doc_res_t", "mtr_doc_res", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_res_c", "mtr_doc_res", "rrv_doc_sum", t1, p1)
 	seedSub("vlx_sub_doc_max")
 	seedInvoice("vlx_inv_doc_max_t", "vlx_sub_doc_max", "threshold", p0, t1)
 	seedInvoice("vlx_inv_doc_max_c", "vlx_sub_doc_max", "subscription_cycle", p0, p1)
-	seedUsageLine("vlx_inv_doc_max_t", "mtr_doc", "rrv_doc_sum", p0, t1)
-	seedUsageLine("vlx_inv_doc_max_c", "mtr_doc", "rrv_doc_max", p0, p1)
+	seedUsageLine("vlx_inv_doc_max_t", "mtr_doc_max", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_max_c", "mtr_doc_max", "rrv_doc_max", p0, p1)
+	seedSub("vlx_sub_doc_xa")
+	seedSub("vlx_sub_doc_xb")
+	seedInvoice("vlx_inv_doc_xa_f", "vlx_sub_doc_xa", "subscription_cancel", p0, t1)
+	seedInvoice("vlx_inv_doc_xb_c", "vlx_sub_doc_xb", "subscription_cycle", p0, p1)
+	seedUsageLine("vlx_inv_doc_xa_f", "mtr_doc_x", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_xb_c", "mtr_doc_x", "rrv_doc_sum", p0, p1)
+	seedSub("vlx_sub_doc_ya")
+	seedSub("vlx_sub_doc_yb")
+	seedInvoice("vlx_inv_doc_ya_f", "vlx_sub_doc_ya", "subscription_cancel", p0, t1)
+	seedInvoice("vlx_inv_doc_yb_c", "vlx_sub_doc_yb", "subscription_cycle", p0, p1)
+	seedUsageLine("vlx_inv_doc_ya_f", "mtr_doc_y", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_yb_c", "mtr_doc_y", "rrv_doc_sum", t1, p1)
+	seedSub("vlx_sub_doc_za")
+	seedSub("vlx_sub_doc_zb")
+	seedInvoice("vlx_inv_doc_za_f", "vlx_sub_doc_za", "subscription_cancel", p0, t1)
+	seedInvoice("vlx_inv_doc_zb_c", "vlx_sub_doc_zb", "subscription_cycle", p0, p1)
+	seedUsageLine("vlx_inv_doc_za_f", "mtr_doc_z", "rrv_doc_sum", p0, t1)
+	seedUsageLine("vlx_inv_doc_zb_c", "mtr_doc_z", "rrv_doc_sum2", p0, p1)
 
 	// SB-1: an active run with no next action is invisible to both due-run
 	// pickers forever — flagged. Control: an escalated run with no next action
@@ -187,11 +216,12 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 		t.Error("an invoice relieved by more than its total (credits applied + a credit note) is NOT caught by invoice_due_conservation")
 	}
 	want := map[string]bool{
-		"invoice_paid_settled_coherence":                  false,
-		"payment_methods_detached_but_still_default":      false,
-		"usage_billed_once_per_subscription_meter_window": false,
-		"dunning_active_run_without_next_action":          false,
+		"invoice_paid_settled_coherence":              false,
+		"payment_methods_detached_but_still_default":  false,
+		"usage_billed_once_per_customer_meter_window": false,
+		"dunning_active_run_without_next_action":      false,
 	}
+	crossSub, crossSubOtherBucket := false, false
 	for _, v := range res.Violations {
 		if _, ok := want[v.Check.Name]; ok && strings.Contains(v.RowID+v.Detail, "doc1") {
 			want[v.Check.Name] = true
@@ -204,16 +234,28 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 				t.Errorf("false positive: an escalated run with no next action is the legal terminal shape: %s", v.RowID)
 			}
 		}
-		if v.Check.Name == "usage_billed_once_per_subscription_meter_window" {
+		if v.Check.Name == "usage_billed_once_per_customer_meter_window" {
 			switch {
 			case strings.Contains(v.RowID, "doc_dbl"):
 				want[v.Check.Name] = true
+			case strings.Contains(v.RowID, "doc_xa"):
+				crossSub = true
+			case strings.Contains(v.RowID, "doc_za"):
+				crossSubOtherBucket = true
+			case strings.Contains(v.RowID+v.Detail, "doc_y"):
+				t.Errorf("false positive: a recreated subscription that starts where its predecessor ended is flagged: %s %s", v.RowID, v.Detail)
 			case strings.Contains(v.RowID+v.Detail, "doc_res"):
 				t.Errorf("false positive: a threshold window beside its residual is flagged — the compare must be half-open: %s %s", v.RowID, v.Detail)
 			case strings.Contains(v.RowID+v.Detail, "doc_max"):
 				t.Errorf("false positive: the ADR-066 §4 deferred max bucket is flagged — pair per rating-rule bucket, not per meter: %s %s", v.RowID, v.Detail)
 			}
 		}
+	}
+	if !crossSub {
+		t.Error("two subscriptions of one customer billing the same usage instant of a meter are NOT caught by usage_billed_once_per_customer_meter_window: the check pairs invoices of one subscription only")
+	}
+	if !crossSubOtherBucket {
+		t.Error("two subscriptions of one customer billing the same usage instant of a meter under different rule versions are NOT caught: the same-bucket requirement must apply within one subscription only")
 	}
 	for name, caught := range want {
 		if !caught {

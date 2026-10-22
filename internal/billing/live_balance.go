@@ -50,9 +50,8 @@ func (e *Engine) SetLiveBalanceReaders(credits CreditBalanceReader, subs Custome
 // Left out on purpose, so the figure can read HIGH: tax, base fees billed in
 // arrears (until the period closes), amounts due on unpaid invoices, and a
 // grant that will expire before the period closes (it is spendable now, but
-// will not be there for the close to draw on). It can read LOW for a
-// subscription with a blocking usage cap, which the close applies and this
-// does not. Currencies are added as raw cents; the ledger has no currency.
+// will not be there for the close to draw on). Currencies are added as raw
+// cents; the ledger has no currency.
 //
 // The reads are separate transactions (balance, subscriptions, then per
 // subscription the watermark and intervals, and per meter the aggregation).
@@ -166,7 +165,9 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 //   - Each meter is counted over the windows a plan carrying it was on the
 //     subscription (meterUsageIntervals, the close's own builder). After a
 //     mid-period plan swap the outgoing plan's meter still counts up to the
-//     swap and the incoming plan's meter counts only from it.
+//     swap and the incoming plan's meter counts only from it. A window starts
+//     no earlier than the trial end or another subscription's coverage end
+//     of the meter that day (usageFloors).
 //   - No threshold invoice this period: every bucket over those windows.
 //   - A reset=false threshold invoice exists: it billed usage up to its
 //     billing_period_end, and credit already paid for it. Additive buckets
@@ -177,12 +178,10 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 //     that predates the invoice.
 //
 // Usage is aggregated per customer and meter, with no subscription key, the
-// same as the close. Two subscriptions on one meter would each bill the same
-// events, which is why the subscription service refuses that setup
+// same as the close. Two live subscriptions on one meter would each bill the
+// same events, which is why the subscription service refuses that setup
 // (rejectMeterOverlap); if such rows exist the estimate counts the usage
 // once per subscription, as the closes will.
-//
-// Not replicated from the close: the blocking usage cap.
 func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return 0, nil
@@ -229,7 +228,11 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 			}
 		}
 	}
-	clamped, full := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough)
+	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
+	if err != nil {
+		return 0, err
+	}
+	clamped, full := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
 	meterIDs := map[string]struct{}{}
 	for mid := range clamped {
 		meterIDs[mid] = struct{}{}
@@ -238,7 +241,7 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 		meterIDs[mid] = struct{}{}
 	}
 
-	ladder := newUsageLadder(wm, false)
+	ladder := newUsageLadder(wm)
 	var total int64
 	for meterID := range meterIDs {
 		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {

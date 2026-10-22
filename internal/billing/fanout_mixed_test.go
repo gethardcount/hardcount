@@ -10,10 +10,11 @@ import (
 
 // TestSettleUnusedAcrossFunding_MixedPaidUnpaid_NoSilentDrop is the audit
 // finding #1 regression: when a period is funded by a PAID invoice (with room)
-// and a partially-paid UNPAID one whose amount_due is below its weighted share,
+// and a partially-paid UNPAID one whose amount_due is below what it would take,
 // the unpaid share used to be clamped to amount_due and the overflow SILENTLY
-// dropped (neither credited nor redistributed). It must now water-fill the
-// overflow onto the paid invoice so the full unused amount is placed.
+// dropped (neither credited nor redistributed). The unpaid upgrade, the newest
+// charging invoice, is relieved of its 2000 due, and the rest spills onto the
+// paid base, so the full unused amount is placed (ADR-118).
 func TestSettleUnusedAcrossFunding_MixedPaidUnpaid_NoSilentDrop(t *testing.T) {
 	periodStart := time.Date(2026, 6, 7, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
@@ -39,7 +40,7 @@ func TestSettleUnusedAcrossFunding_MixedPaidUnpaid_NoSilentDrop(t *testing.T) {
 	}
 	baseLine := domain.InvoiceLineItem{ID: "ili_base", InvoiceID: "inv_base", LineType: domain.LineTypeBaseFee, BillingPeriodStart: &periodStart}
 	// Upgrade invoice, PARTIALLY paid: $83.33 billed, $63.33 paid, $20.00 still
-	// owed. Its weighted cancel share (~$57.50) far exceeds the $20 it can relieve.
+	// owed. Newest first, it takes all it can relieve: the $20.
 	upInv := domain.Invoice{
 		ID: "inv_up", TenantID: "t1", SubscriptionID: "sub_1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
@@ -83,10 +84,9 @@ func TestSettleUnusedAcrossFunding_MixedPaidUnpaid_NoSilentDrop(t *testing.T) {
 	if upGross > 2000 {
 		t.Errorf("unpaid upgrade reduced by %d, exceeds its amount_due 2000", upGross)
 	}
-	// The base invoice must absorb the overflow: its share is now well above its
-	// natural ~5750 weighted share.
-	if baseGross <= 5751 {
-		t.Errorf("base credit %d did not absorb the unpaid overflow (natural share ~5750)", baseGross)
+	// The base invoice takes the rest: 11500 − 2000.
+	if baseGross != 9500 || upGross != 2000 {
+		t.Errorf("base credit %d, upgrade relief %d, want 9500 and 2000", baseGross, upGross)
 	}
 	// credited = the paid balance credit only (unpaid relief returns 0).
 	if credited != baseGross {

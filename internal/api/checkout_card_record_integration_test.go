@@ -53,8 +53,8 @@ func (s *pmCardStripe) SetDefaultPaymentMethod(context.Context, string, string, 
 // the composite setup store + the real payment-methods service.
 //
 // A customer with no card gets it as the default (ADR-021: the next invoice
-// auto-charges it). A customer with a default keeps it; the new card is
-// added beside it, as Add card does.
+// auto-charges it). A customer with a working default keeps it; the paid
+// card is added beside it (only a setup flow's card takes the default).
 func TestCheckoutCompleted_RecordsTheCard_RealStore(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
@@ -116,7 +116,7 @@ func TestCheckoutCompleted_RecordsTheCard_RealStore(t *testing.T) {
 			t.Fatalf("create customer: %v", err)
 		}
 		pmStripe.last4, pmStripe.fingerprint = "0341", "fp_0341"
-		if _, err := pmSvc.AttachFromSetupIntent(ctx, tenantID, c.ID, "pm_old_0341"); err != nil {
+		if _, err := pmSvc.AttachFromSetupIntent(ctx, tenantID, c.ID, "pm_old_0341", false); err != nil {
 			t.Fatalf("seed old card: %v", err)
 		}
 		fetcher.card = payment.CardDetails{PaymentMethodID: "pm_hosted_4242b", Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2034}

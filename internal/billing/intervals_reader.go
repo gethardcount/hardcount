@@ -32,6 +32,13 @@ type IntervalSnapshotter interface {
 	// lifetime entirely outside the window) from "no rows AT ALL" (a
 	// writer bug).
 	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
+	// ListCustomerMeterCoverageEnds returns, per meter, the instants in the
+	// open window (from, to) at which the customer's OTHER subscriptions
+	// (every one but excludeSubID) stopped covering it: a billing interval
+	// of non-zero width on a plan carrying the meter ended, or a
+	// never-activated trial whose live items carry it was canceled. The
+	// usage window's floor (usageFloors) is built from them.
+	ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error)
 }
 
 // SetIntervalReader wires the interval read seam. The snapshotter is a

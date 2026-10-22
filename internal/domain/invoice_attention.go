@@ -1064,12 +1064,13 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 //
 // What the notice says about retries follows the dunning run: only an active,
 // unpaused run has a retry to come. A card the customer saves now replaces
-// the refused default by itself (ADR-126); a card saved before the refusal
-// stays beside it, so the operator is told to make that one the default.
+// the refused default by itself (ADR-126; a setup or update link's card
+// always does, ADR-021); a card already on file stays beside it, so the
+// operator is told to make that one the default.
 func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since time.Time) *Attention {
 	const (
 		final     = "Stripe's decline code is %s, which Stripe and the card networks treat as final. "
-		newCard   = "A card the customer saves now, through a setup link or the hosted invoice page, becomes the default by itself; a card saved before the refusal needs Set as default on the customer page. "
+		newCard   = "A card the customer saves now, through a setup or update link or by paying on the hosted invoice page, becomes the default by itself; a card already on file needs Set as default on the customer page. "
 		hostedPay = "The customer can also pay on the hosted invoice page."
 	)
 	message := "The customer's bank refused this card for good, so automatic retries won't charge it; the customer needs a different card."
@@ -1545,7 +1546,7 @@ func classifyDisputeLost(inv Invoice, d InvoiceDispute, atc AttentionContext) *A
 			FormatMoneyMinor(drawable, inv.Currency) + " of this invoice's prepaid credit." +
 			"\nRetire that credit with commit relief, recorded as money returned outside Velox."
 		detail += " The prepaid credit stays spendable until you retire it. An ordinary credit note is refused on an invoice that bought prepaid credit: " +
-			"use POST /v1/credit-notes with commit_relief {\"retire_all\": true} and the relief amount as out_of_band_amount_cents, never as a card refund, because the bank already returned the money. " +
+			"use POST /v1/credit-notes with commit_relief {\"retire_all\": true, \"out_of_band_amount_cents\": <amount>}, the amount inside commit_relief and never as a card refund, because the bank already returned the money. " +
 			"If the amount you send differs, the answer names the right one. " +
 			"Relief returns at most the price paid for the unspent credit; record any rest of the loss in your own books."
 	case inv.Status == InvoicePaid && spent > 0:

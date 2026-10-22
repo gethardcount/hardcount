@@ -91,13 +91,14 @@ const subCols = `id, tenant_id, code, display_name, customer_id, status, billing
 	billing_threshold_amount_gte, COALESCE(billing_threshold_reset_cycle, true),
 	current_billing_period_start, current_billing_period_end, next_billing_at,
 	COALESCE(billing_anchor_day, 0),
-	usage_cap_units, COALESCE(overage_action,'charge'),
 	COALESCE(test_clock_id,''),
 	billing_failed_for, billing_failure_count, billing_failed_at,
 	billing_next_attempt_at, COALESCE(billing_last_error,''),
 	created_at, updated_at`
 
-const itemCols = `id, tenant_id, subscription_id, plan_id, quantity, metadata,
+// itemCols reads an empty metadata object ('{}', the column default) as NULL,
+// so an item with no metadata leaves the field out of the JSON.
+const itemCols = `id, tenant_id, subscription_id, plan_id, quantity, NULLIF(metadata, '{}'::jsonb),
 	COALESCE(pending_plan_id,''), pending_plan_effective_at, plan_changed_at,
 	created_at, updated_at`
 
@@ -158,10 +159,10 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 			billing_time, trial_start_at, trial_end_at, started_at,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
 			billing_anchor_day,
-			usage_cap_units, overage_action, test_clock_id,
+			test_clock_id,
 			activated_at,
 			created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE(NULLIF($16,''),'charge'),NULLIF($17,''),$18,$19,$19)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULLIF($15,''),$16,$17,$17)
 		RETURNING `+subCols,
 		id, tenantID, sub.Code, sub.DisplayName, sub.CustomerID,
 		sub.Status, sub.BillingTime, postgres.NullableTime(sub.TrialStartAt),
@@ -170,7 +171,7 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		postgres.NullableTime(sub.CurrentBillingPeriodEnd),
 		postgres.NullableTime(sub.NextBillingAt),
 		sub.BillingAnchorDay,
-		sub.UsageCapUnits, sub.OverageAction, sub.TestClockID,
+		sub.TestClockID,
 		postgres.NullableTime(sub.ActivatedAt), now,
 	), &sub)
 
@@ -338,6 +339,46 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.S
 		}
 	}
 	return subs, total, nil
+}
+
+// ListByTestClock returns the subscriptions pinned to a test clock, oldest
+// first, in the same shape List returns (items and thresholds hydrated).
+// It backs GET /v1/test-clocks/{id}/subscriptions. Capped at 1000 rows,
+// far above the handful of subscriptions a simulation holds.
+func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID string) ([]domain.Subscription, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
+		WHERE s.test_clock_id = $1
+		ORDER BY s.created_at ASC, s.id ASC LIMIT 1000
+	`, clockID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var subs []domain.Subscription
+	for rows.Next() {
+		var sub domain.Subscription
+		if err := scanSubRow(rows, &sub); err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range subs {
+		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
+			return nil, err
+		}
+	}
+	return subs, nil
 }
 
 func cancelSpec() transitionSpec {
@@ -2743,7 +2784,6 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 		&sub.CurrentBillingPeriodStart,
 		&sub.CurrentBillingPeriodEnd, &sub.NextBillingAt,
 		&sub.BillingAnchorDay,
-		&sub.UsageCapUnits, &sub.OverageAction,
 		&sub.TestClockID,
 		&failedFor, &failureCount, &failedAt, &nextAttemptAt, &lastError,
 		&sub.CreatedAt, &sub.UpdatedAt,
@@ -2897,7 +2937,7 @@ func hydrateThresholds(ctx context.Context, tx *sql.Tx, sub *domain.Subscription
 
 func scanItemDest(it *domain.SubscriptionItem) []any {
 	return []any{
-		&it.ID, &it.TenantID, &it.SubscriptionID, &it.PlanID, &it.Quantity, &it.Metadata,
+		&it.ID, &it.TenantID, &it.SubscriptionID, &it.PlanID, &it.Quantity, (*[]byte)(&it.Metadata),
 		&it.PendingPlanID, &it.PendingPlanEffectiveAt, &it.PlanChangedAt,
 		&it.CreatedAt, &it.UpdatedAt,
 	}

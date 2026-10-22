@@ -90,7 +90,7 @@ func TestCurrencyRing_ArchivedPlanRepairFlow(t *testing.T) {
 	// Archive the (sub-less) plan → the key unbinds → EUR republish = the
 	// documented wrong-currency repair path, must succeed.
 	st := "archived"
-	if _, err := f.svc.UpdatePlan(f.ctx, f.tenantID, planID, pricing.CreatePlanInput{Status: st}); err != nil {
+	if _, err := f.svc.UpdatePlan(f.ctx, f.tenantID, planID, pricing.UpdatePlanInput{Status: st}); err != nil {
 		t.Fatalf("archive plan: %v", err)
 	}
 	if _, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
@@ -123,7 +123,7 @@ func TestCurrencyRing_PlanCreateAndUpdateBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("meterless EUR plan: %v", err)
 	}
-	if _, err := f.svc.UpdatePlan(f.ctx, f.tenantID, eur.ID, pricing.CreatePlanInput{
+	if _, err := f.svc.UpdatePlan(f.ctx, f.tenantID, eur.ID, pricing.UpdatePlanInput{
 		MeterIDs: []string{meterID},
 	}); err == nil {
 		t.Fatal("meter attach on update must refuse a currency mismatch")

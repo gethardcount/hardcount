@@ -43,14 +43,14 @@ func (h *CreatePreviewHandler) Routes() chi.Router {
 	return r
 }
 
-// createPreviewWireRequest is the JSON shape the wire sends. Decoupled
+// CreatePreviewWireRequest is the JSON shape the wire sends. Decoupled
 // from CreatePreviewRequest so we can parse RFC 3339 timestamps from the
 // body without leaking the time.Time type into the wire contract.
 //
 // Snake-case keys, struct-tag enforced. Both subscription_id and period
 // are optional — service defaults the former to the customer's primary
 // active sub and the latter to that sub's current cycle.
-type createPreviewWireRequest struct {
+type CreatePreviewWireRequest struct {
 	CustomerID     string                   `json:"customer_id"`
 	SubscriptionID string                   `json:"subscription_id"`
 	Period         *createPreviewWirePeriod `json:"period"`
@@ -126,7 +126,7 @@ func (h *CreatePreviewHandler) create(w http.ResponseWriter, r *http.Request) {
 // by the service layer (Required("customer_id")) so the error surfaces
 // uniformly whether the body was {}, {"customer_id":""}, or absent.
 func decodeCreatePreviewRequest(body []byte) (CreatePreviewRequest, error) {
-	wire := createPreviewWireRequest{}
+	wire := CreatePreviewWireRequest{}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &wire); err != nil {
 			return CreatePreviewRequest{}, errs.Invalid("body", "request body is not valid JSON")

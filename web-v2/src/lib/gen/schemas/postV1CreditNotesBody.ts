@@ -9,15 +9,30 @@
  */
 import type { PostV1CreditNotesBodyCommitRelief } from './postV1CreditNotesBodyCommitRelief';
 import type { PostV1CreditNotesBodyLinesItem } from './postV1CreditNotesBodyLinesItem';
+import type { PostV1CreditNotesBodyRefundType } from './postV1CreditNotesBodyRefundType';
 
 export type PostV1CreditNotesBody = {
   invoice_id: string;
   reason?: string;
   lines?: PostV1CreditNotesBodyLinesItem[];
+  /** Not with commit_relief; put the relief's split inside commit_relief. */
   refund_amount_cents?: number;
   credit_amount_cents?: number;
+  /** Not with commit_relief; put the relief's split inside commit_relief. */
   out_of_band_amount_cents?: number;
+  /**
+     * Older single-channel form. On a paid invoice whose three
+     * `*_amount_cents` fields are all 0, `refund` or `credit`
+     * puts the whole note in that channel. Not with commit_relief.
+     */
+  refund_type?: PostV1CreditNotesBodyRefundType;
   auto_issue?: boolean;
-  /** Mutually exclusive with lines/credit_amount_cents. */
+  /**
+     * Mutually exclusive with lines and credit_amount_cents. The
+     * relief's split goes in here, not at the top level: a top-level
+     * `refund_amount_cents`, `out_of_band_amount_cents` or
+     * `refund_type` is a 422. Example after a lost dispute:
+     * `{"invoice_id": "inv_…", "commit_relief": {"retire_all": true, "out_of_band_amount_cents": 5000}}`.
+     */
   commit_relief?: PostV1CreditNotesBodyCommitRelief;
 };
