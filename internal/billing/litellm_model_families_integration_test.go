@@ -314,3 +314,129 @@ func TestLiteLLM_StoredRowRepricedByModelRaw(t *testing.T) {
 		})
 	}
 }
+
+// TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule pins the docs' remedy
+// for usage stored under a raw name that now maps to a model (second review,
+// finding 3): such a row, here a Google Cloud dated Haiku 4.5 name, has no
+// price after the upgrade, while a new call with the same name bills at the
+// recipe price. A rule on model with the raw name bills the old row, and
+// only it: a new call carries the model's name in model.
+func TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	const raw = "vertex_ai/claude-haiku-4-5@20251001"
+	for _, tc := range []struct {
+		name     string
+		addRule  bool
+		wantSub  int64
+		wantRows map[string]int64
+	}{
+		{"no rule", false, 100, map[string]int64{"Tokens (claude-haiku-4.5 · input)": 100}},
+		{"rule on model", true, 200, map[string]int64{
+			"Tokens (claude-haiku-4.5 · input)": 100,
+			"Tokens (" + raw + " · input)":      100,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := newRecipeTenant(t, db, "Raw Row Corp "+tc.name)
+			// The previous release kept this name raw on model: no family matched.
+			rt.storeOldRow("old_raw_haiku45:input", 1_000_000, map[string]any{
+				"model": raw, "model_raw": raw, "provider": "vertex_ai", "token_type": "input",
+			})
+			rt.spend("new_raw_haiku45", raw, 1_000_000, 0, 0)
+			if tc.addRule {
+				rt.priceRule("haiku45_input_stored_raw", "0.0001", map[string]any{"model": raw, "token_type": "input"}, 100)
+			}
+			subtotal, lines := rt.close()
+			if subtotal != tc.wantSub {
+				t.Errorf("subtotal %d¢, want %d¢. Lines:%s", subtotal, tc.wantSub, dumpLines(lines))
+			}
+			for desc, cents := range tc.wantRows {
+				if lines[desc] != cents {
+					t.Errorf("line %q = %d¢, want %d¢. Lines:%s", desc, lines[desc], cents, dumpLines(lines))
+				}
+			}
+		})
+	}
+}
+
+// TestLiteLLM_ProviderCostsAfterUpgrade pins what the docs say about provider
+// costs (second review, findings 1 and 2). A cost saved on an older model's
+// name does not cover the model's new name: Opus 5.5 events arrive as
+// claude-opus-5.5 with no cost, which leaves the period's margin unmeasured
+// until a cost is saved for the new name, and only for events after that.
+// And provider costs have no context_tier: one Haiku 5.5 cost is stamped on
+// both prompt tiers.
+func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	rt := newRecipeTenant(t, db, "Provider Cost Corp")
+	saveCost := func(model, tokenType, perToken string) {
+		t.Helper()
+		if _, err := rt.usageStore.UpsertProviderCostRate(rt.ctx, rt.tenantID, domain.ProviderCostRate{
+			Provider: "anthropic", Model: model, TokenType: tokenType,
+			CostPerToken: decimal.RequireFromString(perToken), Currency: "USD",
+		}); err != nil {
+			t.Fatalf("save cost %s %s: %v", model, tokenType, err)
+		}
+	}
+	events := func(modelRaw string) []domain.UsageEvent {
+		t.Helper()
+		evs, _, err := rt.usageStore.List(rt.ctx, usage.ListFilter{
+			TenantID: rt.tenantID, Dimensions: map[string]any{"model_raw": modelRaw}, Limit: 20,
+		})
+		if err != nil {
+			t.Fatalf("list events: %v", err)
+		}
+		return evs
+	}
+	unresolved := func() int64 {
+		t.Helper()
+		_, n, err := rt.usageStore.CustomerProviderCost(rt.ctx, rt.tenantID, rt.customerID, rt.periodStart, rt.periodEnd)
+		if err != nil {
+			t.Fatalf("customer provider cost: %v", err)
+		}
+		return n
+	}
+
+	// Costs saved before the upgrade, on the name Opus 5.5 used to arrive as.
+	saveCost("claude-opus-5", "input", "0.000004")
+	saveCost("claude-opus-5", "output", "0.00002")
+	rt.spend("pc_opus55_before", "claude-opus-5-5", 1_000_000, 0, 100_000)
+	for _, e := range events("claude-opus-5-5") {
+		if e.ProviderCostMicros != nil || e.ProviderCostSource != "" {
+			t.Errorf("%s: cost %v source %q, want none: a cost on claude-opus-5 does not cover claude-opus-5.5", e.IdempotencyKey, e.ProviderCostMicros, e.ProviderCostSource)
+		}
+	}
+	if n := unresolved(); n != 2 {
+		t.Errorf("unresolved events = %d, want 2 (the call's input and output)", n)
+	}
+
+	// A cost saved for the new name covers later calls only.
+	saveCost("claude-opus-5.5", "input", "0.000004")
+	saveCost("claude-opus-5.5", "output", "0.00002")
+	rt.spend("pc_opus55_after", "anthropic/claude-opus-5-5", 1_000_000, 0, 100_000)
+	for _, e := range events("anthropic/claude-opus-5-5") {
+		if e.ProviderCostSource != "table" || e.ProviderCostMicros == nil {
+			t.Errorf("%s: cost %v source %q, want a table cost", e.IdempotencyKey, e.ProviderCostMicros, e.ProviderCostSource)
+		}
+	}
+	if n := unresolved(); n != 2 {
+		t.Errorf("unresolved events = %d, want still 2: a cost applies only to events that arrive after it", n)
+	}
+
+	// One Haiku 5.5 cost, the standard tier's, is stamped on a long prompt
+	// too, which bills at the higher price.
+	saveCost("claude-haiku-5.5", "input", "0.0000001")
+	rt.spend("pc_haiku_long", "claude-haiku-5-5", 200_000, 0, 0)
+	for _, e := range events("claude-haiku-5-5") {
+		if e.Dimensions["token_type"] != "input" {
+			continue
+		}
+		if e.Dimensions[litellm.DimContextTier] != litellm.ContextTierOver100k {
+			t.Fatalf("%s: %s = %v, want %s", e.IdempotencyKey, litellm.DimContextTier, e.Dimensions[litellm.DimContextTier], litellm.ContextTierOver100k)
+		}
+		// 200,000 tokens x $0.10 per million = $0.02 = 20,000 micros.
+		if e.ProviderCostMicros == nil || *e.ProviderCostMicros != 20_000 {
+			t.Errorf("%s: cost %v micros, want 20000: provider costs have no context_tier, so the one Haiku 5.5 cost covers both tiers", e.IdempotencyKey, e.ProviderCostMicros)
+		}
+	}
+}

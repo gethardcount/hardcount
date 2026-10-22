@@ -176,7 +176,9 @@ Each event also carries these labels (dimensions):
 - `model_raw`: the model name exactly as LiteLLM sent it.
 - `context_tier`, on Claude Haiku 5.5 events only: `prompt_up_to_100k` or
   `prompt_over_100k`. Haiku 5.5 has a higher price when the prompt (input,
-  cache reads and cache writes) is over 100,000 tokens.
+  cache reads and cache writes) is over 100,000 tokens. Provider costs have
+  no `context_tier`, so one Haiku 5.5 cost covers both prices
+  ([more](../ai-pricing.md#see-your-margin)).
 - `provider`: the provider, from LiteLLM's `custom_llm_provider`.
 - `team_id`, when the call has one in `metadata`.
 - `request_tags`, only when the tags arrive under `metadata`. A current

@@ -57,7 +57,9 @@ dimension. A LiteLLM proxy does this for you: Velox turns a name such as
   The prompt counts input, cache reads and cache writes. Its events carry
   `context_tier`: `prompt_up_to_100k` or `prompt_over_100k`. The recipe has
   a rule for each. If you price Haiku 5.5 yourself, put `context_tier` in
-  every rule: a rule without it prices both at one rate.
+  every rule: a rule without it prices both at one rate. A provider cost
+  has no `context_tier`, so your margin on Haiku 5.5 is wrong for one of
+  the two prices ([more](#see-your-margin)).
 - **The prices are Anthropic's list prices.** On Bedrock and Google Cloud,
   a regional endpoint costs you 10% more than global for Claude 4.5 and
   later models; the recipe charges the same for both. Fast mode, US-only
@@ -223,6 +225,14 @@ the 6.0.0 prices. After you upgrade Velox:
   Before, it kept its raw name and had no price.
 - Claude Sonnet 5 keeps the old $3 / $15 recipe prices until you change
   them. Anthropic now charges $2 / $10.
+- A [provider cost](#see-your-margin) saved on `claude-opus-5`,
+  `claude-sonnet-5`, `claude-fable-5` or `claude-mythos-5` does not cover
+  the new names. Nor does one on `claude-opus-4` or `claude-sonnet-4` cover
+  Google Cloud `@default` and `@date` names of Opus 4.1 to 4.8, Sonnet 4.5
+  and Sonnet 4.6, which now arrive as their own model, such as
+  `claude-opus-4.6`. Save a cost for each new name before you upgrade. A
+  cost applies only to usage that arrives after you save it, and while any
+  of a customer's usage has no cost, their margin shows no percentage.
 
 Add the 30 prices **before you upgrade**, so no usage arrives without a
 price. A rule on `claude-opus-5.5` matches nothing until the new release
@@ -342,6 +352,17 @@ one for each raw name and kind of token, such as
 at the Opus 4.6 input price. It also prices later calls with that name,
 which bill at the same price.
 
+**Usage stored under a raw name that now finds a price** has no price.
+These are the names in [Rules you wrote on a raw Claude
+name](#rules-you-wrote-on-a-raw-claude-name) other than Haiku 5.5 (below), such as
+`vertex_ai/claude-haiku-4-5@20251001` or
+`bedrock/us.anthropic.claude-sonnet-4-6`. Velox did not bill those rows,
+and still does not; later calls with the same name bill at the model's
+price. To bill the rows, add a rule on `model` with the raw name, such as
+`{"model": "vertex_ai/claude-haiku-4-5@20251001", "token_type": "input"}`,
+at the model's price. Only rows stored before the upgrade carry the raw
+name in `model`.
+
 **Haiku 5.5 usage stored before the upgrade** has its raw name in `model`
 and no `context_tier`, so the recipe's Haiku 5.5 rules never match it.
 Velox cannot tell which of the two prices applies to those rows. To bill
@@ -445,6 +466,18 @@ usage cost you. Only you see it, never the customer.
    a cost you change later applies only to later events. Save one cost for
    each model and kind of token. These are made-up costs for Claude Sonnet
    4.5: $1.20 per million input tokens and $4.50 per million output tokens.
+
+   `model` must be the name the usage carries exactly, either `model` or
+   `model_raw`. A cost on `claude-opus-5` does not cover
+   `claude-opus-5.5`.
+
+   A cost has no `context_tier`. So one Claude Haiku 5.5 cost covers both
+   of its prices, and the margin is wrong for one of them. At Anthropic's
+   list prices, a prompt over 100,000 tokens costs 5 times as much: if you
+   save the cost of shorter prompts, the margin on longer ones reads too
+   high. When a LiteLLM record has `cost_breakdown`, Velox can use
+   LiteLLM's cost instead of yours
+   ([when](integrations/litellm.md#things-to-know)).
 
    ```bash
    save_cost() {   # save_cost <token type> <cost per token in dollars>
