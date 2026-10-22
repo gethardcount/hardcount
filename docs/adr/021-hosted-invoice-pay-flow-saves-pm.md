@@ -1,11 +1,11 @@
 # ADR-021: Hosted-invoice Pay flow saves the card to the customer's Stripe customer
 
-**Status:** Accepted (amended 2026-10-11 and 2026-10-18)
+**Status:** Accepted (amended 2026-10-11, 2026-10-18 and 2026-10-22)
 **Date:** 2026-05-03
 
 ## Summary
 
-Paying on the hosted invoice page saves the card for later off-session charges. The Stripe Checkout session names the customer's Stripe customer (created on first use) and sets `setup_future_usage=off_session`, so future invoices can charge the card without the customer present. Amended 2026-10-11: Velox also records that card in its own `payment_methods`, through `Stripe.RecordCheckoutCard`, from the webhook or the reconciler's hosted sweep. The card becomes the default only when the customer had no card on file. Amended 2026-10-18 (ADR-126): it also replaces a default the bank refused for good. Status: active, amended.
+Paying on the hosted invoice page saves the card for later off-session charges. The Stripe Checkout session names the customer's Stripe customer (created on first use) and sets `setup_future_usage=off_session`, so future invoices can charge the card without the customer present. Amended 2026-10-11: Velox also records that card in its own `payment_methods`, through `Stripe.RecordCheckoutCard`, from the webhook or the reconciler's hosted sweep. The card becomes the default only when the customer had no card on file. Amended 2026-10-18 (ADR-126): it also replaces a default the bank refused for good. Amended 2026-10-22: a card saved through a Velox setup or update link always becomes the default; a card paid on the hosted page keeps the rule above. Status: active, amended.
 
 ## Context
 
@@ -143,7 +143,9 @@ The attach follows the store's existing default rule:
 - **A default card on file:** the paid card is added beside it, as Add card
   does. This matches Stripe's own default for invoice payments
   (`save_default_payment_method` off). Making the paid card the new default
-  is a product choice, left for a decision.
+  is a product choice, left for a decision. (Amended 2026-10-22: decided
+  for setup and update links, where the card does become the default. A
+  card paid on the hosted page is still added beside a working default.)
 
 **Lost webhooks.** The reconciler's hosted sweep (ADR-068 amendment) now
 records the card too, for a paid session whose webhooks were lost. Before,
@@ -163,3 +165,71 @@ attempt recorded a hard decline on the customer's current default card,
 the card being saved becomes the default. The switch happens in the
 attach's own transaction. A working default is still never replaced: after
 any other decline, or none, a new card is added beside it.
+
+## Amendment 2026-10-22: a card saved through a setup or update link becomes the default
+
+An end-to-end Stripe sandbox walk (2026-10-22) found the rule above wrong for
+setup flows. After an ordinary decline, the customer saved a new card through
+the payment-update link. The success page said "we'll use it for upcoming
+invoices automatically", and `FetchCardDetails` made it Stripe's default. But
+Velox kept the declining card as its default, and every dunning retry charged
+that card again. The same held for the operator's **Add payment method** link.
+
+A setup or update link exists for one reason: to give Velox the card to
+charge. Stripe Billing's retries charge the customer's default payment
+method (`customer.invoice_settings.default_payment_method`, when the
+subscription names none). Stripe also says: "When you update payment methods
+after a failed payment attempt, update the field where the previous payment
+failed"
+([Automate payment retries, payment method ordering](https://docs.stripe.com/billing/revenue-recovery/smart-retries#payment-method-ordering), read 2026-10-22).
+
+**Decision.** A card saved by a SetupIntent Velox created becomes the
+customer's default. Velox's three Checkout setup sessions stamp
+`velox_customer_id` on the SetupIntent (`setup_intent_data.metadata`): the
+operator's **Add payment method** link (email or copy), the customer's
+payment-update link, and legacy `POST /v1/checkout/setup`. The
+`setup_intent.succeeded` handler reads that before any other lookup and asks
+the attach to make the card the default. The store clears the old default
+and sets the new one in the attach's transaction, on its insert path and on
+its update path. The update path covers a card already saved beside, by a
+redelivery or by the session's own `checkout.session.completed`. The next
+dunning retry, auto charge or **Collect payment** charges it.
+
+These keep the rule above (the first card, or one replacing a default the
+bank refused for good, becomes the default; any other is added beside):
+
+- **A card paid on the hosted page.** `RecordCheckoutCard` picks the newest
+  card on the Stripe customer, a guess. In setup mode it never makes the
+  card the default; the session's `setup_intent.succeeded`, which names the
+  exact card, does. Whether a hosted payment's card should replace a working
+  default is still open.
+- **A SetupIntent Velox did not create**, matched only by its Stripe
+  customer.
+
+**Stripe's default follows Velox's.** `FetchCardDetails` no longer sets the
+newest card as Stripe's default. The attach sets Stripe's
+`invoice_settings.default_payment_method` whenever the saved card is Velox's
+default (first card, refused-card replacement, setup flow). It runs after the
+commit, best-effort, as **Set as default** does. A failure logs
+and lands as `stripe_sync_error` on the audit row (ADR-053: Velox charges
+the card it names; Stripe's copy changes only what the Stripe dashboard
+shows).
+
+**One attach at a time per customer.** One setup session sends both webhooks
+for the same card within milliseconds. Run side by side, one insert failed on
+the active-fingerprint unique index, and when that was the setup flow's
+attach, the card stayed beside the old default until Stripe redelivered. The
+attach now takes a per-customer advisory lock first.
+
+**Behavior change.** An operator's **Add payment method** link now replaces
+a working default. Before, the card was added beside it.
+
+**Left as they are.**
+
+- A late redelivery of `setup_intent.succeeded` after the operator's **Set
+  as default** makes the setup card the default again. Stripe's event-id
+  dedup makes this rare.
+- A **Set as default** that runs during a setup attach can fail on the
+  one-default index. It fails loudly; there are never two defaults.
+- No retry runs when the card is saved. The next scheduled retry, or
+  **Collect payment**, charges it.
