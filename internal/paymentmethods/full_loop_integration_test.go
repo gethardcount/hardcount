@@ -365,3 +365,192 @@ func TestUpsert_MakeDefault_ConcurrentWithBeside_RealStore(t *testing.T) {
 		}
 	}
 }
+
+// in reports through the subtest's t, so a failure names its subtest.
+func (r *setupDefaultRig) in(t *testing.T) *setupDefaultRig {
+	c := *r
+	c.t = t
+	return &c
+}
+
+// detach removes a card the way the operator's Remove does (store half:
+// detach, and promote the newest remaining card when it was the default).
+func (r *setupDefaultRig) detach(custID, rowID string) {
+	r.t.Helper()
+	if _, _, err := r.store.DetachAndRebalance(r.ctx, r.tenantID, custID, rowID); err != nil {
+		r.t.Fatalf("detach %s: %v", rowID, err)
+	}
+}
+
+func (r *setupDefaultRig) assertStillRemoved(rowID string) {
+	r.t.Helper()
+	got, err := r.store.Get(r.ctx, r.tenantID, rowID)
+	if err != nil {
+		r.t.Fatalf("get %s: %v", rowID, err)
+	}
+	if got.DetachedAt == nil || got.IsDefault {
+		r.t.Fatalf("removed card %s came back: detached_at=%v is_default=%v", got.StripePaymentMethodID, got.DetachedAt, got.IsDefault)
+	}
+}
+
+// A webhook for a card that was removed after it was saved (Stripe
+// redelivers setup_intent.succeeded hours after a failed first delivery)
+// leaves it removed. Stripe does not let a detached PaymentMethod be used
+// or attached again, so bringing the row back, let alone as the default,
+// would point every retry at a card Stripe refuses while the working card
+// sits unused. Velox's own dedupe-by-fingerprint replaces an older copy of
+// the same card; a late webhook for that copy leaves the newer one in place.
+func TestUpsert_LateAttachOfARemovedCard_RealStore(t *testing.T) {
+	r := newSetupDefaultRig(t, "Late Attach Removed Card")
+
+	t.Run("a card removed beside the default, then a late setup attach", func(t *testing.T) {
+		r := r.in(t)
+		c := r.customer("rm1")
+		r.upsert(c, "pm_rm1_a", "fp_rm1_a", false)
+		b := r.upsert(c, "pm_rm1_b", "fp_rm1_b", false) // checkout.session.completed got there first
+		r.detach(c, b.ID)
+		got := r.upsert(c, "pm_rm1_b", "fp_rm1_b", true) // setup_intent.succeeded, redelivered
+		if got.DetachedAt == nil || got.IsDefault {
+			t.Fatalf("returned row = detached_at %v is_default %v, want the removed row unchanged", got.DetachedAt, got.IsDefault)
+		}
+		r.assertStillRemoved(b.ID)
+		r.assertOnlyDefault(c, "pm_rm1_a")
+	})
+
+	t.Run("a setup card removed as the default, then a late attach", func(t *testing.T) {
+		r := r.in(t)
+		c := r.customer("rm2")
+		r.upsert(c, "pm_rm2_a", "fp_rm2_a", false)
+		b := r.upsert(c, "pm_rm2_b", "fp_rm2_b", true)
+		r.detach(c, b.ID) // a is promoted back
+		r.assertOnlyDefault(c, "pm_rm2_a")
+		r.upsert(c, "pm_rm2_b", "fp_rm2_b", true)
+		r.upsert(c, "pm_rm2_b", "fp_rm2_b", false)
+		r.assertStillRemoved(b.ID)
+		r.assertOnlyDefault(c, "pm_rm2_a")
+	})
+
+	t.Run("control: a card never removed still takes the default", func(t *testing.T) {
+		r := r.in(t)
+		c := r.customer("rm3")
+		r.upsert(c, "pm_rm3_a", "fp_rm3_a", false)
+		r.upsert(c, "pm_rm3_b", "fp_rm3_b", false)
+		r.upsert(c, "pm_rm3_b", "fp_rm3_b", true)
+		r.assertOnlyDefault(c, "pm_rm3_b")
+	})
+
+	t.Run("an older copy of the same card replaced by dedupe, then a late attach", func(t *testing.T) {
+		r := r.in(t)
+		c := r.customer("rm4")
+		old := r.upsert(c, "pm_rm4_old", "fp_rm4", false)
+		r.upsert(c, "pm_rm4_new", "fp_rm4", false) // same physical card, saved again
+		r.assertOnlyDefault(c, "pm_rm4_new")
+		r.upsert(c, "pm_rm4_old", "fp_rm4", false)
+		r.upsert(c, "pm_rm4_old", "fp_rm4", true)
+		r.assertStillRemoved(old.ID)
+		r.assertOnlyDefault(c, "pm_rm4_new")
+		if pms, _ := r.store.List(r.ctx, r.tenantID, c); len(pms) != 1 {
+			t.Fatalf("active cards = %d, want 1 (the newer copy)", len(pms))
+		}
+	})
+}
+
+// recordingAudit keeps the audit rows the service writes.
+type recordingAudit struct {
+	mu   sync.Mutex
+	rows []map[string]any
+}
+
+func (a *recordingAudit) Log(_ context.Context, _, action, resourceType, _, label string, meta map[string]any) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	row := map[string]any{"_action": action, "_resource": resourceType, "_label": label}
+	for k, v := range meta {
+		row[k] = v
+	}
+	a.rows = append(a.rows, row)
+	return nil
+}
+
+func (a *recordingAudit) take() []map[string]any {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := a.rows
+	a.rows = nil
+	return out
+}
+
+func defaultChangedRows(rows []map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, r := range rows {
+		if r["action"] == "default_changed" {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// When an attach moves the default to the saved card, the audit log says
+// so, as Set as default and Remove's auto-promote do: a default_changed row
+// beside the attached row. The attached row records whether the card is
+// the default after the attach. A card added beside, the first card, and a
+// redelivery of a card already the default write no default_changed row.
+func TestAttach_AuditsADefaultChange_RealStore(t *testing.T) {
+	r := newSetupDefaultRig(t, "Attach Audits Default Change")
+	stripe := &dedupeFakeStripe{}
+	svc := paymentmethods.NewService(r.store, stripe, r.custs)
+	audit := &recordingAudit{}
+	svc.SetAuditLogger(audit)
+
+	attach := func(custID, pm, fp string, makeDefault bool) []map[string]any {
+		t.Helper()
+		stripe.next = paymentmethods.CardMetadata{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2034, Fingerprint: fp}
+		if _, err := svc.AttachFromSetupIntent(r.ctx, r.tenantID, custID, pm, makeDefault); err != nil {
+			t.Fatalf("attach %s: %v", pm, err)
+		}
+		return audit.take()
+	}
+	attachedRow := func(t *testing.T, rows []map[string]any) map[string]any {
+		t.Helper()
+		for _, row := range rows {
+			if row["action"] == "attached" {
+				return row
+			}
+		}
+		t.Fatalf("no attached audit row in %v", rows)
+		return nil
+	}
+
+	c := r.customer("aud")
+
+	rows := attach(c, "pm_aud_a", "fp_aud_a", false)
+	if got := attachedRow(t, rows)["is_default"]; got != true {
+		t.Fatalf("first card: attached row is_default = %v, want true", got)
+	}
+	if dc := defaultChangedRows(rows); len(dc) != 0 {
+		t.Fatalf("first card: default_changed rows = %v, want none (no card was replaced)", dc)
+	}
+
+	rows = attach(c, "pm_aud_b", "fp_aud_b", false)
+	if got := attachedRow(t, rows)["is_default"]; got != false {
+		t.Fatalf("card beside: attached row is_default = %v, want false", got)
+	}
+	if dc := defaultChangedRows(rows); len(dc) != 0 {
+		t.Fatalf("card beside: default_changed rows = %v, want none", dc)
+	}
+
+	rows = attach(c, "pm_aud_b", "fp_aud_b", true) // the setup flow's own webhook
+	if got := attachedRow(t, rows)["is_default"]; got != true {
+		t.Fatalf("setup card: attached row is_default = %v, want true", got)
+	}
+	dc := defaultChangedRows(rows)
+	if len(dc) != 1 || dc[0]["_action"] != "update" || dc[0]["_resource"] != "payment_method" ||
+		dc[0]["card_last4"] != "4242" || dc[0]["trigger"] != "setup_link" {
+		t.Fatalf("setup card: default_changed rows = %v, want one update/payment_method row with trigger setup_link", dc)
+	}
+
+	rows = attach(c, "pm_aud_b", "fp_aud_b", true) // redelivery, already the default
+	if dc := defaultChangedRows(rows); len(dc) != 0 {
+		t.Fatalf("redelivery: default_changed rows = %v, want none (the default did not move)", dc)
+	}
+}
