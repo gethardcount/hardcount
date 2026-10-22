@@ -30,11 +30,11 @@ import (
 func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 
-	inAdvance := func(t *testing.T, f *parityFixture, code string, cents int64, interval domain.BillingInterval, meters ...string) domain.Plan {
+	mkPlan := func(t *testing.T, f *parityFixture, code string, cents int64, interval domain.BillingInterval, timing domain.BillTiming, meters ...string) domain.Plan {
 		t.Helper()
 		p, err := f.pricing.CreatePlan(f.ctx, f.tenantID, domain.Plan{
 			Code: code, Name: code, Currency: "USD",
-			BillingInterval: interval, BaseBillTiming: domain.BillInAdvance,
+			BillingInterval: interval, BaseBillTiming: timing,
 			BaseAmountCents: cents, Status: domain.PlanActive, MeterIDs: meters,
 		})
 		if err != nil {
@@ -42,11 +42,53 @@ func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 		}
 		return p
 	}
+	// callsMeter is a $0.10-per-call meter with 5 calls recorded on day 10
+	// of the parity period.
+	callsMeter := func(t *testing.T, f *parityFixture) domain.Meter {
+		t.Helper()
+		rule, err := f.pricing.CreateRatingRule(f.ctx, f.tenantID, domain.RatingRuleVersion{
+			RuleKey: "a5_calls", Name: "calls", Version: 1,
+			LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
+			Currency: "USD", FlatAmountCents: decimal.NewFromInt(10),
+		})
+		if err != nil {
+			t.Fatalf("create rule: %v", err)
+		}
+		meter, err := f.pricing.CreateMeter(f.ctx, f.tenantID, domain.Meter{
+			Key: "a5_calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
+		})
+		if err != nil {
+			t.Fatalf("create meter: %v", err)
+		}
+		if _, err := usage.NewPostgresStore(f.db).Ingest(f.ctx, f.tenantID, domain.UsageEvent{
+			CustomerID: f.custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(5), Timestamp: parityPS.AddDate(0, 0, 9),
+		}); err != nil {
+			t.Fatalf("ingest: %v", err)
+		}
+		return meter
+	}
+	// downgradeAtPeriodEnd is a monthly $99 plan carrying the calls meter,
+	// scheduled to change to a $29 plan without it at the period end.
+	downgradeAtPeriodEnd := func(timing domain.BillTiming, pro, basic string) func(t *testing.T, f *parityFixture) (domain.Subscription, time.Time, time.Time) {
+		return func(t *testing.T, f *parityFixture) (domain.Subscription, time.Time, time.Time) {
+			meter := callsMeter(t, f)
+			proPlan := mkPlan(t, f, pro, 9900, domain.BillingMonthly, timing, meter.ID)
+			basicPlan := mkPlan(t, f, basic, 2900, domain.BillingMonthly, timing)
+			sub := f.activeSub(t, "sub-"+pro, parityPS, domain.SubscriptionItem{PlanID: proPlan.ID, Quantity: 1})
+			if _, err := f.subs.SetItemPendingPlan(f.ctx, f.tenantID, sub.Items[0].ID, basicPlan.ID, parityPE); err != nil {
+				t.Fatalf("schedule change: %v", err)
+			}
+			return sub, parityPS.AddDate(0, 0, 25), parityPE.Add(time.Nanosecond)
+		}
+	}
 
 	type scenario struct {
 		name      string
 		build     func(t *testing.T, f *parityFixture) (sub domain.Subscription, previewAt, closeAt time.Time)
 		wantTotal int64
+		// wantPlans is what plan_name names: the plan the item holds at the
+		// close and the plan the elapsed period stays on.
+		wantPlans []string
 	}
 	scenarios := []scenario{
 		{
@@ -54,34 +96,17 @@ func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 			// $29; usage of the elapsed period stays on the old plan's meter.
 			name:      "in-advance-downgrade-same-interval",
 			wantTotal: 2900 + 5*10,
-			build: func(t *testing.T, f *parityFixture) (domain.Subscription, time.Time, time.Time) {
-				rule, err := f.pricing.CreateRatingRule(f.ctx, f.tenantID, domain.RatingRuleVersion{
-					RuleKey: "a5_calls", Name: "calls", Version: 1,
-					LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-					Currency: "USD", FlatAmountCents: decimal.NewFromInt(10),
-				})
-				if err != nil {
-					t.Fatalf("create rule: %v", err)
-				}
-				meter, err := f.pricing.CreateMeter(f.ctx, f.tenantID, domain.Meter{
-					Key: "a5_calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
-				})
-				if err != nil {
-					t.Fatalf("create meter: %v", err)
-				}
-				pro := inAdvance(t, f, "a5-pro", 9900, domain.BillingMonthly, meter.ID)
-				basic := inAdvance(t, f, "a5-basic", 2900, domain.BillingMonthly)
-				sub := f.activeSub(t, "sub-a5-dg", parityPS, domain.SubscriptionItem{PlanID: pro.ID, Quantity: 1})
-				if _, err := f.subs.SetItemPendingPlan(f.ctx, f.tenantID, sub.Items[0].ID, basic.ID, parityPE); err != nil {
-					t.Fatalf("schedule change: %v", err)
-				}
-				if _, err := usage.NewPostgresStore(f.db).Ingest(f.ctx, f.tenantID, domain.UsageEvent{
-					CustomerID: f.custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(5), Timestamp: parityPS.AddDate(0, 0, 9),
-				}); err != nil {
-					t.Fatalf("ingest: %v", err)
-				}
-				return sub, parityPS.AddDate(0, 0, 25), parityPE.Add(time.Nanosecond)
-			},
+			wantPlans: []string{"a5-basic", "a5-pro"},
+			build:     downgradeAtPeriodEnd(domain.BillInAdvance, "a5-pro", "a5-basic"),
+		},
+		{
+			// The same downgrade in arrears: the close bills the elapsed
+			// period, all on the old plan — its base and its meter. The new
+			// plan bills nothing until the next close.
+			name:      "in-arrears-downgrade-same-interval",
+			wantTotal: 9900 + 5*10,
+			wantPlans: []string{"a5-basic-arrears", "a5-pro-arrears"},
+			build:     downgradeAtPeriodEnd(domain.BillInArrears, "a5-pro-arrears", "a5-basic-arrears"),
 		},
 		{
 			// Calendar billing, yearly $1200 from May 13 → monthly $31 at the
@@ -89,9 +114,10 @@ func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 			// bills 19/31 of the monthly base; the header is that stub.
 			name:      "in-advance-yearly-to-monthly-at-renewal",
 			wantTotal: 1900,
+			wantPlans: []string{"a5-monthly", "a5-yearly"},
 			build: func(t *testing.T, f *parityFixture) (domain.Subscription, time.Time, time.Time) {
-				yearly := inAdvance(t, f, "a5-yearly", 120000, domain.BillingYearly)
-				monthly := inAdvance(t, f, "a5-monthly", 3100, domain.BillingMonthly)
+				yearly := mkPlan(t, f, "a5-yearly", 120000, domain.BillingYearly, domain.BillInAdvance)
+				monthly := mkPlan(t, f, "a5-monthly", 3100, domain.BillingMonthly, domain.BillInAdvance)
 				ps := time.Date(2025, 5, 13, 0, 0, 0, 0, time.UTC)
 				pe := time.Date(2026, 5, 13, 0, 0, 0, 0, time.UTC)
 				sub, err := f.subs.Create(clock.WithEffectiveNow(f.ctx, ps), f.tenantID, domain.Subscription{
@@ -129,6 +155,11 @@ func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 				got = append(got, previewFingerprint(l.LineType, l.Description, l.Quantity, l.AmountCents))
 			}
 			sort.Strings(got)
+			gotPlans := strings.Split(pv.PlanName, ", ")
+			sort.Strings(gotPlans)
+			if strings.Join(gotPlans, ", ") != strings.Join(sc.wantPlans, ", ") {
+				t.Errorf("preview plan_name %q, want the new and the old plan: %v", pv.PlanName, sc.wantPlans)
+			}
 
 			if _, errs := f.engine(t, closeAt).RunCycleForTenant(f.ctx, f.tenantID, 50); len(errs) > 0 {
 				t.Fatalf("cycle close: %v", errs)

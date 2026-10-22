@@ -2543,9 +2543,9 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 	return sub, nil
 }
 
-// pendingPlanDue reports whether its scheduled plan change applies at the
-// close of the period ending at gate. ApplyDuePendingItemPlansAtomic selects
-// the same rows in SQL (pending_plan_effective_at <= gate).
+// pendingPlanDue reports whether the item's scheduled plan change applies at
+// the close of the period ending at gate. ApplyDuePendingItemPlansAtomic
+// selects the same rows in SQL (pending_plan_effective_at <= gate).
 func pendingPlanDue(it domain.SubscriptionItem, gate time.Time) bool {
 	return it.PendingPlanID != "" && it.PendingPlanEffectiveAt != nil && !it.PendingPlanEffectiveAt.After(gate)
 }

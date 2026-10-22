@@ -69,9 +69,10 @@ type PreviewTotal struct {
 
 // PreviewResult is the response shape for both the in-app
 // GET /v1/billing/preview/{subscription_id} debug route and the public
-// POST /v1/invoices/create_preview surface. PlanName is a joined list of
-// the subscription's item plans (comma-separated) — the previous
-// single-plan shape can't represent a multi-item sub.
+// POST /v1/invoices/create_preview surface. PlanName is a comma-separated
+// list of the item plans the estimate reads (after any change due at the
+// close), then, in the cycle estimate, each plan only a segment of the
+// period still bills (a pre-swap plan, a removed item).
 type PreviewResult struct {
 	CustomerID         string         `json:"customer_id"`
 	SubscriptionID     string         `json:"subscription_id"`
@@ -401,6 +402,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 				return PreviewResult{}, fmt.Errorf("get segment plan %s: %w", seg.planID, err)
 			}
 			plans[seg.planID] = pl
+			result.PlanName += ", " + pl.Name
 		}
 	}
 
