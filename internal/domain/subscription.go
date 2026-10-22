@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -392,14 +393,16 @@ type BillingThresholds struct {
 // its own pending-plan-change state so upgrades and downgrades can schedule
 // independently per line.
 type SubscriptionItem struct {
-	ID                     string     `json:"id"`
-	TenantID               string     `json:"tenant_id,omitempty"`
-	SubscriptionID         string     `json:"subscription_id"`
-	PlanID                 string     `json:"plan_id"`
-	Quantity               int64      `json:"quantity"`
-	Metadata               []byte     `json:"metadata,omitempty"` // raw JSONB
-	PendingPlanID          string     `json:"pending_plan_id,omitempty"`
-	PendingPlanEffectiveAt *time.Time `json:"pending_plan_effective_at,omitempty"`
+	ID             string `json:"id"`
+	TenantID       string `json:"tenant_id,omitempty"`
+	SubscriptionID string `json:"subscription_id"`
+	PlanID         string `json:"plan_id"`
+	Quantity       int64  `json:"quantity"`
+	// Metadata is the item's stored JSON object. Nil when the object is
+	// empty, so the field is left out.
+	Metadata               json.RawMessage `json:"metadata,omitempty"`
+	PendingPlanID          string          `json:"pending_plan_id,omitempty"`
+	PendingPlanEffectiveAt *time.Time      `json:"pending_plan_effective_at,omitempty"`
 	// PlanChangedAt stamps the last immediate plan swap on this item. Feeds the
 	// per-item proration dedup key (invoices.source_plan_changed_at plus
 	// source_subscription_item_id) so retries of the same change converge on

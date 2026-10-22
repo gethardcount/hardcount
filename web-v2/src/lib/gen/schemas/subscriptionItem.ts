@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { SubscriptionItemMetadata } from './subscriptionItemMetadata';
 
 /**
  * One priced line of a subscription. It pairs a plan with a quantity.
@@ -17,8 +18,8 @@ export interface SubscriptionItem {
   subscription_id: string;
   plan_id: string;
   quantity: number;
-  /** The item's stored metadata JSON, base64-encoded. Absent when empty. */
-  metadata?: string;
+  /** The item's stored metadata. Absent when empty. */
+  metadata?: SubscriptionItemMetadata;
   /** Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled. */
   pending_plan_id?: string;
   pending_plan_effective_at?: string;

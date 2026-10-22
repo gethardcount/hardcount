@@ -66,3 +66,24 @@ func TestUsageHandler_Aggregate_UnknownTZ_Returns422(t *testing.T) {
 		}
 	}
 }
+
+// A from/to the list and aggregate cannot read is refused (D-10). It used
+// to be dropped, so the response covered all time while the caller believed
+// it was filtered.
+func TestUsageHandler_BadDateFilter_Returns422(t *testing.T) {
+	h := NewHandler(NewService(newMemStore()), nil, nil)
+	for _, route := range []struct {
+		name string
+		fn   func(http.ResponseWriter, *http.Request)
+	}{{"list", h.list}, {"aggregate", h.aggregate}} {
+		for _, q := range []string{"from=2030-13-01", "to=yesterday", "from=2030-01-02&to=2030-01-01"} {
+			req := httptest.NewRequest(http.MethodGet, "/?"+q, nil)
+			req = req.WithContext(auth.WithTenantID(req.Context(), "tnt_test"))
+			rr := httptest.NewRecorder()
+			route.fn(rr, req)
+			if rr.Code != http.StatusUnprocessableEntity {
+				t.Errorf("%s ?%s: got %d, want 422; body=%s", route.name, q, rr.Code, rr.Body.String())
+			}
+		}
+	}
+}
