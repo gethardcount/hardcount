@@ -183,6 +183,10 @@ type Service struct {
 	settings       TenantSettingsReader
 	audit          AuditLogger
 	events         domain.EventDispatcher
+	// collectionStopper and dunningResolver are AfterVoid's Stripe and
+	// dunning legs. Only a test leaves them unwired.
+	collectionStopper PaymentCanceler
+	dunningResolver   DunningResolver
 	// setupLinkEmailOff is true when this server cannot email a setup link
 	// (SMTP_HOST or PAYMENT_UPDATE_URL unset). Read only by the
 	// no-payment-method and recovery-ended notices, which must not say a
@@ -196,6 +200,16 @@ type Service struct {
 // when one can be. Wired at boot from both things the sender needs: SMTP and
 // PAYMENT_UPDATE_URL.
 func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmailOff = !configured }
+
+// SetCollectionStopper wires the Stripe leg every committed void runs
+// (AfterVoid): expire the invoice's live Checkout sessions, then cancel its
+// PaymentIntent. Satisfied by *payment.Stripe.
+func (s *Service) SetCollectionStopper(p PaymentCanceler) { s.collectionStopper = p }
+
+// SetDunningResolver wires the dunning leg every committed void runs
+// (AfterVoid): close the invoice's active run as invoice_voided. Satisfied
+// by *dunning.Service.
+func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d }
 
 // AuditLogger is the narrow audit-write interface the service uses to
 // record state-changing operations that are reachable from multiple
