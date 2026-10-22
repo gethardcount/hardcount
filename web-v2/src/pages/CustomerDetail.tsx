@@ -2172,14 +2172,17 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                               onChange={e => updateLine(idx, { commitGrantedCents: e.target.value })}
                               disabled={isBusy}
                             />
-                            <Input
-                              type="date"
-                              aria-label={`Line ${idx + 1} credits valid through`}
-                              className="w-auto"
-                              value={line.commitExpiresAt}
-                              onChange={e => updateLine(idx, { commitExpiresAt: e.target.value })}
-                              disabled={isBusy}
-                            />
+                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                              Valid through
+                              <Input
+                                type="date"
+                                aria-label={`Line ${idx + 1} credits valid through`}
+                                className="w-auto"
+                                value={line.commitExpiresAt}
+                                onChange={e => updateLine(idx, { commitExpiresAt: e.target.value })}
+                                disabled={isBusy}
+                              />
+                            </label>
                             <span className="text-xs text-muted-foreground">
                               {Number(line.commitGrantedCents) > 0
                                 ? `Grants ${formatCents(Number(line.commitGrantedCents), currency)} of credits when the invoice is finalized.`

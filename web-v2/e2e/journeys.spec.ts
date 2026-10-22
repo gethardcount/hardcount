@@ -589,6 +589,7 @@ test('a commit line valid through a picked day is sent as the next midnight and 
   await composer.getByPlaceholder('2500', { exact: true }).fill('5000')
   await composer.getByText('This line sells prepaid credits').click()
   await composer.getByLabel('Line 1 credits granted in cents').fill('5000')
+  await expect(composer.getByText('Valid through', { exact: true })).toBeVisible()
   await composer.getByLabel('Line 1 credits valid through').fill(picked)
   const creating = page.waitForRequest(r => r.method() === 'POST' && new URL(r.url()).pathname === '/v1/invoices')
   await composer.getByRole('button', { name: 'Save & send' }).click()
