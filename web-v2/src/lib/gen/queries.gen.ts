@@ -56,6 +56,7 @@ import type {
   CreditLedgerEntry,
   CreditLiveBalance,
   CreditNote,
+  CreditNoteStats,
   Customer,
   CustomerBillingProfile,
   CustomerBillingProfileInput,
@@ -10395,6 +10396,110 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
 
 
 
+export const getGetCreditNoteStatsUrl = () => {
+
+
+
+
+  return `/v1/credit-notes/stats`
+}
+
+/**
+ * Counts of every credit note by status, and the money on issued
+ * notes, one entry per currency. Covers every note in this mode, not a
+ * page of them. Draft and voided notes are counted but move no money.
+ * @summary Get credit note totals
+ */
+export const getCreditNoteStats = async ( options?: RequestInit): Promise<CreditNoteStats> => {
+
+  return orvalClient<CreditNoteStats>(getGetCreditNoteStatsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCreditNoteStatsQueryKey = () => {
+    return [
+    `/v1/credit-notes/stats`
+    ] as const;
+    }
+
+
+export const getGetCreditNoteStatsQueryOptions = <TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCreditNoteStatsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCreditNoteStats>>> = () => getCreditNoteStats(requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetCreditNoteStatsQueryResult = NonNullable<Awaited<ReturnType<typeof getCreditNoteStats>>>
+export type GetCreditNoteStatsQueryError = unknown
+
+
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCreditNoteStats>>,
+          TError,
+          Awaited<ReturnType<typeof getCreditNoteStats>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCreditNoteStats>>,
+          TError,
+          Awaited<ReturnType<typeof getCreditNoteStats>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get credit note totals
+ */
+
+export function useGetCreditNoteStats<TData = Awaited<ReturnType<typeof getCreditNoteStats>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getCreditNoteStats>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetCreditNoteStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getPostV1CreditNotesIdSendUrl = (id: string,) => {
 
 
@@ -17005,9 +17110,11 @@ export const getUpdateTenantSettingsUrl = () => {
  * low-balance alerts off.
  *
  * Empty `default_currency`, `timezone`, `invoice_prefix`,
- * `tax_provider` and `tax_on_failure` fall back to their defaults.
- * `default_currency` and `company_country` are stored in upper case,
- * and `brand_color` in lower case. Choosing `stripe_tax` with no
+ * `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back
+ * to their defaults.
+ * `default_currency`, `company_country`, `invoice_prefix` and
+ * `credit_note_prefix` are stored in upper case, and `brand_color` in
+ * lower case. Choosing `stripe_tax` with no
  * `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
  * business use).
  *

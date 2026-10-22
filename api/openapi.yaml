@@ -2795,6 +2795,52 @@ components:
           items:
             $ref: "#/components/schemas/InvoiceLineItemInput"
 
+    CreditNoteStats:
+      type: object
+      required: [draft_count, issued_count, voided_count, by_currency]
+      properties:
+        draft_count:
+          type: integer
+        issued_count:
+          type: integer
+        voided_count:
+          type: integer
+        by_currency:
+          type: array
+          description: |
+            Money on issued notes, one entry per currency, the tenant's
+            default currency first. Empty when no note is issued.
+          items:
+            type: object
+            required: [currency, total_cents, refunded_cents, refund_pending_cents, refund_failed_cents, credited_cents, out_of_band_cents]
+            properties:
+              currency:
+                type: string
+              total_cents:
+                type: integer
+                format: int64
+                description: Total of the issued notes.
+              refunded_cents:
+                type: integer
+                format: int64
+                description: Refunds that succeeded. A refund still pending or one that failed is not counted here.
+              refund_pending_cents:
+                type: integer
+                format: int64
+                description: Refunds not confirmed yet. Neither succeeded nor failed, the refund is waiting on Stripe, Stripe's answer was unclear, or its result was never recorded.
+              refund_failed_cents:
+                type: integer
+                format: int64
+                description: Refunds that failed. No money went back to the card.
+              credited_cents:
+                type: integer
+                format: int64
+                description: Added to customers' credit balances.
+              out_of_band_cents:
+                type: integer
+                format: int64
+                description: Recorded as paid back outside Stripe.
+
     CreditNote:
       type: object
       description: |
@@ -3989,6 +4035,14 @@ components:
           type: string
           pattern: "^[A-Za-z0-9-]{1,20}$"
           description: Starts every invoice number, such as `VLX-000001`.
+        credit_note_prefix:
+          type: string
+          pattern: "^[A-Za-z0-9-]{1,20}$"
+          description: |
+            Starts every credit note number, such as `CN-000001`. A change
+            applies to new credit notes only. Issued notes keep their
+            numbers. It must differ from `invoice_prefix`, or an invoice and
+            a credit note would get the same number.
         net_payment_terms:
           type: integer
           minimum: 0
@@ -4091,7 +4145,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/TenantSettingsInput"
         - type: object
-          required: [tenant_id, default_currency, timezone, invoice_prefix, net_payment_terms, tax_provider, tax_rate, tax_inclusive, next_invoice_sequence, created_at, updated_at]
+          required: [tenant_id, default_currency, timezone, invoice_prefix, credit_note_prefix, net_payment_terms, tax_provider, tax_rate, tax_inclusive, next_invoice_sequence, created_at, updated_at]
           properties:
             tenant_id:
               type: string
@@ -10611,6 +10665,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/credit-notes/stats:
+    get:
+      tags: [CreditNotes]
+      summary: Get credit note totals
+      operationId: getCreditNoteStats
+      description: |
+        Counts of every credit note by status, and the money on issued
+        notes, one entry per currency. Covers every note in this mode, not a
+        page of them. Draft and voided notes are counted but move no money.
+      responses:
+        "200":
+          description: Credit note totals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreditNoteStats"
+
   /v1/credit-notes/{id}/send:
     post:
       tags: [CreditNotes]
@@ -13481,9 +13552,11 @@ paths:
         low-balance alerts off.
 
         Empty `default_currency`, `timezone`, `invoice_prefix`,
-        `tax_provider` and `tax_on_failure` fall back to their defaults.
-        `default_currency` and `company_country` are stored in upper case,
-        and `brand_color` in lower case. Choosing `stripe_tax` with no
+        `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back
+        to their defaults.
+        `default_currency`, `company_country`, `invoice_prefix` and
+        `credit_note_prefix` are stored in upper case, and `brand_color` in
+        lower case. Choosing `stripe_tax` with no
         `default_product_tax_code` sets it to `txcd_10103001` (SaaS,
         business use).
 

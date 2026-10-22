@@ -12,6 +12,7 @@ import type { RecipeDetail } from './gen/schemas/recipeDetail'
 import type { RecipePreviewResult } from './gen/schemas/recipePreviewResult'
 import type { RecipeInstance } from './gen/schemas/recipeInstance'
 import type { ActivityLine } from './gen/schemas/activityLine'
+import type { CreditNoteStats } from './gen/schemas/creditNoteStats'
 
 const API_BASE = '/v1'
 
@@ -485,6 +486,9 @@ export const api = {
 
   // Credit Notes
   listCreditNotes: (params?: string) => apiRequest<{ data: CreditNote[] }>('GET', `/credit-notes${params ? '?' + params : ''}`),
+  // Every note's count and the issued notes' money per currency, from the
+  // server: the list is a page of at most 100 rows and cannot be the source.
+  getCreditNoteStats: () => apiRequest<CreditNoteStats>('GET', '/credit-notes/stats'),
   // The key is required: an issued note can refund a card, and the server's
   // per-invoice cap stops over-crediting but not a repeat. A retry sent with
   // the same key gets the first request's answer instead of a second note.
@@ -1406,6 +1410,7 @@ export interface TenantSettings {
   default_currency: string
   timezone: string
   invoice_prefix: string
+  credit_note_prefix: string
   net_payment_terms: number
   tax_provider: 'none' | 'manual' | 'stripe_tax'
   tax_rate: number

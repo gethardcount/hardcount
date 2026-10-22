@@ -92,6 +92,21 @@ function recentInvoice(page: Page, invoiceNumber: string) {
   return card.getByRole('link').filter({ hasText: invoiceNumber })
 }
 
+// The Credit Notes page's "Issue credit note": pick the customer, then the
+// invoice, and the invoice page's own dialog opens for that invoice.
+async function issueFromCreditNotesPage(page: Page, customerName: string, invoiceNumber: string) {
+  await page.getByRole('button', { name: 'Issue credit note' }).first().click()
+  const picker = page.getByRole('dialog', { name: 'Choose an invoice to credit' })
+  await picker.getByRole('button', { name: 'Select a customer...' }).click()
+  await page.getByPlaceholder('Search...').fill(customerName)
+  await page.getByRole('option', { name: new RegExp(customerName) }).click()
+  await picker.getByRole('button', { name: new RegExp(invoiceNumber) }).click()
+  await expect(picker).toBeHidden()
+  const dialog = page.getByRole('dialog', { name: 'Issue credit note' })
+  await expect(dialog.getByText(invoiceNumber, { exact: true })).toBeVisible()
+  return dialog
+}
+
 // A one-off invoice for $49.00 that used `creditCents` of the customer's
 // credit balance when it was finalized.
 async function invoicePaidPartlyByCredit(creditCents: number) {
@@ -365,16 +380,16 @@ test('a voided invoice in euros owes €0.00 on its page', async ({ page }) => {
 })
 
 test('the credit notes page issues a note against an invoice, and issues or voids a draft', async ({ page }) => {
-  const { invoice } = await billedCustomer()
+  const { customer, invoice } = await billedCustomer()
   await page.goto('/credit-notes')
 
-  // Issue a note from the page: the invoice's amount due drops by it.
-  await page.getByRole('button', { name: 'Issue credit note' }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'Issue credit note' })
-  await dialog.getByLabel('Invoice', { exact: true }).selectOption(invoice.id)
-  await dialog.getByRole('button', { name: 'Billing error', exact: true }).click()
+  // Issue a note from the page: it opens the invoice page's dialog, whose
+  // ceiling is what is still creditable on that invoice, and the invoice's
+  // amount due drops by the note.
+  const dialog = await issueFromCreditNotesPage(page, customer.display_name, invoice.invoice_number)
+  await expect(dialog.getByText(`max ${usd(invoice.total_amount_cents)}`, { exact: true })).toBeVisible()
+  await dialog.getByLabel('Reason').fill('Billing error')
   await dialog.getByLabel(/^Amount/).fill('12.00')
-  await expect(dialog.getByText('Invoice amount due will be reduced by $12.00')).toBeVisible()
   await dialog.getByRole('button', { name: 'Issue credit note' }).click()
   await expect(dialog).toBeHidden()
 
@@ -397,6 +412,12 @@ test('the credit notes page issues a note against an invoice, and issues or void
   expect([toIssue.status, toVoid.status]).toEqual(['draft', 'draft'])
   await page.reload()
 
+  // The tab counts are the server's, so the Draft tab keeps its count while
+  // the Issued tab is open.
+  await page.getByRole('button', { name: /^Issued/ }).click()
+  await expect(page.getByRole('button', { name: /^Draft\s*\d+$/ })).toBeVisible()
+  await page.getByRole('button', { name: /^All/ }).click()
+
   await row(toIssue).getByRole('button', { name: 'Issue', exact: true }).click()
   await page.getByRole('alertdialog', { name: 'Issue credit note' }).getByRole('button', { name: 'Issue credit note' }).click()
   await expect(row(toIssue)).toContainText('issued')
@@ -417,7 +438,7 @@ test('the credit notes page issues a note against an invoice, and issues or void
 })
 
 test('issuing a credit note again after its answer was lost makes one note, from the invoice page and the credit notes page', async ({ page }) => {
-  const { invoice } = await billedCustomer()
+  const { customer, invoice } = await billedCustomer()
   const issueButton = (dialog: Locator) => dialog.getByRole('button', { name: 'Issue credit note' })
 
   // Invoice page: the first answer is lost, so the operator clicks again. The
@@ -434,12 +455,10 @@ test('issuing a credit note again after its answer was lost makes one note, from
   await expect(fromInvoice).toBeHidden()
   expect(await creditNotesFor(invoice.id)).toHaveLength(1)
 
-  // Credit notes page: the same, from its own dialog.
+  // Credit notes page: the same, through the invoice it opens.
   const openListDialog = async () => {
-    await page.getByRole('button', { name: 'Issue credit note' }).first().click()
-    const dialog = page.getByRole('dialog', { name: 'Issue credit note' })
-    await dialog.getByLabel('Invoice', { exact: true }).selectOption(invoice.id)
-    await dialog.getByRole('button', { name: 'Billing error', exact: true }).click()
+    const dialog = await issueFromCreditNotesPage(page, customer.display_name, invoice.invoice_number)
+    await dialog.getByLabel('Reason').fill('E2E lost answer')
     await dialog.getByLabel(/^Amount/).fill('5.00')
     return dialog
   }

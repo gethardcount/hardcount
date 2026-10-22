@@ -77,6 +77,8 @@ export * from './creditLiveBalance';
 export * from './creditNote';
 export * from './creditNoteMetadata';
 export * from './creditNoteRefundStatus';
+export * from './creditNoteStats';
+export * from './creditNoteStatsByCurrencyItem';
 export * from './creditNoteStatus';
 export * from './customer';
 export * from './customerBillingProfile';

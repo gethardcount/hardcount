@@ -54,6 +54,9 @@ type Store interface {
 	BeginTx(ctx context.Context, tenantID string) (*sql.Tx, error)
 	Get(ctx context.Context, tenantID, id string) (domain.CreditNote, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.CreditNote, error)
+	// Stats counts every credit note in the tenant and mode by status, and
+	// sums the issued notes' money per currency (GET /v1/credit-notes/stats).
+	Stats(ctx context.Context, tenantID string) (Stats, error)
 	// NOTE: there is deliberately NO unguarded UpdateStatus on this interface.
 	// Every status write is a CAS (TransitionStatus*) so an audit row can only
 	// evidence a flip that provably happened (ADR-090).
@@ -100,6 +103,36 @@ type Store interface {
 	// (true on attempted-and-failed, false on success).
 	SetTaxReversalPending(ctx context.Context, tenantID, id string, pending bool) error
 	ListLineItems(ctx context.Context, tenantID, creditNoteID string) ([]domain.CreditNoteLineItem, error)
+}
+
+// Stats is the Credit Notes page's header, tabs and stat cards. The page used
+// to compute them from the rows it had loaded, at most 100 and only the open
+// tab's status, so past 100 notes every figure was short (E12).
+type Stats struct {
+	DraftCount  int `json:"draft_count"`
+	IssuedCount int `json:"issued_count"`
+	VoidedCount int `json:"voided_count"`
+	// ByCurrency has one entry per currency with an issued note, the
+	// tenant's default currency first. Money is never added across
+	// currencies.
+	ByCurrency []CurrencyStats `json:"by_currency"`
+}
+
+// CurrencyStats sums the issued credit notes in one currency. Draft and
+// voided notes moved no money and are left out.
+type CurrencyStats struct {
+	Currency   string `json:"currency"`
+	TotalCents int64  `json:"total_cents"`
+	// RefundedCents counts only refund legs whose refund succeeded. A
+	// refund amount is an instruction to move cash; refund_status says
+	// whether it moved. Failed legs are their own figure, and every other
+	// leg (pending at Stripe, an unclear answer, a result never recorded)
+	// is pending: not confirmed yet.
+	RefundedCents      int64 `json:"refunded_cents"`
+	RefundPendingCents int64 `json:"refund_pending_cents"`
+	RefundFailedCents  int64 `json:"refund_failed_cents"`
+	CreditedCents      int64 `json:"credited_cents"`
+	OutOfBandCents     int64 `json:"out_of_band_cents"`
 }
 
 type ListFilter struct {

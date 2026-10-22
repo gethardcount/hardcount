@@ -1469,6 +1469,12 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.CreditN
 	return s.store.List(ctx, filter)
 }
 
+// Stats counts every credit note by status and sums the issued ones per
+// currency.
+func (s *Service) Stats(ctx context.Context, tenantID string) (Stats, error) {
+	return s.store.Stats(ctx, tenantID)
+}
+
 // UnreliefedClawbackCents sums relief this invoice was OWED but never received:
 // auto-issue clawback drafts (issue_pending) that ended up voided, so their
 // Issue() never ran and never reduced amount_due.
