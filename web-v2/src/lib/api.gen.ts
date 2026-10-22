@@ -1990,9 +1990,11 @@ export interface paths {
                     "application/json": {
                         code: string;
                         name: string;
+                        description?: string;
                         currency: string;
                         /** @enum {string} */
                         billing_interval: "monthly" | "yearly";
+                        /** Format: int64 */
                         base_amount_cents?: number;
                         /**
                          * @description Optional. Defaults to in_arrears. See Plan.base_bill_timing
@@ -2001,6 +2003,12 @@ export interface paths {
                          */
                         base_bill_timing?: "in_advance" | "in_arrears";
                         meter_ids?: string[];
+                        /**
+                         * @description Stripe product tax code for the base fee, such as
+                         *     `txcd_10103001`. Empty or omitted means the tenant's
+                         *     `default_product_tax_code`.
+                         */
+                        tax_code?: string;
                     };
                 };
             };
@@ -2038,10 +2046,9 @@ export interface paths {
         head?: never;
         /**
          * Update plan
-         * @description `name`, `base_amount_cents`, `base_bill_timing`, `meter_ids` and
-         *     `status` are left unchanged when omitted. `description` and
-         *     `tax_code` are always written: omitting them clears them. `code`,
-         *     `currency` and `billing_interval` cannot be changed and are ignored.
+         * @description A field left out keeps its current value. To clear `description`
+         *     or `tax_code`, send an empty string. `code`, `currency` and
+         *     `billing_interval` cannot be changed and are ignored.
          *
          *     `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
          *     subscriptions are billed. Changing any of them is refused while a
@@ -12039,7 +12046,7 @@ export interface operations {
                 "application/json": {
                     /** @description Whitespace is trimmed. Empty or omitted keeps the current name. */
                     name?: string;
-                    /** @description Omitting it clears the stored description. */
+                    /** @description Whitespace is trimmed. Omit to keep the current description; an empty string clears it. */
                     description?: string;
                     /**
                      * Format: int64
@@ -12052,7 +12059,7 @@ export interface operations {
                     meter_ids?: string[];
                     /** @enum {string} */
                     status?: "draft" | "active" | "archived";
-                    /** @description Stripe product tax code. Omitting it clears the stored code. */
+                    /** @description Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`. */
                     tax_code?: string;
                 };
             };

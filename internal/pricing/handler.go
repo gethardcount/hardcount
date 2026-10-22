@@ -376,7 +376,7 @@ func (h *Handler) updatePlan(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var input CreatePlanInput
+	var input UpdatePlanInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return

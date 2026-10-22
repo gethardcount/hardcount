@@ -7581,6 +7581,8 @@ paths:
                   type: string
                 name:
                   type: string
+                description:
+                  type: string
                 currency:
                   type: string
                 billing_interval:
@@ -7588,6 +7590,7 @@ paths:
                   enum: [monthly, yearly]
                 base_amount_cents:
                   type: integer
+                  format: int64
                 base_bill_timing:
                   type: string
                   enum: [in_advance, in_arrears]
@@ -7598,6 +7601,12 @@ paths:
                   type: array
                   items:
                     type: string
+                tax_code:
+                  type: string
+                  description: |
+                    Stripe product tax code for the base fee, such as
+                    `txcd_10103001`. Empty or omitted means the tenant's
+                    `default_product_tax_code`.
       responses:
         "201":
           description: Plan created
@@ -7661,10 +7670,9 @@ paths:
       tags: [Pricing]
       summary: Update plan
       description: |
-        `name`, `base_amount_cents`, `base_bill_timing`, `meter_ids` and
-        `status` are left unchanged when omitted. `description` and
-        `tax_code` are always written: omitting them clears them. `code`,
-        `currency` and `billing_interval` cannot be changed and are ignored.
+        A field left out keeps its current value. To clear `description`
+        or `tax_code`, send an empty string. `code`, `currency` and
+        `billing_interval` cannot be changed and are ignored.
 
         `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
         subscriptions are billed. Changing any of them is refused while a
@@ -7692,7 +7700,7 @@ paths:
                   description: Whitespace is trimmed. Empty or omitted keeps the current name.
                 description:
                   type: string
-                  description: Omitting it clears the stored description.
+                  description: Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
                 base_amount_cents:
                   type: integer
                   format: int64
@@ -7710,7 +7718,7 @@ paths:
                   enum: [draft, active, archived]
                 tax_code:
                   type: string
-                  description: Stripe product tax code. Omitting it clears the stored code.
+                  description: Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
       responses:
         "200":
           description: The updated plan
