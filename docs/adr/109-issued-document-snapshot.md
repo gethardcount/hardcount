@@ -1,7 +1,7 @@
 # ADR-109: Snapshot the bill-to and supplier blocks onto issued documents
 
 **Date:** 2026-08-05
-**Status:** Accepted (amended 2026-08-05, 2026-10-14)
+**Status:** Accepted (amended 2026-08-05, 2026-10-14, 2026-10-22)
 
 ## Summary
 
@@ -14,7 +14,8 @@ same transaction as the status change, at the store layer, so no finalize or
 issue path can skip it. Issued documents render from the copy. Drafts, and
 documents issued before the copy existed (NULL columns), render from live
 data; old rows are not backfilled. See the 2026-10-14 amendment for the
-exact fields, the writer sites and the readers.
+exact fields, the writer sites and the readers. The 2026-10-22 amendment adds the
+invoice footer to what an invoice copies.
 
 ## Context
 
@@ -437,3 +438,33 @@ modes are the same as the status write's own.
 | Dashboard `InvoiceDetail` From and Bill To (Bill To prints the display name either way, so finalizing does not change it) | snapshot | live (drafts, old rows) |
 | API `GET /v1/invoices/{id}`, `GET /v1/credit-notes/{id}` | `bill_to_snapshot`, `supplier_snapshot` | fields omitted |
 | Email greeting name and sender name | live by decision: message, not document | live |
+
+## Amendment 2026-10-22: the invoice footer is copied at issue
+
+Until now the invoice footer setting (`tenant_settings.invoice_footer`) had no
+reader: no PDF or page printed it, and nothing wrote `invoices.footer`, so the
+hosted page's footer was always empty (product bug-class sweep 2026-10-21,
+C1). The footer now prints, and it is issued content: operators put payment
+details and legal text in it, so an issued invoice must keep the one it was
+issued with.
+
+- **Where the copy lives.** In the existing `invoices.footer` column, not in
+  `supplier_snapshot`. The footer is not a seller detail, credit notes do not
+  print it, and the column was already in the API and on the hosted page.
+- **Writer.** The invoice issue stamp (`stampIssuedPartiesTx`) sets
+  `footer` from `tenant_settings.invoice_footer` in the same UPDATE as the
+  two snapshots. Every writer in the site-set above calls it, so every issue
+  path copies the footer. No other code writes `invoices.footer`.
+- **Readers.** The invoice PDF (`BuildPDFContext`): a draft prints the
+  current setting, an issued invoice prints `invoices.footer`. The hosted
+  page prints `invoices.footer` (drafts have no hosted page). The API returns
+  it as `footer`.
+- **Old rows.** An invoice issued before this change has no footer copy and
+  prints none. That is what it was issued with, so there is no fallback to
+  the live setting and no backfill.
+- **No per-invoice footer.** No API or dashboard control sets an invoice's
+  own footer. The settings copy that said "per-invoice overrides take
+  precedence" was wrong and is gone.
+- **Still live.** Logo, brand color and the support URL stay branding, read
+  at render time. The support URL now also prints at the foot of the invoice
+  and credit-note PDFs (C6).

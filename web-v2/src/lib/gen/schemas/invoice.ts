@@ -183,6 +183,11 @@ export interface Invoice {
   public_token?: string;
   net_payment_term_days: number;
   memo?: string;
+  /**
+     * The tenant's `invoice_footer` as it was when this invoice was
+     * issued. Printed on the PDF and the hosted invoice page. Empty on
+     * a draft.
+     */
   footer?: string;
   metadata?: InvoiceMetadata;
   created_at: string;
