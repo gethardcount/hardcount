@@ -32,10 +32,20 @@ test('an empty tab says what it filtered for', () => {
 
 test('the pause chip shows on live subscriptions whose collection is paused', () => {
   const chip = { label: 'Collection paused', tone: 'warning' }
-  assert.deepEqual(collectionPausedFlag({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }), chip)
-  assert.deepEqual(collectionPausedFlag({ status: 'trialing', pause_collection: { behavior: 'keep_as_draft' } }), chip)
-  assert.equal(collectionPausedFlag({ status: 'active' }), null)
+  const now = Date.parse('2027-01-15T00:00:00Z')
+  assert.deepEqual(collectionPausedFlag({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }, now), chip)
+  assert.deepEqual(collectionPausedFlag({ status: 'trialing', pause_collection: { behavior: 'keep_as_draft' } }, now), chip)
+  assert.equal(collectionPausedFlag({ status: 'active' }, now), null)
   // The same live rule as ?collection=paused: a canceled row's leftover
   // pause is not shown.
-  assert.equal(collectionPausedFlag({ status: 'canceled', pause_collection: { behavior: 'keep_as_draft' } }), null)
+  assert.equal(collectionPausedFlag({ status: 'canceled', pause_collection: { behavior: 'keep_as_draft' } }, now), null)
+})
+
+test('a timed pause stops showing once its resume date passes, by the given now (a test clock)', () => {
+  // The engine collects again at resumes_at, though the row can keep the
+  // pause until the resumer closes the periods that ended before it.
+  const sub = { status: 'active', pause_collection: { behavior: 'keep_as_draft', resumes_at: '2027-01-15T00:00:00Z' } }
+  assert.deepEqual(collectionPausedFlag(sub, Date.parse('2027-01-14T00:00:00Z')), { label: 'Collection paused', tone: 'warning' })
+  assert.equal(collectionPausedFlag(sub, Date.parse('2027-01-15T00:00:00Z')), null)
+  assert.equal(collectionPausedFlag(sub, Date.parse('2027-01-16T00:00:00Z')), null)
 })

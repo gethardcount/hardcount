@@ -26,10 +26,10 @@ test('Past due follows the given now (a test clock), not the wall clock', () => 
 test('subscriptionStatus and flags: paused collection and scheduled cancel are visible', () => {
   assert.deepEqual(subscriptionStatus({ status: 'active' }), { label: 'Active', tone: 'success' })
   assert.deepEqual(subscriptionStatus({ status: 'canceled' }), { label: 'Canceled', tone: 'neutral' })
-  assert.deepEqual(subscriptionFlags({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }), [{ label: 'Collection paused', tone: 'warning' }])
-  assert.deepEqual(subscriptionFlags({ status: 'trialing', cancel_at_period_end: true }), [{ label: 'Cancel scheduled', tone: 'warning' }])
+  assert.deepEqual(subscriptionFlags({ status: 'active', pause_collection: { behavior: 'keep_as_draft' } }, 0), [{ label: 'Collection paused', tone: 'warning' }])
+  assert.deepEqual(subscriptionFlags({ status: 'trialing', cancel_at_period_end: true }, 0), [{ label: 'Cancel scheduled', tone: 'warning' }])
   // A canceled subscription carries no live flags.
-  assert.deepEqual(subscriptionFlags({ status: 'canceled', pause_collection: {} }), [])
+  assert.deepEqual(subscriptionFlags({ status: 'canceled', pause_collection: {} }, 0), [])
 })
 
 test('generic codes read as sentence case, never snake_case', () => {
