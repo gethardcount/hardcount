@@ -176,13 +176,14 @@ The idempotency key is a unique ID for each event. If LiteLLM sends the same
 call again, Velox counts it once. Velox saves a call's events together, or
 none of them.
 
-`<call>` is LiteLLM's call ID. For chat completions, text completions and
-embeddings, that is all. For every other kind of call it is
-`<litellm_id>@<startTime>`: on a streamed `/v1/messages` call LiteLLM uses
-the client's `x-litellm-call-id` header as the call ID, so two calls can
-share one, but not a start time. When that is longer than 240 characters
-(a `/v1/responses` ID can be over 400), `<call>` is `sha256-` followed by
-its SHA-256 in hex.
+`<call>` is LiteLLM's call ID, the same ID as the call's row in
+LiteLLM's spend log, so a replay from that log counts each call once.
+When the ID is longer than 240 characters (a `/v1/responses` ID can be
+over 400), `<call>` is `sha256-` followed by the ID's SHA-256 in hex; chat
+completion, text completion and embedding IDs are never changed. On a
+streamed `/v1/messages` call LiteLLM uses the client's `x-litellm-call-id`
+header as the call ID. Two calls that send the same value count once in
+Velox, as in LiteLLM's spend log, so don't reuse that header.
 
 Each event also carries these labels (dimensions):
 

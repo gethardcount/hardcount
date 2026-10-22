@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -44,69 +44,76 @@ const (
 // unpriced usage, not a charge.
 //
 // The list is every "skip" row of testdata/litellm-1.83.9-call-types.tsv,
-// the inventory of call_type strings in the LiteLLM 1.83.9 wheel
-// (testdata/list_call_types.py); TestCallTypeInventory keeps the two equal.
+// the inventory of call_type strings found in the LiteLLM 1.83.9 wheel by
+// testdata/list_call_types.py (the sources it reads are listed there);
+// TestCallTypeInventory keeps the two equal. acreate and create are not on
+// it: they name a vector-store create, which carries no tokens, and a Google
+// Interactions create through the SDK, which does.
 // A skipped record that carries tokens is logged and counted, so a call
 // type that starts carrying usage is seen, not billed at a guessed price.
 var nonTokenCallTypes = map[string]struct{}{
 	"_arealtime": {}, "_emit_acquired_lock_event": {}, "_emit_new_item_added_to_queue_event": {},
 	"_emit_released_lock_event": {}, "a_add_message": {}, "aadapter_generate_content": {}, "acancel": {},
 	"acancel_batch": {}, "acancel_eval": {}, "acancel_fine_tuning_job": {}, "acancel_interaction": {},
-	"acancel_responses": {}, "acancel_run": {}, "acreate": {}, "acreate_assistants": {}, "acreate_batch": {},
+	"acancel_responses": {}, "acancel_run": {}, "acreate_assistants": {}, "acreate_batch": {},
 	"acreate_container": {}, "acreate_eval": {}, "acreate_file": {}, "acreate_fine_tuning_job": {},
 	"acreate_realtime_client_secret": {}, "acreate_run": {}, "acreate_skill": {}, "acreate_thread": {},
 	"acreate_video": {}, "add_litellm_data_to_request": {}, "add_message": {}, "adelete": {},
-	"adelete_assistant": {}, "adelete_container": {}, "adelete_eval": {}, "adelete_interaction": {},
-	"adelete_responses": {}, "adelete_run": {}, "adelete_skill": {}, "afile_content": {}, "afile_delete": {},
-	"afile_list": {}, "afile_retrieve": {}, "aget": {}, "aget_assistants": {}, "aget_eval": {},
-	"aget_interaction": {}, "aget_messages": {}, "aget_responses": {}, "aget_run": {}, "aget_skill": {},
-	"aget_thread": {}, "aimage_edit": {}, "aimage_generation": {}, "aimage_variation": {}, "aingest": {},
-	"aiplatform": {}, "alist": {}, "alist_batches": {}, "alist_container_files": {}, "alist_containers": {},
-	"alist_evals": {}, "alist_files": {}, "alist_fine_tuning_jobs": {}, "alist_input_items": {},
-	"alist_runs": {}, "alist_skills": {}, "amoderation": {}, "aocr": {}, "aquery": {}, "arealtime_calls": {},
-	"arerank": {}, "aretrieve": {}, "aretrieve_batch": {}, "aretrieve_container": {}, "aretrieve_content": {},
-	"aretrieve_fine_tuning_job": {}, "arun_thread": {}, "arun_thread_stream": {}, "asearch": {},
-	"asend_message": {}, "asend_message_streaming": {}, "aspeech": {}, "async_get_available_deployment": {},
-	"atranscription": {}, "aupdate": {}, "aupdate_eval": {}, "aupload_container_file": {},
-	"avector_store_create": {}, "avector_store_delete": {}, "avector_store_file_content": {},
-	"avector_store_file_create": {}, "avector_store_file_delete": {}, "avector_store_file_list": {},
-	"avector_store_file_retrieve": {}, "avector_store_file_update": {}, "avector_store_list": {},
-	"avector_store_retrieve": {}, "avector_store_search": {}, "avector_store_update": {}, "avideo_content": {},
-	"avideo_create_character": {}, "avideo_delete": {}, "avideo_edit": {}, "avideo_extension": {},
-	"avideo_generation": {}, "avideo_get_character": {}, "avideo_list": {}, "avideo_remix": {},
-	"avideo_retrieve": {}, "avideo_retrieve_job": {}, "avideo_status": {}, "batch_retrieve": {},
-	"call_mcp_tool": {}, "cancel": {}, "cancel_batch": {}, "cancel_eval": {}, "cancel_fine_tuning_job": {},
-	"cancel_interaction": {}, "cancel_responses": {}, "cancel_run": {}, "connect": {},
-	"container_file_content": {}, "create": {}, "create_assistants": {}, "create_batch": {},
-	"create_container": {}, "create_eval": {}, "create_file": {}, "create_fine_tuning_job": {},
-	"create_run": {}, "create_skill": {}, "create_thread": {}, "create_video": {}, "delete": {},
-	"delete_assistant": {}, "delete_container": {}, "delete_data": {}, "delete_eval": {},
-	"delete_interaction": {}, "delete_responses": {}, "delete_run": {}, "delete_skill": {}, "disconnect": {},
-	"discovery": {}, "file_content": {}, "file_delete": {}, "file_list": {}, "file_retrieve": {}, "get": {},
-	"get_assistants": {}, "get_data": {}, "get_eval": {}, "get_generic_data": {}, "get_interaction": {},
-	"get_key_object": {}, "get_messages": {}, "get_responses": {}, "get_run": {}, "get_skill": {},
-	"get_thread": {}, "health_check": {}, "image_edit": {}, "image_generation": {}, "image_variation": {},
-	"ingest": {}, "insert_data": {}, "list": {}, "list_batches": {}, "list_container_files": {},
-	"list_containers": {}, "list_evals": {}, "list_fine_tuning_jobs": {}, "list_input_items": {},
-	"list_mcp_tools": {}, "list_runs": {}, "list_skills": {}, "moderation": {}, "ocr": {}, "query": {},
-	"redis_async_ping": {}, "redis_sync_ping": {}, "rerank": {}, "reset_budget_budget_table": {},
-	"reset_budget_endusers": {}, "reset_budget_keys": {}, "reset_budget_teams": {}, "reset_budget_users": {},
-	"retrieve": {}, "retrieve_batch": {}, "retrieve_container": {}, "retrieve_content": {},
-	"retrieve_fine_tuning_job": {}, "run_thread": {}, "run_thread_stream": {}, "search": {}, "send_message": {},
-	"speech": {}, "sync": {}, "transcription": {}, "update": {}, "update_data": {}, "update_eval": {},
-	"update_spend": {}, "upload_container_file": {}, "vector_store_create": {}, "vector_store_delete": {},
-	"vector_store_file_content": {}, "vector_store_file_create": {}, "vector_store_file_delete": {},
-	"vector_store_file_list": {}, "vector_store_file_retrieve": {}, "vector_store_file_update": {},
-	"vector_store_list": {}, "vector_store_retrieve": {}, "vector_store_search": {}, "vector_store_update": {},
-	"video_content": {}, "video_create_character": {}, "video_delete": {}, "video_edit": {},
-	"video_extension": {}, "video_generation": {}, "video_get_character": {}, "video_list": {},
-	"video_remix": {}, "video_retrieve": {}, "video_retrieve_job": {}, "video_status": {},
+	"adelete_assistant": {}, "adelete_container": {}, "adelete_container_file": {}, "adelete_eval": {},
+	"adelete_interaction": {}, "adelete_responses": {}, "adelete_run": {}, "adelete_skill": {},
+	"afile_content": {}, "afile_delete": {}, "afile_list": {}, "afile_retrieve": {}, "aget": {},
+	"aget_assistants": {}, "aget_eval": {}, "aget_interaction": {}, "aget_messages": {}, "aget_responses": {},
+	"aget_run": {}, "aget_skill": {}, "aget_thread": {}, "aimage_edit": {}, "aimage_generation": {},
+	"aimage_variation": {}, "aingest": {}, "aiplatform": {}, "alist": {}, "alist_batches": {},
+	"alist_container_files": {}, "alist_containers": {}, "alist_evals": {}, "alist_files": {},
+	"alist_fine_tuning_jobs": {}, "alist_input_items": {}, "alist_runs": {}, "alist_skills": {},
+	"amoderation": {}, "aocr": {}, "aquery": {}, "arealtime_calls": {}, "arerank": {}, "aretrieve": {},
+	"aretrieve_batch": {}, "aretrieve_container": {}, "aretrieve_container_file": {},
+	"aretrieve_container_file_content": {}, "aretrieve_content": {}, "aretrieve_fine_tuning_job": {},
+	"arun_thread": {}, "arun_thread_stream": {}, "asearch": {}, "asend_message": {},
+	"asend_message_streaming": {}, "aspeech": {}, "async_endpoint_func": {},
+	"async_get_available_deployment": {}, "atranscription": {}, "aupdate": {}, "aupdate_eval": {},
+	"aupload_container_file": {}, "avector_store_create": {}, "avector_store_delete": {},
+	"avector_store_file_content": {}, "avector_store_file_create": {}, "avector_store_file_delete": {},
+	"avector_store_file_list": {}, "avector_store_file_retrieve": {}, "avector_store_file_update": {},
+	"avector_store_list": {}, "avector_store_retrieve": {}, "avector_store_search": {},
+	"avector_store_update": {}, "avideo_content": {}, "avideo_create_character": {}, "avideo_delete": {},
+	"avideo_edit": {}, "avideo_extension": {}, "avideo_generation": {}, "avideo_get_character": {},
+	"avideo_list": {}, "avideo_remix": {}, "avideo_retrieve": {}, "avideo_retrieve_job": {},
+	"avideo_status": {}, "batch_retrieve": {}, "call_mcp_tool": {}, "cancel": {}, "cancel_batch": {},
+	"cancel_eval": {}, "cancel_fine_tuning_job": {}, "cancel_interaction": {}, "cancel_responses": {},
+	"cancel_run": {}, "connect": {}, "container_file_content": {}, "create_assistants": {},
+	"create_batch": {}, "create_container": {}, "create_eval": {}, "create_file": {},
+	"create_fine_tuning_job": {}, "create_run": {}, "create_skill": {}, "create_thread": {},
+	"create_video": {}, "delete": {}, "delete_assistant": {}, "delete_container": {},
+	"delete_container_file": {}, "delete_data": {}, "delete_eval": {}, "delete_interaction": {},
+	"delete_responses": {}, "delete_run": {}, "delete_skill": {}, "disconnect": {}, "discovery": {},
+	"endpoint_func": {}, "file_content": {}, "file_delete": {}, "file_list": {}, "file_retrieve": {},
+	"get": {}, "get_assistants": {}, "get_data": {}, "get_eval": {}, "get_generic_data": {},
+	"get_interaction": {}, "get_key_object": {}, "get_messages": {}, "get_responses": {}, "get_run": {},
+	"get_skill": {}, "get_thread": {}, "health_check": {}, "image_edit": {}, "image_generation": {},
+	"image_variation": {}, "ingest": {}, "insert_data": {}, "list": {}, "list_batches": {},
+	"list_container_files": {}, "list_containers": {}, "list_evals": {}, "list_fine_tuning_jobs": {},
+	"list_input_items": {}, "list_mcp_tools": {}, "list_runs": {}, "list_skills": {}, "moderation": {},
+	"ocr": {}, "query": {}, "redis_async_ping": {}, "redis_sync_ping": {}, "rerank": {},
+	"reset_budget_budget_table": {}, "reset_budget_endusers": {}, "reset_budget_keys": {},
+	"reset_budget_teams": {}, "reset_budget_users": {}, "retrieve": {}, "retrieve_batch": {},
+	"retrieve_container": {}, "retrieve_container_file": {}, "retrieve_container_file_content": {},
+	"retrieve_content": {}, "retrieve_fine_tuning_job": {}, "run_thread": {}, "run_thread_stream": {},
+	"search": {}, "send_message": {}, "speech": {}, "sync": {}, "transcription": {}, "update": {},
+	"update_data": {}, "update_eval": {}, "update_spend": {}, "upload_container_file": {},
+	"vector_store_create": {}, "vector_store_delete": {}, "vector_store_file_content": {},
+	"vector_store_file_create": {}, "vector_store_file_delete": {}, "vector_store_file_list": {},
+	"vector_store_file_retrieve": {}, "vector_store_file_update": {}, "vector_store_list": {},
+	"vector_store_retrieve": {}, "vector_store_search": {}, "vector_store_update": {}, "video_content": {},
+	"video_create_character": {}, "video_delete": {}, "video_edit": {}, "video_extension": {},
+	"video_generation": {}, "video_get_character": {}, "video_list": {}, "video_remix": {},
+	"video_retrieve": {}, "video_retrieve_job": {}, "video_status": {},
 }
 
 // billedByIDBefore are the call types Velox billed before 2026-10-22. Their
-// event keys stay <id>:<role>, so a record stored before then deduplicates
-// if it is ever sent again. Every other call type keys on
-// <id>@<startTime>:<role> (see keyPrefix).
+// keys are <id>:<role> whatever the id's length, so a record stored before
+// then deduplicates if it is ever sent again (see keyPrefix).
 var billedByIDBefore = map[string]struct{}{
 	"completion": {}, "acompletion": {}, "chat": {}, "chat.completion": {},
 	"embedding": {}, "aembedding": {}, "text_completion": {}, "atext_completion": {},
@@ -168,18 +175,22 @@ type Mapping struct {
 // (claude-3-5-sonnet-20241022), a provider-prefixed string (azure/gpt-4o-eu),
 // or a friendly alias — and the matcher does exact `properties @> dimension_match`
 // (the industry-standard primitive: Orb/Lago/OpenMeter/Metronome all match
-// exact strings, none family-match). So we canonicalize HERE: longest-prefix
-// match the normalized id to a family, then emit the family on the `model`
-// dimension (and the raw string on `model_raw` for audit).
+// exact strings, none family-match). So we canonicalize HERE: match the
+// normalized id to a family, then emit the family on the `model` dimension
+// (and the raw string on `model_raw` for audit).
 //
-// Entries are detection-prefix → recipe-token. The detection prefix is in real
-// (dashed) API form; the recipe token is whatever the recipe rule uses (note
-// anthropic_style keys "claude-3.5-sonnet" with a DOT). Keep in sync with the
-// anthropic_style / openai_style recipe `dimension_match.model` values.
-var modelFamilies = []struct{ prefix, recipeToken string }{
-	// Current Anthropic lineup (5 generation + the Opus 4.x line; dated ids
-	// like claude-opus-4-8-20260301 match via the prefix+"-" rule, and
-	// longest-prefix keeps claude-opus-4-8 ahead of claude-opus-4).
+// Entries are id → recipe-token. The id is in real (dashed) API form; the
+// recipe token is whatever the recipe rule uses (note anthropic_style keys
+// "claude-3.5-sonnet" with a DOT). Keep in sync with the anthropic_style /
+// openai_style recipe `dimension_match.model` values.
+//
+// A Claude id matches only exactly, or with a date or version ending
+// (claudeSnapshot). An unknown version, such as claude-opus-4-9, keeps its
+// raw name and is not priced: it is never priced as an older model
+// (decision of 2026-10-22). So every Claude model with a price needs its
+// own entry here, and order does not matter for Claude.
+var modelFamilies = []modelFamily{
+	// The 5 generation and the Opus 4.x line.
 	{"claude-fable-5", "claude-fable-5"},
 	{"claude-mythos-5", "claude-mythos-5"},
 	{"claude-opus-5", "claude-opus-5"},
@@ -199,7 +210,12 @@ var modelFamilies = []struct{ prefix, recipeToken string }{
 	// carry an invented rate — its traffic keeps the raw id and surfaces
 	// as unmatched usage on the operator card instead (post-#551 loud).
 	{"claude-opus-4-1", "claude-opus-4.1"},
+	// claude-opus-4-0 and claude-sonnet-4-0 are Anthropic's aliases for
+	// Opus 4 and Sonnet 4. "-0" is not a snapshot ending, so each needs
+	// its own entry.
+	{"claude-opus-4-0", "claude-opus-4"},
 	{"claude-opus-4", "claude-opus-4"},
+	{"claude-sonnet-4-0", "claude-sonnet-4"},
 	{"claude-sonnet-4", "claude-sonnet-4"},
 	{"claude-3-5-sonnet", "claude-3.5-sonnet"},
 	{"claude-3-5-haiku", "claude-3.5-haiku"},
@@ -245,28 +261,82 @@ var modelFamilies = []struct{ prefix, recipeToken string }{
 	{"text-embedding-ada-002", "text-embedding-ada-002"},
 }
 
-// providerPrefixes are stripped before family matching — LiteLLM prepends the
-// routing provider to the model string for non-OpenAI deployments.
-var providerPrefixes = []string{"azure/", "bedrock/", "vertex_ai/", "openai/", "anthropic/", "anthropic.", "us.", "eu.", "apac."}
+// modelFamily is one entry of modelFamilies: the model's id in API form and
+// the token the recipes key their rules on.
+type modelFamily struct {
+	id, recipeToken string
+}
+
+// providerPrefixes are stripped before family matching, repeatedly and in
+// any order, until none is left. A LiteLLM spend log carries the routing
+// provider and the route (bedrock/converse/...), the Bedrock model prefix
+// (anthropic.) and a Bedrock cross-region prefix. The cross-region list is
+// LiteLLM 1.83.9's own (llms/bedrock/common_utils.py). azure_ai/ is
+// Microsoft Foundry, which Anthropic rates at its standard prices.
+var providerPrefixes = []string{
+	"bedrock/", "converse/", "invoke/", "vertex_ai/", "azure_ai/", "azure/",
+	"openai/", "anthropic/", "anthropic.",
+	"global.", "us-gov.", "us.", "eu.", "apac.", "jp.", "au.",
+}
+
+// bedrockThroughput is a Bedrock provisioned-throughput ending, such as the
+// ":51k" of anthropic.claude-3-5-sonnet-20241022-v2:0:51k. LiteLLM drops it
+// the same way.
+var bedrockThroughput = regexp.MustCompile(`(:\d+):\d+k$`)
+
+// claudeSnapshot is the ending a Claude id may carry and still be that model:
+// none, a date (-20250929), a Bedrock version (-v1, -v1:0, -20250929-v1:0), a
+// Google Cloud date or default (@20250805, @default, -v2@20241022), or the
+// old API -latest alias.
+var claudeSnapshot = regexp.MustCompile(`^(?:(?:-\d{8})?(?:-v\d+(?::\d+)?)?|(?:-v\d+)?@(?:\d{8}|default)|-latest)$`)
+
+// normalizeModel lower-cases the raw model string and strips provider
+// prefixes and a Bedrock throughput ending.
+func normalizeModel(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	for stripped := true; stripped; {
+		stripped = false
+		for _, p := range providerPrefixes {
+			if strings.HasPrefix(s, p) {
+				s, stripped = s[len(p):], true
+				break
+			}
+		}
+	}
+	return bedrockThroughput.ReplaceAllString(s, "$1")
+}
+
+// matchesFamily reports whether the normalized id s belongs to family f. A
+// Claude family takes its exact id plus a snapshot ending only. Other
+// families keep the earlier rule: the id, or the id plus "-" and anything.
+func matchesFamily(f modelFamily, s string) bool {
+	if strings.HasPrefix(f.id, "claude-") {
+		return strings.HasPrefix(s, f.id) && claudeSnapshot.MatchString(s[len(f.id):])
+	}
+	return s == f.id || strings.HasPrefix(s, f.id+"-")
+}
+
+// lookupFamily resolves a raw LiteLLM model string to its family, or false
+// if no known family matches. Match is longest-prefix so gpt-4o-mini-* beats
+// gpt-4o-*. At most one Claude family can match a name.
+func lookupFamily(raw string) (modelFamily, bool) {
+	s := normalizeModel(raw)
+	var best modelFamily
+	found := false
+	for _, f := range modelFamilies {
+		if matchesFamily(f, s) && len(f.id) > len(best.id) {
+			best, found = f, true
+		}
+	}
+	return best, found
+}
 
 // canonicalModel resolves a raw LiteLLM model string to its canonical recipe
 // family token, or "" if no known family matches (caller keeps the raw string
-// and logs loudly — we never invent a family, which would mis-price). Match is
-// longest-prefix so gpt-4o-mini-* beats gpt-4o-*.
+// and logs loudly — we never invent a family, which would mis-price).
 func canonicalModel(raw string) string {
-	s := strings.ToLower(strings.TrimSpace(raw))
-	for _, p := range providerPrefixes {
-		s = strings.TrimPrefix(s, p)
-	}
-	best := ""
-	bestToken := ""
-	for _, f := range modelFamilies {
-		if (s == f.prefix || strings.HasPrefix(s, f.prefix+"-")) && len(f.prefix) > len(best) {
-			best = f.prefix
-			bestToken = f.recipeToken
-		}
-	}
-	return bestToken
+	f, _ := lookupFamily(raw)
+	return f.recipeToken
 }
 
 // MapPayload converts a single LiteLLM StandardLoggingPayload into the
@@ -493,28 +563,32 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 }
 
 // keyPrefix is what every event key of the record starts with, before
-// ":<token_type>".
+// ":<token_type>": LiteLLM's call id. It is also the request_id of the
+// call's row in LiteLLM's own spend log (LiteLLM_SpendLogs, where it is the
+// primary key), so a record rebuilt from that log for a replay
+// (docs/ops/runbook/litellm-spend-gap.md) gets the keys of the record Velox
+// already stored. Nothing else goes into the key: the spend log keeps times
+// to the millisecond only, so a key with startTime in it billed every
+// replayed call a second time.
 //
-// For the call types billed before 2026-10-22 it is the record id, as it
-// always was. For every other call type it is <id>@<startTime>: on a
-// streamed /v1/messages or Gemini stream record LiteLLM 1.83.9 sets the id
-// to the client's x-litellm-call-id header, so two calls, even two
-// customers' calls, can share an id, and the tenant-wide key would
-// deduplicate the second one unbilled. LiteLLM sets startTime when the call
-// starts: a resend of the record keeps it, another call does not. A prefix
-// that would push a key past 255 characters (a non-streamed /v1/responses id
-// is 400+) is replaced by its SHA-256, so the hold path accepts the key and a
-// resend still deduplicates.
+// On a streamed /v1/messages or Gemini stream record LiteLLM 1.83.9 sets the
+// id to the client's x-litellm-call-id header, so two calls that send the
+// same header share an id. The second deduplicates, as it does in LiteLLM's
+// own spend log (open decision D6).
+//
+// For the call types first billed on 2026-10-22, an id that would push a key
+// past 255 characters (a non-streamed /v1/responses id is 400+) is replaced
+// by its SHA-256, so the hold path accepts the key and a resend or replay
+// still deduplicates.
 func (p *StandardLoggingPayload) keyPrefix() string {
-	if _, before := billedByIDBefore[p.CallType]; before || p.StartTime <= 0 {
+	if _, before := billedByIDBefore[p.CallType]; before {
 		return p.ID
 	}
-	k := p.ID + "@" + strconv.FormatFloat(p.StartTime, 'f', -1, 64)
-	if utf8.RuneCountInString(k) > maxKeyPrefix {
-		sum := sha256.Sum256([]byte(k))
-		k = "sha256-" + hex.EncodeToString(sum[:])
+	if utf8.RuneCountInString(p.ID) > maxKeyPrefix {
+		sum := sha256.Sum256([]byte(p.ID))
+		return "sha256-" + hex.EncodeToString(sum[:])
 	}
-	return k
+	return p.ID
 }
 
 // dimsWithTokenType returns a copy of base with token_type set, so the two

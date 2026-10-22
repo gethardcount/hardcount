@@ -101,7 +101,7 @@ func TestModelFamilies_EveryTokenPricedByARecipe(t *testing.T) {
 		}
 		priced := roles[f.recipeToken]
 		if len(priced) == 0 {
-			t.Errorf("mapper emits model=%q (prefix %q) but %s has NO pricing rule for it — that traffic ingests and then silently doesn't bill at cycle close", f.recipeToken, f.prefix, where)
+			t.Errorf("mapper emits model=%q (id %q) but %s has NO pricing rule for it — that traffic ingests and then silently doesn't bill at cycle close", f.recipeToken, f.id, where)
 			continue
 		}
 		if priced[""] {
