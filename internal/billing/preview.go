@@ -69,9 +69,10 @@ type PreviewTotal struct {
 
 // PreviewResult is the response shape for both the in-app
 // GET /v1/billing/preview/{subscription_id} debug route and the public
-// POST /v1/invoices/create_preview surface. PlanName is a joined list of
-// the subscription's item plans (comma-separated) — the previous
-// single-plan shape can't represent a multi-item sub.
+// POST /v1/invoices/create_preview surface. PlanName is a comma-separated
+// list of the item plans the estimate reads (after any change due at the
+// close), then, in the cycle estimate, each plan only a segment of the
+// period still bills (a pre-swap plan, a removed item).
 type PreviewResult struct {
 	CustomerID         string         `json:"customer_id"`
 	SubscriptionID     string         `json:"subscription_id"`
@@ -126,6 +127,10 @@ func (e *Engine) Preview(ctx context.Context, sub domain.Subscription) (PreviewR
 func (e *Engine) previewCycle(ctx context.Context, sub domain.Subscription) (PreviewResult, error) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
+	// The close applies the plan changes due at this boundary before it
+	// reads plans (applyDueScheduledPlanChanges), so its estimate reads the
+	// items as the close will (A5).
+	sub = withDuePlanChanges(sub, periodEnd)
 	if sub.Status == domain.SubscriptionTrialing && sub.TrialEndAt != nil && sub.TrialEndAt.After(periodEnd) {
 		return e.previewWithWindow(ctx, sub, periodStart, periodEnd)
 	}
@@ -183,7 +188,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 				return PreviewResult{}, err
 			}
 			invoiceStart = periodEnd
-			invoiceEnd = advanceBillingPeriod(periodEnd, plans[it.PlanID].BillingInterval, loc, sub.BillingAnchorDay)
+			invoiceEnd = domain.NextBillingPeriodEnd(periodEnd, sub.BillingTime, plans[it.PlanID].BillingInterval, loc, sub.BillingAnchorDay)
 			break
 		}
 	}
@@ -397,6 +402,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 				return PreviewResult{}, fmt.Errorf("get segment plan %s: %w", seg.planID, err)
 			}
 			plans[seg.planID] = pl
+			result.PlanName += ", " + pl.Name
 		}
 	}
 
