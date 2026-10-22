@@ -2662,6 +2662,10 @@ export interface paths {
          *     stays a draft. Velox does not finalize it, charge it or start
          *     dunning (automatic payment retries).
          *
+         *     Invoices finalized before the pause are not drafts. Payment retries
+         *     already under way for them continue, as in Stripe. To stop them,
+         *     void the invoice or mark it uncollectible.
+         *
          *     Only `behavior: keep_as_draft` is supported. With `resumes_at`,
          *     periods that end before that instant bill as drafts, and later
          *     periods bill normally. Without it, the pause lasts until you call
@@ -7288,8 +7292,10 @@ export interface components {
          *     without collecting (2026-07-22). `collection_paused` reports an
          *     invoice that is queued for auto-charge but whose subscription
          *     has `pause_collection` set, so the charge sweeps deliberately
-         *     skip it — it will not be charged automatically until
-         *     collection resumes (2026-07-28). `commit_exposure` reports an
+         *     skip it (2026-07-28). A dunning run already open on the invoice
+         *     keeps retrying it through the pause, and `message` then says so;
+         *     with no open run it is not charged automatically until
+         *     collection resumes. `commit_exposure` reports an
          *     unpaid invoice that funded a prepaid commit whose credit is
          *     already spendable (ADR-078 funds commits at issue, not at
          *     payment) — note this reason is only returned when no other
@@ -8336,8 +8342,8 @@ export interface components {
             updated_at: string;
         };
         /**
-         * @description Present on a subscription while collection is paused. Invoices are
-         *     still created, but stay drafts and are not charged.
+         * @description Present on a subscription while collection is paused. New invoices
+         *     are still created, but stay drafts and are not charged.
          */
         SubscriptionPauseCollection: {
             /** @enum {string} */
@@ -9544,6 +9550,14 @@ export interface components {
         };
         TenantSettings: components["schemas"]["TenantSettingsInput"] & {
             tenant_id: string;
+            /**
+             * @description The number the next invoice in this mode (test or live) gets,
+             *     before the prefix: 43 means the next invoice is
+             *     `<invoice_prefix>-000043`. Test and live count separately, and
+             *     changing `invoice_prefix` keeps the count. Not a setting:
+             *     sending it on `PUT` does nothing.
+             */
+            next_invoice_sequence: number;
             /**
              * Format: date-time
              * @description Zero time when the tenant has never saved settings.
