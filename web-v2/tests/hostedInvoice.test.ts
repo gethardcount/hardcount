@@ -29,6 +29,11 @@ test('pay errors never echo the server message', () => {
   assert.match(payErrorCopy(undefined, 'Acme'), /try again in a few minutes/)
 })
 
+test('an amount below the card minimum says so, not "already being processed" or "try again"', () => {
+  const copy = payErrorCopy('amount_below_minimum', 'Acme', 409)
+  assert.equal(copy, 'This amount is below the minimum for a card payment, so it can’t be paid online. Contact Acme to pay another way.')
+})
+
 test('no Stripe keys: the page names who to contact', () => {
   assert.equal(payUnavailableCopy('Acme'), "Online payment isn't set up for this invoice. Contact Acme to arrange payment.")
 })
