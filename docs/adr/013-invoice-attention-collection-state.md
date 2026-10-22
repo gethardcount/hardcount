@@ -15,7 +15,7 @@ actionable "no payment method" state.
 
 ## Summary
 
-A finalized, unpaid invoice whose customer has no payment method gets its own attention reason, `no_payment_method`, separate from `awaiting_payment`, so the operator learns why nothing is charged. `next_attempt_at` is set only when the engine has a real retry scheduled, and the payment deadline is a separate `due_by` field. The customer is emailed once, and adding a card later charges the invoice unless collection is paused. Since then, card-less invoices also enter dunning ([ADR-060](060-no-payment-method-dunning-enrollment.md)), and the `invoice.due_by` timeline row was removed because a future deadline is not an event. Status: active.
+A finalized, unpaid invoice whose customer has no payment method gets its own attention reason, `no_payment_method`, separate from `awaiting_payment`, so the operator learns why nothing is charged. `next_attempt_at` is set only when the engine has a real retry scheduled, and the payment deadline is a separate `due_by` field. The customer is emailed once, and adding a card later charges the invoice. While collection is paused, the queued charge waits, but an open dunning run's next retry still charges it ([ADR-036](036-dunning-campaigns-model.md), 2026-10-22 amendment). Since then, card-less invoices also enter dunning ([ADR-060](060-no-payment-method-dunning-enrollment.md)), and the `invoice.due_by` timeline row was removed because a future deadline is not an event. Status: active.
 
 ## Context
 

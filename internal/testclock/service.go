@@ -713,7 +713,7 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 		//
 		// It runs last, after Phase 5 (ADR-029 amendment 2026-10-20). Every
 		// credit draw judges expiry at its own instant: drainPositiveBlocks
-		// takes only blocks with expires_at after the draw, and a dunning
+		// takes only blocks with expires_at at or after the draw, and a dunning
 		// retry draws at its scheduled instant, at or before frozen.
 		// Expiry retires every grant with expires_at before frozen, and a
 		// retired grant is never drawn again (ADR-071). Run first, it took a

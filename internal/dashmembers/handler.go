@@ -154,14 +154,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type inviteReq struct {
+type InviteReq struct {
 	Email string `json:"email"`
 }
 
 func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tenantID := auth.TenantID(ctx)
-	var req inviteReq
+	var req InviteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -223,7 +223,7 @@ func (h *Handler) previewInvite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type acceptInviteReq struct {
+type AcceptInviteReq struct {
 	Token    string `json:"token"`
 	Password string `json:"password"`
 }
@@ -235,7 +235,7 @@ type acceptInviteReq struct {
 // alone must not open an ALREADY-privileged account).
 func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	var req acceptInviteReq
+	var req AcceptInviteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return

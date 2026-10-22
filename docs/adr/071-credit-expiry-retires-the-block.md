@@ -1,11 +1,11 @@
 # ADR-071: Credit expiry retires the block — atomically, and retirement wins
 
 **Date:** 2026-07-03
-**Status:** Accepted (shipped in P14; designed by the P14 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.4; amended 2026-10-19, §2)
+**Status:** Accepted (shipped in P14; designed by the P14 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in the remediation plan §4.4; amended 2026-10-19, §2; amended 2026-10-22, §2: the boundary instant is live)
 
 ## Summary
 
-When a credit grant expires, one transaction writes the expiry entry for the unused amount and marks the grant fully used (`consumed_cents = amount_cents`), so expired credit can never be spent again. The step, `ExpireGrantAtomic`, re-reads the unused amount under the same row lock that spending credit takes, so a concurrent spend cannot make it expire more than is left. Once expiry commits, a backdated apply draws nothing from that grant; there is no un-expire. So the sweep does not retire a grant while a period close or a period invoice that can still draw on it is owed (§2, amended 2026-10-19). A clawback (taking credit back) that unexpired credit cannot cover now fails instead of driving the ledger negative, and positive adjustments carry the same $1M cap as grants. Status: active.
+When a credit grant expires, one transaction writes the expiry entry for the unused amount and marks the grant fully used (`consumed_cents = amount_cents`), so expired credit can never be spent again. The step, `ExpireGrantAtomic`, re-reads the unused amount under the same row lock that spending credit takes, so a concurrent spend cannot make it expire more than is left. Once expiry commits, a backdated apply draws nothing from that grant; there is no un-expire. So the sweep does not retire a grant while a period close or a period invoice that can still draw on it is owed (§2, amended 2026-10-19). A grant is live up to and including its `expires_at`, and the dashboard stores "valid through Nov 30" as the next local midnight (§2, amended 2026-10-22). A clawback (taking credit back) that unexpired credit cannot cover now fails instead of driving the ledger negative, and positive adjustments carry the same $1M cap as grants. Status: active.
 
 ## Context
 
@@ -79,11 +79,12 @@ idempotency key, evaluated check-then-act across transactions.
    - **The hold.** Both candidate queries (`ListExpiredGrants`,
      `ListExpiredGrantsForClock`) skip a grant while
      `domain.CreditDrawOwedSQL` finds a draw still owed. (i) An `active`
-     or `trialing` subscription of the customer is due before
+     or `trialing` subscription of the customer is due at or before
      `expires_at` (`domain.SubscriptionDueInstantSQL`): its close draws on
      the grant. (ii) A `subscription_cycle` or `threshold` invoice of the
-     customer, issued before `expires_at`, is a draft or is queued for
-     collection (`auto_charge_pending`).
+     customer, issued at or before `expires_at`, is a draft or is queued
+     for collection (`auto_charge_pending`). "At or before" since the
+     2026-10-22 amendment below.
    - **The draw.** A `subscription_cycle` or `threshold` invoice tests
      grant expiry at its `issued_at` (the period end or the fire instant)
      whenever it is collected: `ApplyToInvoiceAtomic` reads it on its
@@ -164,6 +165,92 @@ idempotency key, evaluated check-then-act across transactions.
    grant-shaped drainable inflows and previously bypassed the
    fat-finger cap entirely. Negative adjustments stay uncapped (bounded
    by the balance gate).
+
+### Amendment 2026-10-22: a credit is live at its own expires_at
+
+**One rule: a credit block is live at instant t when t <= `expires_at`.**
+Every predicate uses it: the drain (`drainPositiveBlocks`, `expires_at >=
+t`), the commit banner (`CommitGrantExposure`, the same), the spendable
+balance (`GetSpendableBalance` counts a block as expired when `expires_at <
+t`), both arms of the hold (`<=`), and the two sweeps, which already
+retired only `expires_at < now`. Before, the drain, the banner and the
+spendable balance treated `t == expires_at` as expired while the sweeps
+treated it as live, so at that one instant neither took the grant.
+
+**Why.** The dashboard's expiry picker sent the end of the picked day,
+23:59:59.999 in the tenant zone. A period ends, and its invoice is issued,
+at the next local midnight. So a grant "through Nov 30" was 1 ms short of
+the invoice issued Dec 1 00:00 and paid nothing: the card was charged in
+full. The dashboard now sends the local midnight after the picked day
+(`startOfNextDayInTZ`). With that send, `expires_at` equals the issue
+instant, so the boundary has to count as live.
+
+**What the dashboard shows.** A stored `expires_at` that is a midnight in
+the tenant zone reads as the day before it: Dec 1 00:00 reads "Valid
+through Nov 30". Any other instant reads "Expires" with its date and time
+(`creditExpiryLabel`), because the credit is not valid through the end of
+that day. Two examples are an API grant that stops at 17:00 and a
+dashboard grant saved at 23:59:59.999 before this change, which misses the
+invoice issued at the next midnight.
+
+**Why the hold arms move too.** With `expires_at` equal to the due
+instant, a strict arm (i) is false. The hourly sweep (`expires_at < now`)
+could then retire the grant between midnight and the close, or while the
+close waits on the retry ladder, and the close would charge the card in
+full. Arm (ii) moves for the same case when the close has run and its
+invoice is a draft or queued.
+
+**Stripe says "before".** Its condition is "the invoice's `period_end`
+occurs before the credit grant's `expires_at` time", so it refuses a grant
+that expires exactly at the period end. Velox includes the boundary: all
+of the period's usage happened before its end.
+
+**No backfill.** Grants saved by the dashboard before this change keep
+23:59:59.999 and the 1 ms gap. No partner was live (2026-10-20), and
+finding those rows would rest on a fingerprint (`.999` in some zone), not
+on a fact. The CHANGELOG tells operators to grant them again if needed.
+The API passes any instant through unchanged.
+
+**In advance.** An in-advance cycle invoice issued Dec 1 also carries
+December's base fee, and a draw takes the whole invoice. So a grant
+"through Nov 30" can now pay December's base fee too. Before this change
+no dashboard grant could pay the next period's in-advance base fee; now
+every one that is live at the close can. An API grant that expires after
+the close always could. Stripe's condition above works the same way: it
+tests the invoice's `period_end` against `expires_at`.
+
+A mid-period `cancel_at` invoice still tests expiry when it is collected
+(the residual named in §2).
+
+**Residual: a midnight that DST skips.** Where a zone skips midnight, the
+dashboard (`fromZonedTime`, date-fns-tz 3.2.0) and Go's `time.Date` do not
+always resolve it to the same instant:
+
+| Zone and date | Go `time.Date` | `fromZonedTime` |
+|---|---|---|
+| Africa/Cairo, 2026-04-24 00:00 | 22:00Z (01:00 local) | 21:00Z (23:00 the day before) |
+| Asia/Beirut, 2026-03-29 00:00 | 22:00Z (01:00 local) | 21:00Z (23:00 the day before) |
+| America/Santiago, 2026-09-06 00:00 | 03:00Z (23:00 the day before) | 03:00Z (23:00 the day before) |
+| America/Havana, 2026-03-08 00:00 | 04:00Z (23:00 the day before) | 04:00Z (23:00 the day before) |
+
+In Cairo and Beirut the dashboard's instant is an hour before Go's period
+end. A grant valid through the day before the change then pays nothing for
+a period that ends at that midnight. That happens once a year, and only for
+an anniversary period that ends on that day, since a calendar period ends
+on the 1st. The dashboard reads such a grant as "Expires" with its time,
+not "Valid through". Copying Go's resolution zone by zone in the client is
+not worth it.
+
+Tests (real Postgres): `TestApplyToInvoice_PeriodInvoiceIssuedAtTheExpiryInstantDrawsTheGrant`,
+`TestExpireCredits_HoldsAGrantExpiringAtTheDueInstant`,
+`TestExpireCredits_HoldsAGrantExpiringAtAPeriodInvoiceIssue`,
+`TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree` (credit);
+`TestCycleClose_GrantValidThroughTheLastDay_PaysThePeriodInvoice` and the
+at-the-period-end case of
+`TestFailedClose_ThenSuccess_DrawsTheGrantLiveAtThePeriodEnd` (billing).
+Each failed on the commit that added them alone (#1332). Putting back
+any one of the five old predicates fails at least one of them; that was
+run, not only read.
 
 ## Accepted residuals
 

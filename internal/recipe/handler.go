@@ -77,10 +77,10 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, rec)
 }
 
-// previewRequest is the POST /preview body. Overrides is open-ended JSON
+// PreviewRequest is the POST /preview body. Overrides is open-ended JSON
 // (the recipe's overridable schema constrains values); the service
 // validates against the recipe before rendering.
-type previewRequest struct {
+type PreviewRequest struct {
 	Overrides map[string]any `json:"overrides"`
 }
 
@@ -97,7 +97,7 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 	audit.MarkSkip(r.Context())
 
 	key := chi.URLParam(r, "key")
-	var req previewRequest
+	var req PreviewRequest
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			respond.BadRequest(w, r, "invalid JSON body")
@@ -112,17 +112,17 @@ func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, rec)
 }
 
-// instantiateRequest is the POST /instantiate body. Apply is idempotent
+// InstantiateRequest is the POST /instantiate body. Apply is idempotent
 // (ADR-085): re-posting an already-installed recipe returns the existing
 // instance, so there is no force/overwrite knob.
-type instantiateRequest struct {
+type InstantiateRequest struct {
 	Overrides map[string]any `json:"overrides"`
 }
 
 func (h *Handler) instantiate(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	key := chi.URLParam(r, "key")
-	var req instantiateRequest
+	var req InstantiateRequest
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			respond.BadRequest(w, r, "invalid JSON body")

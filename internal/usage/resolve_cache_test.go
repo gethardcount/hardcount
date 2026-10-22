@@ -27,8 +27,8 @@ func (m *countingMeter) GetMeterByKey(_ context.Context, _, key string) (domain.
 	return domain.Meter{ID: "mtr_" + key}, nil
 }
 
-func evt(extCust, eventName string) apiEvent {
-	return apiEvent{
+func evt(extCust, eventName string) APIEvent {
+	return APIEvent{
 		ExternalCustomerID: extCust,
 		EventName:          eventName,
 		Quantity:           decimal.NewFromInt(1),
@@ -73,7 +73,7 @@ func TestResolveCache(t *testing.T) {
 		h := NewHandler(NewService(newMemStore()), cust, meter)
 		cache := newResolveCache()
 
-		events := []apiEvent{
+		events := []APIEvent{
 			evt("acme", "api_call"),
 			evt("globex", "tokens"),
 			evt("acme", "tokens"),

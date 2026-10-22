@@ -281,7 +281,7 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 //
 //   - The caller's candidate snapshot (ListExpiredGrants*) is stale by
 //     construction — it was read on a different, already-closed tx. A
-//     backdated ApplyToInvoiceAtomic (at < expires_at passes the eligibility
+//     backdated ApplyToInvoiceAtomic (at <= expires_at passes the eligibility
 //     filter on a not-yet-retired grant) can drain the grant between the
 //     list read and this call. `remaining` is therefore recomputed HERE,
 //     under the same FOR UPDATE row lock the apply/adjust paths take —
@@ -467,7 +467,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 	// consumed_cents stays consistent with the ledger sum. The raw-SUM
 	// balance check above is NOT sufficient on its own: it counts
 	// expired-but-unswept grant headroom that drainPositiveBlocks
-	// rightly refuses to drain (expires_at <= now). Booking the full
+	// rightly refuses to drain (expires_at < now). Booking the full
 	// deduction against blocks that only partially absorbed it would
 	// drive SUM(amount_cents) below the blocks' remaining capacity —
 	// the exact negative-ledger drift the attribution model exists to
@@ -548,7 +548,11 @@ func (s *PostgresStore) AdjustAtomicAudited(
 // callers — drawdown (ApplyToInvoiceAtomic) AND clawback attribution
 // (AdjustAtomic) — promotional-first is intended for both. Skips blocks
 // past their expires_at — those will be retired by the expiry path;
-// draining them here would mask the retirement.
+// draining them here would mask the retirement. A block is live at `now`
+// when now <= expires_at (ADR-071 §2, amended 2026-10-22): a grant valid
+// through Nov 30 is stored as the next midnight, the instant the November
+// period ends, and pays that period's invoice. The expiry sweeps use the
+// same rule (`expires_at < now` is expired).
 //
 // Caller MUST hold a FOR UPDATE lock on the customer's ledger rows.
 // In a clean ledger `available` equals the SUM(amount_cents) balance
@@ -564,7 +568,7 @@ func (s *PostgresStore) drainPositiveBlocks(
 		  AND customer_id = $2
 		  AND amount_cents > 0
 		  AND consumed_cents < amount_cents
-		  AND (expires_at IS NULL OR expires_at > $3)
+		  AND (expires_at IS NULL OR expires_at >= $3)
 		ORDER BY (grant_kind IS NOT DISTINCT FROM 'promotional') DESC,
 		         expires_at NULLS LAST, created_at, id
 	`, tenantID, customerID, now)
@@ -954,7 +958,7 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 // that actually MOVES commit credit still goes through the locked reader.
 //
 // Drawability mirrors drainPositiveBlocks' liveness predicate exactly —
-// positive, not exhausted, not past expires_at at `now` — because the one thing
+// positive, not exhausted, expires_at at or after `now` — because the one thing
 // this must never do is promise the operator spendable credit that the drawdown
 // would refuse to spend. `now` is the caller's resolver-bound instant for the
 // same reason the drain takes one: on a clock-pinned invoice, wall-clock is the
@@ -981,7 +985,7 @@ func (s *PostgresStore) CommitGrantExposure(
 			CASE
 				WHEN amount_cents > 0
 				 AND consumed_cents < amount_cents
-				 AND (expires_at IS NULL OR expires_at > $3)
+				 AND (expires_at IS NULL OR expires_at >= $3)
 				THEN amount_cents - consumed_cents
 				ELSE 0
 			END,
@@ -1299,7 +1303,7 @@ func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID str
 // GetSpendableBalance is the credit a draw at `at` could use: the ledger sum,
 // less what is left of every positive block already past its expires_at. Such
 // a block stays in the sum until the expiry sweep writes its expiry entry,
-// but drainPositiveBlocks skips it (expires_at > now), so an invoice issued
+// but drainPositiveBlocks skips it (it takes expires_at >= now), so an invoice issued
 // in between draws nothing from it. The expired predicate is the exact
 // complement of the drain's liveness predicate; keep the two in step.
 // One statement, so the sum and the expired part are the same snapshot.
@@ -1316,7 +1320,7 @@ func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, custo
 		     - COALESCE(SUM(CASE
 		           WHEN amount_cents > 0
 		            AND consumed_cents < amount_cents
-		            AND expires_at IS NOT NULL AND expires_at <= $3
+		            AND expires_at IS NOT NULL AND expires_at < $3
 		           THEN amount_cents - consumed_cents
 		           ELSE 0
 		       END), 0)

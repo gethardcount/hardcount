@@ -91,7 +91,6 @@ const subCols = `id, tenant_id, code, display_name, customer_id, status, billing
 	billing_threshold_amount_gte, COALESCE(billing_threshold_reset_cycle, true),
 	current_billing_period_start, current_billing_period_end, next_billing_at,
 	COALESCE(billing_anchor_day, 0),
-	usage_cap_units, COALESCE(overage_action,'charge'),
 	COALESCE(test_clock_id,''),
 	billing_failed_for, billing_failure_count, billing_failed_at,
 	billing_next_attempt_at, COALESCE(billing_last_error,''),
@@ -160,10 +159,10 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 			billing_time, trial_start_at, trial_end_at, started_at,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
 			billing_anchor_day,
-			usage_cap_units, overage_action, test_clock_id,
+			test_clock_id,
 			activated_at,
 			created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,COALESCE(NULLIF($16,''),'charge'),NULLIF($17,''),$18,$19,$19)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULLIF($15,''),$16,$17,$17)
 		RETURNING `+subCols,
 		id, tenantID, sub.Code, sub.DisplayName, sub.CustomerID,
 		sub.Status, sub.BillingTime, postgres.NullableTime(sub.TrialStartAt),
@@ -172,7 +171,7 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		postgres.NullableTime(sub.CurrentBillingPeriodEnd),
 		postgres.NullableTime(sub.NextBillingAt),
 		sub.BillingAnchorDay,
-		sub.UsageCapUnits, sub.OverageAction, sub.TestClockID,
+		sub.TestClockID,
 		postgres.NullableTime(sub.ActivatedAt), now,
 	), &sub)
 
@@ -2785,7 +2784,6 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 		&sub.CurrentBillingPeriodStart,
 		&sub.CurrentBillingPeriodEnd, &sub.NextBillingAt,
 		&sub.BillingAnchorDay,
-		&sub.UsageCapUnits, &sub.OverageAction,
 		&sub.TestClockID,
 		&failedFor, &failureCount, &failedAt, &nextAttemptAt, &lastError,
 		&sub.CreatedAt, &sub.UpdatedAt,

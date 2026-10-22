@@ -134,7 +134,7 @@ func toResp(pm PaymentMethod) pmResponse {
 	}
 }
 
-type setupSessionRequest struct {
+type SetupSessionRequest struct {
 	ReturnURL string `json:"return_url,omitempty"`
 }
 
@@ -233,11 +233,11 @@ func (h *Handler) operatorDetach(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, toResp(pm))
 }
 
-// sendSetupEmailRequest is the operator-initiated send-email payload.
+// SendSetupEmailRequest is the operator-initiated send-email payload.
 // Note is optional — when present it prefaces the email body with
 // the operator's own context ("Your card expired", "We're moving you
 // to monthly billing"); when absent the template uses a generic body.
-type sendSetupEmailRequest struct {
+type SendSetupEmailRequest struct {
 	Note string `json:"note,omitempty"`
 }
 
@@ -303,7 +303,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	var req sendSetupEmailRequest
+	var req SendSetupEmailRequest
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
@@ -389,7 +389,7 @@ func (h *Handler) operatorCreateSetupSession(w http.ResponseWriter, r *http.Requ
 		respond.BadRequest(w, r, "missing tenant or customer id")
 		return
 	}
-	var req setupSessionRequest
+	var req SetupSessionRequest
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}

@@ -14,9 +14,13 @@ var creditDrawAsOfIssueReasons = []InvoiceBillingReason{BillingReasonSubscriptio
 // DrawsCreditAsOfIssue reports whether an invoice with this billing reason
 // tests credit grant expiry at its issued_at, however late it is collected
 // (ADR-071 §2). A grant that was live when the period ended pays that
-// period's invoice, by the expires_at condition of Stripe's eligibility list:
-// "The invoice's period_end occurs before the credit grant's expires_at
-// time". Every other invoice tests expiry at the instant it is collected.
+// period's invoice: Velox draws it when the period ends at or before
+// expires_at. Stripe's eligibility list says "before" ("The invoice's
+// period_end occurs before the credit grant's expires_at time"). Velox
+// includes the boundary because all of the period's usage happened before
+// its end, and because the dashboard stores "valid through Nov 30" as the
+// next local midnight, the instant the November period ends. Every other
+// invoice tests expiry at the instant it is collected.
 func DrawsCreditAsOfIssue(reason InvoiceBillingReason) bool {
 	return slices.Contains(creditDrawAsOfIssueReasons, reason)
 }
@@ -25,10 +29,15 @@ func DrawsCreditAsOfIssue(reason InvoiceBillingReason) bool {
 // row aliased g is owed, so the expiry sweeps must not retire it (ADR-071 §2):
 //
 //   - (i) an active or trialing subscription of the grant's customer is due
-//     before the grant expires: its close draws on the grant;
-//   - (ii) a period or threshold invoice of the customer issued before the
-//     grant expires is a draft or is queued for collection: its collection
-//     draws on the grant (DrawsCreditAsOfIssue).
+//     at or before the grant expires: its close draws on the grant;
+//   - (ii) a period or threshold invoice of the customer issued at or before
+//     the grant expires is a draft or is queued for collection: its
+//     collection draws on the grant (DrawsCreditAsOfIssue).
+//
+// Both are `<=` because a block is live at t when t <= expires_at, the rule
+// the drain uses. With `<`, a grant expiring at the due instant would be
+// retired by a sweep that runs before the close, and the close would charge
+// the card in full.
 //
 // The hand-off between the two has no gap. The close moves the due instant
 // and inserts the invoice (a draft, or queued) in one transaction, and
@@ -45,11 +54,11 @@ func CreditDrawOwedSQL(g string) string {
 			SELECT 1 FROM subscriptions s
 			 WHERE s.tenant_id = ` + g + `.tenant_id AND s.customer_id = ` + g + `.customer_id
 			   AND s.status IN ('active','trialing')
-			   AND ` + SubscriptionDueInstantSQL("s") + ` < ` + g + `.expires_at)
+			   AND ` + SubscriptionDueInstantSQL("s") + ` <= ` + g + `.expires_at)
 		OR EXISTS (
 			SELECT 1 FROM invoices i
 			 WHERE i.tenant_id = ` + g + `.tenant_id AND i.customer_id = ` + g + `.customer_id
 			   AND i.billing_reason IN (` + strings.Join(reasons, ",") + `)
-			   AND i.issued_at < ` + g + `.expires_at
+			   AND i.issued_at <= ` + g + `.expires_at
 			   AND (i.status = 'draft' OR i.auto_charge_pending)))`
 }

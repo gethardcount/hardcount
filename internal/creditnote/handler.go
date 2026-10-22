@@ -101,11 +101,11 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
-// createRequest is CreateInput plus the ADR-080 commit-relief block. The
+// CreateRequest is CreateInput plus the ADR-080 commit-relief block. The
 // two shapes are mutually exclusive: commit_relief routes to the dedicated
 // single-tx relief coordinator (lines are server-built there); everything
 // else is the ordinary line-based create.
-type createRequest struct {
+type CreateRequest struct {
 	CreateInput
 	CommitRelief *CommitReliefInput `json:"commit_relief,omitempty"`
 }
@@ -113,9 +113,8 @@ type createRequest struct {
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	var req CreateRequest
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 
@@ -127,6 +126,22 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		if req.CreditAmountCents > 0 {
 			respond.Validation(w, r, "credit_amount_cents cannot be used with commit_relief — paying relief from the customer's balance would refund the very credits being retired")
 			return
+		}
+		// The relief's split lives inside commit_relief. At the top level it
+		// was ignored and the relief defaulted to a full card refund, so a
+		// dispute-loss relief meant as out_of_band paid the customer twice.
+		for _, f := range []struct {
+			name string
+			set  bool
+		}{
+			{"refund_amount_cents", req.RefundAmountCents != 0},
+			{"out_of_band_amount_cents", req.OutOfBandAmountCents != 0},
+			{"refund_type", req.RefundType != ""},
+		} {
+			if f.set {
+				respond.ValidationField(w, r, f.name, f.name+" goes inside commit_relief for a relief, for example {\"commit_relief\": {\"retire_all\": true, \"out_of_band_amount_cents\": 5000}}")
+				return
+			}
 		}
 		relief := *req.CommitRelief
 		if relief.InvoiceID == "" {
@@ -329,11 +344,17 @@ func (h *Handler) assemblePDFContext(ctx context.Context, tenantID string, cn do
 		TaxID:        billTo.TaxID,
 	}
 
+	// The support URL is branding, so it is the current setting even when the
+	// seller block is the issue-time copy.
 	supplier := cn.SupplierSnapshot
-	if supplier == nil && h.settings != nil {
+	var supportURL string
+	if h.settings != nil {
 		if ts, err := h.settings.Get(ctx, tenantID); err == nil {
-			live := domain.NewDocumentSupplier(ts)
-			supplier = &live
+			if supplier == nil {
+				live := domain.NewDocumentSupplier(ts)
+				supplier = &live
+			}
+			supportURL = ts.SupportURL
 		}
 	}
 	var ci CompanyInfo
@@ -351,6 +372,7 @@ func (h *Handler) assemblePDFContext(ctx context.Context, tenantID string, cn do
 			TaxID:        supplier.TaxID,
 		}
 	}
+	ci.SupportURL = supportURL
 
 	// Original invoice reference. Absent the invoice getter we still render
 	// the CN — the number lives on the CN itself, so only date/tax metadata
@@ -407,6 +429,15 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(pdfBytes)
 }
 
+// SendEmailRequest is the POST /v1/credit-notes/{id}/send body.
+type SendEmailRequest struct {
+	Email string `json:"email"`
+	// AdditionalEmails: tri-state override, same contract as the
+	// invoice send (absent → customer's stored list; [] → primary
+	// only; list → validated exact override).
+	AdditionalEmails *[]string `json:"additional_emails,omitempty"`
+}
+
 // sendEmail emails the credit-note document with PDF attached (ADR-082
 // rider — CNs previously had NO send surface at all: engine-auto-issued
 // clawback CNs and card-refund CNs moved real money with no document
@@ -421,13 +452,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Email string `json:"email"`
-		// AdditionalEmails: tri-state override, same contract as the
-		// invoice send (absent → customer's stored list; [] → primary
-		// only; list → validated exact override).
-		AdditionalEmails *[]string `json:"additional_emails,omitempty"`
-	}
+	var body SendEmailRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
 		respond.BadRequest(w, r, "email is required")
 		return

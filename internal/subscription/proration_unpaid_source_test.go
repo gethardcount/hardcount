@@ -84,8 +84,8 @@ func TestUpdateItem_Downgrade_UnpaidSource_AdjustsNotRefundableCredit(t *testing
 
 // TestUpdateItem_Downgrade_UnpaidSource_CapsAtAmountDue proves the adjustment is
 // clamped to what's still owed — CreateAndIssueAdjustment rejects a gross above
-// amount_due, so settleUnpaidSourceProration pre-caps it (matching the engine's
-// unpaid-cancel relief).
+// amount_due, so domain.AllocateUnusedCredit caps an unpaid invoice's share
+// (the same rule as the engine's cancel relief).
 func TestUpdateItem_Downgrade_UnpaidSource_CapsAtAmountDue(t *testing.T) {
 	ctx := clock.WithEffectiveNow(context.Background(), proNow)
 	tenantID := "t1"
@@ -222,39 +222,5 @@ func TestUpdateItem_Upgrade_UnpaidSource_Blocked(t *testing.T) {
 	}
 	if env.Error.Code != "unpaid_invoice_blocks_change" {
 		t.Errorf("error code: got %q, want unpaid_invoice_blocks_change", env.Error.Code)
-	}
-}
-
-// A clawback split across funding invoices caps an UNPAID one at what is due
-// plus the customer credits applied to it. Here the newest funding invoice (the
-// upgrade) is unpaid with 500 due and 3900 of credits applied: a 2000 net
-// downgrade credit fits on it whole. Capped at the amount due alone it took 500
-// and pushed the rest onto the older invoice.
-func TestResolveClawbackPieces_UnpaidFundingInvoice_CapIncludesAppliedCredits(t *testing.T) {
-	ctx := context.Background()
-	baseInv := domain.Invoice{
-		ID: "base_inv", PaymentStatus: domain.PaymentSucceeded,
-		SubtotalCents: 2000, TaxFacts: domain.TaxFacts{TaxAmountCents: 200}, TotalAmountCents: 2200,
-		CreatedAt: proPeriodStart,
-	}
-	upInv := domain.Invoice{
-		ID: "up_inv", PaymentStatus: domain.PaymentPending,
-		SubtotalCents: 4000, TaxFacts: domain.TaxFacts{TaxAmountCents: 400}, TotalAmountCents: 4400,
-		AmountDueCents: 500, CreditsAppliedCents: 3900,
-		CreatedAt: proPeriodStart.AddDate(0, 0, 5), // newer → a plan downgrade reverses it first
-	}
-	h := NewHandler(NewService(newMemStore(), nil))
-	h.SetProrationDeps(&plansMock{}, &invoicesMock{sourceInvoice: baseInv, fundingInvoices: []domain.Invoice{baseInv, upInv}}, &creditsMock{})
-	h.SetCreditNoteIssuer(&fakeCNIssuer{})
-
-	ps, pe := proPeriodStart, proPeriodEnd
-	sub := domain.Subscription{ID: "sub_1", CurrentBillingPeriodStart: &ps, CurrentBillingPeriodEnd: &pe}
-	pieces, err := h.resolveClawbackPieces(ctx, "t1", sub, domain.ItemChangeTypePlan, 2000)
-	if err != nil {
-		t.Fatalf("resolveClawbackPieces: %v", err)
-	}
-	// 2000 net grossed up by the upgrade invoice's 10% tax = 2200, all on it.
-	if len(pieces) != 1 || pieces[0].InvoiceID != "up_inv" || pieces[0].GrossCents != 2200 {
-		t.Fatalf("pieces = %+v, want one piece of 2200 on up_inv", pieces)
 	}
 }

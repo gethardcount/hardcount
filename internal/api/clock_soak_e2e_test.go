@@ -89,8 +89,7 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 
 	resp = doPost(t, ts, "/v1/subscriptions", auth, map[string]any{
 		"code": "soak-sub", "display_name": "Soak Sub", "customer_id": custID,
-		"items": []map[string]any{{"plan_id": planID}}, "started_at": start.Format(time.RFC3339),
-		"billing_time": "anniversary",
+		"items": []map[string]any{{"plan_id": planID}}, "billing_time": "anniversary",
 	})
 	assertStatus(t, resp, 201)
 	subID := readJSON(t, resp)["id"].(string)

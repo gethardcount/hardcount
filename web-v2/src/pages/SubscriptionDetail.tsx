@@ -942,12 +942,6 @@ export default function SubscriptionDetailPage() {
                 {sub.current_billing_period_display || '\u2014'}
               </DetailRow>
             )}
-            {sub.usage_cap_units != null && (
-              <DetailRow label="Usage cap" labelClassName="sm:w-40">
-                <span>{sub.usage_cap_units.toLocaleString()} units / period</span>
-                <span className="text-xs text-muted-foreground">({sub.overage_action === 'block' ? 'hard cap' : 'charge overage'})</span>
-              </DetailRow>
-            )}
             <DetailRow label="Created" labelClassName="sm:w-40">{formatDateTime(sub.created_at)}</DetailRow>
             <DetailRow label="ID" labelClassName="sm:w-40">
               <span className="min-w-0 font-mono">{sub.id}</span>

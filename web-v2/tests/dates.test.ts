@@ -5,7 +5,7 @@
 // `npm test` (Vitest).
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { startOfDayInTZ, endOfDayInTZ, isAfterCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
+import { startOfDayInTZ, endOfDayInTZ, startOfNextDayInTZ, creditExpiryLabel, isBeforeCivilToday, formatInvoiceDate, usageFilterEndYMD, civilDateFrom, addCalendarMonthInTZ } from '../src/lib/dates.ts'
 
 test('startOfDayInTZ = 00:00 of the civil day in the given zone, as a UTC instant', () => {
   // 2026-05-05 00:00 IST (UTC+5:30) = the previous UTC evening.
@@ -39,17 +39,6 @@ test('the from/to pair brackets a row that is "May 5" in the tenant zone but not
   // May 6) must fall OUTSIDE the IST-May-5 bracket — the whole point of TZ anchoring.
   const rowUTCMay5ButISTMay6 = Date.parse('2026-05-05T22:00:00Z')
   assert.ok(rowUTCMay5ButISTMay6 > Date.parse(to), 'a UTC-May-5 / IST-May-6 row is excluded from the IST May-5 bracket')
-})
-
-// Locks the one-off invoice "Sells credits" expiry check: "today" is the tenant
-// civil date, the same zone endOfDayInTZ resolves the expiry in.
-test('isAfterCivilToday uses the tenant date, not the UTC date', () => {
-  // 2026-10-16 21:00 EDT = 2026-10-17T01:00Z. Locally it is still Oct 16.
-  const nowMs = Date.parse('2026-10-17T01:00:00Z')
-  assert.equal(isAfterCivilToday('2026-10-17', nowMs, 'America/New_York'), true, 'tomorrow is in the future')
-  assert.equal(isAfterCivilToday('2026-10-16', nowMs, 'America/New_York'), false, 'today is not')
-  // East of UTC: 2026-10-16T20:00Z is Oct 17 01:30 in Kolkata, so Oct 17 is today.
-  assert.equal(isAfterCivilToday('2026-10-17', Date.parse('2026-10-16T20:00:00Z'), 'Asia/Kolkata'), false)
 })
 
 // Backs MANUAL_TEST FLOW TZ1 (dashboard invoice dates): issued/due/paid/voided dates
@@ -134,4 +123,53 @@ test('addCalendarMonthInTZ keeps the tenant wall time across a DST change', () =
   // A UTC tenant has no DST: Feb 15 12:00Z → Mar 15 12:00Z. A Los Angeles browser
   // stepping its own fields crossed its Mar 8 DST change and landed on 11:00Z.
   assert.equal(plusMonth('2026-02-15T12:00:00Z', 'UTC'), '2026-03-15T12:00:00.000Z')
+})
+
+// A credit picked as "valid through Nov 30" is sent as the midnight that
+// starts Dec 1 in the tenant zone: the instant a November period ends and its
+// invoice is issued, so the credit pays that invoice (ADR-071 §2, amended
+// 2026-10-22).
+test('startOfNextDayInTZ = 00:00 of the next civil day in the given zone', () => {
+  assert.equal(startOfNextDayInTZ('2026-11-30', 'America/New_York'), '2026-12-01T05:00:00.000Z')
+  assert.equal(startOfNextDayInTZ('2026-11-30', 'Asia/Kolkata'), '2026-11-30T18:30:00.000Z')
+  assert.equal(startOfNextDayInTZ('2026-11-30', 'UTC'), '2026-12-01T00:00:00.000Z')
+  // Month, year and leap-day rollover.
+  assert.equal(startOfNextDayInTZ('2026-12-31', 'UTC'), '2027-01-01T00:00:00.000Z')
+  assert.equal(startOfNextDayInTZ('2028-02-28', 'UTC'), '2028-02-29T00:00:00.000Z')
+  // The day after the US spring-forward day starts at 00:00 EDT (UTC-4).
+  assert.equal(startOfNextDayInTZ('2026-03-08', 'America/New_York'), '2026-03-09T04:00:00.000Z')
+  // It is the same instant as the start of the next day.
+  assert.equal(startOfNextDayInTZ('2026-05-05', 'America/Los_Angeles'), startOfDayInTZ('2026-05-06', 'America/Los_Angeles'))
+})
+
+// "Valid through <day>" only where it is true: the stored instant is a
+// midnight in the tenant zone. Anything else names its own time.
+test('creditExpiryLabel reads a tenant midnight as the day before, any other instant as its time', () => {
+  const ny = (iso: string) => creditExpiryLabel(iso, 'America/New_York')
+  // Sent by startOfNextDayInTZ('2026-11-30').
+  assert.equal(ny('2026-12-01T05:00:00.000Z'), 'Valid through Nov 30, 2026')
+  // Saved before the fix by endOfDayInTZ('2026-11-30'): it misses the
+  // invoice issued Dec 1 00:00, so it is not valid through Nov 30's end.
+  assert.equal(ny('2026-12-01T04:59:59.999Z'), 'Expires Nov 30, 2026, 11:59 PM EST')
+  // An API grant that stops mid-day.
+  assert.equal(ny('2026-12-15T17:00:00.000Z'), 'Expires Dec 15, 2026, 12:00 PM EST')
+  // The same instant is a midnight only in its own zone.
+  assert.equal(creditExpiryLabel('2026-12-01T00:00:00.000Z', 'UTC'), 'Valid through Nov 30, 2026')
+  assert.equal(creditExpiryLabel('2026-11-30T18:30:00.000Z', 'Asia/Kolkata'), 'Valid through Nov 30, 2026')
+  // Where DST skips midnight (Cairo, 2026-04-24), the stored instant is
+  // 23:00 the day before, so it names that time.
+  assert.equal(creditExpiryLabel(startOfNextDayInTZ('2026-04-23', 'Africa/Cairo'), 'Africa/Cairo').startsWith('Expires Apr 23, 2026, 11:00 PM'), true)
+})
+
+// Locks the New invoice commit line's expiry check: "today" is the tenant
+// civil date, and today is accepted, like the grant dialog (it resolves to
+// tonight's midnight, which is still ahead).
+test('isBeforeCivilToday refuses only earlier tenant days', () => {
+  // 2026-10-16 21:00 EDT = 2026-10-17T01:00Z. Locally it is still Oct 16.
+  const nowMs = Date.parse('2026-10-17T01:00:00Z')
+  assert.equal(isBeforeCivilToday('2026-10-15', nowMs, 'America/New_York'), true, 'yesterday is refused')
+  assert.equal(isBeforeCivilToday('2026-10-16', nowMs, 'America/New_York'), false, 'today is accepted')
+  assert.equal(isBeforeCivilToday('2026-10-17', nowMs, 'America/New_York'), false, 'tomorrow is accepted')
+  // East of UTC: 2026-10-16T20:00Z is Oct 17 01:30 in Kolkata, so Oct 16 is yesterday.
+  assert.equal(isBeforeCivilToday('2026-10-16', Date.parse('2026-10-16T20:00:00Z'), 'Asia/Kolkata'), true)
 })

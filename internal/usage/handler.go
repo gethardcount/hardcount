@@ -99,7 +99,7 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 	h.backfill(w, r)
 }
 
-// apiEvent is the public API input — developers send external identifiers.
+// APIEvent is the public API input — developers send external identifiers.
 // Quantity accepts both number (5) and string ("5.5") forms via shopspring's
 // UnmarshalJSON; the response side serializes as a string for precision.
 //
@@ -110,7 +110,7 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 // is the documented v1 field; properties was an internal name leaked
 // into the wire). The two collapse onto the same usage_events.properties
 // column at the storage layer.
-type apiEvent struct {
+type APIEvent struct {
 	ExternalCustomerID string           `json:"external_customer_id"`
 	EventName          string           `json:"event_name"`
 	Quantity           decimal.Decimal  `json:"quantity,omitempty"`
@@ -184,7 +184,7 @@ const missingKeyMessage = "idempotency_key is required — give each event its o
 
 // resolve converts public API identifiers to internal IDs. cache may be nil
 // (single-event doors), in which case every lookup goes to the store.
-func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, cache *resolveCache) (IngestInput, error) {
+func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, cache *resolveCache) (IngestInput, error) {
 	extCust := strings.TrimSpace(evt.ExternalCustomerID)
 	eventName := strings.TrimSpace(evt.EventName)
 
@@ -244,7 +244,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 		cache.putMeter(eventName, meterID)
 	}
 
-	// dimensions takes precedence over properties — see apiEvent doc.
+	// dimensions takes precedence over properties — see APIEvent doc.
 	dims := evt.Dimensions
 	if dims == nil {
 		dims = evt.Properties
@@ -284,7 +284,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt apiEvent, ca
 func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var evt apiEvent
+	var evt APIEvent
 	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -362,7 +362,7 @@ func (h *Handler) respondIngestError(w http.ResponseWriter, r *http.Request, ten
 func (h *Handler) backfill(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var evt apiEvent
+	var evt APIEvent
 	if err := json.NewDecoder(r.Body).Decode(&evt); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -561,7 +561,7 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var events []apiEvent
+	var events []APIEvent
 	if err := json.NewDecoder(r.Body).Decode(&events); err != nil {
 		// The router caps request bodies via MaxBytesReader; a too-big
 		// batch must read as "split your batch" (413), not as malformed
