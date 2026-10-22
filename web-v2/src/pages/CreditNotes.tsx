@@ -76,6 +76,7 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Plus, Search, Download, Loader2, ArrowUpDown, ArrowUp, ArrowDown, FileMinus, Mail } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
+import { invoiceHeadline } from '@/lib/invoiceTerminal'
 
 const creditNoteSchema = z.object({
   invoice_id: z.string().min(1, 'Invoice is required'),
@@ -762,9 +763,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
 
   const selectedInvoice = invoices.find(inv => inv.id === invoiceId)
   const isPaid = selectedInvoice?.status === 'paid'
-  const maxAmount = selectedInvoice
-    ? isPaid ? selectedInvoice.amount_paid_cents : selectedInvoice.amount_due_cents
-    : 0
+  const maxAmount = selectedInvoice ? invoiceHeadline(selectedInvoice).cents : 0
 
   // One Idempotency-Key per dialog open, sent with every submit from it. A
   // retry after a lost answer (a timeout while Stripe is slow) then gets the

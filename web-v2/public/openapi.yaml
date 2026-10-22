@@ -2661,7 +2661,7 @@ components:
           description: Invoices paid in the window.
         failed_payments:
           type: integer
-          description: Invoices created in the window whose payment failed. All currencies.
+          description: Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
         failed_payments_prev:
           type: integer
           description: "`failed_payments` for the previous window."
@@ -2699,7 +2699,7 @@ components:
         dunning_recovery_rate:
           type: number
           format: double
-          description: Dunning runs opened in the window that are resolved, divided by all runs opened in the window. 0 when none were opened.
+          description: Dunning runs opened in the window that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0), divided by all runs opened in the window. A run closed by a void, a write-off, or a credit note or customer credit that left nothing due is not recovered. 0 when none were opened.
         mrr_movement:
           $ref: "#/components/schemas/AnalyticsMrrMovementTotals"
 
@@ -3369,7 +3369,7 @@ components:
 
     DunningStats:
       type: object
-      required: [active_count, escalated_count, resolved_count, at_risk_cents, currency, at_risk_by_currency]
+      required: [active_count, escalated_count, resolved_count, recovered_count, at_risk_cents, currency, at_risk_by_currency]
       properties:
         active_count:
           type: integer
@@ -3377,19 +3377,23 @@ components:
           type: integer
         resolved_count:
           type: integer
+          description: Resolved runs, whatever closed them (a payment, a void or a write-off).
+        recovered_count:
+          type: integer
+          description: Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered.
         at_risk_cents:
           type: integer
           format: int64
-          description: Amount due on active and escalated runs, in `currency` only.
+          description: Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk.
         currency:
           type: string
           description: The tenant's default currency.
         at_risk_by_currency:
           type: array
           description: |
-            Amount due on active and escalated runs, one entry per currency.
-            `currency` comes first, then the largest amount. Empty when no run
-            is at risk.
+            Amount due on active and escalated runs whose invoice is still
+            open, one entry per currency. `currency` comes first, then the
+            largest amount. Empty when no run is at risk.
           items:
             type: object
             required: [currency, amount_cents]
@@ -9745,7 +9749,7 @@ paths:
             type: string
         - name: sort
           in: query
-          description: One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default).
+          description: One of invoice_number, amount_due_cents, billing_period_start, due_at, issued_at, status, payment_status, created_at (default). amount_due_cents sorts a paid invoice by what paid it (`amount_paid_cents` plus `credits_applied_cents`, since paying zeroes `amount_due_cents`) and every other invoice by `amount_due_cents`, which a voided or written-off invoice keeps.
           schema:
             type: string
         - name: dir

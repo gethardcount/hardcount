@@ -35,7 +35,8 @@ import { invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { Layout } from '@/components/Layout'
 import { cn } from '@/lib/utils'
-import { creditNoteReasonLabel, paymentIsUnresolved } from '@/lib/status'
+import { creditNoteReasonLabel } from '@/lib/status'
+import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight } from '@/lib/invoiceTerminal'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -343,9 +344,7 @@ export default function InvoiceDetailPage() {
   const showOperatorContext =
     invoice?.tax_status === 'pending' ||
     invoice?.tax_status === 'failed' ||
-    (invoice?.status === 'finalized' &&
-      invoice?.payment_status !== 'succeeded' &&
-      invoice?.payment_status !== 'processing')
+    (!!invoice && invoiceAwaitingPayment(invoice))
   const { data: dunningRunsData } = useQuery({
     queryKey: ['invoice-dunning-runs', id],
     queryFn: () => api.listDunningRuns(`invoice_id=${id}`).then(r => r.data || []),
@@ -606,6 +605,11 @@ export default function InvoiceDetailPage() {
   const noSeller = sellerMissing(invoice, settings, settingsLoaded)
   const dates = issueDates(invoice, (iso) => formatInvoiceDate(iso, invoice.billing_timezone))
   const notice = pickInvoiceNotice(invoice)
+  // The two recovery items in the actions menu. Record offline payment also
+  // serves a write-off (ADR-110: money that already arrived is recorded).
+  // Mark uncollectible is the one action a parked charge allows (ADR-107).
+  const showRecordOffline = invoiceCanCollect(invoice) || invoice.status === 'uncollectible'
+  const showMarkUncollectible = invoiceAwaitingPayment(invoice)
 
   return (
     <Layout>
@@ -682,7 +686,7 @@ export default function InvoiceDetailPage() {
             )
           })()}
 
-          {invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status) && invoice.amount_due_cents > 0 && (
+          {invoiceCanCollect(invoice) && (
             !hasPaymentMethod ? (
               // No card → no collect. A greyed-out primary next to the
               // banner's active primary was competing noise; the banner
@@ -744,8 +748,7 @@ export default function InvoiceDetailPage() {
                   Retry tax
                 </DropdownMenuItem>
               )}
-              {((invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status) && invoice.amount_due_cents > 0) ||
-                invoice.status === 'uncollectible') && (
+              {showRecordOffline && (
                 <DropdownMenuItem onClick={() => setShowRecordPaymentDialog(true)} disabled={acting}>
                   <Receipt size={14} className="mr-2" />
                   Record offline payment
@@ -758,24 +761,19 @@ export default function InvoiceDetailPage() {
                   the exit when Stripe cannot be asked. A payment that is
                   genuinely still resolving is a different matter and is still
                   excluded. */}
-              {invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' &&
-                invoice.payment_status !== 'processing' && (
+              {showMarkUncollectible && (
                 <DropdownMenuItem onClick={() => setShowMarkUncollectibleConfirm(true)} disabled={acting} className="text-amber-700 dark:text-amber-400">
                   <AlertOctagon size={14} className="mr-2" />
                   Mark uncollectible
                 </DropdownMenuItem>
               )}
-              {((invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status) && invoice.amount_due_cents > 0) ||
-                invoice.status === 'uncollectible' ||
-                (invoice.status === 'finalized' && invoice.payment_status !== 'succeeded' && !paymentIsUnresolved(invoice.payment_status))) && (
-                <DropdownMenuSeparator />
-              )}
+              {(showRecordOffline || showMarkUncollectible) && <DropdownMenuSeparator />}
 
               {/* Hidden while the payment is unresolved: the server refuses it
                   (the email carries a pay call-to-action, and for a parked
                   invoice the hosted page will not even show a Pay button), so
                   offering it here is discovery-by-failure. */}
-              {invoice.status !== 'voided' && !paymentIsUnresolved(invoice.payment_status) && (
+              {invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null && (
                 <DropdownMenuItem onClick={() => setShowEmailModal(true)} disabled={acting}>
                   <Mail size={14} className="mr-2" />
                   Email invoice
@@ -821,7 +819,7 @@ export default function InvoiceDetailPage() {
               {/* Refused while the payment is unresolved — crediting could
                   refund money that was never collected. */}
               {(invoice.status === 'finalized' || invoice.status === 'paid' || invoice.status === 'uncollectible') &&
-                !paymentIsUnresolved(invoice.payment_status) && (
+                invoicePaymentInFlight(invoice) === null && (
                 <DropdownMenuItem onClick={() => setShowCreditModal(true)} disabled={acting}>
                   <CreditCard size={14} className="mr-2" />
                   Issue credit note
@@ -833,7 +831,7 @@ export default function InvoiceDetailPage() {
                   in fact paid. Mark uncollectible stays available above — it is
                   the one action allowed on a parked invoice. */}
               {invoice.status !== 'voided' && invoice.status !== 'paid' &&
-                !paymentIsUnresolved(invoice.payment_status) && (
+                invoicePaymentInFlight(invoice) === null && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -867,7 +865,7 @@ export default function InvoiceDetailPage() {
         const subLine = writtenOffSubscriptionLine(subscription)
         // A card serves new invoices only (ADR-113: a written-off invoice is
         // never charged), so this line exists to set up future collection.
-        const showCardLine = invoice.amount_due_cents > 0 && !hasPaymentMethod
+        const showCardLine = invoiceDueCents(invoice) > 0 && !hasPaymentMethod
         const cardLine = writtenOffCardLine(customer?.email, whoami?.can_email_setup_links)
         return (
           <Callout
@@ -1315,7 +1313,7 @@ export default function InvoiceDetailPage() {
                   <Separator />
                   <div className="flex justify-between text-sm font-semibold">
                     <span>Amount due</span>
-                    <span className="font-mono tabular-nums">{formatCents(0, invoice.currency)}</span>
+                    <span className="font-mono tabular-nums">{formatCents(invoiceDueCents(invoice), invoice.currency)}</span>
                   </div>
                 </>
               ) : (() => {
@@ -1362,7 +1360,7 @@ export default function InvoiceDetailPage() {
                     <Separator />
                     <div className="flex justify-between font-semibold text-base pt-1">
                       <span>Amount due</span>
-                      <span className="font-mono tabular-nums">{formatCents(invoice.amount_due_cents, invoice.currency)}</span>
+                      <span className="font-mono tabular-nums">{formatCents(invoiceDueCents(invoice), invoice.currency)}</span>
                     </div>
 
                     {/* Post-payment adjustments */}
@@ -1601,7 +1599,7 @@ export default function InvoiceDetailPage() {
             <div className="space-y-3 py-2">
               <p className="text-sm text-muted-foreground">
                 Mark this invoice paid for money received outside Stripe
-                (cheque, wire, cash). The full {formatCents(invoice.amount_due_cents, invoice.currency)} is
+                (cheque, wire, cash). The full {formatCents(invoiceDueCents(invoice), invoice.currency)} is
                 recorded as paid.
               </p>
               {/* The unreconciled consequence, stated BEFORE the operator

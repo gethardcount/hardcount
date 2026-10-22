@@ -16,10 +16,11 @@ func TestInvoiceOrderBy_DefaultsToCreatedAtDesc(t *testing.T) {
 // resolves to a real column. New SPA columns must be added to the
 // allow-list (invoiceSortColumn) — this test catches the asymmetry.
 func TestInvoiceOrderBy_AllowedColumns(t *testing.T) {
+	const amountShown = "(CASE WHEN status = 'paid' THEN amount_paid_cents + credits_applied_cents ELSE amount_due_cents END)"
 	cases := map[string]string{
 		"invoice_number":       "invoice_number",
-		"amount_due_cents":     "amount_due_cents",
-		"amount_due":           "amount_due_cents", // alias
+		"amount_due_cents":     amountShown,
+		"amount_due":           amountShown, // alias
 		"billing_period_start": "billing_period_start",
 		"period":               "billing_period_start", // alias
 		"due_at":               "due_at",
@@ -85,10 +86,10 @@ func TestInvoiceOrderBy_DirNormalization(t *testing.T) {
 // DESC) — visible to operators as inconsistent ordering within a
 // run of same-amount or same-period invoices.
 func TestInvoiceOrderBy_TieBreakMatchesPrimaryDir(t *testing.T) {
-	if got := invoiceOrderBy("amount_due_cents", "asc"); got != "amount_due_cents ASC, id ASC" {
+	if got := invoiceOrderBy("invoice_number", "asc"); got != "invoice_number ASC, id ASC" {
 		t.Errorf("ASC tie-break: got %q", got)
 	}
-	if got := invoiceOrderBy("amount_due_cents", "desc"); got != "amount_due_cents DESC, id DESC" {
+	if got := invoiceOrderBy("invoice_number", "desc"); got != "invoice_number DESC, id DESC" {
 		t.Errorf("DESC tie-break: got %q", got)
 	}
 }

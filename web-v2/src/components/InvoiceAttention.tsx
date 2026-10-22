@@ -15,6 +15,7 @@ import { attentionReasonLabel, supportCodeLine } from '@/lib/attentionLabels'
 import { messageLines, stripePaymentUrl } from '@/lib/invoiceNotice'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
+import { invoiceDueCents } from '@/lib/invoiceTerminal'
 
 // InvoiceAttention is the unified "this invoice needs operator
 // attention" notice, drawn with the shared Callout. Reads server-derived
@@ -364,7 +365,7 @@ function UpdatePaymentMethodButton({ variant, display, invoice }: { variant: 'de
     queryFn: () => api.getCustomer(invoice.customer_id),
     enabled: open,
   })
-  const amountDueLabel = formatCents(invoice.amount_due_cents, invoice.currency)
+  const amountDueLabel = formatCents(invoiceDueCents(invoice), invoice.currency)
   return (
     <>
       <Button variant={variant} size="sm" onClick={() => setOpen(true)}>

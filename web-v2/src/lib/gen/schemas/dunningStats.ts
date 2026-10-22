@@ -12,15 +12,18 @@ import type { DunningStatsAtRiskByCurrencyItem } from './dunningStatsAtRiskByCur
 export interface DunningStats {
   active_count: number;
   escalated_count: number;
+  /** Resolved runs, whatever closed them (a payment, a void or a write-off). */
   resolved_count: number;
-  /** Amount due on active and escalated runs, in `currency` only. */
+  /** Resolved runs that a payment closed (`resolution` is `payment_recovered` and the invoice has `amount_paid_cents` above 0). A run closed by a credit note or customer credit that left nothing due is resolved, not recovered. */
+  recovered_count: number;
+  /** Amount due on active and escalated runs whose invoice is still open, in `currency` only. A voided or written-off invoice is not at risk. */
   at_risk_cents: number;
   /** The tenant's default currency. */
   currency: string;
   /**
-     * Amount due on active and escalated runs, one entry per currency.
-     * `currency` comes first, then the largest amount. Empty when no run
-     * is at risk.
+     * Amount due on active and escalated runs whose invoice is still
+     * open, one entry per currency. `currency` comes first, then the
+     * largest amount. Empty when no run is at risk.
      */
   at_risk_by_currency: DunningStatsAtRiskByCurrencyItem[];
 }

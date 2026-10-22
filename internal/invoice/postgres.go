@@ -4090,12 +4090,19 @@ func invoiceOrderBy(sort, dir string) string {
 // invoiceSortColumn maps the SPA's sort key to a SQL column name.
 // Closed allow-list to prevent injection. Unknown keys default to
 // created_at (the most common sort, matches Stripe Dashboard).
+//
+// amount_due sorts by the invoice's amount as the Invoices list's "Amount"
+// column shows it (invoiceAmountCents in web-v2/src/lib/invoiceTerminal.ts):
+// a paid invoice by what the payment and customer credit paid together, since
+// the settle zeroed its amount_due; every other invoice by amount_due, which a
+// void and a write-off keep. Sorting paid rows by the zeroed figure put a $29
+// paid invoice below a $20 open one (sign-off of #1328).
 func invoiceSortColumn(key string) string {
 	switch key {
 	case "invoice_number":
 		return "invoice_number"
 	case "amount_due_cents", "amount_due":
-		return "amount_due_cents"
+		return "(CASE WHEN status = 'paid' THEN amount_paid_cents + credits_applied_cents ELSE amount_due_cents END)"
 	case "billing_period_start", "period":
 		return "billing_period_start"
 	case "due_at":

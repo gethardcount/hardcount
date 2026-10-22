@@ -3,7 +3,7 @@ import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { formatCents } from '@/lib/api'
-import { isTerminalInvoiceStatus, invoiceAmountLabel } from '@/lib/invoiceTerminal'
+import { isTerminalInvoiceStatus, invoiceAmountLine } from '@/lib/invoiceTerminal'
 import { sellerContact } from '@/lib/sellerContact'
 import { checkoutErrorCopy, linkErrorCopy } from '@/lib/updatePayment'
 import { SellerContactLink } from '@/components/SellerContactLink'
@@ -264,9 +264,9 @@ export default function UpdatePaymentPage() {
                         a closed invoice never reads as owed. */}
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">
-                        {invoiceAmountLabel(data.invoice_status)}
+                        {invoiceAmountLine({ ...data, status: data.invoice_status }).label}
                       </span>
-                      <span className="text-lg font-semibold text-foreground">{formatCents(data.amount_due_cents, data.currency)}</span>
+                      <span className="text-lg font-semibold text-foreground">{formatCents(invoiceAmountLine({ ...data, status: data.invoice_status }).cents, data.currency)}</span>
                     </div>
                   </div>
 

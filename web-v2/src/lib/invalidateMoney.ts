@@ -26,4 +26,16 @@ export function invalidateMoneySurfaces(
   qc.invalidateQueries({ queryKey: ['invoices'] })
   qc.invalidateQueries({ queryKey: ['dashboard-recent-invoices'] })
   qc.invalidateQueries({ queryKey: ['dashboard-overview'] })
+  // An invoice's paid/void state also shows in the sidebar counts, the
+  // Dunning list and cards, the invoice page's dunning row, the customer's
+  // "Last invoice", the subscription's invoices and the command palette.
+  // These were missing, so after a payment or a void they kept the old state
+  // until their cache ran out and the page changed (sweep E10).
+  qc.invalidateQueries({ queryKey: ['layout', 'analytics-overview'] })
+  qc.invalidateQueries({ queryKey: ['dunning-runs'] })
+  qc.invalidateQueries({ queryKey: ['dunning-stats'] })
+  qc.invalidateQueries({ queryKey: invoiceId ? ['invoice-dunning-runs', invoiceId] : ['invoice-dunning-runs'] })
+  qc.invalidateQueries({ queryKey: customerId ? ['last-invoice', customerId] : ['last-invoice'] })
+  qc.invalidateQueries({ queryKey: ['subscription-invoices'] })
+  qc.invalidateQueries({ queryKey: ['command-palette', 'invoices'] })
 }
