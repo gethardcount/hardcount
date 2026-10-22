@@ -441,6 +441,10 @@ type MeterConflict struct {
 // ?billing= query parameter on GET /v1/subscriptions.
 const ListBillingFailing = "failing"
 
+// ListCollectionPaused is the one value of ListFilter.Collection and of the
+// ?collection= query parameter on GET /v1/subscriptions.
+const ListCollectionPaused = "paused"
+
 type ListFilter struct {
 	TenantID   string
 	CustomerID string
@@ -450,6 +454,14 @@ type ListFilter struct {
 	// record, retrying or parked (ADR-119). Empty = no filter. The handler
 	// rejects any other value.
 	Billing string
+	// Collection "paused" keeps only live (active or trialing) subscriptions
+	// whose pause_collection is in force now (set, by an operator or by
+	// dunning, and its resumes_at, if any, not yet reached on the
+	// subscription's clock). Paused
+	// collection is not a status: the subscription stays active and keeps
+	// billing into drafts. Empty = no filter. The handler rejects any other
+	// value.
+	Collection string
 	// Search filters by display_name OR code, case-insensitive
 	// substring (ILIKE, metacharacters escaped). Empty = no filter.
 	// Backs the dashboard list search box and the command palette.

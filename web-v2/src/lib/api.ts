@@ -973,6 +973,9 @@ export interface Invoice {
   // "simulated" badge on header dates + the activity timeline. Live invoices
   // are always false.
   is_simulated?: boolean
+  // test_clock_id: the clock this invoice's dates follow (its customer's
+  // pin). Filled on the list and get reads; absent on wall-clock invoices.
+  test_clock_id?: string
 }
 
 export interface LineItem {

@@ -203,7 +203,6 @@ export default function SubscriptionDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['customer-overview', sub.customer_id] })
       queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', sub.customer_id] })
     }
-    queryClient.invalidateQueries({ queryKey: ['subscriptions-for-test-clock-chip'] })
     // Plan/quantity changes can credit the customer's balance via
     // proration — refresh the balance-bearing families (2026-07-21 audit).
     invalidateMoneySurfaces(queryClient, { customerId: sub?.customer_id })
@@ -422,9 +421,8 @@ export default function SubscriptionDetailPage() {
           : <NoticeRow tone="amber" title="Cancellation scheduled" action={action}>{sentence}</NoticeRow>
       }
       case 'collection_paused': {
-        // Distinct from the hard pause (status=paused): the sub stays active
-        // but invoices generate as drafts and skip finalize/charge/dunning
-        // until resumed. A deliberate state, so the neutral tone.
+        // The sub stays active, but invoices generate as drafts and skip
+        // finalize/charge/dunning until resumed. A deliberate state, so the neutral tone.
         const action = (
           <Button variant="outline" size="sm" onClick={() => resumeCollectionMutation.mutate()} disabled={acting}>
             {resumeCollectionMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Resuming…</> : 'Resume collection'}

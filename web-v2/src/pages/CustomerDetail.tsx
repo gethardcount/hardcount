@@ -32,7 +32,7 @@ import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustom
 import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
 import { statusBadgeVariant } from '@/lib/status'
-import { invoiceStatus } from '@/lib/statusLabels'
+import { collectionPausedFlag, invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 
 import { Button } from '@/components/ui/button'
@@ -222,7 +222,8 @@ export default function CustomerDetailPage() {
     return m
   }, [clocksData])
   // The customer's "now" (its test clock when pinned), for Past due on the
-  // recent-invoice badges. Subscriptions inherit the customer's pin (ADR-027).
+  // recent-invoice badges and for when a timed collection pause ends on the
+  // subscription rows. Subscriptions inherit the customer's pin (ADR-027).
   const invoiceNow = useEffectiveNow(customer?.test_clock_id)
 
   const { data: overview } = useQuery({
@@ -1037,9 +1038,15 @@ export default function CustomerDetailPage() {
           <CardContent className="p-0">
             <div className="divide-y divide-border">
               {activeSubsToShow.map(sub => (
-                <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex items-center justify-between gap-3 px-6 py-2.5 hover:bg-accent/50 transition-colors">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                // Wraps on a narrow screen, so the date drops below rather
+                // than the chips squeezing the name out.
+                <Link key={sub.id} to={`/subscriptions/${sub.id}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-6 py-2.5 hover:bg-accent/50 transition-colors">
+                  <div className="flex items-center gap-2 min-w-0 grow">
                     <Badge variant={statusVariant(sub.status)} className="shrink-0">{sub.status}</Badge>
+                    {(() => {
+                      const paused = collectionPausedFlag(sub, invoiceNow)
+                      return paused && <StatusBadge status={paused} className="shrink-0" />
+                    })()}
                     <span className="text-sm font-medium text-foreground truncate">{sub.display_name}</span>
                   </div>
                   <span className="text-xs text-muted-foreground whitespace-nowrap">{subMeta(sub)}</span>

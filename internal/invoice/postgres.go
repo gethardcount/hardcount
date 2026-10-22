@@ -241,6 +241,11 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(provider_payment_status,''), provider_synced_at,
 	bill_to_snapshot, supplier_snapshot`
 
+// invClockCol reads the test clock an invoice's dates follow from its
+// customer (domain.Invoice.TestClockID). It follows invCols on the list and
+// get reads only; scan it into inv.TestClockID after scanInvDest.
+const invClockCol = `COALESCE((SELECT c.test_clock_id FROM customers c WHERE c.id = invoices.customer_id), '')`
+
 // qualifiedInvCols returns invCols with every column reference prefixed
 // by the given table alias. Used by ADR-029's per-clock queries that
 // JOIN invoices to subscriptions — without qualification, columns like
@@ -460,8 +465,8 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.In
 	defer postgres.Rollback(tx)
 
 	var inv domain.Invoice
-	err = tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
-		Scan(s.scanInvDest(&inv)...)
+	err = tx.QueryRowContext(ctx, `SELECT `+invCols+`, `+invClockCol+` FROM invoices WHERE id = $1`, id).
+		Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
@@ -572,7 +577,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 		queryLimit = limit + 1
 	}
 	args = append(args, queryLimit)
-	query := `SELECT ` + invCols + ` FROM invoices` + where +
+	query := `SELECT ` + invCols + `, ` + invClockCol + ` FROM invoices` + where +
 		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args))
 	if !useCursor {
@@ -589,7 +594,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	var invoices []domain.Invoice
 	for rows.Next() {
 		var inv domain.Invoice
-		if err := rows.Scan(s.scanInvDest(&inv)...); err != nil {
+		if err := rows.Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...); err != nil {
 			return nil, 0, err
 		}
 		invoices = append(invoices, inv)
