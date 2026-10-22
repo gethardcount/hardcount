@@ -68,6 +68,38 @@ func TestStampBelowMinimum(t *testing.T) {
 		}
 	})
 
+	// The stamp is Stripe's latest answer, not a permanent fact: a charge
+	// Stripe later takes or declines (its minimum for a converted charge
+	// follows the account's settlement currency, which can change) records
+	// that answer and clears the stamp, so the hosted page and the notice
+	// stop saying the amount can't be charged.
+	t.Run("a later charge outcome clears the stamp", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			ps   domain.InvoicePaymentStatus
+			pi   string
+		}{
+			{"processing", domain.PaymentProcessing, "pi_later_processing"},
+			{"declined", domain.PaymentFailed, "pi_later_declined"},
+			{"unknown", domain.PaymentUnknown, ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-MIN-E-"+tc.name)
+				if _, applied, err := store.StampBelowMinimum(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, msg); err != nil || !applied {
+					t.Fatalf("stamp: applied=%v err=%v", applied, err)
+				}
+				stampOutcome(t, store, ctx, tenantID, inv.ID, tc.ps, tc.pi, "")
+				after, err := store.Get(ctx, tenantID, inv.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if after.PaymentStatus != tc.ps || after.BelowMinimumAt != nil {
+					t.Errorf("after a %s outcome: payment_status %s below_minimum_at %v, want %s and cleared", tc.name, after.PaymentStatus, after.BelowMinimumAt, tc.ps)
+				}
+			})
+		}
+	})
+
 	t.Run("a voided invoice is not moved", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-MIN-D")
 		if _, err := store.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceVoided); err != nil {
