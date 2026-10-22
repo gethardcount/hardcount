@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, formatCents } from '@/lib/api'
 import { fillRevenueBuckets } from '@/lib/revenueChart'
-import { outstandingText } from '@/lib/money'
+import { formatCompactCents, outstandingText } from '@/lib/money'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
@@ -32,13 +32,6 @@ import { PeriodTabs } from '@/components/analytics/PeriodTabs'
 import { PERIOD_LABELS, type Period } from '@/components/analytics/period'
 import { tooltipStyle, useChartTheme } from '@/lib/chartTheme'
 import { revenueBucketLabel } from '@/lib/chartLabels'
-
-function formatCompactAmount(cents: number): string {
-  const abs = Math.abs(cents)
-  if (abs >= 100_000_00) return `$${Math.round(cents / 100_00)}K`
-  if (abs >= 1_000_00) return `$${(cents / 100_00).toFixed(1)}K`
-  return `$${Math.round(cents / 100)}`
-}
 
 export default function DashboardPage() {
   usePageTitle('Home')
@@ -296,7 +289,7 @@ export default function DashboardPage() {
                         tickLine={false}
                       />
                       <YAxis
-                        tickFormatter={formatCompactAmount}
+                        tickFormatter={(c: number) => formatCompactCents(c, overview.currency)}
                         tick={{ fontSize: 11, fill: theme.tick }}
                         axisLine={false}
                         tickLine={false}

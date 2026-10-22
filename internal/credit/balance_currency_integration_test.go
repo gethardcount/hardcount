@@ -23,7 +23,7 @@ import (
 // currency: billing profile, then the live subscription's plan, then the
 // newest invoice, then the workspace default.
 //
-// Mutation-verify: drop any arm of customerCurrencySQL and the matching
+// Mutation-verify: drop any arm of customerCurrenciesSQL and the matching
 // customer below reads the next arm's currency → red. Read the oldest
 // invoice instead of the newest and the invoiced customer reads EUR → red.
 func TestBalances_CarryTheCustomersCurrency(t *testing.T) {

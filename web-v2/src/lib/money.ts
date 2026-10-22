@@ -49,6 +49,18 @@ function centsWithSymbol(cents: number, symbol: string): string {
   return `${sign}${symbol}${Math.floor(abs / 100).toLocaleString('en-US')}.${String(abs % 100).padStart(2, '0')}`
 }
 
+// formatCompactCents is a chart-axis amount: "£5.0K" from £1,000 up, whole
+// units below. Same currency rule as formatCents. A thousand is 1_000_00
+// cents; the Home axis once divided by 100_00 and read $5,000 as "$50.0K".
+export function formatCompactCents(cents: number, currency: string): string {
+  const sign = cents < 0 ? '-' : ''
+  const abs = Math.abs(cents)
+  const symbol = getCurrencySymbol(currency)
+  if (abs >= 100_000_00) return `${sign}${symbol}${Math.round(abs / 1_000_00)}K`
+  if (abs >= 1_000_00) return `${sign}${symbol}${(abs / 1_000_00).toFixed(1)}K`
+  return `${sign}${symbol}${Math.round(abs / 100)}`
+}
+
 // amountInputToCents turns what an operator typed in an amount field into the
 // cents a form submits. A confirm step that restates the amount must use this
 // same conversion, so it never shows a figure different from the one sent.
