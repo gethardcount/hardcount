@@ -645,8 +645,10 @@ components:
         without collecting (2026-07-22). `collection_paused` reports an
         invoice that is queued for auto-charge but whose subscription
         has `pause_collection` set, so the charge sweeps deliberately
-        skip it — it will not be charged automatically until
-        collection resumes (2026-07-28). `commit_exposure` reports an
+        skip it (2026-07-28). A dunning run already open on the invoice
+        keeps retrying it through the pause, and `message` then says so;
+        with no open run it is not charged automatically until
+        collection resumes. `commit_exposure` reports an
         unpaid invoice that funded a prepaid commit whose credit is
         already spendable (ADR-078 funds commits at issue, not at
         payment) — note this reason is only returned when no other
@@ -1127,6 +1129,10 @@ components:
           type: string
         footer:
           type: string
+          description: |
+            The tenant's `invoice_footer` as it was when this invoice was
+            issued. Printed on the PDF and the hosted invoice page. Empty on
+            a draft.
         metadata:
           type: object
           additionalProperties: true
@@ -1285,8 +1291,11 @@ components:
           format: date-time
           nullable: true
           description: |
-            Expiry of the granted commit block. Absent/null = the credits
-            never expire (the default).
+            Expiry of the granted commit block. The credit can be drawn up
+            to and including this instant; a period invoice draws it when
+            its period ends at or before it. The dashboard sends the local
+            midnight after the picked day. Absent/null = the credits never
+            expire (the default).
 
     ProviderCostRate:
       type: object
@@ -1407,10 +1416,19 @@ components:
         granted is either still in the balance or in one of the totals:
         total_granted = total_used + total_expired + total_retired +
         total_deducted + balance_cents.
-      required: [customer_id, balance_cents, total_granted, total_used, total_expired, total_retired, total_deducted]
+      required: [customer_id, balance_cents, total_granted, total_used, total_expired, total_retired, total_deducted, currency]
       properties:
         customer_id:
           type: string
+        currency:
+          type: string
+          description: >
+            The currency the customer is billed in, uppercase. Credit has no
+            currency of its own: it pays the customer's invoices one cent for
+            one cent, so its amounts read in this currency. The first of: the
+            billing profile's currency, the plan of the customer's active or
+            trialing subscription, the newest invoice's currency, the
+            workspace default.
         balance_cents:
           type: integer
           format: int64
@@ -2213,6 +2231,11 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: |
+            On a grant, its expiry. The credit can be drawn up to and
+            including this instant; a period invoice draws it when its
+            period ends at or before it. The dashboard sends the local
+            midnight after the picked day.
         metadata:
           type: object
           additionalProperties: true
@@ -2290,8 +2313,8 @@ components:
       type: object
       required: [behavior, set_by]
       description: |
-        Present on a subscription while collection is paused. Invoices are
-        still created, but stay drafts and are not charged.
+        Present on a subscription while collection is paused. New invoices
+        are still created, but stay drafts and are not charged.
       properties:
         behavior:
           type: string
@@ -2705,7 +2728,7 @@ components:
           type: string
         line_type:
           type: string
-          enum: [base_fee, usage, add_on, discount, tax]
+          enum: [base_fee, usage, add_on]
           description: Defaults to `add_on`.
         quantity:
           type: integer
@@ -2728,7 +2751,10 @@ components:
           type: string
           format: date-time
           description: |
-            When the granted credit expires. Must be in the future. Needs
+            When the granted credit expires. The credit can be drawn up to
+            and including this instant; a period invoice draws it when its
+            period ends at or before it. The dashboard sends the local
+            midnight after the picked day. Must be in the future. Needs
             `commit_granted_cents`. Absent means it never expires.
 
     InvoiceCreateRequest:
@@ -2739,7 +2765,7 @@ components:
           type: string
         subscription_id:
           type: string
-          description: Optional. Leave out for a one-off invoice.
+          description: Optional. Must belong to `customer_id`. Leave out for a one-off invoice.
         currency:
           type: string
           description: ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
@@ -4024,6 +4050,7 @@ components:
           description: 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`.
         logo_url:
           type: string
+          description: Shown in emails and on the hosted invoice page. PDFs do not print it.
         brand_color:
           type: string
           pattern: "^#[0-9a-fA-F]{6}$"
@@ -4035,20 +4062,35 @@ components:
         support_url:
           type: string
           maxLength: 500
-          description: Must start with `http://` or `https://`. Printed in the invoice footer.
+          description: |
+            Must start with `http://` or `https://`. Linked in emails and on
+            the hosted invoice page, and printed at the foot of invoice and
+            credit-note PDFs.
         invoice_footer:
           type: string
           maxLength: 1000
-          description: Default footer for new invoices. An invoice's own footer takes precedence.
+          description: |
+            Printed under the totals on invoice PDFs and on the hosted
+            invoice page. Each invoice keeps the footer it was issued with,
+            so a change applies to invoices issued after it. A draft shows
+            the current text.
 
     TenantSettings:
       allOf:
         - $ref: "#/components/schemas/TenantSettingsInput"
         - type: object
-          required: [tenant_id, default_currency, timezone, invoice_prefix, net_payment_terms, tax_provider, tax_rate, tax_inclusive, created_at, updated_at]
+          required: [tenant_id, default_currency, timezone, invoice_prefix, net_payment_terms, tax_provider, tax_rate, tax_inclusive, next_invoice_sequence, created_at, updated_at]
           properties:
             tenant_id:
               type: string
+            next_invoice_sequence:
+              type: integer
+              description: |
+                The number the next invoice in this mode (test or live) gets,
+                before the prefix: 43 means the next invoice is
+                `<invoice_prefix>-000043`. Test and live count separately, and
+                changing `invoice_prefix` keeps the count. Not a setting:
+                sending it on `PUT` does nothing.
             created_at:
               type: string
               format: date-time
@@ -4547,6 +4589,7 @@ components:
               type: string
             footer:
               type: string
+              description: The footer this invoice was issued with.
         line_items:
           type: array
           items:
@@ -4714,6 +4757,10 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: |
+            The credit can be drawn up to and including this instant; a
+            period invoice draws it when its period ends at or before it.
+            The dashboard sends the local midnight after the picked day.
         source_invoice_id:
           type: string
           description: For a `commit` block, the invoice that paid for it.
@@ -8396,6 +8443,10 @@ paths:
         stays a draft. Velox does not finalize it, charge it or start
         dunning (automatic payment retries).
 
+        Invoices finalized before the pause are not drafts. Payment retries
+        already under way for them continue, as in Stripe. To stop them,
+        void the invoice or mark it uncollectible.
+
         Only `behavior: keep_as_draft` is supported. With `resumes_at`,
         periods that end before that instant bill as drafts, and later
         periods bill normally. Without it, the pause lasts until you call
@@ -11649,7 +11700,12 @@ paths:
                 expires_at:
                   type: string
                   format: date-time
-                  description: Optional expiry; must be in the future. Omitted = never expires.
+                  description: |
+                    Optional expiry; must be in the future. Omitted = never
+                    expires. The credit can be drawn up to and including this
+                    instant; a period invoice draws it when its period ends
+                    at or before it. The dashboard sends the local midnight
+                    after the picked day.
                 grant_kind:
                   type: string
                   enum: [promotional]

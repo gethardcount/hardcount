@@ -1224,9 +1224,11 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	// write-off is attempted — the pre-ADR-112 behaviour.
 	// The cancel can change the invoice: its relief is written in the cancel's
 	// transaction (ADR-118), and an invoice whose period was wholly unused is
-	// voided there. Re-read it before the write-off, so a voided invoice
-	// resolves the run now (the same end state the 24h re-attempt reached,
-	// after a failed write-off tick) instead of failing MarkUncollectible.
+	// voided there. That void resolves this run itself (invoice AfterVoid),
+	// so with no invoice action the escalation below finds the run resolved
+	// and writes nothing. With one, re-read the invoice before the
+	// write-off: a voided invoice resolves the run here (a no-op CAS when
+	// the void already did) instead of failing MarkUncollectible.
 	if !actionFailed && outcome.SubscriptionCanceled && invRead && policy.FinalInvoiceAction != domain.InvActionNone {
 		fresh, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
 		if err != nil {

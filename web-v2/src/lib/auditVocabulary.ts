@@ -1,4 +1,5 @@
-import type { AuditEntry } from '@/lib/api'
+import { formatRate, formatRateBare, type AuditEntry } from './api'
+import { formatCents, formatCentsBare } from './money'
 
 // Audit-log display vocabulary — the frontend half of the ADR-090 contract.
 //
@@ -236,3 +237,14 @@ export const DEFAULT_ACTIONS = [
   'login', 'logout', 'mode_changed',
   'password_reset_requested', 'password_reset_completed',
 ]
+
+// auditAmount renders one *_cents metadata value. Invoice, payment and credit
+// note rows record their currency beside the amount, so the amount is shown in
+// it. Credit rows record none (the ledger has no currency, ADR-100); their
+// amount is shown without a symbol, never with the workspace's. A string value
+// is a decimal per-unit rate ("0.0003" cents), shown at full precision.
+export function auditAmount(value: number | string, currency: unknown): string {
+  const c = typeof currency === 'string' && currency !== '' ? currency : null
+  if (typeof value === 'string') return c ? formatRate(value, c) : formatRateBare(value)
+  return c ? formatCents(value, c) : formatCentsBare(value)
+}

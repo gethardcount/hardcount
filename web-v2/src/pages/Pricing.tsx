@@ -542,7 +542,12 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
     const versions = rules.filter(r => r.rule_key === ruleKey.trim())
     return versions.length ? versions.reduce((a, b) => (b.version > a.version ? b : a)) : null
   })()
-  const stampCurrency = existingLatest?.currency
+  // Publishing under an EXISTING key keeps that key's currency — this form
+  // has no currency field, and stamping the tenant's current default would
+  // turn a rate edit into a currency-changing republish (refused by the
+  // ADR-100 guard) after a Settings currency switch. A new key takes the
+  // workspace default. The labels and the submit read this one value.
+  const stampCurrency = existingLatest?.currency ?? getActiveCurrency()
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -557,12 +562,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
     setSaving(true)
     setFormError('')
     try {
-      // Publishing under an EXISTING key keeps that key's currency — this
-      // form has no currency field, and stamping the tenant's current
-      // default would turn a rate edit into a currency-changing republish
-      // (refused by the ADR-100 guard) after a Settings currency switch.
-      const currency = stampCurrency ?? getActiveCurrency()
-      const payload: Record<string, unknown> = { rule_key: ruleKey, name, mode, currency }
+      const payload: Record<string, unknown> = { rule_key: ruleKey, name, mode, currency: stampCurrency }
       // A blank or unreadable price is refused here: the server accepts 0 as
       // a deliberate free rate, so it cannot catch a price left empty.
       if (mode === 'flat') {
@@ -857,21 +857,24 @@ function CreatePlanDialog({ onClose, onCreated, meters, rules }: { onClose: () =
   const [meterIds, setMeterIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
 
+  // Inherit currency from the wired meters' prices when resolvable
+  // (ADR-100: plan and its meters' prices must agree — the backend refuses a
+  // mismatch, so don't stamp the tenant default blindly). The Base Price
+  // label reads the same value, so it names the currency the plan is
+  // created in.
+  const planCurrency = meterIds
+    .map(id => meters.find(m => m.id === id)?.rating_rule_version_id)
+    .map(rid => rules.find(r => r.id === rid)?.currency)
+    .find(c => !!c) ?? getActiveCurrency()
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     try {
-      // Inherit currency from the wired meters' prices when resolvable
-      // (ADR-100: plan and its meters' prices must agree — the backend
-      // refuses a mismatch, so don't stamp the tenant default blindly).
-      const inherited = meterIds
-        .map(id => meters.find(m => m.id === id)?.rating_rule_version_id)
-        .map(rid => rules.find(r => r.id === rid)?.currency)
-        .find(c => !!c)
       await api.createPlan({
         name,
         code,
-        currency: inherited ?? getActiveCurrency(),
+        currency: planCurrency,
         billing_interval: interval,
         base_amount_cents: Math.round(parseFloat(basePrice || '0') * 100),
         base_bill_timing: billTiming,
@@ -920,7 +923,7 @@ function CreatePlanDialog({ onClose, onCreated, meters, rules }: { onClose: () =
             </div>
           </div>
           <div>
-            <Label>Base Price ({getCurrencySymbol()})</Label>
+            <Label>Base Price ({getCurrencySymbol(planCurrency)})</Label>
             <Input type="number" step="0.01" min={0} max={999999.99} value={basePrice}
               onChange={e => setBasePrice(e.target.value)} placeholder="49.00" className="mt-1" />
             <p className="text-xs text-muted-foreground mt-1">Fixed {interval} charge before usage fees</p>

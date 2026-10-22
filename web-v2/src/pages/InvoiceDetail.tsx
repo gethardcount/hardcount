@@ -89,7 +89,7 @@ function TaxReversedLine({ cn, currency }: { cn: CreditNote; currency: string })
 const LINE_TYPE_LABELS: Record<string, string> = {
   base_fee: 'Base fee',
   usage: 'Usage',
-  add_on: 'Add-On',
+  add_on: 'Add-on',
   discount: 'Discount',
   tax: 'Tax',
 }
@@ -1315,7 +1315,7 @@ export default function InvoiceDetailPage() {
                   <Separator />
                   <div className="flex justify-between text-sm font-semibold">
                     <span>Amount due</span>
-                    <span className="font-mono tabular-nums">$0.00</span>
+                    <span className="font-mono tabular-nums">{formatCents(0, invoice.currency)}</span>
                   </div>
                 </>
               ) : (() => {
@@ -1562,7 +1562,7 @@ export default function InvoiceDetailPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               {pauseSubOnWriteOff
-                ? 'The subscription keeps drafting invoices for each cycle, but nothing is charged until you resume it.'
+                ? 'The subscription keeps drafting invoices for each cycle, but they stay drafts and nothing charges them. Retries already running on its other unpaid invoices continue.'
                 : 'The subscription keeps billing and charging as normal. Writing off this invoice does not stop the next one.'}
             </p>
           </div>
@@ -1872,7 +1872,6 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded }: {
                 <SelectItem value="add_on">{LINE_TYPE_LABELS.add_on}</SelectItem>
                 <SelectItem value="base_fee">{LINE_TYPE_LABELS.base_fee}</SelectItem>
                 <SelectItem value="usage">{LINE_TYPE_LABELS.usage}</SelectItem>
-                <SelectItem value="discount">{LINE_TYPE_LABELS.discount}</SelectItem>
               </SelectContent>
             </Select>
           </div>

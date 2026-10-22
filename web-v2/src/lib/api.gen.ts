@@ -2662,6 +2662,10 @@ export interface paths {
          *     stays a draft. Velox does not finalize it, charge it or start
          *     dunning (automatic payment retries).
          *
+         *     Invoices finalized before the pause are not drafts. Payment retries
+         *     already under way for them continue, as in Stripe. To stop them,
+         *     void the invoice or mark it uncollectible.
+         *
          *     Only `behavior: keep_as_draft` is supported. With `resumes_at`,
          *     periods that end before that instant bill as drafts, and later
          *     periods bill normally. Without it, the pause lasts until you call
@@ -5336,7 +5340,11 @@ export interface paths {
                         description?: string;
                         /**
                          * Format: date-time
-                         * @description Optional expiry; must be in the future. Omitted = never expires.
+                         * @description Optional expiry; must be in the future. Omitted = never
+                         *     expires. The credit can be drawn up to and including this
+                         *     instant; a period invoice draws it when its period ends
+                         *     at or before it. The dashboard sends the local midnight
+                         *     after the picked day.
                          */
                         expires_at?: string;
                         /**
@@ -7289,8 +7297,10 @@ export interface components {
          *     without collecting (2026-07-22). `collection_paused` reports an
          *     invoice that is queued for auto-charge but whose subscription
          *     has `pause_collection` set, so the charge sweeps deliberately
-         *     skip it — it will not be charged automatically until
-         *     collection resumes (2026-07-28). `commit_exposure` reports an
+         *     skip it (2026-07-28). A dunning run already open on the invoice
+         *     keeps retrying it through the pause, and `message` then says so;
+         *     with no open run it is not charged automatically until
+         *     collection resumes. `commit_exposure` reports an
          *     unpaid invoice that funded a prepaid commit whose credit is
          *     already spendable (ADR-078 funds commits at issue, not at
          *     payment) — note this reason is only returned when no other
@@ -7656,6 +7666,11 @@ export interface components {
             public_token?: string;
             net_payment_term_days: number;
             memo?: string;
+            /**
+             * @description The tenant's `invoice_footer` as it was when this invoice was
+             *     issued. Printed on the PDF and the hosted invoice page. Empty on
+             *     a draft.
+             */
             footer?: string;
             metadata?: {
                 [key: string]: unknown;
@@ -7752,8 +7767,11 @@ export interface components {
             commit_granted_cents?: number | null;
             /**
              * Format: date-time
-             * @description Expiry of the granted commit block. Absent/null = the credits
-             *     never expire (the default).
+             * @description Expiry of the granted commit block. The credit can be drawn up
+             *     to and including this instant; a period invoice draws it when
+             *     its period ends at or before it. The dashboard sends the local
+             *     midnight after the picked day. Absent/null = the credits never
+             *     expire (the default).
              */
             commit_expires_at?: string | null;
         };
@@ -7843,6 +7861,8 @@ export interface components {
         /** @description A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
         CreditBalance: {
             customer_id: string;
+            /** @description The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default. */
+            currency: string;
             /** Format: int64 */
             balance_cents: number;
             /**
@@ -8279,7 +8299,13 @@ export interface components {
             balance_after: number;
             description: string;
             invoice_id?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description On a grant, its expiry. The credit can be drawn up to and
+             *     including this instant; a period invoice draws it when its
+             *     period ends at or before it. The dashboard sends the local
+             *     midnight after the picked day.
+             */
             expires_at?: string;
             metadata?: {
                 [key: string]: unknown;
@@ -8337,8 +8363,8 @@ export interface components {
             updated_at: string;
         };
         /**
-         * @description Present on a subscription while collection is paused. Invoices are
-         *     still created, but stay drafts and are not charged.
+         * @description Present on a subscription while collection is paused. New invoices
+         *     are still created, but stay drafts and are not charged.
          */
         SubscriptionPauseCollection: {
             /** @enum {string} */
@@ -8647,7 +8673,7 @@ export interface components {
              * @description Defaults to `add_on`.
              * @enum {string}
              */
-            line_type?: "base_fee" | "usage" | "add_on" | "discount" | "tax";
+            line_type?: "base_fee" | "usage" | "add_on";
             /** Format: int64 */
             quantity: number;
             /** Format: int64 */
@@ -8661,14 +8687,17 @@ export interface components {
             commit_granted_cents?: number;
             /**
              * Format: date-time
-             * @description When the granted credit expires. Must be in the future. Needs
+             * @description When the granted credit expires. The credit can be drawn up to
+             *     and including this instant; a period invoice draws it when its
+             *     period ends at or before it. The dashboard sends the local
+             *     midnight after the picked day. Must be in the future. Needs
              *     `commit_granted_cents`. Absent means it never expires.
              */
             commit_expires_at?: string;
         };
         InvoiceCreateRequest: {
             customer_id: string;
-            /** @description Optional. Leave out for a one-off invoice. */
+            /** @description Optional. Must belong to `customer_id`. Leave out for a one-off invoice. */
             subscription_id?: string;
             /**
              * @description ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
@@ -9545,18 +9574,36 @@ export interface components {
             company_email?: string;
             /** @description 7 to 20 characters of digits, spaces, `+`, `-`, `(` and `)`. */
             company_phone?: string;
+            /** @description Shown in emails and on the hosted invoice page. PDFs do not print it. */
             logo_url?: string;
             /** @description Accent color on invoice PDFs, as `#rrggbb`. */
             brand_color?: string;
             /** @description Your own tax number (VAT, EIN, GSTIN), printed on invoices. */
             tax_id?: string;
-            /** @description Must start with `http://` or `https://`. Printed in the invoice footer. */
+            /**
+             * @description Must start with `http://` or `https://`. Linked in emails and on
+             *     the hosted invoice page, and printed at the foot of invoice and
+             *     credit-note PDFs.
+             */
             support_url?: string;
-            /** @description Default footer for new invoices. An invoice's own footer takes precedence. */
+            /**
+             * @description Printed under the totals on invoice PDFs and on the hosted
+             *     invoice page. Each invoice keeps the footer it was issued with,
+             *     so a change applies to invoices issued after it. A draft shows
+             *     the current text.
+             */
             invoice_footer?: string;
         };
         TenantSettings: components["schemas"]["TenantSettingsInput"] & {
             tenant_id: string;
+            /**
+             * @description The number the next invoice in this mode (test or live) gets,
+             *     before the prefix: 43 means the next invoice is
+             *     `<invoice_prefix>-000043`. Test and live count separately, and
+             *     changing `invoice_prefix` keeps the count. Not a setting:
+             *     sending it on `PUT` does nothing.
+             */
+            next_invoice_sequence: number;
             /**
              * Format: date-time
              * @description Zero time when the tenant has never saved settings.
@@ -9857,6 +9904,7 @@ export interface components {
                  */
                 billing_timezone?: string;
                 memo?: string;
+                /** @description The footer this invoice was issued with. */
                 footer?: string;
             };
             line_items: {
@@ -9993,7 +10041,12 @@ export interface components {
              * @description The part an operator removed with a negative adjustment.
              */
             deducted_cents: number;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The credit can be drawn up to and including this instant; a
+             *     period invoice draws it when its period ends at or before it.
+             *     The dashboard sends the local midnight after the picked day.
+             */
             expires_at?: string;
             /** @description For a `commit` block, the invoice that paid for it. */
             source_invoice_id?: string;

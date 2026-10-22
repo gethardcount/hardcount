@@ -28,16 +28,20 @@ import (
 type partyEra struct {
 	legalName, line1, city, postal, country, taxID                   string
 	company, companyLine1, companyCity, companyCountry, companyTaxID string
+	// footer is the invoice footer setting (payment details, legal text).
+	footer string
 }
 
 var (
 	eraBefore = partyEra{
 		legalName: "Before GmbH", line1: "Alte Strasse 1", city: "Berlin", postal: "10115", country: "DE", taxID: "DE111111111",
 		company: "Seller Before Ltd", companyLine1: "1 Old Road", companyCity: "Dublin", companyCountry: "IE", companyTaxID: "IE1234567T",
+		footer: "Pay by transfer to IBAN IE00 BEFORE",
 	}
 	eraAfter = partyEra{
 		legalName: "After Pvt Ltd", line1: "99 New Marg", city: "Mumbai", postal: "400001", country: "IN", taxID: "27AAAAA0000A1Z5",
 		company: "Seller After Inc", companyLine1: "2 New Avenue", companyCity: "Austin", companyCountry: "US", companyTaxID: "US-EIN-99",
+		footer: "Pay by transfer to account US00 AFTER",
 	}
 )
 
@@ -105,6 +109,7 @@ func (r *snapRig) applyEra(t *testing.T, e partyEra) {
 	}
 	ts.CompanyName, ts.CompanyAddressLine1, ts.CompanyCity = e.company, e.companyLine1, e.companyCity
 	ts.CompanyCountry, ts.TaxID = e.companyCountry, e.companyTaxID
+	ts.InvoiceFooter = e.footer
 	ts.CompanyEmail, ts.CompanyPhone = "billing@"+strings.ToLower(strings.Fields(e.company)[1])+".test", "+1 555 "+e.postal
 	if _, err := r.settings.Upsert(r.ctx, ts); err != nil {
 		t.Fatalf("upsert settings: %v", err)
@@ -165,6 +170,11 @@ func assertPrints(t *testing.T, label string, inv domain.Invoice, bt BillToInfo,
 		{"supplier tax ID", ci.TaxID, e.companyTaxID},
 		{"supplier tax ID type", ci.TaxIDType, SupplierTaxIDTypeFromCountry(e.companyCountry)},
 	}
+	// An issued invoice keeps the footer it was issued with; the PDF and the
+	// hosted page print inv.Footer. A draft has no copy yet.
+	if inv.Status != domain.InvoiceDraft {
+		checks = append(checks, struct{ field, got, want string }{"issued footer", inv.Footer, e.footer})
+	}
 	for _, c := range checks {
 		if c.got != c.want {
 			t.Errorf("%s: %s = %q, want %q", label, c.field, c.got, c.want)
@@ -221,7 +231,7 @@ func TestIssuedInvoice_NullSnapshotFallsBackToLive(t *testing.T) {
 	issued := r.createFinalized(t, "SNAP-LEGACY-1")
 	admin := testutil.AdminPool(t)
 	if _, err := admin.ExecContext(r.ctx,
-		`UPDATE invoices SET bill_to_snapshot = NULL, supplier_snapshot = NULL WHERE id = $1`, issued.ID); err != nil {
+		`UPDATE invoices SET bill_to_snapshot = NULL, supplier_snapshot = NULL, footer = NULL WHERE id = $1`, issued.ID); err != nil {
 		t.Fatalf("clear snapshot to model a pre-0177 row: %v", err)
 	}
 	r.applyEra(t, eraAfter)
@@ -230,7 +240,11 @@ func TestIssuedInvoice_NullSnapshotFallsBackToLive(t *testing.T) {
 	if inv.BillToSnapshot != nil || inv.SupplierSnapshot != nil {
 		t.Fatalf("legacy row read back with a snapshot (%+v / %+v): a NULL column must scan as nil, never as an empty copy", inv.BillToSnapshot, inv.SupplierSnapshot)
 	}
-	assertPrints(t, "pre-0177 invoice", inv, bt, ci, eraAfter)
+	// The parties fall back to live rows. The footer does not: an invoice
+	// issued before footers were copied was issued with none.
+	want := eraAfter
+	want.footer = ""
+	assertPrints(t, "pre-0177 invoice", inv, bt, ci, want)
 }
 
 // TestIssuedInvoice_ReverseChargeLegendUsesSnapshot: the legend wording

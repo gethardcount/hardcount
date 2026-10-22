@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Trash2 } from 'lucide-react'
-import { api, formatRate, formatDate, type PriceOverride, type RatingRule } from '@/lib/api'
+import { api, formatRate, formatRateBare, formatDate, type PriceOverride, type RatingRule } from '@/lib/api'
 import { dollarsToRateCents } from '@/lib/priceInput'
 import { showApiError } from '@/lib/formErrors'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -32,14 +32,17 @@ const MODE_OPTIONS = [
 
 // priceSummary renders a rule's or override's pricing block in operator
 // language, e.g. "$0.01/unit", "3 tiers", "$10.00 per 100 units".
-function priceSummary(p: { mode: string; flat_amount_cents: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size: number; package_amount_cents: number }, currency?: string): string {
+function priceSummary(p: { mode: string; flat_amount_cents: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size: number; package_amount_cents: number }, currency: string | undefined): string {
+  // An override whose list price is gone has no currency to show: no symbol,
+  // never the workspace's.
+  const rate = (cents: string) => (currency ? formatRate(cents, currency) : formatRateBare(cents))
   switch (p.mode) {
     case 'flat':
-      return `${formatRate(p.flat_amount_cents, currency)}/unit`
+      return `${rate(p.flat_amount_cents)}/unit`
     case 'graduated':
       return `${p.graduated_tiers?.length ?? 0} tiers`
     case 'package':
-      return `${formatRate(String(p.package_amount_cents), currency)} per ${p.package_size} units`
+      return `${rate(String(p.package_amount_cents))} per ${p.package_size} units`
     default:
       return p.mode
   }

@@ -13,7 +13,13 @@ export type PostV1CreditsGrantBody = {
   customer_id: string;
   amount_cents: number;
   description?: string;
-  /** Optional expiry; must be in the future. Omitted = never expires. */
+  /**
+     * Optional expiry; must be in the future. Omitted = never
+     * expires. The credit can be drawn up to and including this
+     * instant; a period invoice draws it when its period ends
+     * at or before it. The dashboard sends the local midnight
+     * after the picked day.
+     */
   expires_at?: string;
   /**
      * Optional cost-basis class (ADR-078). `promotional` marks

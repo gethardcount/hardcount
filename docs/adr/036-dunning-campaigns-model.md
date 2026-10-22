@@ -1,7 +1,7 @@
 # ADR-036: Dunning campaigns model (multi-policy-per-tenant)
 
 **Date:** 2026-05-16
-**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a dunning pause lifts when its invoice is paid; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
+**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a collection pause does not stop open runs; amended 2026-10-22 — a dunning pause lifts when its invoice is paid; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
 
 > ⚠️ **The 2026-05-16 amendment below describes a `final_action` column that no
 > longer exists.** [ADR-112](112-dunning-exhaustion-settles-two-questions.md)
@@ -230,7 +230,7 @@ but two independent choices. The behaviours described are unchanged.)*
 | Velox enum (2026-05-16 amendment; column split by ADR-112) | Behavior |
 |---|---|
 | `manual_review` | Run lands state=escalated. No sub/invoice mutation. Operator handles via dashboard. Maps to Stripe "Keep active." |
-| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; charging + dunning paused until the invoice is paid or the operator resumes (amendment 2026-10-22). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
+| `pause` | **Calls `subscription.Service.PauseCollection(behavior=keep_as_draft)`** — not the pre-amendment hard `PauseAtomic`. Cycle keeps drafting invoices; invoices drafted during the pause are not charged and start no dunning, and they stay drafts after collection resumes (only later cycles finalize). Collection resumes when the operator resumes it or, for a pause dunning set, when the invoice whose dunning set it is paid (amendment 2026-10-22, "a dunning pause lifts when its invoice is paid"). Runs already open on earlier invoices keep retrying (amendment 2026-10-22, "a collection pause does not stop open runs"). Matches Stripe's `pause_collection.behavior=keep_as_draft`. The hard-pause path silently skipped invoice generation for the affected periods (per ADR-035 analysis) — non-Stripe and destructive. |
 | `mark_uncollectible` | Calls `invoice.Service.MarkUncollectible` — flips the unpaid invoice to status='uncollectible' (new status, migration 0089). Stripe-standard semantics: receivable closed but invoice stays in financial reporting. Distinct from voided. |
 | `cancel_subscription` | Calls `subscription.Service.Cancel`. Stripe-default terminal action; supported by 3 of 4 reference platforms. Previously missing — operator workflow required a manual cancel step after escalation. |
 
@@ -353,6 +353,58 @@ then keeps the default. The no-policy skip of point 2 is unchanged and now
 applies only to accounts created before this change. Details, values and
 the rejected alternatives are in
 [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md).
+
+## Amendment (2026-10-22) — a collection pause does not stop open runs
+
+The `pause` row above said "charging + dunning paused until operator
+resumes". That was true only for invoices created during the pause. A
+collection pause keeps each NEW invoice a draft, so it is never charged and
+never starts a run. It does not touch a run already open on an invoice that
+was finalized before the pause: `processRun` has no pause check, so the run
+keeps its schedule and each retry charges the customer's default card. Only
+the charge sweeps (the queued auto-charge, and the charge when a card is
+added) skip a paused subscription.
+
+This behavior stays. Stripe does the same: "Invoices created before you pause
+subscriptions continue to be retried unless you void them"
+([Pause payment collection](https://docs.stripe.com/billing/subscriptions/pause-payment),
+read 2026-10-22). The copy was wrong, not the code. The no-card notice said
+"adding a card won't charge this invoice" and the queued notice said "won't be
+charged automatically" while the next retry would charge (product bug-class
+sweep 2026-10-21, A2).
+
+Where it shows:
+
+- Both paused-collection invoice notices read the invoice's run. With a run
+  that is still retrying, they say the retries continue, and their Details say
+  how to stop them: void the invoice or mark it uncollectible. With no open
+  run, they keep saying nothing charges the invoice until collection resumes.
+- The `PauseCollection` docstring and the pause-collection API description
+  say the same.
+- The dunning escalation email after a `pause` final action says new invoices
+  for the subscription will not be charged automatically, not that collection
+  on the account stopped. The dunning policy outcome and the write-off
+  dialog's "Also pause collection" hint say new invoices stay drafts and
+  retries already running on other unpaid invoices continue.
+- The pause dialog on the subscription page says the same: retries already
+  running on unpaid invoices continue, and voiding the invoice or marking it
+  uncollectible stops them.
+- "Retries continue" is said for a run that is active, not paused, and not
+  waiting on a failed final action. A run whose final action failed stays
+  active with every attempt used, and its next tick re-attempts only the
+  action. One case still reads as retrying when no retry is due: an open run
+  whose attempt count is at or above a `max_retry_attempts` lowered after the
+  run started. Its next tick runs only the final action
+  (`processRun` exhausts on entry). The refused-card notice reads the same
+  flag and has the same gap.
+
+When it happens: an operator pauses collection on a subscription that has an
+unpaid invoice in dunning. When dunning's own `pause` final action fires, the
+run on the invoice that exhausted is closed, but runs open on the
+subscription's other unpaid invoices keep retrying.
+
+There is no control that pauses one run. The `paused` column on
+`invoice_dunning_runs` is read by `processRun`, but nothing sets it.
 
 ## Amendment 2026-10-22 — a dunning pause lifts when its invoice is paid
 

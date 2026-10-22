@@ -344,11 +344,17 @@ func (h *Handler) assemblePDFContext(ctx context.Context, tenantID string, cn do
 		TaxID:        billTo.TaxID,
 	}
 
+	// The support URL is branding, so it is the current setting even when the
+	// seller block is the issue-time copy.
 	supplier := cn.SupplierSnapshot
-	if supplier == nil && h.settings != nil {
+	var supportURL string
+	if h.settings != nil {
 		if ts, err := h.settings.Get(ctx, tenantID); err == nil {
-			live := domain.NewDocumentSupplier(ts)
-			supplier = &live
+			if supplier == nil {
+				live := domain.NewDocumentSupplier(ts)
+				supplier = &live
+			}
+			supportURL = ts.SupportURL
 		}
 	}
 	var ci CompanyInfo
@@ -366,6 +372,7 @@ func (h *Handler) assemblePDFContext(ctx context.Context, tenantID string, cn do
 			TaxID:        supplier.TaxID,
 		}
 	}
+	ci.SupportURL = supportURL
 
 	// Original invoice reference. Absent the invoice getter we still render
 	// the CN — the number lives on the CN itself, so only date/tax metadata

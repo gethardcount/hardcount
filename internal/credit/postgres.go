@@ -281,7 +281,7 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 //
 //   - The caller's candidate snapshot (ListExpiredGrants*) is stale by
 //     construction — it was read on a different, already-closed tx. A
-//     backdated ApplyToInvoiceAtomic (at < expires_at passes the eligibility
+//     backdated ApplyToInvoiceAtomic (at <= expires_at passes the eligibility
 //     filter on a not-yet-retired grant) can drain the grant between the
 //     list read and this call. `remaining` is therefore recomputed HERE,
 //     under the same FOR UPDATE row lock the apply/adjust paths take —
@@ -467,7 +467,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 	// consumed_cents stays consistent with the ledger sum. The raw-SUM
 	// balance check above is NOT sufficient on its own: it counts
 	// expired-but-unswept grant headroom that drainPositiveBlocks
-	// rightly refuses to drain (expires_at <= now). Booking the full
+	// rightly refuses to drain (expires_at < now). Booking the full
 	// deduction against blocks that only partially absorbed it would
 	// drive SUM(amount_cents) below the blocks' remaining capacity —
 	// the exact negative-ledger drift the attribution model exists to
@@ -548,7 +548,11 @@ func (s *PostgresStore) AdjustAtomicAudited(
 // callers — drawdown (ApplyToInvoiceAtomic) AND clawback attribution
 // (AdjustAtomic) — promotional-first is intended for both. Skips blocks
 // past their expires_at — those will be retired by the expiry path;
-// draining them here would mask the retirement.
+// draining them here would mask the retirement. A block is live at `now`
+// when now <= expires_at (ADR-071 §2, amended 2026-10-22): a grant valid
+// through Nov 30 is stored as the next midnight, the instant the November
+// period ends, and pays that period's invoice. The expiry sweeps use the
+// same rule (`expires_at < now` is expired).
 //
 // Caller MUST hold a FOR UPDATE lock on the customer's ledger rows.
 // In a clean ledger `available` equals the SUM(amount_cents) balance
@@ -564,7 +568,7 @@ func (s *PostgresStore) drainPositiveBlocks(
 		  AND customer_id = $2
 		  AND amount_cents > 0
 		  AND consumed_cents < amount_cents
-		  AND (expires_at IS NULL OR expires_at > $3)
+		  AND (expires_at IS NULL OR expires_at >= $3)
 		ORDER BY (grant_kind IS NOT DISTINCT FROM 'promotional') DESC,
 		         expires_at NULLS LAST, created_at, id
 	`, tenantID, customerID, now)
@@ -954,7 +958,7 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 // that actually MOVES commit credit still goes through the locked reader.
 //
 // Drawability mirrors drainPositiveBlocks' liveness predicate exactly —
-// positive, not exhausted, not past expires_at at `now` — because the one thing
+// positive, not exhausted, expires_at at or after `now` — because the one thing
 // this must never do is promise the operator spendable credit that the drawdown
 // would refuse to spend. `now` is the caller's resolver-bound instant for the
 // same reason the drain takes one: on a clock-pinned invoice, wall-clock is the
@@ -981,7 +985,7 @@ func (s *PostgresStore) CommitGrantExposure(
 			CASE
 				WHEN amount_cents > 0
 				 AND consumed_cents < amount_cents
-				 AND (expires_at IS NULL OR expires_at > $3)
+				 AND (expires_at IS NULL OR expires_at >= $3)
 				THEN amount_cents - consumed_cents
 				ELSE 0
 			END,
@@ -1236,6 +1240,43 @@ const balanceWriteOffColumns = `COALESCE(SUM(CASE WHEN entry_type = 'expiry' THE
 			                   AND COALESCE(metadata->>'reason', '') NOT IN ('commit_void_retire', 'commit_refund_retire')
 			              THEN ABS(amount_cents) ELSE 0 END), 0)`
 
+// customerCurrenciesSQL is the currency each customer is billed in
+// (CreditBalance.Currency), one row (customer_id, currency) for every id the
+// customerIDs query yields in a column named id. The ledger has no currency
+// column (ADR-100), so a balance reads in the customer's. The first two arms
+// are the order the engine stamps an invoice's currency in
+// (Engine.invoiceCurrency): the billing profile, then the plan of the live
+// subscription. A customer with neither takes the newest invoice's currency,
+// then the workspace default; the dashboard's customer page resolves the same
+// order (web-v2/src/lib/customerCurrency.ts). ADR-100 keeps a customer's live
+// subscriptions in one currency, so which live item is read does not matter.
+// Each arm reads its table once for all the customers, not once per customer:
+// subscriptions has no index on customer_id. $1 is the tenant id.
+func customerCurrenciesSQL(customerIDs string) string {
+	return `WITH ids AS (` + customerIDs + `),
+		live_plan AS (
+			SELECT DISTINCT ON (s.customer_id) s.customer_id, p.currency
+			  FROM subscriptions s
+			  JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
+			  JOIN plans p ON p.id = si.plan_id
+			 WHERE s.tenant_id = $1 AND s.status IN ('active', 'trialing')
+			   AND s.customer_id IN (SELECT id FROM ids)
+			 ORDER BY s.customer_id, s.current_billing_period_start DESC NULLS LAST, s.created_at DESC),
+		newest_invoice AS (
+			SELECT DISTINCT ON (i.customer_id) i.customer_id, i.currency
+			  FROM invoices i
+			 WHERE i.tenant_id = $1 AND i.customer_id IN (SELECT id FROM ids)
+			 ORDER BY i.customer_id, i.created_at DESC)
+		SELECT ids.id AS customer_id,
+		       UPPER(COALESCE(NULLIF(bp.currency, ''), lp.currency, ni.currency,
+		             (SELECT NULLIF(ts.default_currency, '') FROM tenant_settings ts WHERE ts.tenant_id = $1),
+		             'USD')) AS currency
+		  FROM ids
+		  LEFT JOIN customer_billing_profiles bp ON bp.tenant_id = $1 AND bp.customer_id = ids.id
+		  LEFT JOIN live_plan lp ON lp.customer_id = ids.id
+		  LEFT JOIN newest_invoice ni ON ni.customer_id = ids.id`
+}
+
 func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1251,9 +1292,10 @@ func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID str
 			COALESCE(SUM(amount_cents), 0),
 			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-			`+balanceWriteOffColumns+`
+			`+balanceWriteOffColumns+`,
+			(SELECT cc.currency FROM (`+customerCurrenciesSQL("SELECT $2::text AS id")+`) cc)
 		FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2
-	`, tenantID, customerID).Scan(&b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted)
+	`, tenantID, customerID).Scan(&b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted, &b.Currency)
 
 	return b, err
 }
@@ -1261,7 +1303,7 @@ func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID str
 // GetSpendableBalance is the credit a draw at `at` could use: the ledger sum,
 // less what is left of every positive block already past its expires_at. Such
 // a block stays in the sum until the expiry sweep writes its expiry entry,
-// but drainPositiveBlocks skips it (expires_at > now), so an invoice issued
+// but drainPositiveBlocks skips it (it takes expires_at >= now), so an invoice issued
 // in between draws nothing from it. The expired predicate is the exact
 // complement of the drain's liveness predicate; keep the two in step.
 // One statement, so the sum and the expired part are the same snapshot.
@@ -1278,7 +1320,7 @@ func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, custo
 		     - COALESCE(SUM(CASE
 		           WHEN amount_cents > 0
 		            AND consumed_cents < amount_cents
-		            AND expires_at IS NOT NULL AND expires_at <= $3
+		            AND expires_at IS NOT NULL AND expires_at < $3
 		           THEN amount_cents - consumed_cents
 		           ELSE 0
 		       END), 0)
@@ -1295,16 +1337,22 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT
-			customer_id,
-			COALESCE(SUM(amount_cents), 0),
-			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-			`+balanceWriteOffColumns+`
-		FROM customer_credit_ledger
-		WHERE tenant_id = $1
-		GROUP BY customer_id
-		ORDER BY SUM(amount_cents) DESC
+		WITH balances (customer_id, balance_cents, total_granted, total_used, total_expired, total_retired, total_deducted) AS (
+			SELECT
+				customer_id,
+				COALESCE(SUM(amount_cents), 0),
+				COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
+				`+balanceWriteOffColumns+`
+			FROM customer_credit_ledger
+			WHERE tenant_id = $1
+			GROUP BY customer_id
+		)
+		SELECT b.customer_id, b.balance_cents, b.total_granted, b.total_used,
+		       b.total_expired, b.total_retired, b.total_deducted, cc.currency
+		FROM balances b
+		JOIN (`+customerCurrenciesSQL("SELECT customer_id AS id FROM balances")+`) cc ON cc.customer_id = b.customer_id
+		ORDER BY b.balance_cents DESC
 	`, tenantID)
 	if err != nil {
 		return nil, err
@@ -1314,7 +1362,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 	var balances []domain.CreditBalance
 	for rows.Next() {
 		var b domain.CreditBalance
-		if err := rows.Scan(&b.CustomerID, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted); err != nil {
+		if err := rows.Scan(&b.CustomerID, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted, &b.Currency); err != nil {
 			return nil, err
 		}
 		balances = append(balances, b)

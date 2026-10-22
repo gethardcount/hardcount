@@ -11,8 +11,8 @@ import type { SubscriptionPauseCollectionBehavior } from './subscriptionPauseCol
 import type { SubscriptionPauseCollectionSetBy } from './subscriptionPauseCollectionSetBy';
 
 /**
- * Present on a subscription while collection is paused. Invoices are
- * still created, but stay drafts and are not charged.
+ * Present on a subscription while collection is paused. New invoices
+ * are still created, but stay drafts and are not charged.
  */
 export interface SubscriptionPauseCollection {
   behavior: SubscriptionPauseCollectionBehavior;
