@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -483,5 +484,130 @@ func TestUsageAfterClose_HeldReleaseInTheGrace_PendingPlan(t *testing.T) {
 	out := r.heldRelease(lagB.Add(10*time.Minute), lagB.Add(20*time.Minute))
 	if count(out, "released") != 2 || count(out, "in_open_period") != 2 || count(out, "not_on_plan") != 0 {
 		t.Errorf("release answer = %v, want released 2, in_open_period 2", out)
+	}
+}
+
+// anthropicCall is one of the LiteLLM 1.83.9 records captured from a mock
+// Anthropic (internal/integrations/litellm/testdata), renamed to id, sent for
+// user and ended at end. "cache-write-5m-1h" is 1,000 fresh input tokens,
+// 40,000 5-minute and 60,000 1-hour cache writes and 500 output tokens;
+// "cache-hit" is a LiteLLM response-cache hit.
+func anthropicCall(t *testing.T, name, id, user string, end time.Time) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile("../integrations/litellm/testdata/litellm-1.83.9-mock-anthropic-" + name + ".json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	p := map[string]any{}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	at := float64(end.Unix())
+	p["id"], p["end_user"] = id, user
+	p["startTime"], p["completionStartTime"], p["endTime"] = at-1, at-1, at
+	return p
+}
+
+// TestUsageAfterClose_LiteLLMCacheWritesFlaggedPerWrittenRow: a call with
+// cache writes that ended in April and arrives after April's invoice is
+// written split, as four rows (input, the 5m and 1h writes, output), and
+// answers after_close 4. Its replay writes nothing and answers 0. No invoice
+// bills the four rows.
+//
+// Mutation checks: count the after-close rows of both mappings → 6 (the two
+// pre-split rows on top of the four written); count every after-close row
+// of the written mapping, written or deduplicated → the replay answers 4.
+func TestUsageAfterClose_LiteLLMCacheWritesFlaggedPerWrittenRow(t *testing.T) {
+	skipShort(t)
+	r, planT := newTokensRig(t)
+	r.newSub("llm", planT, lagP0, nil)
+	r.must(http.MethodPost, "/v1/integrations/litellm/spend", lagP0.AddDate(0, 0, 9),
+		litellmCall("call-open", r.custExt, lagP0.AddDate(0, 0, 9), 10, 5), http.StatusOK)
+	r.run(lagB.Add(2 * time.Hour))
+	api0 := afterCloseCount(t, "api")
+
+	late := anthropicCall(t, "cache-write-5m-1h", "cw-late", r.custExt, lagB.Add(-2*time.Minute))
+	out := r.must(http.MethodPost, "/v1/integrations/litellm/spend", lagB.Add(3*time.Hour), late, http.StatusOK)
+	if count(out, "accepted") != 4 || count(out, "after_close") != 4 {
+		t.Errorf("late call answer = %v, want accepted 4 and after_close 4", out)
+	}
+	if got := afterCloseCount(t, "api") - api0; got != 4 {
+		t.Errorf("%s{origin=api} moved by %v, want 4", afterCloseMetric, got)
+	}
+	out = r.must(http.MethodPost, "/v1/integrations/litellm/spend", lagB.Add(4*time.Hour), late, http.StatusOK)
+	if count(out, "accepted") != 0 || count(out, "deduplicated") != 4 || count(out, "after_close") != 0 {
+		t.Errorf("replay answer = %v, want deduplicated 4 and after_close 0", out)
+	}
+	if got := afterCloseCount(t, "api") - api0; got != 4 {
+		t.Errorf("%s{origin=api} moved by %v after the replay, want still 4", afterCloseMetric, got)
+	}
+
+	r.run(lagP2.Add(2 * time.Hour))
+	if got := usageBilled(r.invoices()); got != 15 {
+		r.logInvoices(r.invoices())
+		t.Errorf("usage on all invoices = %dc, want 15c: the open call only", got)
+	}
+}
+
+// TestUsageAfterClose_LiteLLMPreSplitCallCountsOldWayRows: a call whose
+// :input a release before the cache-write split stored in April, at the old
+// quantity (fresh input plus the writes), and whose :output it never stored.
+// LiteLLM resends it after April's invoice. Velox writes it the old way: its
+// :input is deduplicated and only its :output is written, with no write rows.
+// The answer counts after_close 1, the :output. The :input stays billed on
+// April's invoice; the :output is billed nowhere.
+//
+// Mutation checks: count the after-close rows of both mappings → 2; count
+// every after-close row of the written mapping, written or deduplicated → 2.
+func TestUsageAfterClose_LiteLLMPreSplitCallCountsOldWayRows(t *testing.T) {
+	skipShort(t)
+	r, planT := newTokensRig(t)
+	r.newSub("llm", planT, lagP0, nil)
+	end := lagB.Add(-2 * time.Minute)
+	out := r.postEvent("/v1/usage-events", "tokens", "ps-1:input", end, end.Add(time.Minute), 101000, http.StatusCreated)
+	wantStatus(t, "pre-split :input while April is open", out, "")
+	r.run(lagB.Add(2 * time.Hour))
+	api0 := afterCloseCount(t, "api")
+
+	call := anthropicCall(t, "cache-write-5m-1h", "ps-1", r.custExt, end)
+	out = r.must(http.MethodPost, "/v1/integrations/litellm/spend", lagB.Add(3*time.Hour), call, http.StatusOK)
+	if count(out, "accepted") != 1 || count(out, "deduplicated") != 1 || count(out, "after_close") != 1 {
+		t.Errorf("resend of a pre-split call = %v, want accepted 1, deduplicated 1 and after_close 1", out)
+	}
+	if got := afterCloseCount(t, "api") - api0; got != 1 {
+		t.Errorf("%s{origin=api} moved by %v, want 1", afterCloseMetric, got)
+	}
+
+	r.run(lagP2.Add(2 * time.Hour))
+	invs := r.invoices()
+	if got := r.cycleInvoice(invs, lagP0).sum("usage"); got != 101000 {
+		r.logInvoices(invs)
+		t.Errorf("April usage = %dc, want 101000c: the pre-split :input", got)
+	}
+	if got := usageBilled(invs); got != 101000 {
+		r.logInvoices(invs)
+		t.Errorf("usage on all invoices = %dc, want 101000c: no write rows on top, the flagged :output nowhere", got)
+	}
+}
+
+// TestUsageAfterClose_LiteLLMCacheHitCountsNothing: a LiteLLM response-cache
+// hit that ended in April and arrives after April's invoice writes nothing,
+// so nothing is after_close.
+//
+// Mutation check: bill cache hits in the mapper → accepted 2, after_close 2.
+func TestUsageAfterClose_LiteLLMCacheHitCountsNothing(t *testing.T) {
+	skipShort(t)
+	r, planT := newTokensRig(t)
+	r.newSub("llm", planT, lagP0, nil)
+	r.run(lagB.Add(2 * time.Hour))
+	api0 := afterCloseCount(t, "api")
+
+	hit := anthropicCall(t, "cache-hit", "hit-late", r.custExt, lagB.Add(-2*time.Minute))
+	out := r.must(http.MethodPost, "/v1/integrations/litellm/spend", lagB.Add(3*time.Hour), hit, http.StatusOK)
+	if count(out, "accepted") != 0 || count(out, "cache_hits") != 1 || count(out, "after_close") != 0 {
+		t.Errorf("late cache hit answer = %v, want accepted 0, cache_hits 1 and after_close 0", out)
+	}
+	if got := afterCloseCount(t, "api") - api0; got != 0 {
+		t.Errorf("%s{origin=api} moved by %v, want 0", afterCloseMetric, got)
 	}
 }
