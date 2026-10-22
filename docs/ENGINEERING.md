@@ -17,7 +17,7 @@ comes with its proof and a link to where you can check it.
 ## Simplicity
 
 - **One Postgres.** All billing data lives there; Redis is used for rate limiting only. No queue broker, warehouse or workflow engine until a measurement says Postgres is not enough.
-  **Proof:** one `db.m7g.4xlarge` took 12,000 usage events a second at p99 22.6 ms, in 4 of 5 ten-minute runs. [How much traffic Velox handles](scale.md)
+  **Proof:** one `db.m7g.4xlarge` took 12,000 usage events a second at batch 10 (ten events per request), p99 22.6 ms, in 4 of 5 ten-minute runs on stock settings. [How much traffic Velox handles](scale.md)
 - **Prefer one path for each job.** A second path for the same job is where bugs have hidden.
   **Proof:** a per-subscription timezone snapshot shipped and was then removed ([ADR-074](adr/074-subscription-billing-timezone-snapshot.md) → [ADR-077](adr/077-org-level-billing-timezone.md)).
 - **The smallest correct change first.** An extra mechanism needs a reason: the defect it prevents, written in its ADR or PR. [Decision records](adr/README.md)

@@ -100,7 +100,8 @@ Before a run, read [Traps that cost time](#traps-that-cost-time-and-will-cost-yo
 ## Method and the gates — stated once
 
 Every current figure on this page was measured under one protocol. The
-superseded 2026-08-15 figures in Appendix B and the laptop history predate
+superseded 2026-08-15 figures in
+[Appendix B](../dev/records/sustained-throughput-runs-2026-08.md#appendix-b--superseded-figures) and the laptop history predate
 it. The run chapters in
 [Appendix A](../dev/records/sustained-throughput-runs-2026-08.md#appendix-a--the-run-journal) carry their per-run specifics.
 

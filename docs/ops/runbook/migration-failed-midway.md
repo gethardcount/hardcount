@@ -60,6 +60,8 @@ If it says `waited 5s for a table lock`, see
 
 ## It waited 5s for a table lock
 
+First stop the API: see [Before anything else](#before-anything-else).
+
 **Symptom:**
 
 ```

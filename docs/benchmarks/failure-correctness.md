@@ -161,7 +161,7 @@ The index and the check fail independently. An index can be:
 ## 5. How fast a dead leader is replaced
 
 Since 2026-08-30 (ADR-114), leadership is a per-tick lease row on the database
-clock (a [leader lease](../dev/glossary.md#running-velox)). It replaced a session
+clock (a [leader lease](../ops/runbook/index.md#words-on-these-pages)). It replaced a session
 advisory lock. The lease has a 10 s TTL, is renewed every 3 s, and is polled
 at least every 5 s. The old holder stops itself after 6 s without an
 acknowledged renew.

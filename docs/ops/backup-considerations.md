@@ -133,6 +133,8 @@ Each run adds one line to `~/.velox/drill.log`, so you can see how long backups 
 Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the restore failed, `4` row counts differ, `5` the container did not start.
 
 After a drill passes, you can also start Velox against a restored copy, check that `/health/ready` answers 200, and run `go run ./cmd/velox-doctor` against it. It should report no problems.
+Run it as the database owner. The app role (`velox_app`) sees no rows and
+reports clean.
 
 ## Checks after a restore
 

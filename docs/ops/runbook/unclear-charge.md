@@ -27,17 +27,16 @@ hours. Their `payment_status` is `unknown`, and they have a
 - The reconciler is not running. The reconciler re-checks payment status
   with Stripe on each scheduler tick. See
   [A background job is stuck](background-job-stuck.md).
-- The Stripe PaymentIntent (PI) waits at `requires_action`: the bank asked
-  for authentication (3-D Secure) and nobody has completed it. The
-  reconciler settles only final Stripe outcomes, so it skips this PI on
-  every pass, and it does not end on its own.
+- The Stripe PaymentIntent (PI) is still not final at Stripe (for example
+  `requires_action`). The reconciler settles only final outcomes, so it
+  records what it saw and skips it every pass.
 
 **Check:**
 
 ```sql
 SELECT id, payment_status, stripe_payment_intent_id, updated_at
 FROM invoices
-WHERE payment_status = 'unknown' AND stripe_payment_intent_id IS NOT NULL
+WHERE payment_status = 'unknown' AND stripe_payment_intent_id <> ''
   AND updated_at < now() - interval '1 hour'
 LIMIT 20;
 ```
@@ -53,8 +52,8 @@ it again. Velox refuses to charge an invoice whose payment is `unknown`
 reconciler re-checks it every tick and settles any PI that has reached a
 final state at Stripe.
 
-To end it sooner, cancel the PI in Stripe (the reconciler then records it as
-failed), or ask the customer to complete authentication.
+To end it sooner, cancel the PI in Stripe. The reconciler then records it as
+failed.
 
 **Verify:** the query above no longer returns the invoice, and the invoice
 no longer shows `payment_unconfirmed`.

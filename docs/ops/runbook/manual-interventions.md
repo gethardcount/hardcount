@@ -43,7 +43,8 @@ this only when the dashboard **Resolve** action is unavailable.
 
 ## Mark an invoice paid (offline payment received)
 
-Use **Record payment** on the invoice page, or
+Use **Record offline payment** in the invoice's ⋯ menu (on a written-off
+invoice, the **Record payment** button), or
 `POST /v1/invoices/{id}/record-payment` (optional body
 `{"note": "Cheque #1234"}`). It also closes the dunning run, sends
 `invoice.paid` and writes the audit row, which an SQL update would skip.
