@@ -64,7 +64,22 @@ A dunning run is the automatic retries after a failed payment.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
-- [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`, add any new model id to `modelFamilies` (`internal/integrations/litellm/mapper.go`) and `pricingPageClaudeIDs`, and run `go test ./internal/recipe/ ./internal/integrations/litellm/`. If a price moved or a model was added, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price.
+- [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`. If a price moved, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price. If a model was added, also:
+  - Add its id to `modelFamilies` in `internal/integrations/litellm/mapper.go`. If its price depends on the prompt's length, add it to `promptTiers` too.
+  - Add its rules to `anthropic_style.yaml`, bump the version, and add a CHANGELOG line telling existing installs to add its prices.
+  - In `internal/integrations/litellm/model_families_test.go`, add it to `pricingPageClaudeIDs`, and remove it from `mustStayRaw` if it is there.
+  - In `internal/integrations/litellm/testdata/list_claude_model_ids.py`, add it to `FAMILIES` and `PAGE`, and remove it from `PROBES` if it is there. Then regenerate the list (do not edit it by hand):
+
+    ```bash
+    pip download litellm==1.83.9 --no-deps -d /tmp/litellm-1.83.9
+    unzip -o /tmp/litellm-1.83.9/litellm-1.83.9-py3-none-any.whl \
+      litellm/model_prices_and_context_window_backup.json -d /tmp/litellm-1.83.9
+    python3 -I internal/integrations/litellm/testdata/list_claude_model_ids.py \
+      /tmp/litellm-1.83.9/litellm/model_prices_and_context_window_backup.json \
+      > internal/integrations/litellm/testdata/litellm-1.83.9-claude-model-ids.tsv
+    ```
+
+  Then run `go test ./internal/recipe/ ./internal/integrations/litellm/`.
 
 ## Fresh install and upgrade
 

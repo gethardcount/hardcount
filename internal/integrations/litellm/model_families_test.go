@@ -8,27 +8,33 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/shopspring/decimal"
+	"gopkg.in/yaml.v3"
 )
 
-// TestCanonicalModel_ClaudeIDs runs every Claude model name a LiteLLM 1.83.9
-// spend log can carry, the pricing page's ids in each platform's form, and
-// probes, against the expected family in the golden list. The list is
-// written by testdata/list_claude_model_ids.py from the reviewed rule in the
-// design (velox-ops design-litellm-model-families-2026-10-22.md), not from
-// this code.
-//
-// Decision 2 (2026-10-22): a Claude name maps to a family only as the
-// family's exact id, or the id plus a date or version ending. Anything else
-// keeps its raw name and is unpriced, loudly. It never folds into an older
-// family.
-func TestCanonicalModel_ClaudeIDs(t *testing.T) {
+// goldenRow is one line of testdata/litellm-1.83.9-claude-model-ids.tsv.
+type goldenRow struct {
+	source, form, want string
+	// litellmKey is the LiteLLM price-JSON key the form comes from, and
+	// litellmIn and litellmOut are that key's own price in dollars per
+	// million tokens; "" when it has none.
+	litellmKey, litellmIn, litellmOut string
+}
+
+// regenerate is how to fix the golden list after a model is added; it is
+// in every failure message of the tests that read it.
+const regenerate = "if you added a model, add it to FAMILIES and PAGE in testdata/list_claude_model_ids.py, drop any probe that is now its id, and regenerate the list (docs/dev/release-checklist.md)"
+
+func readGolden(t *testing.T) []goldenRow {
+	t.Helper()
 	f, err := os.Open("testdata/litellm-1.83.9-claude-model-ids.tsv")
 	if err != nil {
 		t.Fatalf("open golden list: %v", err)
 	}
 	defer func() { _ = f.Close() }()
 
-	rows := 0
+	var rows []goldenRow
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
@@ -36,13 +42,38 @@ func TestCanonicalModel_ClaudeIDs(t *testing.T) {
 			continue
 		}
 		parts := strings.Split(line, "\t")
-		if len(parts) != 3 {
+		if len(parts) != 6 {
 			t.Fatalf("bad golden line %q", line)
 		}
-		form, want := parts[1], parts[2]
-		rows++
-		if got := canonicalModel(form); got != want {
-			t.Errorf("canonicalModel(%q) = %q, want %q (%s)", form, got, want, parts[0])
+		rows = append(rows, goldenRow{parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]})
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("read golden list: %v", err)
+	}
+	if len(rows) < 900 {
+		t.Fatalf("golden list has %d rows, want the full list (>900)", len(rows))
+	}
+	return rows
+}
+
+// TestCanonicalModel_ClaudeIDs runs every Claude model name a LiteLLM 1.83.9
+// spend log can carry, the pricing page's ids in each platform's form, and
+// probes, against the expected family in the golden list. The list is
+// written by testdata/list_claude_model_ids.py from the reviewed rule in the
+// design (velox-ops design-litellm-model-families-2026-10-22.md), not from
+// this code. It is the same rule written a second time, so this test shows
+// the code matches it; TestCanonicalModel_LiteLLMPricesAgree and
+// TestCanonicalModel_EndingGrammar check the rule itself.
+//
+// Decision 2 (2026-10-22): a Claude name maps to a family only as the
+// family's exact id, or the id plus a date or version ending. Anything else
+// keeps its raw name and is unpriced, loudly. It never folds into an older
+// family.
+func TestCanonicalModel_ClaudeIDs(t *testing.T) {
+	for _, r := range readGolden(t) {
+		form := r.form
+		if got := canonicalModel(form); got != r.want {
+			t.Errorf("canonicalModel(%q) = %q, want %q (%s); %s", form, got, r.want, r.source, regenerate)
 		}
 		// No name may match two Claude families: with strict endings the
 		// match is unique, so the family list's order cannot matter.
@@ -57,11 +88,177 @@ func TestCanonicalModel_ClaudeIDs(t *testing.T) {
 			t.Errorf("%q matches %d Claude families %v, want at most one", form, len(hits), hits)
 		}
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("read golden list: %v", err)
+}
+
+// litellmPriceExceptions are LiteLLM 1.83.9 keys whose own price is not the
+// Anthropic list price of the model they name. Each is LiteLLM's data, not a
+// wrong match: the name is that model's id, or the id plus a snapshot ending.
+var litellmPriceExceptions = map[string]string{
+	// LiteLLM prices this key as Claude 3 Haiku ($0.25 / $1.25).
+	"eu.anthropic.claude-3-5-haiku-20241022-v1:0": "LiteLLM lists Claude 3 Haiku's price",
+	// Google Cloud's own price for Claude 3.5 Haiku, $1 / $5.
+	"vertex_ai/claude-3-5-haiku":          "Google Cloud's price",
+	"vertex_ai/claude-3-5-haiku@20241022": "Google Cloud's price",
+}
+
+// recipeListPrices reads anthropic_style.yaml into model -> token type ->
+// dollars per million tokens. For a model priced by prompt length it keeps
+// the lower tier's price.
+func recipeListPrices(t *testing.T) map[string]map[string]decimal.Decimal {
+	t.Helper()
+	raw, err := os.ReadFile("../../recipe/recipes/anthropic_style.yaml")
+	if err != nil {
+		t.Fatalf("read recipe: %v", err)
 	}
-	if rows < 900 {
-		t.Fatalf("golden list has %d rows, want the full list (>900)", rows)
+	var doc struct {
+		RatingRules []struct {
+			Key             string `yaml:"key"`
+			FlatAmountCents string `yaml:"flat_amount_cents"`
+		} `yaml:"rating_rules"`
+		PricingRules []struct {
+			RatingRule     string            `yaml:"rating_rule"`
+			DimensionMatch map[string]string `yaml:"dimension_match"`
+		} `yaml:"pricing_rules"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse recipe: %v", err)
+	}
+	cents := map[string]decimal.Decimal{}
+	for _, r := range doc.RatingRules {
+		cents[r.Key] = decimal.RequireFromString(r.FlatAmountCents)
+	}
+	out := map[string]map[string]decimal.Decimal{}
+	for _, r := range doc.PricingRules {
+		m := r.DimensionMatch
+		if tier := m[DimContextTier]; tier != "" && tier != ContextTierUpTo100k {
+			continue
+		}
+		if out[m["model"]] == nil {
+			out[m["model"]] = map[string]decimal.Decimal{}
+		}
+		// cents per token x 1,000,000 / 100 = dollars per million tokens.
+		out[m["model"]][m["token_type"]] = cents[r.RatingRule].Mul(decimal.NewFromInt(10_000))
+	}
+	return out
+}
+
+// TestCanonicalModel_LiteLLMPricesAgree checks the matching rule against data
+// it was not written from: LiteLLM's own price for each key. A key that maps
+// to a family must have that family's recipe price for input and output, or
+// 1.1 times it (Bedrock and Google Cloud regional endpoints). A name folded
+// into the wrong family shows here as a price that does not match, such as
+// vertex_ai/claude-opus-4-6@default at Claude Opus 4's $15 / $75 against
+// LiteLLM's $5 / $25.
+func TestCanonicalModel_LiteLLMPricesAgree(t *testing.T) {
+	recipe := recipeListPrices(t)
+	regional := decimal.RequireFromString("1.1")
+	agrees := func(litellm string, list decimal.Decimal) bool {
+		p := decimal.RequireFromString(litellm)
+		return p.Equal(list) || p.Equal(list.Mul(regional))
+	}
+	checked := 0
+	for _, r := range readGolden(t) {
+		if r.source != "litellm" || r.want == "" || r.litellmIn == "" || r.litellmOut == "" {
+			continue
+		}
+		list, ok := recipe[r.want]
+		if !ok {
+			t.Errorf("%q maps to %q, which anthropic_style does not price", r.form, r.want)
+			continue
+		}
+		ok = agrees(r.litellmIn, list["input"]) && agrees(r.litellmOut, list["output"])
+		if _, exempt := litellmPriceExceptions[r.litellmKey]; exempt {
+			if ok {
+				t.Errorf("%q is in litellmPriceExceptions but its LiteLLM price now matches %q: remove it", r.litellmKey, r.want)
+			}
+			continue
+		}
+		checked++
+		if !ok {
+			t.Errorf("%q maps to %q ($%s / $%s per MTok), but LiteLLM prices its key %q at $%s / $%s: is it really that model? %s",
+				r.form, r.want, list["input"], list["output"], r.litellmKey, r.litellmIn, r.litellmOut, regenerate)
+		}
+	}
+	if checked < 300 {
+		t.Fatalf("checked %d mapped LiteLLM forms against their own price, want the full list (>300)", checked)
+	}
+}
+
+// Endings written out by hand, not taken from claudeSnapshot. snapshotEndings
+// keep a model's id that model; notSnapshotEndings make a name the model
+// does not know.
+var (
+	snapshotEndings = []string{
+		"", "-20250929", "-v1", "-v1:0", "-v2:0", "-20250929-v1:0",
+		"@20250805", "@default", "-v2@20241022", "-latest",
+		"-20241022-v2:0:51k", // a Bedrock provisioned-throughput ending
+	}
+	notSnapshotEndings = []string{
+		"-thinking", "-fast", "-preview", "-beta", "-exp", "-9", "-99",
+		"[1m]", "@latest", "@preview", "@2025", "-v", "-v1:0:0", "-2025",
+		"-202509290", "-latest-2", ".1", "_v1", "-20250929-thinking",
+		"@20250929-v1", "-v1@default@default", "-latest-20250929",
+	}
+)
+
+// TestCanonicalModel_EndingGrammar tries every Claude family id with each
+// hand-written ending: a snapshot ending keeps the family, any other ending
+// is a model Velox does not know and keeps its raw name (decision 2). So a
+// looser ending rule fails here even if the golden list's script is
+// loosened the same way.
+func TestCanonicalModel_EndingGrammar(t *testing.T) {
+	for _, f := range modelFamilies {
+		if !strings.HasPrefix(f.id, "claude-") {
+			continue
+		}
+		for _, end := range snapshotEndings {
+			for _, form := range []string{f.id + end, "bedrock/us.anthropic." + f.id + end, "vertex_ai/" + f.id + end} {
+				if got := canonicalModel(form); got != f.recipeToken {
+					t.Errorf("canonicalModel(%q) = %q, want %q: %q is a snapshot ending", form, got, f.recipeToken, end)
+				}
+			}
+		}
+		for _, end := range notSnapshotEndings {
+			for _, form := range []string{f.id + end, "anthropic/" + f.id + end, "bedrock/global.anthropic." + f.id + end} {
+				if got := canonicalModel(form); got != "" {
+					t.Errorf("canonicalModel(%q) = %q, want no family: %q is not a snapshot ending, so the name is a model Velox does not know (decision 2)", form, got, end)
+				}
+			}
+		}
+	}
+}
+
+// TestCanonicalModel_GoldenScriptFamilies: the golden list's script carries
+// its own copy of the Claude families. When one side gains a model and the
+// other does not, say which file to fix.
+func TestCanonicalModel_GoldenScriptFamilies(t *testing.T) {
+	raw, err := os.ReadFile("testdata/list_claude_model_ids.py")
+	if err != nil {
+		t.Fatalf("read script: %v", err)
+	}
+	entry := regexp.MustCompile(`\("(claude-[^"]+)", "(claude-[^"]+)"\)`)
+	script := map[string]string{}
+	for _, m := range entry.FindAllStringSubmatch(string(raw), -1) {
+		script[m[1]] = m[2]
+	}
+	if len(script) == 0 {
+		t.Fatal("no FAMILIES entries found in list_claude_model_ids.py")
+	}
+	code := map[string]string{}
+	for _, f := range modelFamilies {
+		if strings.HasPrefix(f.id, "claude-") {
+			code[f.id] = f.recipeToken
+		}
+	}
+	for id, tok := range code {
+		if script[id] != tok {
+			t.Errorf("modelFamilies has %s -> %s, but FAMILIES in testdata/list_claude_model_ids.py has %q; %s", id, tok, script[id], regenerate)
+		}
+	}
+	for id, tok := range script {
+		if _, ok := code[id]; !ok {
+			t.Errorf("FAMILIES in testdata/list_claude_model_ids.py has %s -> %s, but modelFamilies does not", id, tok)
+		}
 	}
 }
 
