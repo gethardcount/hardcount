@@ -18,9 +18,10 @@ original text.
 
 ## [Unreleased]
 
-**Before upgrading:**
+**There is no upgrade path from Velox 0.8.x: install fresh ([#1354](https://github.com/getvelox/velox/pull/1354)).** Pointed at a v0.8.x database, `velox migrate status` says `no migration record`, and `velox migrate` and start-up stop without changing anything.
 
-- **There is no upgrade path from Velox 0.8.x: install fresh ([#1354](https://github.com/getvelox/velox/pull/1354)).** Pointed at a v0.8.x database, `velox migrate status` says `no migration record`, and `velox migrate` and start-up stop without changing anything.
+**Before upgrading** an install that ran a build of `main` from the switch to goose on ([#1198](https://github.com/getvelox/velox/pull/1198)), which these notes call "the previous release":
+
 - **`velox migrate status` prints a plan now.** A script that reads its old `version: N, dirty: …` line must change.
 - **`velox migrate force` is removed, and `velox migrate rollback` runs only with `APP_ENV=local`.** To go back, restore the backup taken before the upgrade. The restore loses everything written after the backup ([Going back](docs/production-one-vm.md#going-back)).
 - **Velox's three extensions (`pgcrypto`, `citext`, `btree_gist`) must be in schema `public`.** Migrations now run with `search_path = public`, so an extension kept in another schema is not found, and the migration stops without changing anything ([Postgres requirements](docs/ops/postgres-requirements.md#extensions)).

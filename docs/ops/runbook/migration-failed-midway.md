@@ -145,7 +145,10 @@ this database has Velox tables but no migration record (goose_db_version has no 
 `goose_db_version`, the migration record. Velox cannot tell which version
 the tables are at, so it changes nothing. This happens when a backup was
 restored without its migration table, when the record was dropped by hand,
-or when the database is from Velox 0.8.x.
+or when the database is from Velox 0.8.x. Velox looks for a `tenants`
+table in `public` and in every schema on the connecting user's
+`search_path`, so Velox 0.8.x tables kept in the admin user's own schema
+count too.
 
 **Fix:** restore the backup again, with its migration table, into an empty
 database, or point Velox at an empty database. Then run `velox migrate`.

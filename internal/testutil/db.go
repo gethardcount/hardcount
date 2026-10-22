@@ -126,8 +126,8 @@ func cleanDB(t *testing.T, pool *sql.DB) {
 // stale, and an error here is a real error and must surface.
 //
 // Why the record is excluded: truncating it leaves the schema in place
-// with no record; the next process's migrate.Up then runs the baseline on
-// a full database, fails on its first CREATE, and runMigrations drops and
+// with no record; the next process's migrate.Up then refuses the database
+// (ErrNoMigrationRecord: tables, no record), and runMigrations drops and
 // rebuilds everything — a slower route to the same silent-no-op class.
 //
 // Why no CASCADE: every table is in the list, so FK ordering is moot.

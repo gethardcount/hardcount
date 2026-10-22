@@ -12,7 +12,7 @@ import (
 // The version record is public.goose_db_version, which goose writes: one
 // row per applied migration, plus row 0.
 //
-// readState reads it, and whether public.tenants exists, read-only: no
+// readState reads it, and whether a tenants table exists, read-only: no
 // lock, and it creates nothing (goose's own Status, HasPending and
 // GetVersions all create goose_db_version). decide turns what it read into
 // an action. Up, Down, CheckSchemaReady and `velox migrate status` all use
@@ -23,8 +23,11 @@ import (
 
 // state is what readState found.
 type state struct {
-	// veloxTables: public.tenants exists. The baseline creates it, so a
-	// database without it has none of Velox's tables.
+	// veloxTables: a tenants table exists in public, or in a schema on the
+	// connection's search_path. The baseline creates public.tenants. v0.8.x
+	// created its tables unqualified, so an install could keep them in
+	// another schema, such as the admin user's own, which the default
+	// search_path ("$user", public) lists first.
 	veloxTables bool
 	gooseTable  bool
 	// applied lists the versions in goose_db_version, ascending, without
@@ -78,9 +81,12 @@ func readState(ctx context.Context, db *sql.DB) (state, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	// pg_tables, not to_regclass: to_regclass reads the catalog as of now,
-	// not as of the transaction's snapshot.
-	if err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'tenants')`,
+	// not as of the transaction's snapshot. current_schemas is this
+	// connection's search_path, before the migration session sets it to
+	// public.
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'tenants'
+		  AND (schemaname = 'public' OR schemaname = ANY (current_schemas(false))))`,
 	).Scan(&st.veloxTables); err != nil {
 		return st, err
 	}

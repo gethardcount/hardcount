@@ -3,6 +3,7 @@ package testutil
 import (
 	"context"
 	"database/sql"
+	"errors"
 	neturl "net/url"
 	"strings"
 	"testing"
@@ -81,7 +82,7 @@ func scratchDatabase(t *testing.T, name string) (string, *sql.DB) {
 // TestHarness_CleanDBKeepsVersionTables: the migration record,
 // goose_db_version, survives cleanup. Mutation: remove it from
 // cleanDBErr's exclusion → this goes red (and the next process's
-// migrate.Up would run the baseline on a full database).
+// migrate.Up would refuse the database: tables, no record).
 func TestHarness_CleanDBKeepsVersionTables(t *testing.T) {
 	url, pool := scratchDatabase(t, "velox_testutil_clean")
 	if err := migrate.Up(url); err != nil {
@@ -98,8 +99,8 @@ func TestHarness_CleanDBKeepsVersionTables(t *testing.T) {
 }
 
 // TestHarness_ResetAfterFailedUp walks runMigrations' fallback: migrate.Up
-// fails on a database (here its tables with no goose record: the baseline
-// stops on its first CREATE), the reset drops every object that is not an
+// fails on a database (here its tables with no goose record, which Up
+// refuses with ErrNoMigrationRecord), the reset drops every object that is not an
 // extension's, and migrate.Up then builds it from the baseline. Mutation: drop only tables; the baseline's CREATE
 // FUNCTION then fails on a function the reset left behind.
 func TestHarness_ResetAfterFailedUp(t *testing.T) {
@@ -111,8 +112,8 @@ func TestHarness_ResetAfterFailedUp(t *testing.T) {
 	if _, err := pool.ExecContext(ctx, `DROP TABLE public.goose_db_version`); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrate.Up(url); err == nil {
-		t.Fatal("migrate.Up ran the baseline over existing tables without an error")
+	if err := migrate.Up(url); !errors.Is(err, migrate.ErrNoMigrationRecord) {
+		t.Fatalf("migrate.Up on tables with no record: want ErrNoMigrationRecord, got %v", err)
 	}
 	if err := dropAllTablesErr(pool); err != nil {
 		t.Fatalf("reset: %v", err)
