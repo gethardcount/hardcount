@@ -214,4 +214,12 @@ export interface Invoice {
      * instead of inferring it. Always false in live mode.
      */
   is_simulated?: boolean;
+  /**
+     * The test clock this invoice's dates follow: the clock its customer
+     * is pinned to, for cycle and one-off invoices alike. Read from the
+     * customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+     * responses may leave it out. Left out for a customer on wall-clock
+     * time, and always in live mode.
+     */
+  test_clock_id?: string;
 }

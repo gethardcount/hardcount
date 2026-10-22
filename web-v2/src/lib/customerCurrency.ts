@@ -30,7 +30,7 @@ export interface CustomerCurrency {
 }
 
 // A subscription still bills (and so still sets the currency) in these states.
-const LIVE_STATUSES = new Set(['active', 'trialing', 'past_due', 'paused'])
+const LIVE_STATUSES = new Set(['active', 'trialing'])
 
 export interface CurrencySubscription {
   status: string

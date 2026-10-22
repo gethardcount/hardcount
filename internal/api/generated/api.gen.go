@@ -2815,19 +2815,19 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 
 // Defines values for GetV1RatingRulesParamsLifecycleState.
 const (
-	Active   GetV1RatingRulesParamsLifecycleState = "active"
-	Archived GetV1RatingRulesParamsLifecycleState = "archived"
-	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
+	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
+	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
+	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
 func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 	switch e {
-	case Active:
+	case GetV1RatingRulesParamsLifecycleStateActive:
 		return true
-	case Archived:
+	case GetV1RatingRulesParamsLifecycleStateArchived:
 		return true
-	case Draft:
+	case GetV1RatingRulesParamsLifecycleStateDraft:
 		return true
 	default:
 		return false
@@ -2933,6 +2933,33 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 	}
 }
 
+// Defines values for GetV1SubscriptionsParamsStatus.
+const (
+	GetV1SubscriptionsParamsStatusActive   GetV1SubscriptionsParamsStatus = "active"
+	GetV1SubscriptionsParamsStatusArchived GetV1SubscriptionsParamsStatus = "archived"
+	GetV1SubscriptionsParamsStatusCanceled GetV1SubscriptionsParamsStatus = "canceled"
+	GetV1SubscriptionsParamsStatusDraft    GetV1SubscriptionsParamsStatus = "draft"
+	GetV1SubscriptionsParamsStatusTrialing GetV1SubscriptionsParamsStatus = "trialing"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsStatus enum.
+func (e GetV1SubscriptionsParamsStatus) Valid() bool {
+	switch e {
+	case GetV1SubscriptionsParamsStatusActive:
+		return true
+	case GetV1SubscriptionsParamsStatusArchived:
+		return true
+	case GetV1SubscriptionsParamsStatusCanceled:
+		return true
+	case GetV1SubscriptionsParamsStatusDraft:
+		return true
+	case GetV1SubscriptionsParamsStatusTrialing:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetV1SubscriptionsParamsBilling.
 const (
 	Failing GetV1SubscriptionsParamsBilling = "failing"
@@ -2942,6 +2969,21 @@ const (
 func (e GetV1SubscriptionsParamsBilling) Valid() bool {
 	switch e {
 	case Failing:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetV1SubscriptionsParamsCollection.
+const (
+	Paused GetV1SubscriptionsParamsCollection = "paused"
+)
+
+// Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsCollection enum.
+func (e GetV1SubscriptionsParamsCollection) Valid() bool {
+	switch e {
+	case Paused:
 		return true
 	default:
 		return false
@@ -3951,6 +3993,35 @@ type CreditNoteRefundStatus string
 // CreditNoteStatus defines model for CreditNote.Status.
 type CreditNoteStatus string
 
+// CreditNoteStats defines model for CreditNoteStats.
+type CreditNoteStats struct {
+	// ByCurrency Money on issued notes, one entry per currency, the tenant's
+	// default currency first. Empty when no note is issued.
+	ByCurrency []struct {
+		// CreditedCents Added to customers' credit balances.
+		CreditedCents int64  `json:"credited_cents"`
+		Currency      string `json:"currency"`
+
+		// OutOfBandCents Recorded as paid back outside Stripe.
+		OutOfBandCents int64 `json:"out_of_band_cents"`
+
+		// RefundFailedCents Refunds that failed. No money went back to the card.
+		RefundFailedCents int64 `json:"refund_failed_cents"`
+
+		// RefundPendingCents Refunds not confirmed yet. Neither succeeded nor failed, the refund is waiting on Stripe, Stripe's answer was unclear, or its result was never recorded.
+		RefundPendingCents int64 `json:"refund_pending_cents"`
+
+		// RefundedCents Refunds that succeeded. A refund still pending or one that failed is not counted here.
+		RefundedCents int64 `json:"refunded_cents"`
+
+		// TotalCents Total of the issued notes.
+		TotalCents int64 `json:"total_cents"`
+	} `json:"by_currency"`
+	DraftCount  int `json:"draft_count"`
+	IssuedCount int `json:"issued_count"`
+	VoidedCount int `json:"voided_count"`
+}
+
 // Customer defines model for Customer.
 type Customer struct {
 	// AdditionalEmails CC'd on billing documents and billing-state emails (invoice,
@@ -4923,7 +4994,14 @@ type Invoice struct {
 	// TenantId Owning tenant. Returned for diagnostic clarity but redundant
 	// with the API key (which already determines the tenant).
 	// Omitted when empty.
-	TenantId         string `json:"tenant_id,omitempty"`
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// TestClockId The test clock this invoice's dates follow: the clock its customer
+	// is pinned to, for cycle and one-off invoices alike. Read from the
+	// customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
+	// responses may leave it out. Left out for a customer on wall-clock
+	// time, and always in live mode.
+	TestClockId      string `json:"test_clock_id,omitempty"`
 	TotalAmountCents int64  `json:"total_amount_cents"`
 
 	// UncollectibleAt When the invoice was marked uncollectible.
@@ -6168,6 +6246,12 @@ type TenantSettings struct {
 	// `credit.balance_low` webhook fires. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
+	// applies to new credit notes only. Issued notes keep their
+	// numbers. It must differ from `invoice_prefix`, or an invoice and
+	// a credit note would get the same number.
+	CreditNotePrefix string `json:"credit_note_prefix"`
+
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency"`
 
@@ -6258,6 +6342,12 @@ type TenantSettingsInput struct {
 	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
 	// `credit.balance_low` webhook fires. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
+
+	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
+	// applies to new credit notes only. Issued notes keep their
+	// numbers. It must differ from `invoice_prefix`, or an invoice and
+	// a credit note would get the same number.
+	CreditNotePrefix string `json:"credit_note_prefix,omitempty"`
 
 	// DefaultCurrency ISO 4217 code. Zero-decimal currencies (such as JPY) are not supported yet.
 	DefaultCurrency string `json:"default_currency,omitempty"`
@@ -8063,12 +8153,22 @@ type GetV1SubscriptionsParams struct {
 
 	// PlanId Filter to subscriptions with a live item on this plan.
 	PlanId string `form:"plan_id,omitempty" json:"plan_id,omitempty"`
-	Status string `form:"status,omitempty" json:"status,omitempty"`
+
+	// Status Exact status. Any other value is a 400. Paused collection is not
+	// a status: use `collection=paused`.
+	Status GetV1SubscriptionsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
 
 	// Billing `failing` returns only subscriptions that carry a
 	// `billing_failure`: those waiting for their next billing attempt
 	// and those that are parked. Any other value is a 400.
 	Billing GetV1SubscriptionsParamsBilling `form:"billing,omitempty" json:"billing,omitempty"`
+
+	// Collection `paused` returns only active and trialing subscriptions whose
+	// `pause_collection` is in force, whether an operator or dunning set
+	// it. A timed pause ends at `resumes_at` (on the subscription's test
+	// clock, if it has one), even while the response still carries it.
+	// Any other value is a 400.
+	Collection GetV1SubscriptionsParamsCollection `form:"collection,omitempty" json:"collection,omitempty"`
 
 	// Search Case-insensitive substring match on display name or code.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
@@ -8080,8 +8180,14 @@ type GetV1SubscriptionsParams struct {
 	Offset int                         `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// GetV1SubscriptionsParamsStatus defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsStatus string
+
 // GetV1SubscriptionsParamsBilling defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsBilling string
+
+// GetV1SubscriptionsParamsCollection defines parameters for GetV1Subscriptions.
+type GetV1SubscriptionsParamsCollection string
 
 // GetV1SubscriptionsParamsDir defines parameters for GetV1Subscriptions.
 type GetV1SubscriptionsParamsDir string
@@ -9239,6 +9345,9 @@ type ServerInterface interface {
 	// Create a credit note (line-based, or commit relief)
 	// (POST /v1/credit-notes)
 	PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams)
+	// Get credit note totals
+	// (GET /v1/credit-notes/stats)
+	GetCreditNoteStats(w http.ResponseWriter, r *http.Request)
 	// Get a credit note
 	// (GET /v1/credit-notes/{id})
 	GetCreditNote(w http.ResponseWriter, r *http.Request, id string)
@@ -9908,6 +10017,12 @@ func (_ Unimplemented) ListCreditNotes(w http.ResponseWriter, r *http.Request, p
 // Create a credit note (line-based, or commit relief)
 // (POST /v1/credit-notes)
 func (_ Unimplemented) PostV1CreditNotes(w http.ResponseWriter, r *http.Request, params PostV1CreditNotesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Get credit note totals
+// (GET /v1/credit-notes/stats)
+func (_ Unimplemented) GetCreditNoteStats(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11985,6 +12100,26 @@ func (siw *ServerInterfaceWrapper) PostV1CreditNotes(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostV1CreditNotes(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCreditNoteStats operation middleware
+func (siw *ServerInterfaceWrapper) GetCreditNoteStats(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCreditNoteStats(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17133,6 +17268,19 @@ func (siw *ServerInterfaceWrapper) GetV1Subscriptions(w http.ResponseWriter, r *
 		return
 	}
 
+	// ------------- Optional query parameter "collection" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "collection", r.URL.Query(), &params.Collection, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "collection"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "collection", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "search" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "search", r.URL.Query(), &params.Search, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -19849,6 +19997,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/credit-notes", wrapper.PostV1CreditNotes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/v1/credit-notes/stats", wrapper.GetCreditNoteStats)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes/{id}", wrapper.GetCreditNote)

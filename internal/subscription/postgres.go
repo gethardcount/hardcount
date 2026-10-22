@@ -3186,6 +3186,19 @@ func buildSubWhere(f ListFilter) (string, []any) {
 		// can never disagree about which subscriptions are failing.
 		clauses = append(clauses, domain.SubscriptionBillingFailingSQL("s"))
 	}
+	if f.Collection == ListCollectionPaused {
+		// Live rows only, the same rule as the dashboard's pause chip: a
+		// canceled row can still carry the pause columns, and nothing is
+		// collected from it for a reason the pause explains. And only a
+		// pause in force now, the engine's rule (PauseCollection.InForceAt):
+		// a timed pause stops holding collection at resumes_at, though the
+		// resumer leaves it on the row while a period that ended before then
+		// is still open. "Now" is the subscription's test clock, when it has
+		// one, as in the clock's charge sweep.
+		clauses = append(clauses, `(s.pause_collection_behavior IS NOT NULL AND s.status IN ('active','trialing')
+			AND (s.pause_collection_resumes_at IS NULL OR s.pause_collection_resumes_at >
+			     COALESCE((SELECT tc.frozen_time FROM test_clocks tc WHERE tc.id = s.test_clock_id), now())))`)
+	}
 	if f.Search != "" {
 		// One placeholder reused across both columns — Postgres
 		// allows repeating $N, and it keeps the pattern arg single-
