@@ -4,13 +4,13 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api, formatCents } from '@/lib/api'
 import { fillRevenueBuckets } from '@/lib/revenueChart'
-import { outstandingText } from '@/lib/money'
+import { formatCompactCents, outstandingText } from '@/lib/money'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
 import { useAuth } from '@/contexts/AuthContext'
 import { NoticeRow } from '@/components/NoticeRow'
-import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
+import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
 import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
@@ -32,13 +32,6 @@ import { PeriodTabs } from '@/components/analytics/PeriodTabs'
 import { PERIOD_LABELS, type Period } from '@/components/analytics/period'
 import { tooltipStyle, useChartTheme } from '@/lib/chartTheme'
 import { revenueBucketLabel } from '@/lib/chartLabels'
-
-function formatCompactAmount(cents: number): string {
-  const abs = Math.abs(cents)
-  if (abs >= 100_000_00) return `$${Math.round(cents / 100_00)}K`
-  if (abs >= 1_000_00) return `$${(cents / 100_00).toFixed(1)}K`
-  return `$${Math.round(cents / 100)}`
-}
 
 export default function DashboardPage() {
   usePageTitle('Home')
@@ -238,14 +231,14 @@ export default function DashboardPage() {
               value={formatCents(overview.mrr, overview.currency)}
               current={overview.mrr}
               previous={overview.mrr_prev}
-              hint={`ARR ${formatCents(overview.arr, overview.currency)}`}
+              hint={currencyScopedHint(`ARR ${formatCents(overview.arr, overview.currency)}`, overview.currency)}
             />
             <TrendCard
               label="Revenue"
               value={formatCents(overview.revenue, overview.currency)}
               current={overview.revenue}
               previous={overview.revenue_prev}
-              hint={`${overview.paid_invoices} ${overview.paid_invoices === 1 ? 'invoice' : 'invoices'} paid`}
+              hint={currencyScopedHint(`${overview.paid_invoices} ${overview.paid_invoices === 1 ? 'invoice' : 'invoices'} paid`, overview.currency)}
             />
             <TrendCard
               label="Customers"
@@ -296,14 +289,14 @@ export default function DashboardPage() {
                         tickLine={false}
                       />
                       <YAxis
-                        tickFormatter={formatCompactAmount}
+                        tickFormatter={(c: number) => formatCompactCents(c, overview.currency)}
                         tick={{ fontSize: 11, fill: theme.tick }}
                         axisLine={false}
                         tickLine={false}
                         width={55}
                       />
                       <Tooltip
-                        formatter={(value) => [formatCents(Number(value)), 'Revenue']}
+                        formatter={(value) => [formatCents(Number(value), overview.currency), 'Revenue']}
                         labelFormatter={(label) => revenueBucketLabel(String(label))}
                         contentStyle={tooltipStyle(theme)}
                         itemStyle={{ color: theme.tooltipText }}

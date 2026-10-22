@@ -7860,6 +7860,8 @@ export interface components {
         /** @description A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
         CreditBalance: {
             customer_id: string;
+            /** @description The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default. */
+            currency: string;
             /** Format: int64 */
             balance_cents: number;
             /**

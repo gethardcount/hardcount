@@ -7,12 +7,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime, getCurrencySymbol } from '@/lib/api'
+import { api, downloadCreditNotePDF, formatCents, formatDate, formatDateTime, getActiveCurrency, getCurrencySymbol } from '@/lib/api'
+import { amountInputToCents, amountsByCurrencyText, type CurrencyAmount } from '@/lib/money'
 import type { CreditNote, Invoice, Customer } from '@/lib/api'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { downloadCSV } from '@/lib/csv'
+import { CREDIT_NOTE_CSV_HEADERS, creditNoteCsvRow } from '@/lib/creditNoteCsv'
 import { creditNoteStats } from '@/lib/creditNoteStats'
 import { Layout } from '@/components/Layout'
 import { SimulatedBadge } from '@/components/TestClockBadge'
@@ -231,6 +233,8 @@ export default function CreditNotesPage() {
   // Stats — extracted to creditNoteStats so the "Refunded to Card" gating is
   // unit-tested: only refund_status=succeeded counts as money returned.
   const stats = useMemo(() => creditNoteStats(notes), [notes])
+  // One figure per currency; nothing is zero, in the workspace default.
+  const sums = (amounts: CurrencyAmount[]) => amountsByCurrencyText(amounts) ?? formatCents(0, getActiveCurrency())
 
   // Filter + search
   const filtered = useMemo(() => notes.filter(n => {
@@ -260,22 +264,12 @@ export default function CreditNotesPage() {
   const paginated = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const handleExport = () => {
-    const rows = filtered.map(n => [
-      n.credit_note_number,
+    const rows = filtered.map(n => creditNoteCsvRow(
+      n,
       customerMap[n.customer_id]?.display_name || '',
       invoiceMap[n.invoice_id]?.invoice_number || '',
-      n.status,
-      (n.refund_amount_cents / 100).toFixed(2),
-      // Without this column a failed refund's amount reads as returned money
-      // in the spreadsheet — the same lie the stat card told on screen.
-      n.refund_amount_cents > 0 ? (n.refund_status || '') : '',
-      (n.credit_amount_cents / 100).toFixed(2),
-      ((n.out_of_band_amount_cents ?? 0) / 100).toFixed(2),
-      n.reason,
-      (n.total_cents / 100).toFixed(2),
-      n.issued_at || n.created_at,
-    ])
-    downloadCSV('credit-notes.csv', ['Number', 'Customer', 'Invoice', 'Status', 'Refund', 'Refund status', 'Credit', 'Out of band', 'Reason', 'Amount', 'Date'], rows)
+    ))
+    downloadCSV('credit-notes.csv', CREDIT_NOTE_CSV_HEADERS, rows)
   }
 
   return (
@@ -304,18 +298,18 @@ export default function CreditNotesPage() {
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Total credited</p>
-              <p className="text-xl font-semibold text-foreground mt-1 tabular-nums">{formatCents(stats.totalAmount)}</p>
+              <p className="text-xl font-semibold text-foreground mt-1 tabular-nums">{sums(stats.totalAmount)}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Refunded to Card</p>
-              <p className="text-xl font-semibold text-primary mt-1 tabular-nums">{formatCents(stats.totalRefunded)}</p>
-              {(stats.refundPendingCents > 0 || stats.refundFailedCents > 0) && (
+              <p className="text-xl font-semibold text-primary mt-1 tabular-nums">{sums(stats.totalRefunded)}</p>
+              {(stats.refundPendingCents.length > 0 || stats.refundFailedCents.length > 0) && (
                 <p className="text-xs mt-0.5">
-                  {stats.refundPendingCents > 0 && <span className="text-amber-600">{formatCents(stats.refundPendingCents)} pending</span>}
-                  {stats.refundPendingCents > 0 && stats.refundFailedCents > 0 && <span className="text-muted-foreground"> · </span>}
-                  {stats.refundFailedCents > 0 && <span className="text-red-600">{formatCents(stats.refundFailedCents)} failed — not returned</span>}
+                  {stats.refundPendingCents.length > 0 && <span className="text-amber-600">{sums(stats.refundPendingCents)} pending</span>}
+                  {stats.refundPendingCents.length > 0 && stats.refundFailedCents.length > 0 && <span className="text-muted-foreground"> · </span>}
+                  {stats.refundFailedCents.length > 0 && <span className="text-red-600">{sums(stats.refundFailedCents)} failed — not returned</span>}
                 </p>
               )}
             </CardContent>
@@ -323,7 +317,7 @@ export default function CreditNotesPage() {
           <Card>
             <CardContent className="px-5 py-4">
               <p className="text-xs font-medium text-muted-foreground">Applied to Balance</p>
-              <p className="text-xl font-semibold text-emerald-600 mt-1 tabular-nums">{formatCents(stats.totalCredited)}</p>
+              <p className="text-xl font-semibold text-emerald-600 mt-1 tabular-nums">{sums(stats.totalCredited)}</p>
             </CardContent>
           </Card>
           <Card>
@@ -489,7 +483,7 @@ export default function CreditNotesPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-mono text-sm">
-                          {formatCents(note.total_cents)}
+                          {formatCents(note.total_cents, note.currency)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-between">
@@ -785,7 +779,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
 
   const createMutation = useMutation({
     mutationFn: async (data: CreditNoteFormData) => {
-      const amountCents = Math.round(parseFloat(data.amount) * 100)
+      const amountCents = amountInputToCents(data.amount)
       return api.createCreditNote({
         invoice_id: data.invoice_id,
         reason: data.reason,
@@ -861,7 +855,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                           const custName = customerMap[inv.customer_id]?.display_name || ''
                           return (
                             <option key={inv.id} value={inv.id}>
-                              {inv.invoice_number} - {custName} ({formatCents(inv.total_amount_cents)})
+                              {inv.invoice_number} - {custName} ({formatCents(inv.total_amount_cents, inv.currency)})
                             </option>
                           )
                         })}
@@ -881,7 +875,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                     </div>
                     <div>
                       <p className="text-muted-foreground">{isPaid ? 'Amount paid' : 'Amount due'}</p>
-                      <p className="font-medium text-foreground mt-0.5">{formatCents(maxAmount)}</p>
+                      <p className="font-medium text-foreground mt-0.5">{formatCents(maxAmount, selectedInvoice.currency)}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Invoice status</p>
@@ -932,7 +926,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                   name="amount"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Amount ({getCurrencySymbol()})</FormLabel>
+                      <FormLabel>Amount{selectedInvoice ? ` (${getCurrencySymbol(selectedInvoice.currency).trim()})` : ''}</FormLabel>
                       <FormControl>
                         <Input
                           type="number"
@@ -943,7 +937,7 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                           {...field}
                         />
                       </FormControl>
-                      {maxAmount > 0 && <FormDescription>Max: {formatCents(maxAmount)}</FormDescription>}
+                      {selectedInvoice && maxAmount > 0 && <FormDescription>Max: {formatCents(maxAmount, selectedInvoice.currency)}</FormDescription>}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -979,10 +973,10 @@ function CreateCreditNoteDialog({ open, onOpenChange, customerMap, onCreated }: 
                 <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 rounded-lg px-4 py-3 text-sm">
                   <p className="text-blue-800 dark:text-blue-200">
                     {isPaid && refundType === 'refund'
-                      ? `${getCurrencySymbol()}${parseFloat(amount || '0').toFixed(2)} will be refunded to the customer's payment method`
+                      ? `${formatCents(amountInputToCents(amount), selectedInvoice.currency)} will be refunded to the customer's payment method`
                       : isPaid
-                        ? `${getCurrencySymbol()}${parseFloat(amount || '0').toFixed(2)} will be added to the customer's credit balance`
-                        : `Invoice amount due will be reduced by ${getCurrencySymbol()}${parseFloat(amount || '0').toFixed(2)}`
+                        ? `${formatCents(amountInputToCents(amount), selectedInvoice.currency)} will be added to the customer's credit balance`
+                        : `Invoice amount due will be reduced by ${formatCents(amountInputToCents(amount), selectedInvoice.currency)}`
                     }
                   </p>
                 </div>

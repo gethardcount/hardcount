@@ -48,12 +48,13 @@ export function shiftDecimal(s: string, places: number): string {
 }
 
 // money renders a cents-decimal-string scaled by 10^shift with the entity's
-// currency symbol — padded to two decimals, never rounded.
-export function money(cents: string, shift: number, currency?: string): string {
+// currency symbol — padded to two decimals, never rounded. An entity that
+// carries no currency gets no symbol, never the workspace's.
+export function money(cents: string, shift: number, currency: string | undefined): string {
   let v = shiftDecimal(cents, shift - 2)
   const frac = v.split('.')[1] ?? ''
   if (frac.length < 2) v = (frac.length === 0 ? v + '.' : v) + '0'.repeat(2 - frac.length)
-  return getCurrencySymbol(currency) + v
+  return (currency ? getCurrencySymbol(currency) : '') + v
 }
 
 // singular trims a plural unit for "per <unit>" copy (seconds → second).
