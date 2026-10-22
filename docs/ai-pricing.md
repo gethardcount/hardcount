@@ -38,13 +38,30 @@ later.
 
 | Recipe | Meter | Models it prices | Kinds of token (`token_type`) |
 |---|---|---|---|
-| `anthropic_style` | `tokens` | `claude-fable-5`, `claude-mythos-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`, `claude-opus-4.5`, `claude-opus-4.1`, `claude-opus-4`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `claude-sonnet-4`, `claude-haiku-4.5`, `claude-3.5-sonnet`, `claude-3.5-haiku`, `claude-3-opus`, `claude-3-sonnet`, `claude-3-haiku` | `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h` |
+| `anthropic_style` | `tokens` | `claude-fable-5.1`, `claude-mythos-5.1`, `claude-opus-5.5`, `claude-sonnet-5.5`, `claude-haiku-5.5` (two prices, by `context_tier`), `claude-fable-5`, `claude-mythos-5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`, `claude-opus-4.5`, `claude-opus-4.1`, `claude-opus-4`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `claude-sonnet-4`, `claude-haiku-4.5`, `claude-3.5-sonnet`, `claude-3.5-haiku`, `claude-3-opus`, `claude-3-sonnet`, `claude-3-haiku` | `input`, `output`, `cache_read`, `cache_write_5m`, `cache_write_1h` |
 | `openai_style` | `tokens` | `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex`, `gpt-5.1`, `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4.1-nano`, `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`, `gpt-3.5-turbo`, `o1`, `o1-pro`, `o1-mini`, `o3`, `o3-pro`, `o3-mini`, `o4-mini`, `text-embedding-3-large`, `text-embedding-3-small`, `text-embedding-ada-002` | `input`, `output`, and `cache_read` where the model has it |
 | `replicate_style` | `gpu_seconds` | GPU time, by `gpu_type`: `h100`, `a100`, `a40`, `t4`, `cpu` | (none: one price per second for each GPU type) |
 
 Send the model name exactly as the table shows it, in the `model`
 dimension. A LiteLLM proxy does this for you: Velox turns a name such as
 `claude-sonnet-4-5-20250929` into `claude-sonnet-4.5`.
+
+- **A Claude name matches a model only when it is the model's id, or the id
+  with a date or version ending,** such as `-20250929`, `-v1:0`,
+  `@20250805` or `@default`. Bedrock, Google Cloud and Foundry prefixes are
+  removed first. A name Velox does not know, such as `claude-opus-4-9`, is
+  never priced as an older model. It keeps its own name and has no price
+  until you add one ([how](#price-a-claude-model-velox-does-not-know)).
+- **Claude Haiku 5.5 has two prices.** A call whose prompt is over 100,000
+  tokens pays the higher one, for every token of the call, output included.
+  The prompt counts input, cache reads and cache writes. Its events carry
+  `context_tier`: `prompt_up_to_100k` or `prompt_over_100k`. The recipe has
+  a rule for each. If you price Haiku 5.5 yourself, put `context_tier` in
+  every rule: a rule without it prices both at one rate.
+- **The prices are Anthropic's list prices.** On Bedrock and Google Cloud,
+  a regional endpoint costs you 10% more than global for Claude 4.5 and
+  later models; the recipe charges the same for both. Fast mode, US-only
+  inference and batch prices are not applied.
 
 The two AI recipes share the `tokens` meter, so you can apply both. Each
 adds its own plan. All prices on one meter must be in one currency, so
@@ -146,7 +163,8 @@ tokens. Add one rule for each kind of token you sell.
   Priority decides which rule prices each event.
 
 **Usage that no rule picks has no price.** The usual cause is a new model
-name. If the meter has a default price, that price bills it. To set one,
+name. If the meter has a default price, or a broader rule such as
+`{"token_type": "input"}` matches it, that price bills it, with no notice. To set one,
 send `PATCH /v1/meters/{id}` with `rating_rule_version_id`. If the meter has
 no default price, Velox makes and sends the invoice without that usage, as
 Lago, Metronome and Orb do. You see it in four places:
@@ -164,6 +182,174 @@ include it. For a period that is already invoiced, bill it with a one-off
 invoice ([runbook](ops/runbook/usage-with-no-price.md)). Velox refuses
 (409) to remove a meter's last price while a plan with a live subscription
 uses the meter.
+
+## Price a Claude model Velox does not know
+
+A Claude name Velox does not know keeps its own name in both `model` and
+`model_raw`. Price it on `model_raw` at priority 101: that value is the
+name exactly as LiteLLM sent it, and it does not change when a later
+Velox release learns the model. Make one rating rule for each kind of
+token, with its own `rule_key`, and add it as in [Price a model a recipe
+does not cover](#price-a-model-a-recipe-does-not-cover), with this
+pricing rule:
+
+```bash
+jq -n --arg rate "$RATE_ID" \
+    '{dimension_match: {model_raw: "claude-opus-4-9", token_type: "input"},
+      rating_rule_version_id: $rate, aggregation_mode: "sum", priority: 101}' \
+  | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
+    -H "Authorization: Bearer $VELOX_KEY" \
+    -H "Content-Type: application/json" \
+    -d @- | jq -c '{dimension_match, priority}'
+```
+
+**You see:**
+`{"dimension_match":{"model_raw":"claude-opus-4-9","token_type":"input"},"priority":101}`
+
+Usage not invoiced yet bills at that price, including usage that arrived
+before you added it.
+
+## Claude models added after you installed
+
+Applying a recipe again returns the setup it made the first time and adds
+nothing. So an install of `anthropic_style` 5.0.0 or earlier does not get
+the 6.0.0 prices. After you upgrade Velox:
+
+- Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 usage arrives as
+  `claude-opus-5.5`, `claude-sonnet-5.5`, `claude-fable-5.1` and
+  `claude-mythos-5.1`. Before, Velox billed it at Opus 5, Sonnet 5, Fable 5
+  and Mythos 5 prices. With no rule for the new name, it has no price.
+- Claude Haiku 5.5 usage arrives as `claude-haiku-5.5` with `context_tier`.
+  Before, it kept its raw name and had no price.
+- Claude Sonnet 5 keeps the old $3 / $15 recipe prices until you change
+  them. Anthropic now charges $2 / $10.
+
+Add the 30 prices **before you upgrade**, so no usage arrives without a
+price. A rule on `claude-opus-5.5` matches nothing until the new release
+sends that name. This script makes them with the recipe's own rule keys,
+names and prices:
+
+```bash
+CURRENCY=USD   # the currency you installed the recipe in
+METER_ID=$(curl -s "$VELOX/v1/meters" -H "Authorization: Bearer $VELOX_KEY" \
+  | jq -r '.data[] | select(.key == "tokens") | .id')
+
+# add_price <rule key> <name> <cents per token> <model> <token type> [context tier]
+add_price() {
+  rate_id=$(jq -n --arg key "$1" --arg name "$2" --arg cents "$3" --arg cur "$CURRENCY" \
+      '{rule_key: $key, name: $name, mode: "flat", currency: $cur, flat_amount_cents: $cents}' \
+    | curl -s -X POST "$VELOX/v1/rating-rules" \
+      -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
+      -d @- | jq -r .id)
+  jq -n --arg rate "$rate_id" --arg model "$4" --arg type "$5" --arg tier "${6:-}" \
+      '{dimension_match: ({model: $model, token_type: $type}
+          + (if $tier == "" then {} else {context_tier: $tier} end)),
+        rating_rule_version_id: $rate, aggregation_mode: "sum", priority: 100}' \
+    | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
+      -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
+      -d @- | jq -c .dimension_match
+}
+
+for m in "fable51|Claude Fable 5.1|claude-fable-5.1|0.001|0.005|0.000025|0.00125|0.002" \
+         "mythos51|Claude Mythos 5.1|claude-mythos-5.1|0.001|0.005|0.000025|0.00125|0.002" \
+         "opus55|Claude Opus 5.5|claude-opus-5.5|0.0004|0.002|0.00002|0.0005|0.0008" \
+         "sonnet55|Claude Sonnet 5.5|claude-sonnet-5.5|0.0002|0.001|0.00001|0.00025|0.0004"; do
+  IFS='|' read -r key name model in out read w5m w1h <<<"$m"
+  add_price "${key}_input" "$name input" "$in" "$model" input
+  add_price "${key}_output" "$name output" "$out" "$model" output
+  add_price "${key}_cache_read" "$name cache read" "$read" "$model" cache_read
+  add_price "${key}_cache_write_5m" "$name cache write (5m)" "$w5m" "$model" cache_write_5m
+  add_price "${key}_cache_write_1h" "$name cache write (1h)" "$w1h" "$model" cache_write_1h
+done
+
+for t in "std|prompt_up_to_100k|up to|0.00001|0.00005|0.000001|0.0000125|0.00002" \
+         "long|prompt_over_100k|over|0.00005|0.00025|0.000005|0.0000625|0.0001"; do
+  IFS='|' read -r key tier words in out read w5m w1h <<<"$t"
+  suffix=" (prompts $words 100K tokens)"
+  add_price "haiku55_${key}_input" "Claude Haiku 5.5 input$suffix" "$in" claude-haiku-5.5 input "$tier"
+  add_price "haiku55_${key}_output" "Claude Haiku 5.5 output$suffix" "$out" claude-haiku-5.5 output "$tier"
+  add_price "haiku55_${key}_cache_read" "Claude Haiku 5.5 cache read$suffix" "$read" claude-haiku-5.5 cache_read "$tier"
+  add_price "haiku55_${key}_cache_write_5m" "Claude Haiku 5.5 cache write (5m)$suffix" "$w5m" claude-haiku-5.5 cache_write_5m "$tier"
+  add_price "haiku55_${key}_cache_write_1h" "Claude Haiku 5.5 cache write (1h)$suffix" "$w1h" claude-haiku-5.5 cache_write_1h "$tier"
+done
+```
+
+**You see:** 30 lines, the first and last:
+
+```text
+{"model":"claude-fable-5.1","token_type":"input"}
+…
+{"context_tier":"prompt_over_100k","model":"claude-haiku-5.5","token_type":"cache_write_1h"}
+```
+
+The prices are cents per token in your recipe's currency, like the
+recipe's. Change them to your own prices if you resell at a margin.
+
+**Sonnet 5.** To charge Anthropic's new price, publish a new version of
+each Sonnet 5 rule. It applies from each subscription's next billing
+period; the current period keeps the old price.
+
+```bash
+CURRENCY=USD   # the currency you installed the recipe in
+
+# new_version <rule key> <name> <cents per token>
+new_version() {
+  jq -n --arg key "$1" --arg name "$2" --arg cents "$3" --arg cur "$CURRENCY" \
+      '{rule_key: $key, name: $name, mode: "flat", currency: $cur, flat_amount_cents: $cents}' \
+    | curl -s -X POST "$VELOX/v1/rating-rules" \
+      -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
+      -d @- | jq -c '{rule_key, version, flat_amount_cents}'
+}
+new_version sonnet5_input "Claude Sonnet 5 input" 0.0002
+new_version sonnet5_output "Claude Sonnet 5 output" 0.001
+new_version sonnet5_cache_read "Claude Sonnet 5 cache read" 0.00002
+new_version sonnet5_cache_write_5m "Claude Sonnet 5 cache write (5m)" 0.00025
+new_version sonnet5_cache_write_1h "Claude Sonnet 5 cache write (1h)" 0.0004
+```
+
+**You see:** five lines such as
+`{"rule_key":"sonnet5_input","version":2,"flat_amount_cents":"0.0002"}`.
+
+### Rules you wrote on a raw Claude name
+
+Some Claude names used to keep their raw name in `model`, so a rule you
+added for one keyed on it. They are Haiku 5.5, Bedrock cross-region names
+such as `bedrock/us.anthropic.claude-sonnet-4-6`, `converse/` and
+`azure_ai/` names, and some Google Cloud dated names such as
+`claude-haiku-4-5@20251001`. Those names now arrive as the model's name,
+such as `claude-sonnet-4.6`, so such a rule stops matching. Change
+its `dimension_match` to the model's name, or to `model_raw` with the raw
+name at priority 101.
+
+### Usage stored before you upgraded
+
+Velox does not change usage it already stored. Usage stored before the
+upgrade keeps the model it was stored with, and bills at that model's
+price when its period is invoiced:
+
+- **Google Cloud Opus 4.5 to 4.8** (names with `@default` or `@date`, such
+  as `vertex_ai/claude-opus-4-6@default`) were stored as `claude-opus-4`,
+  and bill at $15 / $75, 3 times Anthropic's price.
+- **Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1** were stored as Opus 5,
+  Sonnet 5, Fable 5 and Mythos 5, and bill at those prices.
+
+To bill those rows at the right price, add a rating rule with its own
+`rule_key`, and a pricing rule on the raw name at **priority 101**. That
+priority wins over the recipe's rule; at equal priority, the older rule
+wins. Add
+one for each raw name and kind of token, such as
+`{"model_raw": "vertex_ai/claude-opus-4-6@default", "token_type": "input"}`
+at the Opus 4.6 input price. It also prices later calls with that name,
+which bill at the same price.
+
+**Haiku 5.5 usage stored before the upgrade** has its raw name in `model`
+and no `context_tier`, so the recipe's Haiku 5.5 rules never match it.
+Velox cannot tell which of the two prices applies to those rows. To bill
+them, add a rule on `model` with the raw name, such as
+`{"model": "claude-haiku-5-5", "token_type": "input"}`, at the price you
+choose. Only rows stored before the upgrade carry that value in `model`.
+Do not use `model_raw` here: it would also price later Haiku 5.5 calls at
+one rate.
 
 ## Sell prepaid credit (a prepaid commit)
 

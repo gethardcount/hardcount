@@ -64,6 +64,7 @@ A dunning run is the automatic retries after a failed payment.
 - [ ] Invoice → Email: the message arrives in Mailpit; open it, read it, and check the amount and the links.
 - [ ] The emailed PDF opens, and its total, lines, tax and buyer address match the invoice page.
 - [ ] Run a real LiteLLM proxy with the callback from [the LiteLLM guide](../integrations/litellm.md) → one completion creates one `input` and one `output` usage event on the customer (plus `cache_read` if the prompt was cached).
+- [ ] Open [Anthropic's pricing page](https://platform.claude.com/docs/en/about-claude/pricing) and the models overview. Update `anthropicListPrices` and `anthropicPricesChecked` in `internal/recipe/anthropic_prices_test.go`, add any new model id to `modelFamilies` (`internal/integrations/litellm/mapper.go`) and `pricingPageClaudeIDs`, and run `go test ./internal/recipe/ ./internal/integrations/litellm/`. If a price moved or a model was added, fix `anthropic_style.yaml`, bump its version, and add a CHANGELOG line telling existing installs to update that price.
 
 ## Fresh install and upgrade
 
