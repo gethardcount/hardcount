@@ -4,7 +4,7 @@
 // -1 on real data.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { customersTrend, failedPaymentsTrend, subscriptionsHint } from '../src/lib/homeKpis.ts'
+import { currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '../src/lib/homeKpis.ts'
 
 const base = {
   live_customers: 3,
@@ -34,4 +34,12 @@ test('the hint names trialing subscriptions only when there are some', () => {
   assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 2 }), '1 active subscription · 2 trialing subscriptions')
   assert.equal(subscriptionsHint({ ...base, trialing_subscriptions: 0 }), '3 active subscriptions')
   assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 0 }), '1 active subscription')
+})
+
+// MRR and Revenue sum the workspace default currency only (internal/analytics
+// overview.go); a tenant with EUR customers saw a USD figure that silently
+// left them out. The hint says which currency the figure covers.
+test('MRR and Revenue hints name the one currency they cover', () => {
+  assert.equal(currencyScopedHint('ARR $14,400.00', 'usd'), 'ARR $14,400.00 · in USD only')
+  assert.equal(currencyScopedHint('3 invoices paid', 'EUR'), '3 invoices paid · in EUR only')
 })

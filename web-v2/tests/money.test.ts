@@ -11,9 +11,12 @@ import {
   atRiskText,
   dunningAmountDue,
   formatCents,
+  formatCentsBare,
+  getCurrencySymbol,
   outstandingText,
   prorationText,
   setActiveCurrency,
+  sumByCurrency,
 } from '../src/lib/money.ts'
 
 beforeEach(() => setActiveCurrency('USD'))
@@ -21,8 +24,39 @@ beforeEach(() => setActiveCurrency('USD'))
 test('an explicit currency wins over the workspace default', () => {
   assert.equal(formatCents(120000, 'EUR'), '€1,200.00')
   assert.equal(formatCents(120000, 'GBP'), '£1,200.00')
-  // Negative control: without a currency, the default is used.
-  assert.equal(formatCents(120000), '$1,200.00')
+})
+
+// A EUR credit read "$20.00" on the Credits page and a EUR credit note was
+// added into a dollar total: formatCents(cents) fell back to the workspace
+// default without a word. There is no default now, so the type checker lists
+// every call that has no currency, and a call that slips past it fails loudly
+// instead of printing the wrong symbol.
+test('formatCents and getCurrencySymbol have no default currency', () => {
+  // @ts-expect-error a currency is required
+  assert.throws(() => formatCents(120000))
+  // @ts-expect-error a currency is required
+  assert.throws(() => getCurrencySymbol())
+})
+
+test('an amount whose currency was never recorded is shown without a symbol', () => {
+  assert.equal(formatCentsBare(120050), '1,200.50')
+  assert.equal(formatCentsBare(-5), '-0.05')
+})
+
+test('sums per currency never add one currency into another', () => {
+  assert.deepEqual(
+    sumByCurrency([
+      { currency: 'USD', amount_cents: 1000 },
+      { currency: 'EUR', amount_cents: 5000 },
+      { currency: 'usd', amount_cents: 500 },
+      { currency: 'GBP', amount_cents: 0 },
+    ]),
+    [
+      { currency: 'EUR', amount_cents: 5000 },
+      { currency: 'USD', amount_cents: 1500 },
+    ],
+  )
+  assert.deepEqual(sumByCurrency([]), [])
 })
 
 test('an unknown currency code is shown as the code, never as the default symbol', () => {
@@ -35,7 +69,7 @@ test('amountInputToCents is what both the form and its confirm use', () => {
   assert.equal(amountInputToCents(''), 0)
   assert.equal(amountInputToCents('abc'), 0)
   // The confirm shows these cents, so it can't disagree with what is sent.
-  assert.equal(formatCents(amountInputToCents('0.1')), '$0.10')
+  assert.equal(formatCents(amountInputToCents('0.1'), 'USD'), '$0.10')
 })
 
 test('dunning amount uses the run invoice currency', () => {
@@ -124,8 +158,6 @@ test('At risk shows every currency with runs, not the default-only figure', () =
   )
   // Nothing at risk: zero in the default currency.
   assert.equal(atRiskText({ at_risk_cents: 0, currency: 'CAD', at_risk_by_currency: [] }), 'CA$0.00')
-  // A server without the list: the default-only figure, in its currency.
-  assert.equal(atRiskText({ at_risk_cents: 1500, currency: 'EUR' }), '€15.00')
 })
 
 test('proration toasts use the subscription currency', () => {
