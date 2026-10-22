@@ -8,18 +8,14 @@ import (
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// The money guard on the cancel's clear of the pause (A4). A cancel decides
-// its final invoice against the pause in force at the cancel instant: a
-// keep_as_draft pause leaves the final invoice a draft, and nothing charges
-// it. The cancel then clears the pause from the canceled row, so the row and
-// the API stop saying collection is paused on a subscription that has ended.
+// A cancel decides its final invoice against the pause in force at the
+// cancel instant: a keep_as_draft pause leaves the final invoice a draft, and
+// nothing charges it. The pause stays on the canceled row: it still holds the
+// subscription's unpaid invoices, this final draft among them, until an
+// operator resumes collection (TestCanceledPausedSub_PauseStillHoldsItsInvoices
+// in internal/invoice covers the sweep and the tax retry).
 //
-// The clear must be the cancel transaction's last write. The final invoice is
-// built from the canceled row the flip returns; clearing the pause in the flip
-// itself would finalize that invoice and charge the card on file.
-//
-// Mutation: move retireLiveOnlyStateTx before billFn (or into the flip's
-// UPDATE) and both cases fail.
+// Mutation: clear the pause in the cancel and both cases fail.
 func TestCancel_PausedSub_FinalInvoiceStaysDraft(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -56,8 +52,8 @@ func TestCancel_PausedSub_FinalInvoiceStaysDraft(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read subscription: %v", err)
 			}
-			if sub.PauseCollection != nil {
-				t.Errorf("canceled subscription still carries pause %+v: a canceled subscription has no collection to resume", *sub.PauseCollection)
+			if sub.PauseCollection == nil {
+				t.Error("the cancel cleared the pause: it still holds the subscription's unpaid invoices, this final draft among them")
 			}
 		})
 	}
