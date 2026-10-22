@@ -188,8 +188,9 @@ type ReleaseResult struct {
 	// Released counts rows newly written to usage_events.
 	Released int `json:"released"`
 	// Deduplicated counts rows usage_events already had under the same key
-	// (LiteLLM resent the call after the customer existed). Marked released,
-	// not written again.
+	// (LiteLLM resent the call after the customer existed), and LiteLLM
+	// cache-write rows whose call usage_events already bills with the writes
+	// inside its input row. Marked released, not written again.
 	Deduplicated int `json:"deduplicated"`
 	// StillHeld counts rows for this external id left held that a release
 	// cannot take yet: their meter does not exist, or their time is after

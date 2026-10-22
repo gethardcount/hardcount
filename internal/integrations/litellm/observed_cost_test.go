@@ -379,3 +379,28 @@ func TestObservedCost_CacheWriteWithoutItsCostFallsToTable(t *testing.T) {
 		t.Errorf("cache_write_5m cost = %v, want nil", c)
 	}
 }
+
+// When cache_creation_cost exceeds input_cost (less the reads), the two
+// figures do not nest, so neither is the provider's cost: the input event
+// AND the 5-minute write event fall to the rate table. Stamping the write
+// with LiteLLM's figure while the input is priced from the table would mix
+// two sources that do not add up.
+// Mutation-verify: drop the `c.input == nil → c.write5m = nil` guard in
+// roleCosts → the write row keeps 150000.
+func TestObservedCost_CacheWriteNotNestedFallsToTable(t *testing.T) {
+	p := mockAnthropicRecord(t, "cache-write-5m")
+	p.CostBreakdown.InputCost = 0.1 // below cache_creation_cost (0.15)
+	m, err := MapPayload(p)
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	got := costsByRole(t, m.Events)
+	for _, tt := range []string{TokenTypeInput, TokenTypeCacheWrite5m} {
+		if c, ok := got[tt]; !ok || c != nil {
+			t.Errorf("%s cost = %v (present %v), want nil: the rate table prices it", tt, c, ok)
+		}
+	}
+	if c := got[TokenTypeOutput]; c == nil || *c != 7500 {
+		t.Errorf("output cost = %v, want 7500", c)
+	}
+}

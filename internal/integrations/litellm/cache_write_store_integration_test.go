@@ -2,7 +2,9 @@ package litellm
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -428,4 +430,297 @@ func TestSpend_CacheHitStoresNothing_RealStore(t *testing.T) {
 		t.Errorf("cache hit = %+v, want skipped 1 and cache_hits 1", r)
 	}
 	f.expectRows("cache hit", "events", p.ID, "", map[string]int64{})
+}
+
+// A call held split by this release, then resent through a copy of the
+// previous release once the customer exists (a rolling-deploy overlap, a
+// binary rollback, or a spend-log replay served by an old copy). The old
+// copy writes :input at the pre-split quantity, which bills the writes,
+// and releases the held :input and :output. The two held write rows must
+// then never be billed: not by an operator release, not by a resend.
+//
+// Mutation-verify:
+//   - ReleaseHeld writes a held write row without checking the call's
+//     stored :input → the release bills 100,000 write tokens twice;
+//   - IngestCallResolvingHeld lets the held :input's quantity decide over
+//     the stored :input → the resend bills them twice;
+//   - the Legacy path leaves the call's held write rows held → they stay
+//     on the held list.
+func TestSpend_HeldSplitThenOldBinaryIngest_RealStore(t *testing.T) {
+	setup := func(t *testing.T, name, id, user string) (*writeFixture, string, string) {
+		f := newWriteFixture(t, name)
+		if r := f.mustSpend(f.probeCall(id, user)); r.Held != 4 {
+			t.Fatalf("first delivery = %+v, want 4 held", r)
+		}
+		cus, mtr := f.customerAndMeter(user)
+		f.ingestLegacy(id, cus, mtr)
+		f.expectRows("old copy wrote the call", "events", id, "", legacyRows)
+		f.expectRows("old copy released input and output", "held", id, "released", legacyHeldInputOutput)
+		return f, cus, mtr
+	}
+
+	t.Run("operator release", func(t *testing.T) {
+		f, cus, mtr := setup(t, "LiteLLM split then old release", "mix-1", "cus_mix1")
+		res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
+			ExternalCustomerID: "cus_mix1", CustomerID: cus, MeterIDs: map[string]string{MeterKeyTokens: mtr},
+		}, nil, nil)
+		if err != nil {
+			t.Fatalf("release: %v", err)
+		}
+		if res.Released != 0 || res.Deduplicated != 2 {
+			t.Errorf("release = %+v, want 0 released and 2 deduplicated", res)
+		}
+		f.expectRows("after the release", "events", "mix-1", "", legacyRows)
+		f.expectRows("nothing left held", "held", "mix-1", "held", map[string]int64{})
+	})
+
+	t.Run("resend", func(t *testing.T) {
+		f, _, _ := setup(t, "LiteLLM split then old resend", "mix-2", "cus_mix2")
+		if r := f.mustSpend(f.probeCall("mix-2", "cus_mix2")); r.Accepted != 0 || r.Deduplicated != 2 {
+			t.Errorf("resend = %+v, want 0 accepted and 2 deduplicated", r)
+		}
+		f.expectRows("after the resend", "events", "mix-2", "", legacyRows)
+		f.expectRows("nothing left held", "held", "mix-2", "held", map[string]int64{})
+	})
+}
+
+// legacyHeldInputOutput is the held rows a pre-split ingest releases for a
+// call held split: its :input (held at the split quantity) and :output.
+var legacyHeldInputOutput = map[string]int64{TokenTypeInput: 1000, TokenTypeOutput: 500}
+
+// A call stored before the fix, resent when its customer lookup misses (the
+// external id changed, the customer was recreated): the hold reads the
+// stored :input and holds the call the pre-split way, so the held list
+// shows no write rows and a release bills none.
+// Mutation-verify: drop HoldCall's usage_events lookup → the split is held,
+// write rows included.
+func TestSpend_PreFixCallHeldOnLookupMiss_RealStore(t *testing.T) {
+	f := newWriteFixture(t, "LiteLLM prefix held on miss")
+	cus, mtr := f.customerAndMeter("cus_before")
+	f.ingestLegacy("mv-1", cus, mtr)
+
+	if r := f.mustSpend(f.probeCall("mv-1", "cus_after")); r.Held != 2 {
+		t.Errorf("resend under a new external id = %+v, want 2 held (the pre-split rows)", r)
+	}
+	f.expectRows("held on the lookup miss", "held", "mv-1", "held", legacyRows)
+
+	cus2, _ := f.customerAndMeter("cus_after")
+	res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
+		ExternalCustomerID: "cus_after", CustomerID: cus2, MeterIDs: map[string]string{MeterKeyTokens: mtr},
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if res.Released != 0 || res.Deduplicated != 2 {
+		t.Errorf("release = %+v, want 0 released and 2 deduplicated", res)
+	}
+	f.expectRows("after the release", "events", "mv-1", "", legacyRows)
+}
+
+// An operator discard and a resend of the same held call at once. The
+// resend reads the held rows under their lock, so it waits for the discard
+// and then sees it: nothing is billed. Read without the lock, the resend
+// would see "held", write the usage, and its release UPDATE would then
+// match no row, so nothing would report the discarded usage being billed.
+// Mutation-verify: drop FOR UPDATE in lockHeldKeys → 4 rows billed.
+func TestSpend_DiscardRacesResend_RealStore(t *testing.T) {
+	f := newWriteFixture(t, "LiteLLM discard race")
+	if r := f.mustSpend(f.probeCall("dr-1", "cus_dr")); r.Held != 4 {
+		t.Fatalf("first delivery = %+v, want 4 held", r)
+	}
+	f.customerAndMeter("cus_dr")
+	admin := testutil.AdminPool(t)
+	store := usage.NewPostgresStore(f.db)
+
+	inDiscard, letGo := make(chan struct{}), make(chan struct{})
+	discarded := make(chan error, 1)
+	go func() {
+		_, err := store.DiscardHeld(f.ctx, f.tenantID, "cus_dr", "", func(*sql.Tx, int) error {
+			close(inDiscard)
+			<-letGo
+			return nil
+		})
+		discarded <- err
+	}()
+	<-inDiscard
+
+	done := make(chan SpendResponse, 1)
+	go func() {
+		code, body := postSpendWithCtx(t, f.h, f.ctx, f.tenantID, f.probeCall("dr-1", "cus_dr"))
+		var r SpendResponse
+		if code == http.StatusOK {
+			_ = json.Unmarshal([]byte(body), &r)
+		}
+		done <- r
+	}()
+	testutil.WaitForLockWaiter(t, f.ctx, admin, "usage_held_events")
+	close(letGo)
+	if err := <-discarded; err != nil {
+		t.Fatalf("discard: %v", err)
+	}
+	select {
+	case r := <-done:
+		if r.Accepted != 0 || r.Deduplicated != 4 {
+			t.Errorf("resend = %+v, want 0 accepted and 4 deduplicated", r)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("resend never finished")
+	}
+	f.expectRows("discarded call", "events", "dr-1", "", map[string]int64{})
+	f.expectRows("all rows discarded", "held", "dr-1", "discarded", splitRows)
+}
+
+// A resend that deadlocks with another transaction on the call's held rows
+// (an operator release claims them in no particular order) is retried once
+// inside the store, so LiteLLM gets 200 instead of a 503. The test builds
+// the deadlock exactly: it holds the :output row, lets the resend lock the
+// rows before it and queue on :output, then asks for :cache_write_1h. The
+// resend's deadlock check fires first (the test's session waits 10s before
+// checking), so Postgres aborts the resend.
+// Mutation-verify: no retry → 503.
+func TestSpend_DeadlockedResendRetried_RealStore(t *testing.T) {
+	f := newWriteFixture(t, "LiteLLM deadlock retry")
+	if r := f.mustSpend(f.probeCall("dl-1", "cus_dl")); r.Held != 4 {
+		t.Fatalf("first delivery = %+v, want 4 held", r)
+	}
+	f.customerAndMeter("cus_dl")
+	admin := testutil.AdminPool(t)
+
+	other, err := admin.BeginTx(f.ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = other.Rollback() }()
+	if _, err := other.ExecContext(f.ctx, `SET LOCAL deadlock_timeout = '10s'`); err != nil {
+		t.Fatalf("deadlock_timeout: %v", err)
+	}
+	lockRow := func(key string) error {
+		_, err := other.ExecContext(f.ctx, `SELECT 1 FROM usage_held_events WHERE idempotency_key = $1 FOR UPDATE`, key)
+		return err
+	}
+	if err := lockRow("dl-1:output"); err != nil {
+		t.Fatalf("lock output: %v", err)
+	}
+
+	type outcome struct {
+		code int
+		r    SpendResponse
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		code, body := postSpendWithCtx(t, f.h, f.ctx, f.tenantID, f.probeCall("dl-1", "cus_dl"))
+		var r SpendResponse
+		if code == http.StatusOK {
+			_ = json.Unmarshal([]byte(body), &r)
+		}
+		done <- outcome{code, r}
+	}()
+	testutil.WaitForLockWaiter(t, f.ctx, admin, "idempotency_key, id, status, quantity")
+	// Closes the cycle. Postgres aborts the resend, which frees this lock.
+	if err := lockRow("dl-1:cache_write_1h"); err != nil {
+		t.Fatalf("the test's own lock was chosen as the deadlock victim (the interleaving was not reached): %v", err)
+	}
+	if err := other.Rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	select {
+	case o := <-done:
+		if o.code != http.StatusOK || o.r.Accepted != 4 {
+			t.Errorf("deadlocked resend = %d %+v, want 200 with 4 accepted", o.code, o.r)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("resend never finished")
+	}
+	f.expectRows("after the retry", "events", "dl-1", "", splitRows)
+}
+
+// A release that takes a call's held write rows but not its held :input
+// (cut by Limit), while a copy of the previous release is writing the old
+// :input for the same call (its transaction not committed yet). The release
+// reads the call's :input under the held :input's lock, so it waits, then
+// sees the old :input and bills no write row. The held rows are inserted
+// with ids that put :input last, so the cut is certain.
+// Mutation-verify: drop FOR UPDATE in writesBilledInInput → both write rows
+// are written on top of the old :input.
+func TestRelease_WaitsForInFlightOldInput_RealStore(t *testing.T) {
+	f := newWriteFixture(t, "LiteLLM release vs old input")
+	cus, mtr := f.customerAndMeter("cus_cut")
+	admin := testutil.AdminPool(t)
+	hold, err := f.db.BeginTx(f.ctx, postgres.TxTenant, f.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(hold)
+	for i, r := range []struct {
+		role string
+		qty  int64
+	}{{TokenTypeCacheWrite5m, 40000}, {TokenTypeCacheWrite1h, 60000}, {TokenTypeOutput, 500}, {TokenTypeInput, 1000}} {
+		if _, err := hold.ExecContext(f.ctx, `
+			INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, meter_key,
+				quantity, properties, idempotency_key, event_at, reason)
+			VALUES ($1, $2, 'litellm', 'cus_cut', 'tokens', $3, jsonb_build_object('token_type', $4::text),
+				'cut-1:' || $4, '2026-10-01T00:00:00Z', 'customer_not_found')
+		`, fmt.Sprintf("vlx_hue_cut%d", i), f.tenantID, r.qty, r.role); err != nil {
+			t.Fatalf("hold %s: %v", r.role, err)
+		}
+	}
+	if err := hold.Commit(); err != nil {
+		t.Fatalf("hold commit: %v", err)
+	}
+
+	// The previous release's IngestResolvingHeld for :input, mid-flight: it
+	// has locked the held :input and written the old :input.
+	old, err := f.db.BeginTx(f.ctx, postgres.TxTenant, f.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(old)
+	if _, err := old.ExecContext(f.ctx, `SELECT 1 FROM usage_held_events WHERE idempotency_key = 'cut-1:input' FOR UPDATE`); err != nil {
+		t.Fatalf("old lock: %v", err)
+	}
+	if _, err := old.ExecContext(f.ctx, `
+		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id, quantity, properties, idempotency_key, timestamp, origin)
+		VALUES ($1, $2, $3, $4, 101000, '{"token_type":"input"}', 'cut-1:input', '2026-10-01T00:00:00Z', 'api')
+	`, postgres.NewID("vlx_evt"), f.tenantID, cus, mtr); err != nil {
+		t.Fatalf("old input: %v", err)
+	}
+	if _, err := old.ExecContext(f.ctx, `UPDATE usage_held_events SET status = 'released', resolved_at = now() WHERE idempotency_key = 'cut-1:input'`); err != nil {
+		t.Fatalf("old release: %v", err)
+	}
+
+	store := usage.NewPostgresStore(f.db)
+	type outcome struct {
+		res usage.ReleaseHeldResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := store.ReleaseHeld(f.ctx, f.tenantID, usage.ReleaseHeldInput{
+			ExternalCustomerID: "cus_cut", CustomerID: cus, MeterIDs: map[string]string{MeterKeyTokens: mtr},
+			NotAfter: time.Now(), Limit: 3,
+		}, nil)
+		done <- outcome{res, err}
+	}()
+	testutil.WaitForLockWaiter(t, f.ctx, admin, "usage_held_events")
+	if err := old.Commit(); err != nil {
+		t.Fatalf("old commit: %v", err)
+	}
+	select {
+	case o := <-done:
+		if o.err != nil {
+			t.Fatalf("release: %v", o.err)
+		}
+		dedup := 0
+		for _, r := range o.res.Rows {
+			if r.Deduplicated {
+				dedup++
+			}
+		}
+		if len(o.res.Rows) != 3 || dedup != 2 {
+			t.Errorf("release rows = %+v, want 3 rows, the 2 write rows deduplicated", o.res.Rows)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("release never finished")
+	}
+	f.expectRows("after the release", "events", "cut-1", "", legacyRows)
 }

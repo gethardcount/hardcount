@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -69,6 +70,19 @@ type CallResult struct {
 	Legacy bool
 }
 
+// CallInputKey is the key of the call's input row for a cache-write row's
+// key, and false for any other key. It follows the key layout LiteLLM's
+// mapper writes, <call id>:<role> (pinned by a test there); ReleaseHeld uses
+// it to find a held cache-write row's input row.
+func CallInputKey(key string) (string, bool) {
+	for _, suf := range []string{":cache_write_5m", ":cache_write_1h"} {
+		if strings.HasSuffix(key, suf) {
+			return strings.TrimSuffix(key, suf) + ":input", true
+		}
+	}
+	return "", false
+}
+
 // IngestCall writes one call's events in one transaction. Each event gets
 // Ingest's checks and timestamp rules; a key held and then discarded is not
 // written, and a key still held is written and its held row released (see
@@ -77,15 +91,18 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable
 	}
-	// One clock lookup for the call: prepare reads the bound instant.
+	// One clock lookup for the call: build reads the bound instant.
 	ctx = clock.WithSim(ctx, s.simNow(ctx, tenantID, in.CustomerID))
-	prep := func(evs []CallEvent) ([]domain.UsageEvent, error) {
+	// Both mappings are built, the store writes one, and only that one is
+	// recorded as late: a replay would otherwise count rows never written.
+	prep := func(evs []CallEvent) ([]domain.UsageEvent, []domain.UsageEvent, error) {
 		if evs == nil {
-			return nil, nil
+			return nil, nil, nil
 		}
 		out := make([]domain.UsageEvent, 0, len(evs))
+		var late []domain.UsageEvent
 		for _, e := range evs {
-			ev, err := s.prepare(ctx, tenantID, IngestInput{
+			ev, isLate, err := s.build(ctx, tenantID, IngestInput{
 				CustomerID:         in.CustomerID,
 				MeterID:            in.MeterID,
 				Quantity:           e.Quantity,
@@ -95,25 +112,38 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 				ObservedCostMicros: e.ObservedCostMicros,
 			}, domain.UsageOriginAPI)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			out = append(out, ev)
+			if isLate {
+				late = append(late, ev)
+			}
 		}
-		return out, nil
+		return out, late, nil
 	}
-	events, err := prep(in.Events)
+	events, eventsLate, err := prep(in.Events)
 	if err != nil {
 		return CallResult{}, err
 	}
-	legacy, err := prep(in.Legacy)
+	legacy, legacyLate, err := prep(in.Legacy)
 	if err != nil {
 		return CallResult{}, err
 	}
 	res, err := s.held.IngestCallResolvingHeld(ctx, tenantID, StoreCall{Events: events, Legacy: legacy, LegacyKey: in.LegacyKey})
-	if err == nil && res.Inserted > 0 {
+	if err != nil {
+		return res, err
+	}
+	written := eventsLate
+	if res.Legacy {
+		written = legacyLate
+	}
+	for _, ev := range written {
+		recordLate(ctx, ev)
+	}
+	if res.Inserted > 0 {
 		mw.RecordUsageIngested(res.Inserted)
 	}
-	return res, err
+	return res, nil
 }
 
 // HoldCall holds one call's events in one transaction, each with Hold's

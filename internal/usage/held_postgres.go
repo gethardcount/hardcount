@@ -249,7 +249,9 @@ func (s *PostgresStore) HeldFor(ctx context.Context, tenantID, externalCustomerI
 //     with origin 'backfill'. ON CONFLICT there means usage_events already
 //     has the key (LiteLLM resent the call after the customer existed): the
 //     held row is still marked released, with no event id, and nothing is
-//     billed twice.
+//     billed twice. A LiteLLM cache-write row is treated the same way when
+//     usage_events already bills its call the pre-split way, writes inside
+//     :input (writesBilledInInput).
 //  3. Record the written event id on the held row, run the audit emission,
 //     commit. A failure anywhere rolls all of it back: the rows stay held.
 func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in ReleaseHeldInput, emit func(tx *sql.Tx, res ReleaseHeldResult) error) (ReleaseHeldResult, error) {
@@ -305,6 +307,22 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 
 	res := ReleaseHeldResult{Rows: make([]ReleasedRow, 0, len(claimed))}
 	for _, h := range claimed {
+		row := ReleasedRow{HeldID: h.ID, MeterKey: h.MeterKey, EventAt: h.EventAt}
+		if inputKey, isWrite := CallInputKey(h.IdempotencyKey); isWrite {
+			// A LiteLLM cache-write row whose call usage_events already
+			// bills the pre-split way (a copy of the previous release
+			// wrote it after this one held the split): its tokens are
+			// inside that :input row.
+			billed, err := writesBilledInInput(ctx, tx, tenantID, inputKey)
+			if err != nil {
+				return ReleaseHeldResult{}, err
+			}
+			if billed {
+				row.Deduplicated = true
+				res.Rows = append(res.Rows, row)
+				continue
+			}
+		}
 		out, err := ingestOneTx(ctx, tx, tenantID, domain.UsageEvent{
 			CustomerID:         in.CustomerID,
 			MeterID:            in.MeterIDs[h.MeterKey],
@@ -315,7 +333,6 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 			Origin:             domain.UsageOriginBackfill,
 			ProviderCostMicros: h.ObservedCostMicros,
 		})
-		row := ReleasedRow{HeldID: h.ID, MeterKey: h.MeterKey, EventAt: h.EventAt}
 		switch {
 		case errors.Is(err, errs.ErrDuplicateKey):
 			row.Deduplicated = true
@@ -540,23 +557,42 @@ func callKeys(groups ...[]string) []string {
 // already be stored by the mapper before the cache-write split, whose input
 // quantity includes the writes. Writing the split mapping on top would add
 // the write rows on new keys while :input dedups: the writes billed twice.
-// So the input key decides, from the row already stored under it, in
-// usage_events or usage_held_events, in any status:
+// So the input key decides, from the row already stored under it:
 //
-//   - held row: its quantity decides (it is locked above).
-//   - otherwise the split :input is INSERTed first. That insert is the
+//   - a usage_events row decides whenever there is one: it is what bills.
+//     With a held row for the key, that row's lock (taken above) is the one
+//     every LiteLLM writer of the key takes first — this release, the
+//     previous one's IngestResolvingHeld, ReleaseHeld's claim — so a plain
+//     read now sees any such write that committed.
+//   - with a held row and no usage_events row, the held row's quantity
+//     decides (any status: a discarded row is never written).
+//   - with neither, the split :input is INSERTed first. That insert is the
 //     claim: ON CONFLICT on the (tenant_id, livemode, idempotency_key)
 //     UNIQUE waits for an uncommitted insert of the same key — such as a
 //     copy of the previous release writing the old :input during a rolling
 //     deploy — and then sees it. A SELECT-then-INSERT would not see the
-//     uncommitted row and would double-bill.
-//   - on conflict, the stored row's quantity decides.
+//     uncommitted row and would double-bill. On conflict the stored row's
+//     quantity decides.
 //
-// A stored quantity equal to the pre-split input quantity means the call was
-// first recorded the old way: it is written as call.Legacy (no write rows,
-// the old input quantity and cost), so every key of it dedups or releases
-// its held row. Any other stored quantity, or none, means the split mapping.
+// A deciding quantity equal to the pre-split input quantity means the call
+// was first recorded the old way: it is written as call.Legacy (no write
+// rows, the old input quantity and cost), so every key of it dedups or
+// releases its held row, and any held write row of the call is marked
+// released with no event: its tokens are already billed inside :input. Any
+// other quantity, or none, means the split mapping.
+//
+// A deadlock (another transaction locking the call's held rows in another
+// order, such as ReleaseHeld's claim) aborts the transaction; it is run
+// once more before the error reaches the caller.
 func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
+	res, err := s.ingestCallTx(ctx, tenantID, call)
+	if postgres.IsDeadlock(err) {
+		res, err = s.ingestCallTx(ctx, tenantID, call)
+	}
+	return res, err
+}
+
+func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
 	eventKey := func(e domain.UsageEvent) string { return e.IdempotencyKey }
 	keysOf := func(evs []domain.UsageEvent) []string {
 		out := make([]string, 0, len(evs))
@@ -588,7 +624,15 @@ func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID st
 		}
 		var prior *decimal.Decimal
 		if h, isHeld := held[call.LegacyKey]; isHeld {
-			prior = &h.quantity
+			q, found, err := storedEventQuantity(ctx, tx, call.LegacyKey)
+			if err != nil {
+				return CallResult{}, err
+			}
+			if found {
+				prior = &q
+			} else {
+				prior = &h.quantity
+			}
 		} else {
 			_, err := ingestOneTx(ctx, tx, tenantID, claim)
 			switch {
@@ -610,6 +654,22 @@ func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID st
 		if prior != nil && prior.Equal(legacy.Quantity) {
 			events = call.Legacy
 			res.Legacy = true
+			// The split-only keys (the cache writes) are inside :input now.
+			// A held row of one — the call held split, then written the old
+			// way — is resolved, so no release bills it on top.
+			inLegacy := map[string]bool{}
+			for _, k := range keysOf(call.Legacy) {
+				inLegacy[k] = true
+			}
+			for _, ev := range call.Events {
+				h, isHeld := held[ev.IdempotencyKey]
+				if inLegacy[ev.IdempotencyKey] || !isHeld || h.status != string(domain.HeldStatusHeld) {
+					continue
+				}
+				if err := markHeldReleased(ctx, tx, h.id, ev.CustomerID, nil); err != nil {
+					return CallResult{}, err
+				}
+			}
 		}
 	}
 
@@ -640,11 +700,7 @@ func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID st
 			if err == nil {
 				eventID = &out.ID
 			}
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE usage_held_events SET status = 'released', resolved_at = now(),
-					released_customer_id = $2, released_event_id = $3
-				WHERE id = $1 AND status = 'held'
-			`, h.id, ev.CustomerID, eventID); err != nil {
+			if err := markHeldReleased(ctx, tx, h.id, ev.CustomerID, eventID); err != nil {
 				return CallResult{}, err
 			}
 		}
@@ -655,6 +711,46 @@ func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID st
 	return res, nil
 }
 
+// markHeldReleased marks one held row released for this customer. eventID
+// is the usage_events row written for it, or nil when usage_events already
+// bills it.
+func markHeldReleased(ctx context.Context, tx *sql.Tx, heldID, customerID string, eventID *string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE usage_held_events SET status = 'released', resolved_at = now(),
+			released_customer_id = $2, released_event_id = $3
+		WHERE id = $1 AND status = 'held'
+	`, heldID, customerID, eventID)
+	return err
+}
+
+// writesBilledInInput reports whether a held cache-write row's call is
+// already billed the pre-split way: usage_events has the call's :input at a
+// quantity other than the call's held :input, so that row includes the
+// writes. The held :input is locked first: every LiteLLM writer of the
+// input key takes that lock before writing it (see
+// IngestCallResolvingHeld), so the read sees any such write that committed.
+// No held :input (never the case for a call held whole) means no answer:
+// false.
+func writesBilledInInput(ctx context.Context, tx *sql.Tx, tenantID, inputKey string) (bool, error) {
+	var heldQty decimal.Decimal
+	err := tx.QueryRowContext(ctx, `
+		SELECT quantity FROM usage_held_events
+		WHERE tenant_id = $1 AND idempotency_key = $2
+		FOR UPDATE
+	`, tenantID, inputKey).Scan(&heldQty)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	q, found, err := storedEventQuantity(ctx, tx, inputKey)
+	if err != nil || !found {
+		return false, err
+	}
+	return !q.Equal(heldQty), nil
+}
+
 // HoldCall holds one LiteLLM call — every event the mapper made from it — in
 // ONE transaction, ON CONFLICT DO NOTHING per key, so a resend of a call
 // already held is counted as deduplicated. It applies
@@ -663,13 +759,20 @@ func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID st
 // deleted and recreated under the same external id), and otherwise the
 // split :input is held first. That insert waits for an uncommitted hold of
 // the same key, and on conflict the held row's quantity (any status)
-// decides. A stored pre-split input quantity holds the call as call.Legacy.
+// decides. A stored pre-split input quantity holds the call as call.Legacy,
+// so the held list shows no write rows for it.
 //
-// One race stays open: a copy of the previous release INGESTING the old
-// :input (its customer exists) while this one HOLDS the same call (its
-// customer lookup ran before the customer existed). The held write rows
-// would then be released on top of the old :input. It needs a rolling
-// deploy, a resend and a customer created between two lookups of one call.
+// Held write rows can still meet a pre-split :input: this release holds
+// the call split, then a copy of the previous release writes the old
+// :input once the customer exists (a rolling deploy, a rollback, a replay
+// it serves). Billing is guarded where the write rows would be written:
+// ReleaseHeld and IngestCallResolvingHeld read the stored :input and bill
+// no write row on top of it. Only a release run by the previous release's
+// code would; the CHANGELOG says not to roll back while such rows are held.
+//
+// HoldCall takes no row locks (its inserts wait only on an uncommitted
+// insert of the same key, and every hold of a call inserts :input first),
+// so unlike IngestCallResolvingHeld it cannot deadlock and is not retried.
 func (s *PostgresStore) HoldCall(ctx context.Context, tenantID string, call HeldCall) (CallResult, error) {
 	heldKey := func(e domain.HeldUsageEvent) string { return e.IdempotencyKey }
 

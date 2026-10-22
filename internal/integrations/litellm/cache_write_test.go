@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
 // The litellm-1.83.9-mock-anthropic-*.json records were built by LiteLLM
@@ -173,6 +175,17 @@ func TestMapPayload_CacheWriteFallback(t *testing.T) {
 			want:   map[string]int64{TokenTypeInput: 101000, TokenTypeOutput: 500},
 		},
 		{
+			// The parts add up and fit in the prompt, but one is negative:
+			// splitting would bill 10 more tokens at the 1-hour price than
+			// were written. Mutation-verify: drop the negative-part check
+			// in cacheWriteSplit → a 100,010-token 1h row.
+			name: "a negative part",
+			usage: Usage{PromptTokens: 101000, CompletionTokens: 500, CacheCreationInputTokens: 100000,
+				PromptTokensDetails: &PromptTokensDetails{CacheCreationTokens: 100000, CacheCreationTokenDetails: &CacheCreationTokenDetails{Ephemeral5mInputTokens: i64(-10), Ephemeral1hInputTokens: i64(100010)}}},
+			reason: UnsplitSumMismatch,
+			want:   map[string]int64{TokenTypeInput: 101000, TokenTypeOutput: 500},
+		},
+		{
 			name: "writes not inside prompt_tokens",
 			usage: Usage{PromptTokens: 19, CompletionTokens: 400, CacheCreationInputTokens: 7277,
 				PromptTokensDetails: &PromptTokensDetails{CacheCreationTokenDetails: &CacheCreationTokenDetails{Ephemeral5mInputTokens: i64(7277), Ephemeral1hInputTokens: i64(0)}}},
@@ -272,5 +285,24 @@ func TestMapPayload_FailureSkipped(t *testing.T) {
 	anon.User, anon.EndUser = "", ""
 	if m, err := MapPayload(anon); err != nil || m.Skip != SkipFailure {
 		t.Fatalf("failure with no user: skip %q, err %v; want SkipFailure and no error", m.Skip, err)
+	}
+}
+
+// ReleaseHeld finds a held cache-write row's input row from its key alone
+// (usage.CallInputKey), so it must agree with the keys this mapper writes:
+// every write row maps to the call's input key, no other row does.
+func TestCallInputKey_MatchesMapperKeys(t *testing.T) {
+	m, err := MapPayload(mockAnthropicRecord(t, "cache-write-5m-1h"))
+	if err != nil {
+		t.Fatalf("map: %v", err)
+	}
+	roles := byRole(t, m.Events)
+	inputKey := roles[TokenTypeInput].IdempotencyKey
+	for tt, e := range roles {
+		got, ok := usage.CallInputKey(e.IdempotencyKey)
+		isWrite := tt == TokenTypeCacheWrite5m || tt == TokenTypeCacheWrite1h
+		if ok != isWrite || (isWrite && got != inputKey) {
+			t.Errorf("CallInputKey(%q) = %q, %v; want %q, %v", e.IdempotencyKey, got, ok, inputKey, isWrite)
+		}
 	}
 }

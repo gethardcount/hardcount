@@ -73,6 +73,9 @@ func TestClassifyByOpenPeriod(t *testing.T) {
 type heldMemStore struct {
 	*memStore
 	held []domain.HeldUsageEvent
+	// callLegacy makes IngestCallResolvingHeld report that it wrote the
+	// call's pre-split mapping.
+	callLegacy bool
 }
 
 func (h *heldMemStore) Hold(_ context.Context, _ string, ev domain.HeldUsageEvent) (domain.HeldUsageEvent, error) {
@@ -94,8 +97,11 @@ func (h *heldMemStore) DiscardHeld(context.Context, string, string, string, func
 func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent) (domain.UsageEvent, error) {
 	return h.Ingest(ctx, tenantID, ev)
 }
-func (h *heldMemStore) IngestCallResolvingHeld(context.Context, string, StoreCall) (CallResult, error) {
-	return CallResult{}, nil
+func (h *heldMemStore) IngestCallResolvingHeld(_ context.Context, _ string, call StoreCall) (CallResult, error) {
+	if h.callLegacy {
+		return CallResult{Inserted: len(call.Legacy), Legacy: true}, nil
+	}
+	return CallResult{Inserted: len(call.Events)}, nil
 }
 func (h *heldMemStore) HoldCall(_ context.Context, _ string, call HeldCall) (CallResult, error) {
 	h.held = append(h.held, call.Events...)
