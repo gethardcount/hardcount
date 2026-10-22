@@ -2803,19 +2803,19 @@ func (e GetV1PublicCostDashboardToken200JSONResponseBodyBillingPeriodSource) Val
 
 // Defines values for GetV1RatingRulesParamsLifecycleState.
 const (
-	Active   GetV1RatingRulesParamsLifecycleState = "active"
-	Archived GetV1RatingRulesParamsLifecycleState = "archived"
-	Draft    GetV1RatingRulesParamsLifecycleState = "draft"
+	GetV1RatingRulesParamsLifecycleStateActive   GetV1RatingRulesParamsLifecycleState = "active"
+	GetV1RatingRulesParamsLifecycleStateArchived GetV1RatingRulesParamsLifecycleState = "archived"
+	GetV1RatingRulesParamsLifecycleStateDraft    GetV1RatingRulesParamsLifecycleState = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetV1RatingRulesParamsLifecycleState enum.
 func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 	switch e {
-	case Active:
+	case GetV1RatingRulesParamsLifecycleStateActive:
 		return true
-	case Archived:
+	case GetV1RatingRulesParamsLifecycleStateArchived:
 		return true
-	case Draft:
+	case GetV1RatingRulesParamsLifecycleStateDraft:
 		return true
 	default:
 		return false
@@ -2923,25 +2923,25 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 
 // Defines values for GetV1SubscriptionsParamsStatus.
 const (
-	Active   GetV1SubscriptionsParamsStatus = "active"
-	Archived GetV1SubscriptionsParamsStatus = "archived"
-	Canceled GetV1SubscriptionsParamsStatus = "canceled"
-	Draft    GetV1SubscriptionsParamsStatus = "draft"
-	Trialing GetV1SubscriptionsParamsStatus = "trialing"
+	GetV1SubscriptionsParamsStatusActive   GetV1SubscriptionsParamsStatus = "active"
+	GetV1SubscriptionsParamsStatusArchived GetV1SubscriptionsParamsStatus = "archived"
+	GetV1SubscriptionsParamsStatusCanceled GetV1SubscriptionsParamsStatus = "canceled"
+	GetV1SubscriptionsParamsStatusDraft    GetV1SubscriptionsParamsStatus = "draft"
+	GetV1SubscriptionsParamsStatusTrialing GetV1SubscriptionsParamsStatus = "trialing"
 )
 
 // Valid indicates whether the value is a known member of the GetV1SubscriptionsParamsStatus enum.
 func (e GetV1SubscriptionsParamsStatus) Valid() bool {
 	switch e {
-	case Active:
+	case GetV1SubscriptionsParamsStatusActive:
 		return true
-	case Archived:
+	case GetV1SubscriptionsParamsStatusArchived:
 		return true
-	case Canceled:
+	case GetV1SubscriptionsParamsStatusCanceled:
 		return true
-	case Draft:
+	case GetV1SubscriptionsParamsStatusDraft:
 		return true
-	case Trialing:
+	case GetV1SubscriptionsParamsStatusTrialing:
 		return true
 	default:
 		return false
