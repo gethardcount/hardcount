@@ -26,6 +26,10 @@ export type PostV1PlansBody = {
   meter_ids?: string[];
   /** Optional. A plan is created active; archive it with PATCH. */
   status?: PostV1PlansBodyStatus;
-  /** Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`. */
+  /**
+     * Stripe product tax code for the base fee, such as
+     * `txcd_10103001`. Empty or omitted means the tenant's
+     * `default_product_tax_code`.
+     */
   tax_code?: string;
 };

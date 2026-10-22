@@ -360,6 +360,7 @@ export function CreateSubscriptionDialog({
                     <FormControl>
                       <Input type="number" min={0} max={730} placeholder="0 days" {...field} />
                     </FormControl>
+                    <FormMessage />
                   </FormItem>
                 )}
               />

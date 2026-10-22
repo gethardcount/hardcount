@@ -491,8 +491,11 @@ type CreatePlanInput struct {
 	// first-invoice-on-create + cancel-proration semantics per ADR-031.
 	BaseBillTiming domain.BillTiming `json:"base_bill_timing,omitempty"`
 	MeterIDs       []string          `json:"meter_ids"`
-	Status         string            `json:"status,omitempty"`
-	TaxCode        string            `json:"tax_code,omitempty"`
+	// Status is optional and may only be "active": create always makes an
+	// active plan. It stays a field so a caller sending "active" is not
+	// refused as an unknown field.
+	Status  string `json:"status,omitempty"`
+	TaxCode string `json:"tax_code,omitempty"`
 }
 
 func (s *Service) CreatePlan(ctx context.Context, tenantID string, input CreatePlanInput) (domain.Plan, error) {
@@ -590,7 +593,24 @@ func (s *Service) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan
 	return s.store.ListPlans(ctx, tenantID)
 }
 
-func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input CreatePlanInput) (domain.Plan, error) {
+// UpdatePlanInput is the PATCH /v1/plans/{id} body. A field left out keeps
+// its stored value. Description and TaxCode are pointers because an empty
+// string is a real value for them (it clears the field), so "left out" has
+// to be told apart from "set to empty". The dashboard's meter attach sends
+// only meter_ids: a write-on-omit here cleared a tax code set through the
+// API, and the plan's base fee then fell back to the tenant default code.
+// code, currency and billing_interval cannot change, so they are not here.
+type UpdatePlanInput struct {
+	Name            string            `json:"name,omitempty"`
+	Description     *string           `json:"description,omitempty"`
+	BaseAmountCents int64             `json:"base_amount_cents,omitempty"`
+	BaseBillTiming  domain.BillTiming `json:"base_bill_timing,omitempty"`
+	MeterIDs        []string          `json:"meter_ids,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	TaxCode         *string           `json:"tax_code,omitempty"`
+}
+
+func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input UpdatePlanInput) (domain.Plan, error) {
 	existing, err := s.store.GetPlan(ctx, tenantID, id)
 	if err != nil {
 		return domain.Plan{}, err
@@ -641,7 +661,9 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Cre
 	if name := strings.TrimSpace(input.Name); name != "" {
 		existing.Name = name
 	}
-	existing.Description = strings.TrimSpace(input.Description)
+	if input.Description != nil {
+		existing.Description = strings.TrimSpace(*input.Description)
+	}
 	if input.BaseAmountCents > 0 {
 		existing.BaseAmountCents = input.BaseAmountCents
 	}
@@ -664,11 +686,13 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Cre
 			return domain.Plan{}, errs.Invalid("status", "must be draft, active or archived")
 		}
 	}
-	taxCode := strings.TrimSpace(input.TaxCode)
-	if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {
-		return domain.Plan{}, err
+	if input.TaxCode != nil {
+		taxCode := strings.TrimSpace(*input.TaxCode)
+		if err := domain.ValidateStripeTaxCode("tax_code", taxCode); err != nil {
+			return domain.Plan{}, err
+		}
+		existing.TaxCode = taxCode
 	}
-	existing.TaxCode = taxCode
 
 	return s.store.UpdatePlan(ctx, tenantID, existing)
 }

@@ -403,6 +403,12 @@ func (h *Handler) listSentEmails(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
+	// The outbox legally holds nothing for an unknown id, so without this
+	// read a typo'd or other-mode id answered 200 with an empty list.
+	if _, err := h.svc.Get(r.Context(), tenantID, id); err != nil {
+		respond.FromError(w, r, err, "customer")
+		return
+	}
 
 	rows, err := h.sentEmails.ListByCustomer(r.Context(), tenantID, id)
 	if err != nil {

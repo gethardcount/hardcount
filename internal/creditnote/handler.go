@@ -101,11 +101,11 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
-// createRequest is CreateInput plus the ADR-080 commit-relief block. The
+// CreateRequest is CreateInput plus the ADR-080 commit-relief block. The
 // two shapes are mutually exclusive: commit_relief routes to the dedicated
 // single-tx relief coordinator (lines are server-built there); everything
 // else is the ordinary line-based create.
-type createRequest struct {
+type CreateRequest struct {
 	CreateInput
 	CommitRelief *CommitReliefInput `json:"commit_relief,omitempty"`
 }
@@ -113,7 +113,7 @@ type createRequest struct {
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var req createRequest
+	var req CreateRequest
 	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
@@ -422,6 +422,15 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(pdfBytes)
 }
 
+// SendEmailRequest is the POST /v1/credit-notes/{id}/send body.
+type SendEmailRequest struct {
+	Email string `json:"email"`
+	// AdditionalEmails: tri-state override, same contract as the
+	// invoice send (absent → customer's stored list; [] → primary
+	// only; list → validated exact override).
+	AdditionalEmails *[]string `json:"additional_emails,omitempty"`
+}
+
 // sendEmail emails the credit-note document with PDF attached (ADR-082
 // rider — CNs previously had NO send surface at all: engine-auto-issued
 // clawback CNs and card-refund CNs moved real money with no document
@@ -436,13 +445,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Email string `json:"email"`
-		// AdditionalEmails: tri-state override, same contract as the
-		// invoice send (absent → customer's stored list; [] → primary
-		// only; list → validated exact override).
-		AdditionalEmails *[]string `json:"additional_emails,omitempty"`
-	}
+	var body SendEmailRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Email == "" {
 		respond.BadRequest(w, r, "email is required")
 		return

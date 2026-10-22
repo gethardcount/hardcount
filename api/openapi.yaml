@@ -1307,6 +1307,8 @@ components:
           description: Decimal dollars per token.
         currency:
           type: string
+          enum: [USD]
+          description: Always USD. Cost and margin count every rate in dollars.
         created_at:
           type: string
           format: date-time
@@ -2201,7 +2203,7 @@ components:
         balance_after:
           type: integer
           format: int64
-          description: Customer's credit balance after this entry.
+          description: Customer's credit balance after this entry, in cents.
         description:
           type: string
         invoice_id:
@@ -2262,9 +2264,9 @@ components:
           type: integer
           format: int64
         metadata:
-          type: string
-          format: byte
-          description: The item's stored metadata JSON, base64-encoded. Absent when empty.
+          type: object
+          additionalProperties: true
+          description: The item's stored metadata. Absent when empty.
         pending_plan_id:
           type: string
           description: Plan the item moves to at `pending_plan_effective_at`. Absent when no change is scheduled.
@@ -3426,7 +3428,7 @@ components:
           description: Per-unit rate in cents, as a decimal string.
         graduated_tiers:
           type: array
-          nullable: true
+          description: Empty (`[]`) unless `mode` is `graduated`.
           items:
             type: object
             properties:
@@ -5372,8 +5374,7 @@ paths:
         days, newest first: invoice, payment receipt, payment failed,
         payment setup request, dunning, and credit note emails. Emails
         not tied to an invoice (such as a setup link sent from the
-        payment-methods page) are not listed. No paging. An unknown
-        customer ID returns an empty list, not 404.
+        payment-methods page) are not listed. No paging.
       operationId: listCustomerSentEmails
       parameters:
         - name: id
@@ -5394,6 +5395,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SentEmail"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/customers/{id}/usage:
     get:
@@ -5933,9 +5940,7 @@ paths:
         An older route the dashboard no longer uses. Prefer
         `GET /v1/customers/{customer_id}/payment-methods`.
 
-        Any read error, an unknown customer included, returns 200 with
-        `setup_status: missing` and zero timestamps. Needs the
-        `customer:write` permission.
+        An unknown customer is 404. Needs the `customer:write` permission.
       parameters:
         - name: customerID
           in: path
@@ -5949,6 +5954,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CustomerPaymentSetup"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/public/cost-dashboard/{token}:
     get:
@@ -6440,8 +6451,7 @@ paths:
       description: |
         Every pricing rule on the meter, highest priority first, then oldest
         first. At billing time each usage event is billed by the first rule
-        in this order whose `dimension_match` it matches. The meter id is
-        not checked: an unknown id returns an empty list.
+        in this order whose `dimension_match` it matches.
       operationId: listMeterPricingRules
       parameters:
         - name: meter_id
@@ -6462,6 +6472,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/MeterPricingRule"
+        "404":
+          description: No meter with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     post:
       tags: [Pricing]
       summary: Create or update a meter pricing rule
@@ -6827,6 +6843,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditGrants"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credits/adjust:
     post:
@@ -6917,8 +6939,7 @@ paths:
       description: |
         Ledger entries for one customer. `balance_after` is the running
         balance in time order over the whole ledger, so it stays right
-        when you filter by `entry_type`. An unknown customer returns an
-        empty list, not 404.
+        when you filter by `entry_type`.
       operationId: listCreditLedgerEntries
       parameters:
         - name: customer_id
@@ -6966,6 +6987,12 @@ paths:
                       $ref: "#/components/schemas/CreditLedgerEntry"
                   total:
                     type: integer
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/webhook-endpoints/endpoints:
     post:
@@ -7608,6 +7635,7 @@ paths:
                   enum: [monthly, yearly]
                 base_amount_cents:
                   type: integer
+                  format: int64
                 base_bill_timing:
                   type: string
                   enum: [in_advance, in_arrears]
@@ -7624,7 +7652,10 @@ paths:
                   description: Optional. A plan is created active; archive it with PATCH.
                 tax_code:
                   type: string
-                  description: Stripe tax code for this plan. Absent means the tenant's `default_product_tax_code`.
+                  description: |
+                    Stripe product tax code for the base fee, such as
+                    `txcd_10103001`. Empty or omitted means the tenant's
+                    `default_product_tax_code`.
       responses:
         "201":
           description: Plan created
@@ -7697,10 +7728,9 @@ paths:
       tags: [Pricing]
       summary: Update plan
       description: |
-        `name`, `base_amount_cents`, `base_bill_timing`, `meter_ids` and
-        `status` are left unchanged when omitted. `description` and
-        `tax_code` are always written: omitting them clears them. `code`,
-        `currency` and `billing_interval` cannot be changed and are ignored.
+        A field left out keeps its current value. To clear `description`
+        or `tax_code`, send an empty string. `code`, `currency` and
+        `billing_interval` cannot be changed and are ignored.
 
         `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
         subscriptions are billed. Changing any of them is refused while a
@@ -7728,7 +7758,7 @@ paths:
                   description: Whitespace is trimmed. Empty or omitted keeps the current name.
                 description:
                   type: string
-                  description: Omitting it clears the stored description.
+                  description: Whitespace is trimmed. Omit to keep the current description; an empty string clears it.
                 base_amount_cents:
                   type: integer
                   format: int64
@@ -7746,7 +7776,7 @@ paths:
                   enum: [draft, active, archived]
                 tax_code:
                   type: string
-                  description: Stripe product tax code. Omitting it clears the stored code.
+                  description: Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
       responses:
         "200":
           description: The updated plan
@@ -9038,6 +9068,7 @@ paths:
                 properties:
                   type: object
                   additionalProperties: true
+                  description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                 idempotency_key:
                   type: string
                   maxLength: 255
@@ -9104,16 +9135,14 @@ paths:
             type: string
         - name: from
           in: query
-          description: Only events at or after this time (RFC 3339). A value that does not parse is ignored.
+          description: Only events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
           schema:
             type: string
-            format: date-time
         - name: to
           in: query
-          description: Only events before this time (RFC 3339, exclusive). A value that does not parse is ignored.
+          description: Only events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
           schema:
             type: string
-            format: date-time
         - name: limit
           in: query
           schema:
@@ -9150,7 +9179,11 @@ paths:
                     type: string
                     description: Pass it as `after` to read the next page. Sent only when `has_more` is true.
         "422":
-          description: Malformed dimensions filter
+          description: "`validation_error`: a malformed `dimensions` pair, or a `from` or `to` that cannot be parsed, or `to` before `from` (param names the field)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/usage-events/batch:
     post:
@@ -9193,6 +9226,10 @@ paths:
                   dimensions:
                     type: object
                     additionalProperties: true
+                  properties:
+                    type: object
+                    additionalProperties: true
+                    description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                   idempotency_key:
                     type: string
                     maxLength: 255
@@ -9492,8 +9529,7 @@ paths:
         customer's latest reading (Latest value), added across customers.
         `total` stays the plain sum of reported quantities. `total_units`
         adds quantities across all meters whatever their units, and is kept
-        for compatibility only. A `from` or `to` value that is not RFC 3339
-        is ignored, not rejected.
+        for compatibility only.
       operationId: aggregateUsageEvents
       parameters:
         - name: customer_id
@@ -9506,16 +9542,14 @@ paths:
             type: string
         - name: from
           in: query
-          description: Events at or after this time (RFC 3339).
+          description: Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
           schema:
             type: string
-            format: date-time
         - name: to
           in: query
-          description: Events before this time (RFC 3339).
+          description: Events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
           schema:
             type: string
-            format: date-time
         - name: dimensions
           in: query
           description: |
@@ -9539,7 +9573,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UsageAggregate"
         "422":
-          description: "`validation_error`: a malformed `dimensions` pair or an unknown `tz`."
+          description: "`validation_error`: a malformed `dimensions` pair, an unknown `tz`, a `from` or `to` that cannot be parsed, or `to` before `from`."
           content:
             application/json:
               schema:
@@ -9553,8 +9587,7 @@ paths:
         Per-meter quantity totals and the event count for one customer over
         a window. Without `from` and `to` the window is the current calendar
         month in UTC (the test clock's month when the customer is on one).
-        Quantities are plain sums, whatever the meter's aggregation. An
-        unknown customer id returns zero totals, not 404.
+        Quantities are plain sums, whatever the meter's aggregation.
       operationId: getUsageSummary
       parameters:
         - name: customer_id
@@ -9580,6 +9613,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UsageSummary"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: "`validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field)."
           content:
@@ -11475,7 +11514,11 @@ paths:
                   description: Decimal dollars per token (e.g. "0.000003").
                 currency:
                   type: string
+                  enum: [USD]
                   default: USD
+                  description: |
+                    Rates are in USD only, the currency LiteLLM reports cost
+                    in. Any other value is 422.
       responses:
         "200":
           description: Upserted rate
@@ -11483,6 +11526,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ProviderCostRate"
+        "422":
+          description: "`validation_error`: a required field is missing, `cost_per_token` is negative, or `currency` is not USD (param names the field)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/provider-costs/{id}:
     delete:
@@ -11625,6 +11674,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CreditBalance"
+        "404":
+          description: No customer with this ID in this tenant and mode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /v1/credits/balance/{customer_id}/live:
     get:

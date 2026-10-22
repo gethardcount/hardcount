@@ -375,7 +375,7 @@ func (h *Handler) updatePlan(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var input CreatePlanInput
+	var input UpdatePlanInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		respond.BadRequest(w, r, "invalid JSON body")
 		return
@@ -428,6 +428,12 @@ func (h *Handler) listMeterPricingRules(w http.ResponseWriter, r *http.Request) 
 	tenantID := auth.TenantID(r.Context())
 	meterID := chi.URLParam(r, "meter_id")
 
+	// The rules table holds nothing for an unknown meter, so without this
+	// read a typo'd id answered 200 with an empty list.
+	if _, err := h.svc.GetMeter(r.Context(), tenantID, meterID); err != nil {
+		respond.FromError(w, r, err, "meter")
+		return
+	}
 	rules, err := h.svc.ListMeterPricingRulesByMeter(r.Context(), tenantID, meterID)
 	if err != nil {
 		respond.FromError(w, r, err, "meter_pricing_rule")

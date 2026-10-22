@@ -1055,12 +1055,13 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 //
 // What the notice says about retries follows the dunning run: only an active,
 // unpaused run has a retry to come. A card the customer saves now replaces
-// the refused default by itself (ADR-126); a card saved before the refusal
-// stays beside it, so the operator is told to make that one the default.
+// the refused default by itself (ADR-126; a setup or update link's card
+// always does, ADR-021); a card already on file stays beside it, so the
+// operator is told to make that one the default.
 func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since time.Time) *Attention {
 	const (
 		final     = "Stripe's decline code is %s, which Stripe and the card networks treat as final. "
-		newCard   = "A card the customer saves now, through a setup link or the hosted invoice page, becomes the default by itself; a card saved before the refusal needs Set as default on the customer page. "
+		newCard   = "A card the customer saves now, through a setup or update link or by paying on the hosted invoice page, becomes the default by itself; a card already on file needs Set as default on the customer page. "
 		hostedPay = "The customer can also pay on the hosted invoice page."
 	)
 	message := "The customer's bank refused this card for good, so automatic retries won't charge it; the customer needs a different card."

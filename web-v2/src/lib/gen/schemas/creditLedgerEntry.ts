@@ -19,7 +19,7 @@ export interface CreditLedgerEntry {
   entry_type: CreditLedgerEntryEntryType;
   /** Positive adds credit, negative removes it. */
   amount_cents: number;
-  /** Customer's credit balance after this entry. */
+  /** Customer's credit balance after this entry, in cents. */
   balance_after: number;
   description: string;
   invoice_id?: string;

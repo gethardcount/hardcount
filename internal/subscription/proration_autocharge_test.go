@@ -84,6 +84,7 @@ func TestUpdateItem_Downgrade_DoesNotEnrollForAutoCharge(t *testing.T) {
 
 	h := NewHandler(svc)
 	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetCreditNoteIssuer(&fakeCNIssuer{})
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
 	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)

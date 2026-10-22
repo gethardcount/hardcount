@@ -12,11 +12,11 @@ export type AggregateUsageEventsParams = {
 customer_id?: string;
 meter_id?: string;
 /**
- * Events at or after this time (RFC 3339).
+ * Events at or after this time. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
  */
 from?: string;
 /**
- * Events before this time (RFC 3339).
+ * Events before this time, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
  */
 to?: string;
 /**
