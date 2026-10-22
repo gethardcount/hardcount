@@ -148,7 +148,7 @@ func TestResolveRun_InvoiceActionFailureLeavesRunActive(t *testing.T) {
 			if err != nil {
 				t.Fatalf("StartDunning: %v", err)
 			}
-			h := NewHandler(svc, HandlerDeps{})
+			h := NewHandler(svc)
 			h.SetInvoiceVoider(&recordingVoider{err: errBlip})
 
 			body, _ := json.Marshal(ResolveInput{Resolution: string(resolution)})
@@ -202,7 +202,7 @@ func TestResolveRun_InvoiceAlreadyInEndStateResolves(t *testing.T) {
 			inv.Status = status
 			svc.SetSubscriptionPauser(&recordingPauser{}, &seqInvGet{steps: []stubInvGet{{inv: inv}}})
 			voider := &recordingVoider{err: errs.InvalidState("invoice is already " + string(status))}
-			h := NewHandler(svc, HandlerDeps{})
+			h := NewHandler(svc)
 			h.SetInvoiceVoider(voider)
 
 			if rec := resolveVia(h, run.ID, resolution); rec.Code != http.StatusOK {

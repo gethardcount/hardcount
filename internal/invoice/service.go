@@ -183,6 +183,10 @@ type Service struct {
 	settings       TenantSettingsReader
 	audit          AuditLogger
 	events         domain.EventDispatcher
+	// collectionStopper and dunningResolver are AfterVoid's Stripe and
+	// dunning legs. Only a test leaves them unwired.
+	collectionStopper PaymentCanceler
+	dunningResolver   DunningResolver
 	// setupLinkEmailOff is true when this server cannot email a setup link
 	// (SMTP_HOST or PAYMENT_UPDATE_URL unset). Read only by the
 	// no-payment-method and recovery-ended notices, which must not say a
@@ -196,6 +200,16 @@ type Service struct {
 // when one can be. Wired at boot from both things the sender needs: SMTP and
 // PAYMENT_UPDATE_URL.
 func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmailOff = !configured }
+
+// SetCollectionStopper wires the Stripe leg every committed void runs
+// (AfterVoid): expire the invoice's live Checkout sessions, then cancel its
+// PaymentIntent. Satisfied by *payment.Stripe.
+func (s *Service) SetCollectionStopper(p PaymentCanceler) { s.collectionStopper = p }
+
+// SetDunningResolver wires the dunning leg every committed void runs
+// (AfterVoid): close the invoice's active run as invoice_voided. Satisfied
+// by *dunning.Service.
+func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d }
 
 // AuditLogger is the narrow audit-write interface the service uses to
 // record state-changing operations that are reachable from multiple
@@ -1821,13 +1835,36 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 	return nil
 }
 
-// AfterVoid runs a committed void's post-commit legs: the upstream tax
-// reversal and the invoice.voided webhook. Void calls it itself; a caller of
-// VoidUnchangedTx calls it once its transaction commits. A crash before it
-// runs loses nothing durable: RetryPendingTaxReversal re-drives the reversal
-// (the voided row keeps tax_reversed_at NULL); the webhook is best-effort, as
-// on every void.
+// AfterVoid runs a committed void's post-commit legs, the same for every
+// void: Void calls it itself, and a caller of VoidUnchangedTx (the cancel and
+// plan-swap relief, Engine.FinishRelief) calls it once its transaction
+// commits. Before 2026-10-22 the Stripe and dunning legs ran only in the two
+// HTTP handlers, so a relief void left the invoice payable on a live
+// Checkout session and its dunning run active until the run's next due tick.
+//
+// In order:
+//  1. Stop collection at Stripe: expire the invoice's live Checkout
+//     sessions, then cancel its PaymentIntent. Money first.
+//  2. Reverse the upstream tax.
+//  3. Send invoice.voided.
+//  4. Resolve the invoice's active dunning run as invoice_voided. A caller
+//     that resolves the run itself afterwards (the dunning handler) loses
+//     the resolve CAS and gets the resolved row back.
+//
+// Each leg is best-effort, and a crash before one loses nothing durable:
+// the void's own transaction closed Velox's checkout claims, a Checkout
+// session expires within an hour at Stripe, and a payment that still lands
+// raises the paid-on-voided anomaly (ADR-068); RetryPendingTaxReversal
+// re-drives the reversal (tax_reversed_at stays NULL); dunning's next tick
+// on the run resolves it (processRun reads the voided invoice).
 func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.Invoice) {
+	// The void has committed, so every leg runs to the end even if the
+	// caller's context ends now (an API timeout, a client disconnect, a
+	// dunning tick stopping): the same rule as finishReliefThenCollect.
+	ctx = context.WithoutCancel(ctx)
+	if s.collectionStopper != nil {
+		s.collectionStopper.StopCollection(ctx, tenantID, voided)
+	}
 	// Invoice-stable reversal reference (inv_taxrev_<id>). Void permits an
 	// `uncollectible` source (annulling a bad debt is a legitimate operator
 	// action), and MarkUncollectible already reversed the tax under THIS same
@@ -1852,6 +1889,12 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 			"amount_due_cents":   voided.AmountDueCents,
 			"currency":           voided.Currency,
 		})
+	}
+	if s.dunningResolver != nil {
+		if err := s.dunningResolver.ResolveByInvoice(ctx, tenantID, voided.ID, domain.ResolutionInvoiceVoided); err != nil {
+			slog.WarnContext(ctx, "resolve the voided invoice's dunning run failed; its next dunning tick resolves it",
+				"invoice_id", voided.ID, "error", err)
+		}
 	}
 }
 
