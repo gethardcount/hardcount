@@ -1562,7 +1562,7 @@ export default function InvoiceDetailPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               {pauseSubOnWriteOff
-                ? 'The subscription keeps drafting invoices for each cycle, but nothing is charged until you resume it.'
+                ? 'The subscription keeps drafting invoices for each cycle, but they stay drafts and nothing charges them. Retries already running on its other unpaid invoices continue.'
                 : 'The subscription keeps billing and charging as normal. Writing off this invoice does not stop the next one.'}
             </p>
           </div>

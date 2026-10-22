@@ -130,10 +130,11 @@ const (
 	// AttentionReasonCollectionPaused: the invoice is queued for
 	// auto-charge but its subscription has pause_collection set, so the
 	// sweeps deliberately skip it. Distinct from payment_scheduled
-	// because nothing is scheduled — saying otherwise promises a charge
-	// that will never fire. Reached when a subscription is paused AFTER
-	// its invoice was queued, which is what dunning's `pause` final
-	// action does to every invoice already in flight.
+	// because the auto-charge is not scheduled. Reached when a subscription
+	// is paused AFTER its invoice was queued, which is what dunning's
+	// `pause` final action does to every invoice already in flight. A
+	// dunning run already open on the invoice keeps retrying it through
+	// the pause, and the message then says so.
 	AttentionReasonCollectionPaused AttentionReason = "collection_paused"
 
 	// AttentionReasonAwaitingPayment: invoice is finalized and unpaid but
@@ -417,6 +418,9 @@ type AttentionContext struct {
 	// The no-payment-method notice reads it too: "charged once the customer
 	// adds a card" is false while collection is paused, so the invoice
 	// service populates it for card-less invoices as well as queued ones.
+	// The pause does not stop a dunning run already open on the invoice
+	// (Stripe keeps retrying invoices created before a pause too), so both
+	// notices read DunningRetrying alongside it.
 	// Zero-value (false) keeps the scheduled copy — safe for callers
 	// without the signal, and the honest default for the common case
 	// where nothing is paused.
@@ -486,14 +490,19 @@ type AttentionContext struct {
 	// for failed invoices only.
 	RefusedCardDeclineCode string
 
-	// DunningRetrying is true when the invoice's dunning run is active and
-	// not paused, so a scheduled retry is still to come. Read only by the
-	// refused-card notice: "dunning keeps its schedule" is true only then.
-	// After the run exhausts, while it is paused, or with no run at all
-	// (dunning off), no retry runs whatever card becomes the default. The
-	// invoice service reads it for invoices with RefusedCardDeclineCode set.
-	// Zero value (false) gives the no-retry copy, which still sends the
-	// operator to get a new card rather than to wait on a retry.
+	// DunningRetrying is true when the invoice's dunning run is active, not
+	// paused and not waiting on a failed final action, so a scheduled retry
+	// is still to come (except a run at or above a max_retry_attempts lowered
+	// after it started, whose next tick only runs the final action). After the run exhausts (including a final action that
+	// failed and is being re-attempted), while it is paused, or with no run at
+	// all (dunning off), no retry runs whatever card becomes the default. Read by the refused-card
+	// notice ("dunning keeps its schedule" is true only then) and by the two
+	// paused-collection notices: a collection pause does not stop an open
+	// run, whose next retry charges the customer's default card. The invoice
+	// service reads it for refused-card invoices and for every invoice it
+	// reads the pause state for. Zero value (false) gives the no-retry copy,
+	// which still sends the operator to get a new card rather than to wait
+	// on a retry.
 	DunningRetrying bool
 
 	// LostDispute is a dispute on one of this invoice's payments that closed
@@ -648,7 +657,7 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	// would be a promise nothing keeps.
 	case inv.Status == InvoiceFinalized && inv.PaymentStatus == PaymentPending &&
 		inv.AutoChargePending && atc.CollectionPaused:
-		return classifyCollectionPaused(inv)
+		return classifyCollectionPaused(inv, atc.DunningRetrying)
 	case inv.Status == InvoiceFinalized && inv.PaymentStatus == PaymentPending && inv.AutoChargePending:
 		return classifyPaymentScheduled(inv)
 	case inv.Status == InvoiceFinalized && inv.PaymentStatus == PaymentPending:
@@ -1249,21 +1258,33 @@ func classifyPaymentScheduled(inv Invoice) *Attention {
 
 // classifyCollectionPaused surfaces a queued invoice whose subscription is
 // paused for collection. The queue flag is still set — it is what will make
-// the sweep pick the invoice up the moment collection resumes — but nothing
-// charges it in the meantime, so this must not borrow payment_scheduled's
-// "the engine will charge this" copy.
+// the sweep pick the invoice up the moment collection resumes — but the
+// sweeps skip it in the meantime, so this must not borrow
+// payment_scheduled's "the engine will charge this" copy.
+//
+// The pause does not stop a dunning run already open on the invoice: its
+// retries keep their schedule and charge the card on file, as Stripe keeps
+// retrying invoices created before a pause unless they are voided. So with
+// retrying set the notice says the retries continue and how to stop them,
+// and only without it does it say nothing charges the invoice.
 //
 // Severity info, not warning: the operator asked for this. Charge now stays
 // offered because a manual collect is an explicit override and has no pause
 // filter — the pause governs automation, not the operator.
-func classifyCollectionPaused(inv Invoice) *Attention {
+func classifyCollectionPaused(inv Invoice, retrying bool) *Attention {
 	since := attentionSince(inv)
+	message := "Collection is paused on the subscription, so this invoice won't be charged automatically; use Charge now to collect it anyway."
+	detail := "Resume collection on the subscription page to go back to automatic charges. This invoice is then charged on the next run."
+	if retrying {
+		message = "Collection is paused, but payment retries for this invoice continue, so the next retry charges the card on file."
+		detail = pausedRetriesDetail
+	}
 	return &Attention{
 		Severity: AttentionSeverityInfo,
 		Reason:   AttentionReasonCollectionPaused,
 		Code:     "payment.collection_paused",
-		Message:  "Collection is paused on the subscription, so this invoice won't be charged automatically; use Charge now to collect it anyway.",
-		Detail:   "Resume collection on the subscription page to go back to automatic charges. This invoice is then charged on the next run.",
+		Message:  message,
+		Detail:   detail,
 		DocURL:   docURL("collection-paused"),
 		Actions: []AttentionActionItem{
 			{Code: AttentionActionChargeNow, Label: "Charge now"},
@@ -1300,15 +1321,23 @@ func classifyAwaitingPayment(inv Invoice) *Attention {
 	}
 }
 
+// pausedRetriesDetail explains a collection pause beside an open dunning run:
+// the pause keeps new invoices as drafts, and this invoice's retries keep
+// going until it is paid, voided or written off. Both actions sit in the
+// invoice page's ⋯ menu, above the banner that shows this detail.
+const pausedRetriesDetail = "Pausing collection keeps new invoices as drafts. Payment retries already under way for this invoice keep their schedule. " +
+	"To stop the retries, void this invoice or mark it uncollectible from the ⋯ menu above."
+
 // classifyNoPaymentMethod surfaces the finalized-unpaid invoice whose
 // customer has no PaymentSetup ready. The invoice IS queued
 // (auto_charge_pending) and dunning ages it out — but automation cannot
 // conjure the card, so the operator/customer is the mover.
 //
 // Message line 1 says what happens to THIS invoice when a card arrives,
-// which depends on two real signals: collection paused (the sweep that
+// which depends on three real signals: collection paused (the sweep that
 // charges on attach skips paused subscriptions, so nothing happens until
-// resume) and simulated time (the wall-clock sweep excludes clock-pinned
+// resume), an open dunning run (which the pause does not stop, so its next
+// retry charges the new card) and simulated time (the wall-clock sweep excludes clock-pinned
 // invoices, so the charge waits for the next clock advance). Line 2 says
 // what happened to the setup link, which depends on two more: whether the
 // customer has an email and whether this server can send email at all.
@@ -1334,7 +1363,13 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 	if inv.IsSimulated {
 		charge = "This invoice is charged on the next clock advance once the customer adds a card."
 	}
-	if atc.CollectionPaused {
+	// A pause stops the charge on attach, not a dunning run already open on
+	// the invoice: its next retry charges the card the customer adds.
+	pausedRetrying := atc.CollectionPaused && atc.DunningRetrying
+	switch {
+	case pausedRetrying:
+		charge = "Collection is paused, but payment retries for this invoice continue, so the next retry charges a card the customer adds."
+	case atc.CollectionPaused:
 		charge = "Collection is paused on the subscription, so adding a card won't charge this invoice until you resume it."
 	}
 
@@ -1410,12 +1445,16 @@ func classifyNoPaymentMethod(inv Invoice, atc AttentionContext) *Attention {
 		}
 	}
 
+	noCardDetail := emailDetail
+	if pausedRetrying {
+		noCardDetail = joinDetail(pausedRetriesDetail, emailDetail)
+	}
 	return &Attention{
 		Severity: AttentionSeverityWarning,
 		Reason:   AttentionReasonNoPaymentMethod,
 		Code:     "payment.no_payment_method",
 		Message:  charge + "\n" + emailLine,
-		Detail:   emailDetail,
+		Detail:   noCardDetail,
 		DocURL:   docURL("no-payment-method"),
 		Actions:  actions,
 		Since:    &since,

@@ -407,7 +407,6 @@ func (s *Sender) brandingFor(ctx context.Context, tenantID string) Branding {
 		LogoURL:     ts.LogoURL,
 		BrandColor:  ts.BrandColor,
 		SupportURL:  ts.SupportURL,
-		FromAddress: ts.CompanyEmail,
 	}
 	return b.fill()
 }
