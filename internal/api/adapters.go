@@ -1369,15 +1369,13 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 	return a.mintForClaim(ctx, sc, freshClaim, stripeCustomerID, inv, successURL, cancelURL)
 }
 
-// mintForClaim creates (or idempotently re-drives) the Stripe Checkout
-// session for one claim and fills the row. The idempotency key IS the claim
-// id: a crash before the fill, a concurrent loser, or a retry all receive
-// the same session from Stripe — one invoice can never grow two live
-// payable sessions.
-func (a *hostedInvoiceStripeAdapter) mintForClaim(
-	ctx context.Context, sc *stripe.Client, claim payment.CheckoutClaim,
-	stripeCustomerID string, inv domain.Invoice, successURL, cancelURL string,
-) (string, error) {
+// hostedInvoiceCheckoutParams builds the Stripe Checkout session request for
+// one hosted-invoice claim. It is a pure function of its inputs: every
+// re-drive replays the claim id as the idempotency key, and Stripe rejects a
+// replayed key whose params changed.
+func hostedInvoiceCheckoutParams(
+	claim payment.CheckoutClaim, stripeCustomerID string, inv domain.Invoice, successURL, cancelURL string,
+) *stripe.CheckoutSessionCreateParams {
 	currency := strings.ToLower(claim.Currency)
 	productName := "Invoice " + inv.InvoiceNumber
 	// Duplicate the metadata on BOTH the session and the PaymentIntent.
@@ -1401,7 +1399,7 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 	// PaymentMethod is never attached to anything. Without
 	// `setup_future_usage`, the card is consumed by the one-shot PI and
 	// detached. Both are required for dunning auto-retry to work.
-	sess, err := sc.V1CheckoutSessions.Create(ctx, &stripe.CheckoutSessionCreateParams{
+	return &stripe.CheckoutSessionCreateParams{
 		Customer: stripe.String(stripeCustomerID),
 		Mode:     stripe.String(string(stripe.CheckoutSessionModePayment)),
 		LineItems: []*stripe.CheckoutSessionCreateLineItemParams{
@@ -1430,13 +1428,32 @@ func (a *hostedInvoiceStripeAdapter) mintForClaim(
 		// id as the idempotency key, and Stripe rejects a replayed key whose
 		// params changed, so a clock-relative expiry broke every retry.
 		ExpiresAt: stripe.Int64(checkoutSessionExpiry(claim).Unix()),
+		// Charge in the invoice's own currency. Unset, Stripe applies the account's
+		// Adaptive Pricing setting and may preselect the buyer's local currency with a
+		// 2-4% conversion fee, so the bank statement no longer matches the invoice and
+		// receipt (USD 10.29 charged as INR 1,010.68).
+		AdaptivePricing: &stripe.CheckoutSessionCreateAdaptivePricingParams{
+			Enabled: stripe.Bool(false),
+		},
 		Params: stripe.Params{
 			Metadata: meta,
 			// The claim id: every re-drive for this claim converges on the
 			// SAME Stripe session.
 			IdempotencyKey: stripe.String(claim.ID),
 		},
-	})
+	}
+}
+
+// mintForClaim creates (or idempotently re-drives) the Stripe Checkout
+// session for one claim and fills the row. The idempotency key IS the claim
+// id: a crash before the fill, a concurrent loser, or a retry all receive
+// the same session from Stripe — one invoice can never grow two live
+// payable sessions.
+func (a *hostedInvoiceStripeAdapter) mintForClaim(
+	ctx context.Context, sc *stripe.Client, claim payment.CheckoutClaim,
+	stripeCustomerID string, inv domain.Invoice, successURL, cancelURL string,
+) (string, error) {
+	sess, err := sc.V1CheckoutSessions.Create(ctx, hostedInvoiceCheckoutParams(claim, stripeCustomerID, inv, successURL, cancelURL))
 	if err != nil {
 		return "", fmt.Errorf("checkout session: %w", err)
 	}
