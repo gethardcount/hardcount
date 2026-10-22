@@ -2,11 +2,9 @@
 
 Each tenant (one account's data) shares the database with others. Postgres
 Row-Level Security (RLS) hides every tenant's rows from every other tenant.
-This page is for a report that one tenant saw another's data. Back to the
-[runbook index](index.md).
+Back to the [runbook index](index.md).
 
-**This is a SEV-1**, the highest-severity incident. A leak across RLS is the
-worst-case bug. Follow [Escalation](escalation.md) alongside this page.
+**This is a SEV-1.** Follow [Escalation](escalation.md) alongside this page.
 
 ## Symptom
 
@@ -28,9 +26,8 @@ shows it only that tenant's rows. A leak means one of these failed:
 
 ## Check
 
-1. **Contain it first.** Velox has no read-only mode. Revoke API keys
-   (dashboard → API keys), stop the API container, or both. Keep Postgres
-   up for forensics.
+1. **Contain it first** ([Escalation, SEV-1 step 1](escalation.md#sev-1)).
+   Keep Postgres up for forensics.
 2. **Check that RLS is on for every tenant-scoped table:**
 
    ```sql

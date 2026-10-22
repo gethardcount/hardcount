@@ -1,8 +1,6 @@
 # Set up email
 
-Velox sends email through your email provider's SMTP server. SMTP is the standard way programs hand email to a provider. This page is for the engineer who runs Velox: it connects a provider, checks that email arrives, and sets up bounce handling.
-
-Think of Velox as the person who writes the letters and your email provider as the post office that delivers them. Velox never delivers email itself.
+Velox sends email through your email provider's SMTP server. SMTP is the standard way programs hand email to a provider. This page connects a provider, checks that email arrives, and sets up bounce handling.
 
 Velox sends:
 
@@ -11,7 +9,7 @@ Velox sends:
 - payment-failed emails and links to add a payment method,
 - password resets and team invites.
 
-Velox sends at most 60 emails a minute (5 every 5 seconds), and you cannot change that. Emails above that rate wait in a queue and go out in order.
+Velox sends about 20 to 30 emails a minute, and you cannot change that. Emails above that rate wait in a queue and go out in order. Velox sends only through SMTP, so it cannot show opens or clicks.
 
 ## Connect a provider
 
@@ -37,12 +35,7 @@ Velox sends at most 60 emails a minute (5 every 5 seconds), and you cannot chang
    CUSTOMER_PORTAL_URL=https://billing.example.com
    ```
 
-   | Setting | What it is for |
-   |---|---|
-   | `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Velox adds `/invoice/<token>`. |
-   | `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Velox adds `?token=…`. |
-   | `DASHBOARD_BASE_URL` | Password-reset and team-invite links. |
-   | `CUSTOMER_PORTAL_URL` | Not an email link. It is where Stripe sends a customer after they save a card. Velox adds `/payment-method-added`. |
+   What each one is for: [What breaks when a setting is missing](#what-breaks-when-a-setting-is-missing).
 
 3. Restart Velox. With Docker Compose, run `docker compose up -d`.
 
@@ -55,8 +48,6 @@ Velox sends at most 60 emails a minute (5 every 5 seconds), and you cannot chang
 5. Click **Send test email**.
 
    **You see:** "Sent to" and your address. The email arrives within a few minutes. If it does not, check spam and the server log.
-
-Settings → Email is new in v0.8.0. On v0.7.0 and earlier, test with a password reset instead: sign out, click **Forgot password?**, and enter your email.
 
 ## Keep email out of spam
 
@@ -72,15 +63,15 @@ Use a `SMTP_FROM` address on that domain. Every email Velox sends carries a `Dat
 
 ## What breaks when a setting is missing
 
-Velox starts without any of these. It logs one warning at start-up for each one that is missing:
+Velox starts without any of these. It logs one warning at start-up for each one that is missing, starting with the setting's name (`SMTP NOT CONFIGURED` for `SMTP_HOST`, `… NOT SET` for the others).
 
-| Missing | Start-up warning | What breaks |
+| Setting | What Velox uses it for | Without it |
 |---|---|---|
-| `SMTP_HOST` | `SMTP NOT CONFIGURED — …` | No email is sent. Queued emails are retried for about 72 hours, then marked failed. Actions that send email right away (send an invoice or a credit note, send a setup link, invite a teammate) refuse with 409 `email_not_configured`. |
-| `HOSTED_INVOICE_BASE_URL` | `HOSTED_INVOICE_BASE_URL NOT SET — …` | Invoice, receipt, dunning and payment-failed emails have no link in their button. |
-| `PAYMENT_UPDATE_URL` | `PAYMENT_UPDATE_URL NOT SET — …` | The "add a payment method" email is not sent. Velox sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
-| `DASHBOARD_BASE_URL` | `DASHBOARD_BASE_URL NOT SET — …` | Password-reset emails are not sent, and team invites fail. Velox never builds these links from the address in a request. |
-| `CUSTOMER_PORTAL_URL` | `CUSTOMER_PORTAL_URL NOT SET — …` | After saving a card, Stripe sends the customer to `http://localhost:5173`, which exists only in local development. The card is still saved. |
+| `SMTP_HOST` | Your provider's SMTP server | No email is sent. Queued emails are retried for about 72 hours, then marked failed. Actions that send email right away (send an invoice or a credit note, send a setup link, invite a teammate) refuse with 409 `email_not_configured`. |
+| `HOSTED_INVOICE_BASE_URL` | The "View & pay invoice" and "View receipt" buttons. Velox adds `/invoice/<token>`. | Invoice, receipt, dunning and payment-failed emails have no link in their button. |
+| `PAYMENT_UPDATE_URL` | The link in the email that asks a customer to add a payment method. Velox adds `?token=…`. | That email is not sent. Velox sends it when an invoice has no payment method on file, and when you click Resend setup link. Payment-failed and dunning emails link to the invoice page instead, so they do not need it. |
+| `DASHBOARD_BASE_URL` | Password-reset and team-invite links | Password-reset emails are not sent, and team invites are refused. Velox never builds these links from the address in a request. |
+| `CUSTOMER_PORTAL_URL` | Not an email link: where Stripe sends a customer after they save a card. Velox adds `/payment-method-added`. | Stripe sends the customer to `http://localhost:5173`, which exists only in local development. The card is still saved. |
 
 ## Settings for each provider
 
@@ -97,7 +88,7 @@ SMTP_FROM=billing@yourdomain.com
 SMTP_TLS=starttls
 ```
 
-`SMTP_USERNAME` is the word `apikey`; the password is your API key. Free tier: 100 emails a day. [SendGrid SMTP docs](https://docs.sendgrid.com/for-developers/sending-email/integrating-with-the-smtp-api)
+`SMTP_USERNAME` is the word `apikey`; the password is your API key. [SendGrid SMTP docs](https://docs.sendgrid.com/for-developers/sending-email/integrating-with-the-smtp-api)
 
 ### Postmark
 
@@ -162,7 +153,7 @@ SMTP_FROM=billing@yourdomain.com
 SMTP_TLS=starttls
 ```
 
-`SMTP_USERNAME` is the word `resend`. Free tier: 3,000 emails a month, 100 a day. [Resend SMTP docs](https://resend.com/docs/send-with-smtp)
+`SMTP_USERNAME` is the word `resend`. [Resend SMTP docs](https://resend.com/docs/send-with-smtp)
 
 ### Mailtrap (test inbox, not for production)
 
@@ -208,8 +199,6 @@ Mailpit is a local email catcher with a web inbox. The repository's root `docker
 
    **You see:** it in the inbox at <http://localhost:8025>. Nothing leaves your machine.
 
-Local development uses the same sending code as production. There is no "print to the log" mode.
-
 ## Common mistakes
 
 | Mistake | What you see | Fix |
@@ -246,7 +235,7 @@ Send one invoice email and follow it.
 
 If the email stays `pending`, Velox is retrying it. The server log shows the provider's error; fix the cause it names. Velox retries for about 72 hours, then marks the email failed.
 
-If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. Velox refuses these when they are entered, since 2026-10-18, but an address stored before is kept as it was. Velox does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
+If the email is `failed` at once with `email: recipient is not a single valid email address`, the customer's email or a CC entry is not one bare address, such as `Bob <bob@example.com>`. New addresses are checked when they are entered; an address stored earlier may still have this form. Velox does not retry this email. Change the address to the bare form (`bob@example.com`) and send again.
 
 ## Bounces and spam complaints
 
@@ -304,10 +293,4 @@ If the two settings are unset, the route answers 401 to every call, and emails s
 
 **Other providers (SES, SendGrid, Mailgun, Resend):** Velox cannot receive their bounce reports. Turn on suppression (a do-not-send list) in the provider's dashboard, so it stops sending to addresses that bounce.
 
-## Sending a lot of email
-
-- **Velox sends at most 60 emails a minute.** Check that your provider's limit is at least that.
-- **Use one provider and sending domain for billing email only.** Some teams send marketing email through a different provider and domain.
-- **Ask your provider about dedicated IP addresses** before you send more than about 50,000 emails a day from one sender.
-
-Velox sends only through SMTP. It has no direct connection to a provider's own API, so it cannot show opens or clicks.
+**Next:** [Connect Stripe](../production-one-vm.md#6-connect-stripe).

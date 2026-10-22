@@ -277,11 +277,13 @@ func serve() {
 		MaxHeaderBytes:    1 << 13, // 8 KB
 	}
 
-	// Shutdown is a published three-stage budget — 90s worst case, typically
-	// under two seconds — and every stage's bound abandons only work that is
-	// designed to be resumed. Configure the orchestrator's grace period at
-	// 120s (docs/ops/high-availability.md 'What happens when a copy stops'; compose sets
-	// stop_grace_period). Docker's 10s default SIGKILLs mid-drain.
+	// Shutdown is a published three-stage budget — 90s worst case after the
+	// SHUTDOWN_DRAIN_DELAY readiness drain, typically under two seconds — and
+	// every stage's bound abandons only work that is designed to be resumed.
+	// Set the orchestrator's grace period above the drain delay plus 90s:
+	// 120s with the 5s default (docs/ops/high-availability.md 'What happens
+	// when a copy stops'; compose sets stop_grace_period). Docker's 10s
+	// default SIGKILLs mid-drain.
 	const (
 		shutdownHTTPDrain   = 30 * time.Second // stage 1: in-flight requests
 		shutdownCatchupWait = 30 * time.Second // stage 2: an in-flight test-clock advance
@@ -555,7 +557,7 @@ func resolveAppURL(env, adminURL, appURL string) (url, fallbackWarn string, err 
 	}
 
 	if !local {
-		return "", "", fmt.Errorf("APP_DATABASE_URL is required in %s: the runtime pool must be a least-privilege role with its own password, not one derived from DATABASE_URL with the documented default — see docs/self-host.md", env)
+		return "", "", fmt.Errorf("APP_DATABASE_URL is required in %s: the runtime pool must be a least-privilege role with its own password, not one derived from DATABASE_URL with the documented default — see docs/ops/postgres-requirements.md#the-two-database-users", env)
 	}
 
 	derived := deriveAppURL(adminURL)
@@ -604,7 +606,7 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 		// every env — explicit config never silently degrades. Only the
 		// local derived URL keeps warn-and-fallback (role not created).
 		if cfg.DB.AppURL != "" || cfg.Env != "local" {
-			slog.Error("refusing to start: could not open the app database connection, so RLS would not be enforced and tenants would not be isolated. Check APP_DATABASE_URL and that the role exists with LOGIN — see docs/self-host.md.", "error", err, "env", cfg.Env)
+			slog.Error("refusing to start: could not open the app database connection, so RLS would not be enforced and tenants would not be isolated. Check APP_DATABASE_URL and that the role exists with LOGIN — see docs/ops/postgres-requirements.md#the-two-database-users.", "error", err, "env", cfg.Env)
 			os.Exit(1)
 		}
 		slog.Warn("could not open app database connection, falling back to admin", "error", err)
@@ -618,7 +620,7 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	}
 	if canBypass {
 		if cfg.Env != "local" {
-			slog.Error("refusing to start: the APP_DATABASE_URL role can BYPASS row-level security (superuser or BYPASSRLS) — tenants would not be isolated. Point APP_DATABASE_URL at a least-privilege role like velox_app, not the admin role — see docs/self-host.md.", "role", role, "env", cfg.Env)
+			slog.Error("refusing to start: the APP_DATABASE_URL role can BYPASS row-level security (superuser or BYPASSRLS) — tenants would not be isolated. Point APP_DATABASE_URL at a least-privilege role like velox_app, not the admin role — see docs/ops/postgres-requirements.md#the-two-database-users.", "role", role, "env", cfg.Env)
 			os.Exit(1)
 		}
 		slog.Warn("app database role can bypass RLS — acceptable in local dev only", "role", role)

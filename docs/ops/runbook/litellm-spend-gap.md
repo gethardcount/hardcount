@@ -2,8 +2,7 @@
 
 LiteLLM is an AI proxy that can send each model call's token usage to
 Velox. If Velox refuses a batch during an outage and LiteLLM runs out of
-retries, that usage is lost. This page is for filling the gap. Back to the
-[runbook index](index.md).
+retries, that usage is lost. Back to the [runbook index](index.md).
 
 ## Symptom
 

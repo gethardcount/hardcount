@@ -1,8 +1,7 @@
 # A background job is stuck
 
 Velox runs its billing, payment retries, webhooks and emails in background
-jobs. This page is for when one of them seems to have stopped. Back to the
-[runbook index](index.md).
+jobs. Back to the [runbook index](index.md).
 
 ## How the jobs share work
 
@@ -11,15 +10,12 @@ called a role:
 
 | Role | Runs every |
 |---|---|
-| `billing` | 1 hour in production, 5 minutes when `APP_ENV=local` |
-| `dunning` (payment retries) | 1 hour in production, 5 minutes when `APP_ENV=local` |
+| `billing`, `dunning` (payment retries) | 1 hour (5 minutes when `APP_ENV=local`) |
 | `webhook_outbox` | 2 s |
 | `email_outbox` | 5 s |
 | `webhook_delivery` (the webhook retry worker) | 30 s |
 
-Each role is one row in the `leader_leases` table. Think of it as a key on
-a hook: a replica takes the key to run one tick and hangs it back when the
-tick ends.
+Each role is one row in the `leader_leases` table.
 
 - To run a tick, a replica takes that row for **10 seconds** (the lease),
   renews it every **3 seconds** while its work runs, and releases it when
@@ -71,13 +67,9 @@ in [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 - **A tick is wedged**: it keeps renewing its lease (its heartbeat is
   alive) while its work is stuck.
 - **No replica is polling** for the role.
-- **It is not a crash loop from a panic.** A panic is recovered and the
-  poll loop keeps running, so the `/health/ready` scheduler check stays
-  `ok`. In billing and dunning only the step or row that panicked stops,
-  and the rest of the tick runs. A panicking tick shows up instead as
-  `velox_leader_lease_lost_total{reason="panicked"}` and a growing
-  `velox_leader_last_tick_age_seconds{role}`. To find the stack, see
-  [Fix](#fix).
+- **A panic.** The poll loop survives it, so the `/health/ready` scheduler
+  check stays `ok`; it shows as
+  `velox_leader_lease_lost_total{reason="panicked"}`. See [Fix](#fix).
 
 A long tick is not a stuck one. A billing tick bills every subscription
 that is due before it ends, so on a busy billing day it can run for hours.
@@ -192,19 +184,8 @@ The next tick starts one interval after it ends.
    replica.
 3. **A long query.** Cancel it with `SELECT pg_cancel_backend(<pid>)` if
    appropriate.
-4. **One tenant dominates the batch.** The batch size is fixed at 50
-   subscriptions per tick and cannot be changed with an environment
-   variable. Drain that tenant on demand with `POST /v1/billing/run` (per
-   tenant; it loops until empty).
-   - It is safe to run while the leader's tick is in flight.
-   - A drain may report 0 for a subscription the leader is committing at
-     that instant. The leader's commit bills it, and the two can never
-     both bill a period.
-   - A drain skips a subscription whose billing is failing and is waiting
-     for its next attempt or parked. See [Billing failing](billing-failing.md).
-   - A drain does not close a period that is still inside its
-     `INVOICE_GRACE_PERIOD`. See
-     [Invoice timing and late usage](invoice-timing-late-usage.md).
+4. **One tenant dominates the batch.** Drain it with `POST /v1/billing/run`;
+   see [Scheduler interval and batch size](#scheduler-interval-and-batch-size).
 
 ## Verify
 
@@ -242,17 +223,11 @@ clearing `not_before` after a panic is fixed (see [Fix](#fix)).
 
 | Metric | Alert when |
 |---|---|
-| `velox_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min). No replica has finished a tick. The 5-minute floor keeps a restart or a lease handover of the `webhook_outbox`, `email_outbox` and `webhook_delivery` roles from paging. A single replica's liveness gauge (`velox_scheduler_last_run_timestamp_seconds`, which followers also stamp) cannot give this signal |
+| `velox_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min): no replica has finished a tick |
 | `velox_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick is wedged but still renewing. See [Check](#check) step 3 for billing |
 | `velox_leader_paused{role}` | 1 outside a planned window |
 | `velox_leader_lease_lost_total{role,reason}` | Any increase, except `reason="paused"`. See [Lease-lost reasons](#lease-lost-reasons) |
 | `velox_leader_status_scrape_errors_total` | 1: the view could not be read. The database is the problem, not the roles |
-
-The billing due gauge, `velox_billing_due_subscriptions`, counts due
-subscriptions whose billing is not failing. Ones with a saved failure are in
-`velox_billing_failing_subscriptions` instead. The tick still attempts those
-once their wait has passed, so it can be busy on them while the due gauge is
-flat.
 
 ### Lease-lost reasons
 
@@ -275,20 +250,14 @@ took over, it waits `min(interval, 60 s)`. After a `takeover` the new
 holder is already running it. After `paused`, nobody leads until it is
 unpaused.
 
-**A panic repeats.** The step or row that panicked runs again once per
-interval until the bad input or code is fixed, and restarting does not
-help. A tick that a shutdown stopped is released as interrupted even if
-it then panicked, so a deploy does not add a wait. To find the stack,
-and for a dunning run that panics, see [Fix](#fix).
-
 **A panic while billing one subscription is the exception.**
 
 - It is saved as a billing failure on that subscription, and later ticks
   skip the subscription until its wait ends.
 - The tick bills every other due subscription, then ends as panicked. So
   the page fires once per attempt, not once per tick.
-- That is at most eight times over 3 days 17 hours, spaced on the wait
-  ladder (15m, 1h, 4h, 12h, 24h three times). Then the subscription parks
+- That is at most eight times over 3 days 17 hours, spaced on the
+  [wait ladder](billing-failing.md#why). Then the subscription parks
   and the panic stops. On the hourly production tick the first three
   attempts land on three ticks in a row.
 - The subscription shows up in `velox_billing_failing_subscriptions`, and
@@ -348,21 +317,16 @@ lag.
 ## Poolers and migrations
 
 Every lease statement is self-contained, so the server is safe behind
-PgBouncer in transaction mode and behind RDS Proxy. Migrations are not.
-They hold a transaction-scoped advisory lock on a dedicated connection, and
-some run outside a transaction. Run them on a direct or session-mode
-connection ([Postgres requirements](../postgres-requirements.md)).
+PgBouncer in transaction mode (RDS Proxy is expected to work, not tested).
+Migrations are not. They hold a session advisory lock on one connection for
+the whole run, and some steps run outside a transaction. Run them on a direct
+or session-mode connection
+([Postgres requirements](../postgres-requirements.md#connection-poolers)).
 
 ## Drills
 
-- `scripts/partition-drill.sh` cuts a holder's network link and reports
-  when the row expires and another replica takes it: **9 s** measured
-  (2026-08-30).
-- `TestLeaseFailover_SIGKILLedHolderReplacedWithinTTL` covers a process
-  that dies: **9.5 s** across five runs. It also checks that no other
-  replica takes the role while the dead holder's lease could still be live.
-- The advisory-lock drill this replaced measured 95 s and depended on TCP
-  keepalives. This one depends only on the database clock.
+- Measured failover:
+  [Correctness under failure §5](../../benchmarks/failure-correctness.md#5-how-fast-a-dead-leader-is-replaced).
 - `scripts/pgbouncer-test.sh` runs the integration suite behind PgBouncer
   in transaction mode, the same job CI runs.
 

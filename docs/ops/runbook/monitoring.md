@@ -11,13 +11,8 @@ during an incident. Back to the [runbook index](index.md).
 | `GET /health/ready` | Readiness: 503 when the database ping fails or the process is shutting down, else 200. The body also reports whether the scheduler ran recently | Kubernetes readiness probe and load balancer health check |
 | `GET /metrics` | Prometheus scrape. Send `METRICS_TOKEN` as a bearer token. In production with no token set it answers 401 | Metrics-collection job |
 
-The scheduler is the background loop that drives billing. If it has not
-ticked in 2× the configured interval, the `scheduler` check in the
-`/health/ready` body starts with `degraded`, but the status code stays 200. Taking the replica
-out of the load balancer would not restart the scheduler, so the readiness
-probe does not catch a stalled scheduler. Alert on the scheduler and leader
-metrics below instead, and see
-[A background job is stuck](background-job-stuck.md).
+A stalled scheduler shows `degraded` in the body but keeps the 200, so alert
+on the scheduler metrics below.
 
 When the database ping fails, the body says `database: error` and nothing
 more. The cause is in the application log, in the
@@ -40,8 +35,8 @@ alerting tier: what should page someone, and what is only informational.
 | `time() - velox_scheduler_last_run_timestamp_seconds` | > 2× tick interval | Scheduler stalled on this replica. `/health/ready` shows it in its body but stays 200, so this alert is how you find out |
 | `velox_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min) | No replica has finished a tick of this role. The 5-minute floor is for the roles that run every few seconds: a restart or a lease handover stops them for more than 3 intervals, and that is not a stall. **On a busy billing day this trips too**: if `velox_billing_due_subscriptions` is falling, the tick is draining; do not restart it. See [A background job is stuck](background-job-stuck.md) |
 | `increase(velox_leader_lease_lost_total[1h])` | > 0 | A tick lost its lease. Split by `reason`, and exclude `paused` (an operator action). What each reason means: [Lease-lost reasons](background-job-stuck.md#lease-lost-reasons) |
-| `velox_email_outbox_failing_emails{mode="live"}` | > 0 | Emails tried 3 or more times and queued over 30 minutes ago keep failing. Usually the SMTP relay refuses the sender or the credentials, or `SMTP_HOST` is unset. Left alone they are lost after about 72 hours. See [Emails not going out](email-outbox-backed-up.md) |
-| `velox_email_outbox_oldest_due_age_seconds{mode="live"}` | > 1800 | An email has been due for 30 minutes and no replica has sent it. The email job is stopped, or more emails came due than it sends: about 20 to 30 a minute on one replica. See [Emails not going out](email-outbox-backed-up.md) |
+| `velox_email_outbox_failing_emails{mode="live"}` | > 0 | See [Emails not going out](email-outbox-backed-up.md) |
+| `velox_email_outbox_oldest_due_age_seconds{mode="live"}` | > 1800 | See [Emails not going out](email-outbox-backed-up.md) |
 | `velox_webhook_outbox_oldest_pending_age_seconds{mode="live"}` | > 1800 | A webhook event queued 30 minutes ago has no deliveries yet: the webhook outbox job is stopped, or writing the event fails. A failing endpoint does not show here. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
 
 ### Warn (Slack or email, not page)
@@ -57,12 +52,12 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_stripe_breaker_state` | == 2 (open; 0=closed, 1=half_open) | Stripe API circuit breaker tripped |
 | `velox_email_outbox_pending` | > 1000 | Email dispatcher stuck or SMTP provider issue (−1 = the metric query itself failed) |
 | `velox_webhook_outbox_pending` | > 1000 | Webhook dispatcher stuck (−1 = metric query failed) |
-| `increase(velox_email_outbox_dead_lettered_total{mode="live"}[1h])` by `cause` | > 0 | Emails given up on; they are not sent unless you send them again. `permanent`: the address bounced, is suppressed or is invalid. `max_attempts`: 15 tries over about 72 hours failed. See [Emails not going out](email-outbox-backed-up.md) |
+| `increase(velox_email_outbox_dead_lettered_total{mode="live"}[1h])` by `cause` | > 0 | See [Emails not going out](email-outbox-backed-up.md) |
 | `increase(velox_webhook_outbox_dead_lettered_total{mode="live"}[1h])` | > 0 | Webhook events given up on before any delivery was written, so no endpoint gets them. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
 | `velox_creditnote_pending_tax_reversals` | any row older than 24h (alert on age, not presence) | An issued credit note whose tax reversal at the provider is still owed. See the note below the table |
 | `velox_invoice_pending_tax_reversals` | any row older than 24h | A voided `stripe_tax` invoice whose committed tax transaction has no confirmed reversal. See the note below the table |
 | `velox_creditnote_pending_issue_drafts` | sustained growth over days | Clawback drafts not issuing. Alert on growth or age, not presence. See [Clawback drafts waiting](unclear-charge.md#clawback-drafts-waiting) |
-| `velox_parked_invoices{disposition="open"}` | > 0 | An invoice whose charge got an unclear answer from Stripe that named no payment, and that Velox has not ended on schedule. Velox ends a park within about 25 hours on its own; the gauge counts only parks still parked 26 hours after the charge's hold, or with no hold. See [Parked invoices](unclear-charge.md#parked-no-paymentintent) |
+| `velox_parked_invoices{disposition="open"}` | > 0 | An invoice whose charge got an unclear answer from Stripe that named no payment, and that Velox has not ended on schedule. Parks less than 26 hours past their hold are not counted: Velox normally ends them by about 25 hours. See [Parked invoices](unclear-charge.md#parked-no-paymentintent) |
 | `velox_stripe_key_unusable_total{reason}` | increase > 0 | Charges are paused (not failed) until the key is fixed in Settings → Payments. `rejected`: Stripe refused the tenant's key (rolled, or a restricted key without a permission; adding the permission in Stripe also fixes it, and the next charge that goes through clears the Settings notice). `not_configured`: no key for that mode. The ERROR line "Stripe refused this tenant's API key" names the tenant and mode. Each tick tries again |
 | `velox_stale_charge_hold_resolutions_total{result="cannot_ask"}` | increase > 0 | An interrupted charge Velox cannot confirm with Stripe (disconnected, key rejected, customer gone). The invoice cannot be charged until it is fixed or written off. See [Interrupted charges](unclear-charge.md#interrupted-velox-cannot-ask-stripe) |
 | `velox_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}` | any increase | LiteLLM spend batches were refused for retry (usage store unreachable). See [LiteLLM spend gap](litellm-spend-gap.md) |
@@ -78,8 +73,7 @@ Notes on three rows:
 
 - **Queued auto-charges.** Invoices with no card stay queued on purpose:
   adding a card charges them on the next visit. So a steady baseline is
-  normal. Above 5,000 is the point at which Velox should stop re-visiting
-  card-less invoices every tick (an amendment to ADR-116).
+  normal.
 - **Pending tax reversals (credit notes).** The sweep re-drives each one
   every tick and keeps it until the provider accepts it.
   A row for a tick or two is normal. A day means the provider keeps
