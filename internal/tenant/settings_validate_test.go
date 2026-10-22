@@ -56,3 +56,37 @@ func TestValidateSettings_TaxRateReason(t *testing.T) {
 		}
 	}
 }
+
+// credit_note_prefix starts every credit note number, the same way
+// invoice_prefix starts every invoice number. It was stored with a default of
+// CN but no API field could set it (C2), so every tenant's notes read
+// CN-000001. It gets the invoice prefix's check: the value goes into PDF file
+// names and email subjects.
+func TestValidateSettings_CreditNotePrefix(t *testing.T) {
+	if got := DefaultSettings("t").CreditNotePrefix; got != "CN" {
+		t.Errorf("default credit_note_prefix = %q, want CN", got)
+	}
+
+	ts := &domain.TenantSettings{CreditNotePrefix: ""}
+	if err := validateSettings(ts); err != nil {
+		t.Fatalf("empty prefix refused: %v", err)
+	}
+	if ts.CreditNotePrefix != "CN" {
+		t.Errorf("empty prefix stored as %q, want the default CN", ts.CreditNotePrefix)
+	}
+
+	ts = &domain.TenantSettings{CreditNotePrefix: "  ACME-CN "}
+	if err := validateSettings(ts); err != nil {
+		t.Fatalf("valid prefix refused: %v", err)
+	}
+	if ts.CreditNotePrefix != "ACME-CN" {
+		t.Errorf("prefix stored as %q, want it trimmed to ACME-CN", ts.CreditNotePrefix)
+	}
+
+	for _, bad := range []string{"ACME CN", "ACME/CN", "CN_1", "ABCDEFGHIJKLMNOPQRSTU"} {
+		err := validateSettings(&domain.TenantSettings{CreditNotePrefix: bad})
+		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "credit_note_prefix" {
+			t.Errorf("prefix %q: got %v (field %q), want a credit_note_prefix validation error", bad, err, errs.Field(err))
+		}
+	}
+}

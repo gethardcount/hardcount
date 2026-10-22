@@ -32,3 +32,13 @@ test('an unmapped field still produces a message, so Save is never silent', () =
   assert.equal(f?.tab, 'general')
   assert.equal(f?.message, 'Check this value.')
 })
+
+test('the credit note prefix is on the Invoicing tab, next to the invoice prefix', () => {
+  const f = firstInvalidSettingsField({ credit_note_prefix: { message: 'Letters, numbers, and hyphens only' } })
+  assert.deepEqual(f, {
+    field: 'credit_note_prefix',
+    tab: 'invoicing',
+    label: 'Credit note prefix',
+    message: 'Letters, numbers, and hyphens only',
+  })
+})

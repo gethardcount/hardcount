@@ -1,62 +1,60 @@
-// Guards the Credit Notes page's "Refunded to Card" stat.
+// Guards the Credit Notes page's header, tabs and stat cards (E12).
 //
-// The stat used to sum refund_amount_cents over every issued CN — counting
-// allocations, not outcomes — so a refund whose Stripe leg FAILED (no refund
-// object even created) displayed as money returned to a card. Observed live
-// 2026-08-03 on Walkthrough Co: card showed $192.60 while $30.00 of it was two
-// failed legs; the true figure was $162.60. "Refunded to Card" must count only
-// refund_status=succeeded; pending/failed are surfaced separately, never
-// folded into the money total.
+// They were computed from the rows the page had loaded: at most 100 notes, and
+// only the open tab's status. Past 100 notes every figure was short, and under
+// a status tab the other tabs' counts read 0 and disappeared. The figures now
+// come from GET /v1/credit-notes/stats, which counts every note and sums money
+// per currency. Which refund legs count as "refunded" (succeeded only) is
+// decided and tested on the server (internal/creditnote stats test); this file
+// guards how the page words what the server sent.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { creditNoteStats } from '../src/lib/creditNoteStats.ts'
+import { creditNoteStatFigures, type CreditNoteStats } from '../src/lib/creditNoteStats.ts'
 
-const cn = (over: Record<string, unknown>) => ({
-  status: 'issued',
-  refund_status: 'none',
-  refund_amount_cents: 0,
-  credit_amount_cents: 0,
-  out_of_band_amount_cents: 0,
+const usd = (over: Partial<CreditNoteStats['by_currency'][number]> = {}) => ({
+  currency: 'USD',
   total_cents: 0,
+  refunded_cents: 0,
+  refund_pending_cents: 0,
+  refund_failed_cents: 0,
+  credited_cents: 0,
+  out_of_band_cents: 0,
   ...over,
 })
 
-test('a failed refund leg is never counted as refunded to card', () => {
-  const s = creditNoteStats([
-    cn({ refund_amount_cents: 16260, refund_status: 'succeeded', total_cents: 16260 }),
-    cn({ refund_amount_cents: 2000, refund_status: 'failed', total_cents: 2000 }),
-    cn({ refund_amount_cents: 1000, refund_status: 'failed', total_cents: 1000 }),
-  ])
-  assert.equal(s.totalRefunded, 16260) // the live Walkthrough Co shape: $162.60, not $192.60
-  assert.equal(s.refundFailedCents, 3000)
-  assert.equal(s.refundPendingCents, 0)
+test('counts come from the server, so every tab keeps its count', () => {
+  const f = creditNoteStatFigures({ draft_count: 3, issued_count: 140, voided_count: 2, by_currency: [] }, 'USD')
+  assert.deepEqual(f.counts, { all: 145, draft: 3, issued: 140, voided: 2 })
 })
 
-test('a pending refund leg is in flight, not refunded', () => {
-  const s = creditNoteStats([
-    cn({ refund_amount_cents: 5000, refund_status: 'pending', total_cents: 5000 }),
-  ])
-  assert.equal(s.totalRefunded, 0)
-  assert.equal(s.refundPendingCents, 5000)
+test('amounts in two currencies are shown side by side, never added together', () => {
+  const f = creditNoteStatFigures({
+    draft_count: 0, issued_count: 2, voided_count: 0,
+    by_currency: [
+      usd({ total_cents: 1000, refunded_cents: 1000 }),
+      usd({ currency: 'EUR', total_cents: 700, credited_cents: 700 }),
+    ],
+  }, 'USD')
+  assert.equal(f.total, '$10.00 + €7.00')
+  assert.equal(f.refunded, '$10.00')
+  assert.equal(f.credited, '€7.00')
 })
 
-test('draft and voided notes count toward no money stat', () => {
-  const s = creditNoteStats([
-    cn({ status: 'draft', refund_amount_cents: 700, refund_status: 'succeeded', total_cents: 700 }),
-    cn({ status: 'voided', refund_amount_cents: 900, refund_status: 'succeeded', total_cents: 900 }),
-  ])
-  assert.equal(s.totalRefunded, 0)
-  assert.equal(s.totalAmount, 0)
-  assert.equal(s.draft, 1)
-  assert.equal(s.voided, 1)
+test('with no issued notes the money figures read zero in the default currency', () => {
+  const f = creditNoteStatFigures({ draft_count: 1, issued_count: 0, voided_count: 0, by_currency: [] }, 'EUR')
+  assert.equal(f.total, '€0.00')
+  assert.equal(f.refunded, '€0.00')
+  assert.equal(f.credited, '€0.00')
+  assert.equal(f.refundPending, null)
+  assert.equal(f.refundFailed, null)
 })
 
-test('mixed-allocation CN contributes each channel to its own stat', () => {
-  const s = creditNoteStats([
-    cn({ refund_amount_cents: 1000, refund_status: 'failed', credit_amount_cents: 2000, total_cents: 3000 }),
-  ])
-  assert.equal(s.totalCredited, 2000)  // the credit leg settled at Issue
-  assert.equal(s.totalRefunded, 0)     // the card leg did not
-  assert.equal(s.refundFailedCents, 1000)
-  assert.equal(s.totalAmount, 3000)
+test('pending and failed refund legs are named apart from money refunded', () => {
+  const f = creditNoteStatFigures({
+    draft_count: 0, issued_count: 3, voided_count: 0,
+    by_currency: [usd({ total_cents: 3500, refunded_cents: 1000, refund_pending_cents: 500, refund_failed_cents: 2000 })],
+  }, 'USD')
+  assert.equal(f.refunded, '$10.00')
+  assert.equal(f.refundPending, '$5.00')
+  assert.equal(f.refundFailed, '$20.00')
 })
