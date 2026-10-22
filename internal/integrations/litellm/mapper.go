@@ -26,10 +26,30 @@ const MeterKeyTokens = "tokens"
 // wait on LiteLLM exposing the TTL split (see the cache-write note in
 // MapPayload).
 const (
-	TokenTypeInput     = "input"
-	TokenTypeOutput    = "output"
-	TokenTypeCacheRead = "cache_read"
+	TokenTypeInput        = "input"
+	TokenTypeOutput       = "output"
+	TokenTypeCacheRead    = "cache_read"
+	TokenTypeCacheWrite5m = "cache_write_5m"
+	TokenTypeCacheWrite1h = "cache_write_1h"
 )
+
+// SkipReason says why a record maps to no events.
+type SkipReason string
+
+const (
+	SkipNotTokenBearing SkipReason = "not_token_bearing"
+	SkipFailure         SkipReason = "failure"
+	SkipCacheHit        SkipReason = "cache_hit"
+	SkipNoTokens        SkipReason = "no_tokens"
+)
+
+// Mapping is what MapPayload makes of one record.
+type Mapping struct {
+	Events    []ExternalIngest
+	Legacy    []ExternalIngest
+	LegacyKey string
+	Skip      SkipReason
+}
 
 // modelFamilies maps a normalized model id (lower-cased, provider-prefix
 // stripped) to the canonical FAMILY token that the pricing recipes key their
@@ -159,7 +179,12 @@ func canonicalModel(raw string) string {
 // IngestInput.CustomerID carries the EXTERNAL id (payload.User); the
 // handler resolves it to the internal customer_id via the existing
 // usage Resolver path (same flow as POST /v1/usage-events).
-func MapPayload(p StandardLoggingPayload) ([]ExternalIngest, error) {
+func MapPayload(p StandardLoggingPayload) (Mapping, error) {
+	out, err := mapPayloadOld(p)
+	return Mapping{Events: out}, err
+}
+
+func mapPayloadOld(p StandardLoggingPayload) ([]ExternalIngest, error) {
 	if !p.IsTokenBearing() {
 		return nil, nil
 	}

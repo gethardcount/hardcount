@@ -30,7 +30,7 @@ func TestMapPayload_RealProxyRecord(t *testing.T) {
 		t.Fatalf("fixture holds %d records, want 1", len(batch))
 	}
 
-	out, err := MapPayload(batch[0])
+	out, err := mapEvents(batch[0])
 	if err != nil {
 		t.Fatalf("a real proxy record was refused: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestCallerIDAndTokenUsage_Sources(t *testing.T) {
 	})
 
 	t.Run("no caller anywhere is still refused", func(t *testing.T) {
-		_, err := MapPayload(StandardLoggingPayload{CallType: "acompletion", PromptTokens: 5})
+		_, err := mapEvents(StandardLoggingPayload{CallType: "acompletion", PromptTokens: 5})
 		if err != ErrMissingUser {
 			t.Fatalf("err = %v, want ErrMissingUser", err)
 		}
@@ -104,7 +104,7 @@ func TestCallerIDAndTokenUsage_Sources(t *testing.T) {
 				"prompt_tokens_details": map[string]any{"cached_tokens": float64(600)},
 			}},
 		}
-		out, err := MapPayload(p)
+		out, err := mapEvents(p)
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
 		}
@@ -125,7 +125,7 @@ func TestCallerIDAndTokenUsage_Sources(t *testing.T) {
 
 	t.Run("top-level counts alone are enough", func(t *testing.T) {
 		p := StandardLoggingPayload{ID: "call_top", CallType: "acompletion", Model: "gpt-4o", EndUser: "cus_x", PromptTokens: 7, CompletionTokens: 3}
-		out, err := MapPayload(p)
+		out, err := mapEvents(p)
 		if err != nil || len(out) != 2 {
 			t.Fatalf("out=%d err=%v, want 2 events and no error", len(out), err)
 		}
@@ -142,7 +142,7 @@ func TestCallerIDAndTokenUsage_Sources(t *testing.T) {
 	})
 
 	t.Run("no counts anywhere maps to nothing", func(t *testing.T) {
-		out, err := MapPayload(StandardLoggingPayload{CallType: "acompletion", EndUser: "cus_x"})
+		out, err := mapEvents(StandardLoggingPayload{CallType: "acompletion", EndUser: "cus_x"})
 		if err != nil || len(out) != 0 {
 			t.Errorf("out=%d err=%v, want no events and no error", len(out), err)
 		}
