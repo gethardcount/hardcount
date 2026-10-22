@@ -48,6 +48,7 @@ type lagRig struct {
 	clk      *clock.Fake
 	srv      *Server
 	auth     string
+	tenantID string
 	timing   string
 	meterID  string
 	planA    string
@@ -107,6 +108,7 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 	clk := clock.NewFake(lagP0)
 	r := &lagRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil, opts...), timing: timing, custExt: "lag_cust"}
 	tenantID := testutil.CreateTestTenant(t, db, "close lag "+timing)
+	r.tenantID = tenantID
 	r.auth = "Bearer " + createTestAPIKey(t, db, tenantID)
 
 	rule := r.must(http.MethodPost, "/v1/rating-rules", lagP0, map[string]any{

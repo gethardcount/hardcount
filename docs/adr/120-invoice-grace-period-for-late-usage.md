@@ -1,7 +1,7 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace)
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace)
 
 ## Summary
 
@@ -18,6 +18,11 @@ can bill it with a one-off invoice. Velox does not refuse late usage.
 The grace delays every period-end invoice, flat-fee ones too, and the final
 invoice of a cancel scheduled for a date. The invoice's dates and amounts do
 not move; only when it is built, and what follows it, move later.
+
+Actions that close the ended period at once, with no grace: an immediate
+cancel, any other subscription write through the API or the dashboard,
+`retry-billing`, a spend-threshold invoice and a test-clock advance.
+Dunning's final pause or cancel waits for the grace (amended 2026-10-22).
 
 ## Context
 
@@ -75,6 +80,17 @@ difference on a later invoice
    advancing a clock to a period end still produces its invoice. Spend
    threshold invoices and the final invoice of an immediate cancel are built
    at once, as before.
+
+   **Amended 2026-10-22: dunning's final pause and cancel wait.** They close
+   the ended periods through `BillDue` with the grace
+   (`subscription.Service.PauseCollectionForDunning`, `CancelForDunning`).
+   Periods past their grace are closed. A period still inside it is left
+   open, and nothing is paused or canceled. The dunning run's
+   `next_action_at` moves to the end of the grace. A first exhaustion is
+   not marked `action_failed` (a re-attempt of an earlier failed action
+   keeps that mark, see ADR-112), and no write-off, escalation, email or
+   webhook fires then. The dashboard labels the wait "Final step". Test
+   clocks still pass no grace.
 4. **Gauges.** `velox_billing_due_subscriptions` and
    `velox_billing_oldest_due_age_seconds` use the same shifted instant. The
    age is counted from the due instant plus the grace.
@@ -109,6 +125,14 @@ usage still arriving.
 **Operator actions on one subscription do not wait.** An operator who cancels
 or changes a subscription, or retries its billing, is acting now. Making them
 wait would refuse the cancel with `unbilled_period` for up to the grace.
+
+**Dunning does wait (amended 2026-10-22).** Dunning is not the operator
+acting now. Its exhaustion can land minutes after a period end: a later
+payment failure, a threshold or one-off invoice, a custom schedule. A close
+then would bill none of the usage still arriving inside the grace. A
+wait of at most the grace costs that much more service before the pause or
+cancel. Reusing the `action_failed` re-attempt was rejected: it waits 24
+hours, not the grace, and labels a deliberate wait a failure.
 
 **Test clocks do not wait.** In a simulation the operator decides when usage
 arrives relative to an advance, and every existing clock flow expects the

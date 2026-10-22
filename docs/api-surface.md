@@ -185,8 +185,16 @@ An event counts toward the billing period its `timestamp` falls in.
 - The same applies after a spend-threshold invoice (an invoice made early
   because spend crossed a limit). Usage stamped before it that arrives later
   is not on the period-end invoice either. Bill it the same way.
-- An immediate cancel, `retry-billing`, a spend-threshold invoice and a
-  test-clock advance build their invoice at once, with no grace period.
+- These build the ended period's invoice at once, with no grace period:
+  - an immediate cancel;
+  - any other change to a subscription, through the API or the dashboard
+    (an item change, a pause or resume of collection, a scheduled cancel or
+    its removal);
+  - `retry-billing`;
+  - a spend-threshold invoice;
+  - a test-clock advance.
+- Dunning's final pause or cancel waits for the grace. When retries run out
+  inside it, the run waits until the grace ends, then pauses or cancels.
 
 The metric `velox_usage_late_event_total` counts events, not sent through
 the backfill route, whose `timestamp` is more than 24 hours older than their

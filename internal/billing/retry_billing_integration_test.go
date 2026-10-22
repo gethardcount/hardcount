@@ -417,16 +417,16 @@ func TestRetryBilling_RunBillsDuringTheRetrysAttempt(t *testing.T) {
 	}
 }
 
-// interleavedBiller runs before() and then the real BillDueNow: the window
+// interleavedBiller runs before() and then the real BillDue: the window
 // between the retry's clear and its attempt.
 type interleavedBiller struct {
 	before func()
 	next   subscription.DueBiller
 }
 
-func (b interleavedBiller) BillDueNow(ctx context.Context, tenantID, id string) (int, error) {
+func (b interleavedBiller) BillDue(ctx context.Context, tenantID, id string, grace time.Duration) (int, error) {
 	b.before()
-	return b.next.BillDueNow(ctx, tenantID, id)
+	return b.next.BillDue(ctx, tenantID, id, grace)
 }
 
 // TestRetryBilling_RunFailsBetweenTheClearAndTheAttempt: after the retry's
