@@ -1,9 +1,9 @@
 # Glossary
 
 The words you meet in the Velox docs and dashboard, each in one plain
-sentence first, then the detail. The last section, [For
-contributors](#for-contributors), holds words from the code and the
-operations docs. For the big picture first, read [How Velox
+sentence first, then the detail. Words from the code and the operations
+docs are in the [contributor glossary](dev/glossary.md). For the big picture
+first, read [How Velox
 works](how-velox-works.md). Back to the [docs index](README.md).
 
 ## Accounts and access
@@ -48,13 +48,13 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   `model` or `token_type`, as key-value pairs. Pricing rules match on them,
   so one meter can be priced at many rates. Up to 16 keys, and each value is
   a single value (text, number, true/false or null), never a list or an
-  object. [More](design/multi-dim-meters.md#subset-match-semantics)
+  object. [More](ai-pricing.md#how-velox-picks-the-price-for-an-event)
 - **pricing rule**: A rule on a meter that picks the usage events to price.
   It takes the events whose dimensions contain every key-value pair in its
   `dimension_match`. It combines them into one quantity (sum, count, max or
   last value) and prices that quantity with a rating rule. If rules overlap,
   the highest-priority rule claims each event, so nothing counts twice.
-  [More](design/multi-dim-meters.md#priority--claim-semantics)
+  [More](ai-pricing.md#how-velox-picks-the-price-for-an-event)
 - **rating rule**: A price formula that turns a usage quantity into money:
   a flat rate per unit, graduated tiers, or fixed-size packages. It is
   identified by its `rule_key` and has versions. Billing uses the version
@@ -114,7 +114,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   period's running subtotal, or a usage count on one item (`usage_gte`).
   Crossing it issues an invoice with `billing_reason` "threshold", and can
   restart the cycle if you choose. Usage is never blocked.
-  [More](design/billing-thresholds.md)
+  [More](features.md#subscriptions-and-invoices)
 - **invoice states (draft, finalized, paid, void, uncollectible)**: Where
   an invoice is in its life. Draft: you can still change it. Finalized:
   issued and owed. Paid. Void: canceled, as if the debt never existed (the
@@ -143,7 +143,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   when it is billed, so less is charged. Free promotional credit is used
   before paid credit. Within each, the credit that expires soonest goes
   first. A commit's own purchase invoice can never be paid with credit.
-  [More](design/prepaid-commits.md#d7-drawdown-order-null-safe)
+  [More](ai-pricing.md#sell-prepaid-credit-a-prepaid-commit)
 - **credit note (CN)**: A document that lowers what a customer owes on an
   invoice. On an unpaid invoice it lowers the amount due; if nothing is left
   due, the invoice is marked paid. On a paid one,
@@ -213,7 +213,7 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   by provider, model and token type, kept separately for live and test
   mode. When a usage event arrives, Velox uses it to record that event's
   cost, unless the sender already sent the real cost.
-  [More](design/cost-tables.md)
+  [More](ai-pricing.md#see-your-margin)
 - **COGS and margin**: COGS (cost of goods sold) is what you pay providers
   for a customer's usage. Velox records it on each usage event when the
   event arrives, from the sent cost or the cost table. Margin is what you
@@ -261,70 +261,3 @@ works](how-velox-works.md). Back to the [docs index](README.md).
   shape the product. Many features in Velox wait until a design partner
   asks for them, for example roles and permissions (RBAC) or Helm charts.
   [More](roadmap.md#not-planned-for-now)
-
-## For contributors
-
-Words from the code, the database and the operations docs. You do not need
-them to use Velox.
-
-### Database access
-
-- **RLS (Row-Level Security)**: A PostgreSQL feature that keeps each
-  tenant's data invisible to the others. Tenants share the same tables, and
-  each tenant-owned row has a `tenant_id`. A policy shows only the rows that
-  match the transaction's tenant, and on mode-aware tables its live or test
-  mode, unless the transaction set the bypass flag.
-  [More](adr/003-postgresql-rls-multi-tenancy.md)
-- **TxTenant and TxBypass**: The two ways to open a database transaction
-  with `db.BeginTx`. TxTenant sets the tenant (and test or live mode), so
-  RLS shows only that tenant's rows. TxBypass turns RLS off for work across
-  tenants, such as the billing scheduler.
-  [More](adr/003-postgresql-rls-multi-tenancy.md#decision)
-- **Table and column names behind the words above**:
-  - dimensions: the `properties` column of a usage event.
-  - cost table: `provider_cost_rates`.
-  - saved cards: `payment_methods`.
-  - dunning run: a row in `invoice_dunning_runs`.
-  - an invoice's billing timezone: `invoices.billing_timezone`.
-  - a test clock's time: `frozen_time`.
-  - clock-pinned invoices and credit notes: `is_simulated` is set.
-
-### Running Velox
-
-- **outbox**: A database table of messages waiting to be sent
-  (`webhook_outbox`, `email_outbox`). Most webhook events, and the four
-  money emails (payment receipt, payment failed, dunning warning, dunning
-  escalation), are queued inside the transaction that caused them. The rest
-  are queued right after it commits. A background dispatcher then delivers
-  each row, with retries. [More](adr/040-outbox-always-on.md)
-- **leader lease**: A row in the `leader_leases` table that lets exactly
-  one copy of Velox run one tick of a job that must run once across all
-  copies (billing, dunning, both outbox dispatchers, webhook delivery). It
-  is renewed during the tick and released after it. It expires 10 seconds
-  after the last renewal.
-  [More](adr/114-leader-leases-tick-scoped-fencing.md)
-- **fencing token**: A number for each job in `leader_leases`
-  (`holder_token`) that goes up every time a copy takes the lease. The five
-  queries that claim due work check it with `leader_fence`, so a former
-  leader that stalled claims nothing.
-  [More](adr/114-leader-leases-tick-scoped-fencing.md#fencing-boundary-the-five-claim-funnels)
-- **velox-doctor**: A read-only command that scans a Velox database for
-  states no correct code could produce, such as invoice totals that do not
-  add up. It exits 1 when it finds a problem, or 2 if a check cannot run. It
-  runs in CI and needs a database role that can see every row.
-  [More](records/product-stability-plan.md)
-
-### Working on the code
-
-- **site-set (and effect-firer, gated reader)**: Every place in the code
-  that touches one state, such as an invoice status. That means each
-  writer and each effect-firer (code that sends an email, a webhook, a
-  Stripe call or a ledger write when the state changes). It also means each
-  gated reader (code that branches on the state), each caller and callee,
-  and each crash point.
-  [More](dev/money-path-robustness-playbook.md#2-the-meta-practice-complete-site-set-enumeration)
-- **FLOW (in MANUAL_TEST)**: A named set of test steps run by hand, with a
-  stable ID such as FLOW S1 or FLOW TC4. Some code comments and ADRs still
-  cite these IDs. MANUAL_TEST.md was retired in October 2026;
-  [How we test](testing.md#old-flow-ids) says how to read it in git
-  history.

@@ -1,7 +1,7 @@
 # ADR-079: Provider cost tables + per-customer margin (COGS)
 
 **Status:** Accepted (2026-07-05; amended 2026-10-14, 2026-10-22)
-**Context:** `docs/design/cost-tables.md` (locked design — 4-platform
+**Context:** `docs/dev/design/cost-tables.md` (locked design — 4-platform
 quote-verified sweep + 5-lens adversarial panel; this ADR records the
 decisions, the design doc holds the evidence).
 

@@ -9,7 +9,7 @@
 // would report a spotless bill of health over rows it cannot see.
 //
 // See internal/doctor for the invariant catalog and the exactness rule, and
-// docs/records/product-stability-plan.md for why this exists.
+// docs/dev/records/product-stability-plan.md for why this exists.
 package main
 
 import (

@@ -16,7 +16,7 @@ const RunbookPath = "docs/ops/runbook/migration-failed-midway.md"
 
 // LockTimeoutRunbookPath is the operator page for a migration that stopped
 // on a table lock. LockTimeoutError names it.
-const LockTimeoutRunbookPath = "docs/ops/runbook/migration-lock-timeout.md"
+const LockTimeoutRunbookPath = "docs/ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock"
 
 // pgLockNotAvailable is SQLSTATE 55P03, what Postgres raises when
 // lock_timeout expires ("canceling statement due to lock timeout").

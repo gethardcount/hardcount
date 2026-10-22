@@ -7,7 +7,7 @@
 **Amended:** 2026-10-19 (a panic stops one step, not the tick; a panicked tick waits one full interval).
 **Partly superseded:** by [ADR-115](115-one-closer-for-the-billing-period.md) on 2026-08-30 (the billing-period watermark compare-and-swap).
 **Amends:** ADR-006 (background scheduler; the leader gate it assumed), ADR-072 (transport lease model — unchanged, now composed with a leader fence), ADR-073 (boot contract — `VerifyAdvisoryLockTopology` retired)
-**Plan of record:** [docs/records/ha-readiness-2026-07-06.md](../records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
+**Plan of record:** [docs/dev/records/ha-readiness-2026-07-06.md](../dev/records/ha-readiness-2026-07-06.md) (2026-08-30 header) · velox-ops `ha-program-2026-08-30.md`
 
 ## Summary
 

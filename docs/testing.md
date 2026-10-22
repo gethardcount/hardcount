@@ -146,13 +146,3 @@ open and read, the LiteLLM callback, and the invoice PDF.
 The golden-path demo (`scripts/demo.sh`) and the `velox-doctor` sweep also
 run in CI on every PR. The doctor checks the money invariants over the rows
 the golden path left behind.
-
-## Old flow IDs
-
-Until October 2026, hand-run test steps lived in `MANUAL_TEST.md`, with flow
-IDs such as `FLOW TC4` or `FLOW B10`. Some code comments and ADRs still name
-them. To read the last version of the file:
-
-```bash
-git show "$(git log -1 --format=%H --diff-filter=D -- MANUAL_TEST.md)^:MANUAL_TEST.md" | less
-```

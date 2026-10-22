@@ -3,10 +3,6 @@
 **New here? Read the [README](../README.md), then run the
 [quick start](quick-start.md).**
 
-After that, pick what you want to do and read the docs in the order
-listed. Words you may not know are in the [glossary](glossary.md), with
-plain meanings first.
-
 ## Try it
 
 1. [README](../README.md): what Velox is, who it is for, and a demo.
@@ -19,6 +15,7 @@ plain meanings first.
 5. [How Velox compares](comparison.md) with four open-source billing
    engines, with sources, and [why Velox exists](why-velox.md).
 6. [Roadmap](roadmap.md): what shipped recently and what is deferred.
+   Every change, by date: [CHANGELOG](../CHANGELOG.md).
 
 ## Understand it
 
@@ -27,8 +24,8 @@ plain meanings first.
 2. [Glossary](glossary.md): the words you will meet, plain meaning first.
 3. [How much traffic Velox handles](scale.md): what was measured, and
    where one Postgres stops being enough.
-4. [How Velox is engineered](ENGINEERING.md): the principles, one page,
-   and [the evidence behind them](engineering-evidence.md).
+4. [How Velox is engineered](ENGINEERING.md): the rules, with the proof
+   for each.
 5. [Card payment failure handling](payments.md): declines, ambiguous
    results, crashes mid-charge, duplicate webhooks, refunds, and the known
    gaps.
@@ -66,37 +63,9 @@ plain meanings first.
    [email setup](ops/email-setup.md),
    [backups](ops/backup-considerations.md) and
    [tax calculation](ops/tax-calculation.md).
-6. When something breaks: the [operations runbook](ops/runbook/index.md)
-   (find what you see, then follow its steps) and the
-   [failure-mode catalog](failure-modes/README.md).
+6. When something breaks: the [operations runbook](ops/runbook/index.md).
+   Find what you see, then follow its steps.
 
-## Contribute
+---
 
-1. [CONTRIBUTING](../CONTRIBUTING.md): setup, tests, and what CI checks.
-2. [Architecture](architecture.md): package layout and design rules.
-3. [Money-path robustness playbook](dev/money-path-robustness-playbook.md):
-   required for any change to invoices, payments, credits, dunning,
-   subscriptions or tax.
-4. [How we test](testing.md): which test to write, and how to run it.
-   The [release checklist](dev/release-checklist.md) holds the live checks
-   run by hand before each release, and the
-   [Stripe end-to-end test](dev/stripe-end-to-end-test.md) has the
-   step-by-step Stripe commands.
-5. [OpenAPI workflow](dev/openapi-workflow.md): changing the API contract.
-6. [Writing a database migration](dev/migrations.md): changing the
-   database schema.
-7. [Writing style](dev/writing-style.md): how to write docs here.
-8. AI coding agents start at [CLAUDE.md](../CLAUDE.md).
-
-## Archive
-
-Background for a decision. You do not need these to use or run Velox.
-
-- [Architecture decision records (ADRs)](adr/README.md): one decision per
-  file, with the reasons and the alternatives.
-- [Design docs](design/README.md): the plan for each feature, written
-  before it was built. Where a design doc and the code disagree, the code
-  and the ADRs are the current record.
-- [Records](records/README.md): dated audits, reviews and plans, kept as
-  written.
-- [CHANGELOG](../CHANGELOG.md): every change, by date.
+Changing Velox itself? Contributor docs, design notes and records are in [docs/dev/](dev/README.md).

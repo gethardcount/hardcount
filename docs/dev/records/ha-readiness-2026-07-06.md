@@ -1,11 +1,11 @@
 # HA readiness — SPOF register and the multi-replica plan (2026-07-06)
 
-> **Record of 2026-07-06, with later amendments.** To run two or more copies today, read [High availability](../ops/high-availability.md).
+> **Record of 2026-07-06, with later amendments.** To run two or more copies today, read [High availability](../../ops/high-availability.md).
 
 > **Amendment 2026-10-17.** One VM with the Compose stack is also a
 > supported production setup, for a small team that can accept a few
 > minutes of downtime during a restart. Two or more replicas is the
-> high-availability setup. [docs/self-host.md](../self-host.md) is the
+> high-availability setup. [docs/self-host.md](../../self-host.md) is the
 > current answer.
 
 > **Amendment 2026-08-30 — the premise below is retired.** The supported
@@ -32,7 +32,7 @@
 > `[ADR-114]`. The advisory-lock line-cites in this file describe the binary
 > until PR-D of that arc merges; they are history after it.
 
-Single-instance is the supported v1 deployment shape: one `velox-api` process, one Postgres, no load balancer, "~minutes of downtime per deploy/restart is acceptable" ([docs/self-host.md](../self-host.md), Operational posture, lines 55-66). Money paths are crash-safe by construction — invoice generation is idempotency-index exactly-once (internal/subscription/postgres.go:1089-1094), dunning transitions are exactly-once CAS (#325), outbound email/webhooks are durable Postgres outboxes with lease claims, and every scheduler sweep re-derives eligibility from durable state — so process death costs latency, not correctness. What single-instance does NOT give you is redundancy, and what N=2 does not yet give you is safety on a handful of named surfaces. This document is the pre-work for the multi-replica build: every single point of failure, every verified hazard of running two API replicas today, and the ordered work list — so that when a design-partner pilot approaches production cutover (the named trigger, docs/self-host.md:67-69), the build is execution, not discovery. Every claim below carries the file:line it was verified against; surfaces that are already safe say so explicitly.
+Single-instance is the supported v1 deployment shape: one `velox-api` process, one Postgres, no load balancer, "~minutes of downtime per deploy/restart is acceptable" ([docs/self-host.md](../../self-host.md), Operational posture, lines 55-66). Money paths are crash-safe by construction — invoice generation is idempotency-index exactly-once (internal/subscription/postgres.go:1089-1094), dunning transitions are exactly-once CAS (#325), outbound email/webhooks are durable Postgres outboxes with lease claims, and every scheduler sweep re-derives eligibility from durable state — so process death costs latency, not correctness. What single-instance does NOT give you is redundancy, and what N=2 does not yet give you is safety on a handful of named surfaces. This document is the pre-work for the multi-replica build: every single point of failure, every verified hazard of running two API replicas today, and the ordered work list — so that when a design-partner pilot approaches production cutover (the named trigger, docs/self-host.md:67-69), the build is execution, not discovery. Every claim below carries the file:line it was verified against; surfaces that are already safe say so explicitly.
 
 ---
 

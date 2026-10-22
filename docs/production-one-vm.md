@@ -431,7 +431,7 @@ If the upgrade stops with an error, Velox does not start, and nothing needs repa
 docker compose stop velox-api
 ```
 
-Then follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md). If the error says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query: see [An upgrade waited for a table lock](ops/runbook/migration-lock-timeout.md). When the cause is fixed, start the API again:
+Then follow [A database upgrade stopped](ops/runbook/migration-failed-midway.md). If the error says `waited 5s for a table lock`, something held a lock on a table the upgrade changes, often a long-running query: see [An upgrade waited for a table lock](ops/runbook/migration-failed-midway.md#it-waited-5s-for-a-table-lock). When the cause is fixed, start the API again:
 
 ```bash
 docker compose up -d velox-api

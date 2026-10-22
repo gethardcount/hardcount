@@ -101,4 +101,4 @@ Velox stores only a salted SHA-256 hash of each key, never the key itself.
 That is why a key is shown only once, when it is created.
 
 Related: to add a second account to one Velox server, see
-[Working on Velox locally](self-host.md#add-a-second-account).
+[Add a second account](../CONTRIBUTING.md#add-a-second-account).

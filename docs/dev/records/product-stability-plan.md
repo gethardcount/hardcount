@@ -6,8 +6,8 @@
 maintained as a *standing condition*, not a one-time push.
 
 This is the third leg of the discipline set:
-[money-path-robustness-playbook](../dev/money-path-robustness-playbook.md) (build
-side), manual-test-strategy (proof side; since replaced by [How we test](../testing.md)), and this
+[money-path-robustness-playbook](../money-path-robustness-playbook.md) (build
+side), manual-test-strategy (proof side; since replaced by [How we test](../../testing.md)), and this
 document (maintenance side — where residual defects live and what finds each
 class cheapest).
 
@@ -20,7 +20,7 @@ class cheapest).
 3. **Dependabot: nothing open** except items on the deferred-with-trigger
    list (currently: react-router 8, orval-next).
 4. **No doc that lies.** Every user-visible change ships its docs and a test
-   at the right layer ([How we test](../testing.md)) in the same PR. (Until
+   at the right layer ([How we test](../../testing.md)) in the same PR. (Until
    October 2026 this goal was a truth rate for the hand-run runbook
    `MANUAL_TEST.md`; B3 below records its last sample.)
 5. **Every deferral carries a trigger**, in the ADR or the register in
@@ -64,7 +64,7 @@ New code is the largest defect source. The standing gates:
   Findings are verified by the author, not a refuter panel (agents assigned
   to knock findings down — measured useless here). Cap at ~5 finders.
 - **Same-PR doc rule**: CHANGELOG + a test at the right layer (see
-  [How we test](../testing.md)) + ADR (+ ADR index row) + README ship with
+  [How we test](../../testing.md)) + ADR (+ ADR index row) + README ship with
   the change. A doc that lies is a defect.
 - **Pre-push gate**: gofmt · go vet · `go test ./... -race -short -count=1` ·
   golangci-lint (its `unused` finding = deleted-test alarm) · `make gen`
@@ -145,7 +145,7 @@ the same-PR rule is failing.
 
 ### B5. Fresh-tenant smoke ritual *(no build — a rule)*
 
-The [release checklist](../dev/release-checklist.md) and the Playwright suite
+The [release checklist](../release-checklist.md) and the Playwright suite
 on a **fresh tenant** before any DP-facing (design-partner-facing) milestone.
 (Until October 2026 this was S1/S2, the MANUAL_TEST.md smoke flows.)
 Fresh-tenant walks found 3 seam bugs that aged-tenant walks structurally

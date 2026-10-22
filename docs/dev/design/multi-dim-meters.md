@@ -2,11 +2,11 @@
 
 > - **Decided:** one meter takes usage events with dimension labels, such as `model`. Pricing rules match sets of labels, and the highest-priority matching rule claims each event, so no event is priced twice.
 > - **Shipped:** v0.1.0, in [#20](https://github.com/getvelox/velox/pull/20) (migration `0054_multi_dim_meters`).
-> - **Current docs:** [How Velox picks the price for an event](../ai-pricing.md#how-velox-picks-the-price-for-an-event) in the AI pricing reference. The decisions made since are listed below. Where this page and the code disagree, the code wins.
+> - **Current docs:** [How Velox picks the price for an event](../../ai-pricing.md#how-velox-picks-the-price-for-an-event) in the AI pricing reference. The decisions made since are listed below. Where this page and the code disagree, the code wins.
 
 > **Design document from 2026-04-25** (the proposal as reviewed before building). It is not kept current.
 >
-> **Current design:** [ADR-044](../adr/044-canonical-ai-token-metering-model.md) (canonical `tokens` meter + `token_type` dimension), [ADR-045](../adr/045-decimal-per-unit-pricing-rates.md) (decimal per-unit rates; cycle billing prices multi-dim meters), and [ADR-070](../adr/070-price-change-semantics.md) (a rule is priced at the version of its `rule_key` in force when the period opened), plus the package docs in `internal/usage/` and `internal/billing/`.
+> **Current design:** [ADR-044](../../adr/044-canonical-ai-token-metering-model.md) (canonical `tokens` meter + `token_type` dimension), [ADR-045](../../adr/045-decimal-per-unit-pricing-rates.md) (decimal per-unit rates; cycle billing prices multi-dim meters), and [ADR-070](../../adr/070-price-change-semantics.md) (a rule is priced at the version of its `rule_key` in force when the period opened), plus the package docs in `internal/usage/` and `internal/billing/`.
 >
 > **Known out of date in the body below:**
 >
