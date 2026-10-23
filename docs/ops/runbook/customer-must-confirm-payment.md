@@ -34,10 +34,11 @@ One of these:
   payment.
 - **The customer is asked to confirm.** The first email, and each payment
   reminder, says "Your bank asked you to confirm the payment" with a link to
-  the hosted invoice page, where they pay and confirm. It says nothing about
-  a decline. Emails need SMTP set up and an email address on the customer,
-  and the link needs `HOSTED_INVOICE_BASE_URL`. Without it the email asks
-  the customer to contact you to pay.
+  the hosted invoice page, where they pay; their bank may ask them to
+  confirm. It says nothing about a decline. Emails need SMTP set up and an
+  email address on the customer, and the link needs
+  `HOSTED_INVOICE_BASE_URL`. Without it the email asks the customer to
+  contact you to pay.
 - **A different card ends it.** A card the customer saves through a setup
   or update link becomes the default, and the next retry charges it.
 - **Paying on the hosted page with the same card ends it too.** That

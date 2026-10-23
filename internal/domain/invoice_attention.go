@@ -1178,7 +1178,7 @@ func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since t
 func classifyNeedsConfirmation(inv Invoice, retrying bool, since time.Time) *Attention {
 	const (
 		why     = "Stripe's code is authentication_required: the bank wants the customer to confirm this payment, usually with 3-D Secure, and a charge made without the customer can't do that. "
-		howPay  = "The customer pays on the hosted invoice page, where their bank asks them to confirm. "
+		howPay  = "The customer pays on the hosted invoice page, where their bank may ask them to confirm. "
 		newCard = "A different card the customer saves through a setup or update link becomes the default; "
 	)
 	detail := why + howPay +

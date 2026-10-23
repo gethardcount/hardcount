@@ -495,7 +495,7 @@ func (s *Sender) SendDunningWarning(ctx context.Context, tenantID, to string, cc
 
 	// A card the bank refused for good (#966), and a payment the bank wants
 	// the customer to confirm, get their own copy: no retry date is
-	// promised, because dunning will not charge that card again.
+	// promised, because dunning retries skip that card.
 	subject, contentHTML, ctaURL, ctaLabel := renderDunningWarningHTML(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
 	textBody := dunningWarningTextBody(customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, hostedURL)
 	switch ask {

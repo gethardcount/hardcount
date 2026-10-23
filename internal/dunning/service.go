@@ -166,8 +166,8 @@ type EmailNotifier interface {
 	// ask selects the copy. DeclineAskNewCard is "use a different card": the
 	// bank refused the card for good (#966). DeclineAskConfirm is "confirm
 	// your payment": the bank wants the customer to confirm it. Either way
-	// dunning will not charge that card again, so the email must not
-	// promise a retry on a date, and failureReason is empty.
+	// dunning retries skip that card, so the email must not promise a retry
+	// on a date, and failureReason is empty.
 	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	// outcome is what exhaustion actually did to THIS invoice, not what
 	// the policy asked for — the copy is composed from it (ADR-112).

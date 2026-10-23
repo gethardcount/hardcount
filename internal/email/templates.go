@@ -205,9 +205,10 @@ func renderDunningWarningHTML(customerName, invoiceNumber string, attemptNumber,
 
 // renderCardRefusedWarningHTML is the dunning warning for a card the bank
 // refused for good (#966): lost, stolen, revoked and the rest of
-// domain.IsHardDecline. Dunning will not charge that card again for this
-// invoice, so unlike renderDunningWarningHTML it promises no retry date and
-// shows no attempt count. It does not say why the bank refused: Stripe asks
+// domain.IsHardDecline. Dunning retries skip that card, so unlike
+// renderDunningWarningHTML it promises no retry date and shows no attempt
+// count. It does not say the card won't be charged again: Collect payment
+// and the customer's next invoice still charge it. It does not say why the bank refused: Stripe asks
 // that lost, stolen and fraud declines reach the customer as a plain decline
 // (https://docs.stripe.com/declines/codes).
 func renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
@@ -227,7 +228,7 @@ func renderCardRefusedWarningHTML(customerName, invoiceNumber, hostedURL string)
 // cardRefusedSentence and cardRefusedAsk are the card-refused warning's copy,
 // shared by its HTML and plain-text parts so the two cannot drift.
 func cardRefusedSentence(invoiceNumber string) string {
-	return "Your bank declined the card on file for invoice " + invoiceNumber + ", so we won't charge that card again."
+	return "Your bank declined the card on file for invoice " + invoiceNumber + "."
 }
 
 const cardRefusedAsk = "Please pay the invoice with a different card."
@@ -263,7 +264,7 @@ func confirmPaymentSentence(invoiceNumber string) string {
 
 func confirmPaymentAsk(hasLink bool) string {
 	if hasLink {
-		return "Please pay the invoice using the link below. Your bank will ask you to confirm the payment."
+		return "Please pay the invoice using the link below. Your bank may ask you to confirm the payment."
 	}
 	return "Please contact us to pay the invoice."
 }

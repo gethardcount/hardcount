@@ -306,9 +306,10 @@ type PaymentFailure struct {
 // email gives when the bank refused the card for good (domain.IsHardDecline).
 // It does not say why: Stripe asks that lost, stolen and fraud declines be
 // shown to the customer as a plain decline
-// (https://docs.stripe.com/declines/codes). It says what to do, since
-// Velox will not charge that card again for this invoice.
-const refusedCardCustomerMessage = "Your bank declined this card, and we won't try it again. Please pay with a different card."
+// (https://docs.stripe.com/declines/codes). It says what to do. It does not
+// say the card won't be charged again: only dunning retries skip it, while
+// Collect payment and the customer's next invoice still charge it.
+const refusedCardCustomerMessage = "Your bank declined this card. Please pay with a different card."
 
 // customerFailureReason is the reason the payment-failed email shows the
 // customer: Stripe's message for a card error (CardMessage; none, so no

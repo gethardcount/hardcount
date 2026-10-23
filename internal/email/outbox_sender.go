@@ -98,7 +98,9 @@ type outboxMessage struct {
 	// warning's "use a different card" copy. It is still written beside
 	// DeclineAsk "new_card", so an older replica sending the row picks the
 	// same copy, and read when DeclineAsk is empty, for rows the older
-	// binary queued.
+	// binary queued. "confirm" has no older-binary flag: an older replica
+	// sends a confirm reminder as the ordinary warning, with a retry date,
+	// until every copy is upgraded (CHANGELOG, #1360).
 	CardNeedsReplacing bool `json:"card_needs_replacing,omitempty"`
 	// EscalationOutcome is what dunning's exhaustion actually did to this
 	// invoice (ADR-112) — it replaced the single `action` verb, which could
