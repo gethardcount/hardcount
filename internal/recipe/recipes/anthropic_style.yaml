@@ -1,5 +1,5 @@
 key: anthropic_style
-version: 7.0.0
+version: 8.0.0
 name: Anthropic (Claude) token pricing
 summary: |
   Ready-made pricing for reselling Claude (Anthropic) API access. Bills each

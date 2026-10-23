@@ -979,25 +979,25 @@ func (s *PostgresStore) LockMeterTx(ctx context.Context, tx *sql.Tx, meterID str
 	return m, nil
 }
 
-// meterHasUsageSQL reports whether the meter has events: rows in
-// usage_events for the meter, or held rows (usage_held_events, status held)
+// meterHasUsageSQL reports which events the meter has: rows in
+// usage_events for the meter, and held rows (usage_held_events, status held)
 // for its event name, which are billed under the meter's aggregation when
 // they are released (ADR-130 §2). Row-level security scopes both reads to
 // the tenant and the mode; tenant_id leads each table's indexes. No index
 // leads with (tenant_id, meter_id), so proving a meter has no events scans
 // the tenant's events (ADR-130 §18).
 const meterHasUsageSQL = `
-	SELECT EXISTS (SELECT 1 FROM usage_events WHERE tenant_id = $1 AND meter_id = $2)
-	    OR EXISTS (SELECT 1 FROM usage_held_events WHERE tenant_id = $1 AND event_name = $3 AND status = 'held')`
+	SELECT EXISTS (SELECT 1 FROM usage_events WHERE tenant_id = $1 AND meter_id = $2),
+	       EXISTS (SELECT 1 FROM usage_held_events WHERE tenant_id = $1 AND event_name = $3 AND status = 'held')`
 
-// MeterHasUsageTx is MeterHasUsage on the caller's transaction. After
+// MeterUsageTx reads meterHasUsageSQL on the caller's transaction. After
 // LockMeterTx it sees every event whose insert the lock waited for.
-func (s *PostgresStore) MeterHasUsageTx(ctx context.Context, tx *sql.Tx, m domain.Meter) (bool, error) {
-	var has bool
-	if err := tx.QueryRowContext(ctx, meterHasUsageSQL, m.TenantID, m.ID, m.EventName).Scan(&has); err != nil {
-		return false, fmt.Errorf("read whether meter %s has usage: %w", m.ID, err)
+func (s *PostgresStore) MeterUsageTx(ctx context.Context, tx *sql.Tx, m domain.Meter) (MeterUsage, error) {
+	var u MeterUsage
+	if err := tx.QueryRowContext(ctx, meterHasUsageSQL, m.TenantID, m.ID, m.EventName).Scan(&u.Events, &u.Held); err != nil {
+		return MeterUsage{}, fmt.Errorf("read whether meter %s has usage: %w", m.ID, err)
 	}
-	return has, nil
+	return u, nil
 }
 
 // MeterHasUsage reports whether the meter has events (meterHasUsageSQL).
@@ -1007,11 +1007,11 @@ func (s *PostgresStore) MeterHasUsage(ctx context.Context, tenantID string, m do
 		return false, err
 	}
 	defer postgres.Rollback(tx)
-	var has bool
-	if err := tx.QueryRowContext(ctx, meterHasUsageSQL, tenantID, m.ID, m.EventName).Scan(&has); err != nil {
+	var u MeterUsage
+	if err := tx.QueryRowContext(ctx, meterHasUsageSQL, tenantID, m.ID, m.EventName).Scan(&u.Events, &u.Held); err != nil {
 		return false, fmt.Errorf("read whether meter %s has usage: %w", m.ID, err)
 	}
-	return has, nil
+	return u.Any(), nil
 }
 
 // CountSubsUsingMeterTx locks the plans wiring the meter, in id order so two

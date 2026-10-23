@@ -1,5 +1,5 @@
 key: openai_style
-version: 6.0.0
+version: 7.0.0
 name: OpenAI (GPT) token pricing
 summary: |
   Ready-made pricing for reselling OpenAI (GPT) API access. Bills each

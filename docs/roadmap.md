@@ -23,12 +23,12 @@ first. Every shipped change, with its date, is in the
   - editing or deleting a pricing rule;
   - a new rule that could take usage from a price that bills it now;
   - pointing the default price at another price, or removing it.
+
+  Per-plan usage prices (below) replace this check before the release.
 - **Done:** a meter has one aggregation, which every price of it bills
   under. It is fixed once the meter has usage. A meter's `key` is now
   `event_name`, the name usage events send it by
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §2).
-
-  Per-plan usage prices (below) replace this check before the release.
 - **Done:** eight API operations that another operation already did are
   removed. The [CHANGELOG](../CHANGELOG.md) names the replacement for each.
 - **Done:** a dunning policy's schedule is one list of days, `retry_days`:

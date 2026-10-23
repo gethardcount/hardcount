@@ -934,10 +934,13 @@ export interface paths {
          *     exist on the tenant.
          *
          *     `aggregation` can change until the meter has usage, then it is
-         *     fixed: a change is refused with 409 `meter_has_usage`, because the
-         *     usage so far was counted under the aggregation it has. Make a new
-         *     meter to count differently. Usage is a usage event of the meter, or
-         *     a held usage row for its `event_name` that is still held.
+         *     fixed: a change is refused with 409 `meter_has_usage`. Usage is a
+         *     usage event of the meter, or a held usage row for its `event_name`
+         *     that is still held. Usage events are counted under the aggregation
+         *     the meter has; to count differently, make a new meter with another
+         *     event name. Held rows bill under it when released, and only to the
+         *     meter of their event name; only discarding them frees the
+         *     aggregation.
          *
          *     While a draft, trialing or active subscription uses the meter,
          *     pointing the default at another rating rule, or clearing it, is
@@ -3268,8 +3271,8 @@ export interface paths {
         put?: never;
         /**
          * Discard held usage
-         * @description Marks the held rows for one external customer ID (and one meter
-         *     key, when given) as discarded. They are never billed. The rows stay
+         * @description Marks the held rows for one external customer ID (and one event
+         *     name, when given) as discarded. They are never billed. The rows stay
          *     stored as a record. Writes an audit log entry. Requires usage write
          *     permission.
          */
@@ -7028,7 +7031,8 @@ export interface components {
              * @description Whether the meter has events: usage events, or held usage rows
              *     for its `event_name` that are still held. Once it has, its
              *     `aggregation` cannot change. Returned when you create, get or
-             *     update one meter; the meter list leaves it out.
+             *     update one meter; the meter list leaves it out. A create or
+             *     update that succeeded leaves it out if it could not be read.
              */
             has_usage?: boolean;
             rating_rule_version_id?: string;
@@ -13414,7 +13418,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `validation_error`: `external_customer_id` is missing. */
+            /** @description `validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
             422: {
                 headers: {
                     [name: string]: unknown;

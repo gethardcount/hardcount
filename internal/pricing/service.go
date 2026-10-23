@@ -438,13 +438,20 @@ func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input Up
 // UPDATE waits for an ingest still writing an event of the meter (the
 // event's foreign key holds KEY SHARE on the meter row), so an event that
 // commits first is seen here.
+//
+// The message says what holds it. Held rows have not been counted yet, and
+// they release only to the meter of their event name, so a new meter is no
+// way out for them.
 func (s *Service) refuseAggregationChange(ctx context.Context, tx *sql.Tx, locked domain.Meter) error {
-	has, err := s.store.MeterHasUsageTx(ctx, tx, locked)
+	u, err := s.store.MeterUsageTx(ctx, tx, locked)
 	if err != nil {
 		return err
 	}
-	if has {
-		return errs.InvalidState(fmt.Sprintf("Meter %q has usage, so its aggregation is fixed: its usage so far was counted as %s. Make a new meter to count differently.", locked.EventName, locked.Aggregation)).WithCode(errs.CodeMeterHasUsage)
+	switch {
+	case u.Events:
+		return errs.InvalidState(fmt.Sprintf("Meter %q has usage events, so its aggregation stays %s: its events are counted under it. To count differently, make a new meter with another event name.", locked.EventName, locked.Aggregation)).WithCode(errs.CodeMeterHasUsage)
+	case u.Held:
+		return errs.InvalidState(fmt.Sprintf("Meter %q has held usage for its event name, so its aggregation stays %s: the held rows bill under it when released. Only discarding them frees the aggregation, and discarded rows are never billed.", locked.EventName, locked.Aggregation)).WithCode(errs.CodeMeterHasUsage)
 	}
 	return nil
 }

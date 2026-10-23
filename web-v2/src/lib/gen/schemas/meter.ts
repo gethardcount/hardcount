@@ -27,7 +27,8 @@ export interface Meter {
      * Whether the meter has events: usage events, or held usage rows
      * for its `event_name` that are still held. Once it has, its
      * `aggregation` cannot change. Returned when you create, get or
-     * update one meter; the meter list leaves it out.
+     * update one meter; the meter list leaves it out. A create or
+     * update that succeeded leaves it out if it could not be read.
      */
   has_usage?: boolean;
   rating_rule_version_id?: string;

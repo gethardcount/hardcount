@@ -235,29 +235,39 @@ func (h *Handler) createMeter(w http.ResponseWriter, r *http.Request) {
 		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionCreate, "meter", meter.ID, meter.Name, nil)
 	}
 
-	h.respondMeter(w, r, http.StatusCreated, tenantID, meter)
+	h.respondMeter(w, r, http.StatusCreated, tenantID, meter, true)
 }
 
 // meterResponse is one meter as POST, GET and PATCH /v1/meters answer it:
 // the meter and whether it has usage. Once it has, its aggregation is fixed
 // (ADR-130 §2), and the dashboard says so before an edit. The list leaves
 // has_usage out: proving a meter has no events scans the account's events
-// (ADR-130 §18), once per meter.
+// (ADR-130 §18), once per meter. A create or update whose has_usage read
+// fails leaves it out too (respondMeter).
 type meterResponse struct {
 	domain.Meter
-	HasUsage bool `json:"has_usage"`
+	HasUsage *bool `json:"has_usage,omitempty"`
 }
 
 // respondMeter writes meter with has_usage. A new meter can have usage at
 // once: held rows that named its event name before it existed.
-func (h *Handler) respondMeter(w http.ResponseWriter, r *http.Request, status int, tenantID string, meter domain.Meter) {
+//
+// After a create or update (wrote), the write has committed, so a failed
+// has_usage read must not turn it into a 500: a client that retried the
+// create would get 409 "already exists" for the meter its first call made.
+// The answer is the write's status with has_usage left out, not guessed.
+func (h *Handler) respondMeter(w http.ResponseWriter, r *http.Request, status int, tenantID string, meter domain.Meter, wrote bool) {
 	has, err := h.svc.MeterHasUsage(r.Context(), tenantID, meter)
 	if err != nil {
-		respond.InternalError(w, r)
 		slog.ErrorContext(r.Context(), "read whether the meter has usage", "meter_id", meter.ID, "error", err)
+		if !wrote {
+			respond.InternalError(w, r)
+			return
+		}
+		respond.JSON(w, r, status, meterResponse{Meter: meter})
 		return
 	}
-	respond.JSON(w, r, status, meterResponse{Meter: meter, HasUsage: has})
+	respond.JSON(w, r, status, meterResponse{Meter: meter, HasUsage: &has})
 }
 
 func (h *Handler) listMeters(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +301,7 @@ func (h *Handler) getMeter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.respondMeter(w, r, http.StatusOK, tenantID, meter)
+	h.respondMeter(w, r, http.StatusOK, tenantID, meter, false)
 }
 
 // updateMeter is the PATCH that makes the DEFAULT rating-rule binding
@@ -318,7 +328,7 @@ func (h *Handler) updateMeter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.respondMeter(w, r, http.StatusOK, tenantID, meter)
+	h.respondMeter(w, r, http.StatusOK, tenantID, meter, true)
 }
 
 // ---------------------------------------------------------------------------

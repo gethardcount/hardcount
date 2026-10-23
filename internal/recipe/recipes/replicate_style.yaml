@@ -1,5 +1,5 @@
 key: replicate_style
-version: 4.0.0
+version: 5.0.0
 name: GPU compute pricing (per-second)
 summary: |
   Ready-made pricing for reselling GPU compute. Bills each customer per

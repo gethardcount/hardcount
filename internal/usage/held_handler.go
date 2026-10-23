@@ -171,12 +171,14 @@ type DiscardHeldRequest struct {
 	EventName string `json:"event_name"`
 }
 
-// discardHeld serves POST /v1/usage-events/held/discard.
+// discardHeld serves POST /v1/usage-events/held/discard. The body decodes
+// strictly: an unknown field such as the old `meter_key` would otherwise
+// leave EventName empty and discard every held row of the customer, and a
+// discarded row is never billed.
 func (h *Handler) discardHeld(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	var req DiscardHeldRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
 	n, err := h.svc.Discard(r.Context(), tenantID, strings.TrimSpace(req.ExternalCustomerID), strings.TrimSpace(req.EventName))
