@@ -46,6 +46,8 @@ func TestConfirmPaymentEmail_AsksToConfirmWithThePayLink(t *testing.T) {
 	}
 
 	// No hosted page: no button, no link, and the copy does not point at one.
+	// Nor does it say the bank will ask them to confirm: a customer who pays
+	// some other way (a bank transfer) is not asked.
 	_, rawNoLink, url, label := renderConfirmPaymentHTML("Ada", "INV-0042", "")
 	if url != "" || label != "" {
 		t.Errorf("CTA %q %q with no hosted page, want none", label, url)
@@ -53,6 +55,9 @@ func TestConfirmPaymentEmail_AsksToConfirmWithThePayLink(t *testing.T) {
 	for part, body := range map[string]string{"html": stdhtml.UnescapeString(rawNoLink), "text": confirmPaymentTextBody("Ada", "INV-0042", "")} {
 		if strings.Contains(body, "link below") || strings.Contains(body, "Pay invoice:") {
 			t.Errorf("%s part points at a link with no hosted page:\n%s", part, body)
+		}
+		if !strings.Contains(body, "Please contact us to pay the invoice.") || strings.Contains(body, "will ask you") {
+			t.Errorf("%s part with no hosted page, want only \"Please contact us to pay the invoice.\":\n%s", part, body)
 		}
 	}
 }
@@ -76,9 +81,10 @@ func (a *askDeliverer) SendPaymentFailed(_ context.Context, _, _ string, _ []str
 
 // The dispatcher sends a queued row with the copy and the reason it was
 // queued with: decline_ask, or for a row an older binary queued,
-// card_needs_replacing; and the payment-failed reason the settle
-// transaction writes as failure_reason (before, only reason was read, so
-// the email showed no reason).
+// card_needs_replacing. A payment-failed email's reason is read from reason,
+// where the settle transaction writes the customer's reason. The previous
+// release wrote failure_reason there, unfiltered (Velox's own text, such as
+// "reconciled: requires_payment_method"), and it is not shown.
 func TestDispatcher_SendsTheQueuedCopyAndReason(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -92,8 +98,8 @@ func TestDispatcher_SendsTheQueuedCopyAndReason(t *testing.T) {
 		{"warning queued by the older binary", TypeDunningWarning, map[string]any{"card_needs_replacing": true}, domain.DeclineAskNewCard, ""},
 		{"warning, ordinary", TypeDunningWarning, map[string]any{"failure_reason": "Your card has insufficient funds."}, domain.DeclineAskNone, "Your card has insufficient funds."},
 		{"payment failed, confirm", TypePaymentFailed, map[string]any{"decline_ask": "confirm"}, domain.DeclineAskConfirm, ""},
-		{"payment failed, settle transaction", TypePaymentFailed, map[string]any{"failure_reason": "Your card was declined."}, domain.DeclineAskNone, "Your card was declined."},
-		{"payment failed, older enqueue", TypePaymentFailed, map[string]any{"reason": "Your card was declined."}, domain.DeclineAskNone, "Your card was declined."},
+		{"payment failed, settle transaction", TypePaymentFailed, map[string]any{"reason": "Your card was declined."}, domain.DeclineAskNone, "Your card was declined."},
+		{"payment failed, queued by the previous release", TypePaymentFailed, map[string]any{"failure_reason": "reconciled: requires_payment_method"}, domain.DeclineAskNone, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

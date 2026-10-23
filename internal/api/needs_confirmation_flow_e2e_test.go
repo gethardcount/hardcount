@@ -223,7 +223,9 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 		return out
 	}
 	// emailsOf is each customer email queued for the invoice, oldest first:
-	// its type, the reason it shows, and which copy it uses.
+	// its type, the reason it shows (the dispatcher reads a payment_failed
+	// row's reason, a dunning_warning row's failure_reason), and which copy
+	// it uses.
 	type queued struct{ kind, reason, ask string }
 	emailsOf := func(invoiceID string) []queued {
 		t.Helper()
@@ -232,7 +234,7 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 			t.Fatalf("begin tx: %v", err)
 		}
 		defer postgres.Rollback(tx)
-		rows, err := tx.QueryContext(t.Context(), `SELECT email_type, COALESCE(payload->>'failure_reason', ''), COALESCE(payload->>'decline_ask', '')
+		rows, err := tx.QueryContext(t.Context(), `SELECT email_type, COALESCE(CASE WHEN email_type = 'payment_failed' THEN payload->>'reason' ELSE payload->>'failure_reason' END, ''), COALESCE(payload->>'decline_ask', '')
 			FROM email_outbox
 			WHERE tenant_id = $1 AND email_type IN ('payment_failed', 'dunning_warning', 'dunning_escalation')
 			  AND payload->>'invoice_number' = (SELECT invoice_number FROM invoices WHERE id = $2)
@@ -379,6 +381,11 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 	emailsB := emailsOf(invB)
 	if len(emailsB) != 2 || emailsB[1].kind != "dunning_warning" || emailsB[1].ask != "" {
 		t.Errorf("emails for invoice B after retry 1: %+v, want the ordinary dunning warning", emailsB)
+	}
+	// The ordinary decline's email gives Stripe's message for the card error
+	// as the reason.
+	if len(emailsB) > 0 && (emailsB[0].kind != "payment_failed" || emailsB[0].reason != "Your card was declined.") {
+		t.Errorf("first email for invoice B: %+v, want a payment_failed with Stripe's reason", emailsB[0])
 	}
 	if codes := actionCodes(flowObj(getInvoice(invA), "attention")); len(codes) != 1 || codes[0] != "send_reminder" {
 		t.Errorf("invoice A attention actions after retry 1: %v, want only send_reminder", codes)
