@@ -1132,7 +1132,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Operator-initiated retry-tax routes through the billing engine,
 	// which owns provider resolve → recompute → atomic persist. Backs
 	// the "Retry tax" action surfaced by the unified Attention shape on
-	// invoices in tax_status pending or failed.
+	// invoices in tax_status pending.
 	invoiceSvc.SetTaxRetrier(engine)
 
 	// Payment-method reader powers the no_payment_method attention

@@ -446,7 +446,7 @@ func (m *memStore) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID string
 	if inv.Status != domain.InvoiceDraft {
 		return domain.Invoice{}, errs.InvalidState("not draft")
 	}
-	if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+	if inv.TaxStatus != domain.InvoiceTaxPending {
 		return domain.Invoice{}, errs.InvalidState("tax not retryable")
 	}
 	byID := make(map[string]domain.InvoiceLineItem, len(lineItems))
@@ -512,7 +512,7 @@ func TestRetryProviderConfigErrors_FlushesStuckRows(t *testing.T) {
 		ID: "inv_stuck_b", TenantID: "t1", CustomerID: "cus_b",
 		Status: domain.InvoiceDraft,
 		TaxFacts: domain.TaxFacts{
-			TaxStatus: domain.InvoiceTaxFailed, TaxErrorCode: "provider_auth",
+			TaxStatus: domain.InvoiceTaxPending, TaxErrorCode: "provider_auth",
 		},
 		BillingReason: "subscription_cycle",
 		Currency:      "USD", CreatedAt: now,
@@ -595,7 +595,7 @@ func (m *memStore) ListCustomerDataInvalidErrors(_ context.Context, tenantID, cu
 		if inv.Status != domain.InvoiceDraft {
 			continue
 		}
-		if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+		if inv.TaxStatus != domain.InvoiceTaxPending {
 			continue
 		}
 		if inv.TaxErrorCode != "customer_data_invalid" {
@@ -617,7 +617,7 @@ func (m *memStore) ListProviderConfigErrors(_ context.Context, tenantID string, 
 		if inv.Status != domain.InvoiceDraft {
 			continue
 		}
-		if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+		if inv.TaxStatus != domain.InvoiceTaxPending {
 			continue
 		}
 		if inv.TaxErrorCode != "provider_not_configured" && inv.TaxErrorCode != "provider_auth" {
@@ -650,7 +650,7 @@ func (m *memStore) ListPendingTaxRetry(_ context.Context, batch int, retryableCo
 		if inv.Status != domain.InvoiceDraft {
 			continue
 		}
-		if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed {
+		if inv.TaxStatus != domain.InvoiceTaxPending {
 			continue
 		}
 		if _, ok := allowed[inv.TaxErrorCode]; !ok {

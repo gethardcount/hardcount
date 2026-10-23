@@ -123,7 +123,6 @@ const (
 	DunningActive    DunningRunState = "active"
 	DunningResolved  DunningRunState = "resolved"
 	DunningEscalated DunningRunState = "escalated"
-	DunningPaused    DunningRunState = "paused"
 )
 
 // DunningStartCause is WHY collection needed a dunning run — recorded
@@ -175,12 +174,7 @@ type DunningEventType string
 
 const (
 	DunningEventStarted        DunningEventType = "dunning_started"
-	DunningEventRetryScheduled DunningEventType = "retry_scheduled"
 	DunningEventRetryAttempted DunningEventType = "retry_attempted"
-	DunningEventRetrySucceeded DunningEventType = "retry_succeeded"
-	DunningEventRetryFailed    DunningEventType = "retry_failed"
-	DunningEventPaused         DunningEventType = "paused"
-	DunningEventResumed        DunningEventType = "resumed"
 	DunningEventEscalated      DunningEventType = "escalated"
 	DunningEventResolved       DunningEventType = "resolved"
 )

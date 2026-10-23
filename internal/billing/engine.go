@@ -5483,7 +5483,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 }
 
 // RetryTaxForInvoice re-runs ApplyTaxToLineItems against an invoice
-// that's currently parked at tax_status in (pending, failed) and
+// that's currently parked at tax_status=pending and
 // persists the new decision atomically. Backs the operator-triggered
 // "Retry tax" action surfaced by the unified Attention shape.
 //
@@ -5498,7 +5498,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice
 // Gates:
 //   - invoice must be draft (postgres re-asserts this under FOR UPDATE in
 //     UpdateTaxAtomic — it's the genuine data invariant)
-//   - tax_status must be pending or failed (retry-specific policy enforced
+//   - tax_status must be pending (retry-specific policy enforced
 //     HERE; the store no longer re-asserts it, since ComputeTaxForInvoice
 //     legitimately computes tax on a draft whose tax_status is still 'ok')
 //   - subscription is loaded if present (so jurisdiction-by-plan-tax-
@@ -5513,7 +5513,7 @@ func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID str
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 			"tax retry only valid on draft invoices (current: %s)", inv.Status))
 	}
-	// pending/failed are the classic retry shapes. The third admitted shape
+	// pending is the classic retry shape. The second admitted shape
 	// is a draft whose calculation SUCCEEDED at build time but has since
 	// aged past the provider's 24h TTL — a paused-collection sub's cycle
 	// invoice is the common way a draft sits that long. Finalize refuses
@@ -5543,9 +5543,9 @@ func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID str
 			okWithExpiredCalc = true
 		}
 	}
-	if inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed && !okWithExpiredCalc {
+	if inv.TaxStatus != domain.InvoiceTaxPending && !okWithExpiredCalc {
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
-			"tax retry only valid when tax_status is pending or failed, or to refresh a draft's EXPIRED uncommitted calculation (current: %s)", inv.TaxStatus))
+			"tax retry only valid when tax_status is pending, or to refresh a draft's EXPIRED uncommitted calculation (current: %s)", inv.TaxStatus))
 	}
 	return e.computeAndPersistInvoiceTax(ctx, tenantID, invoiceID, inv)
 }
@@ -5561,8 +5561,8 @@ func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID str
 // when an invoice is finalized rather than at draft-create time.
 //
 // It shares the same compute-and-persist core as RetryTaxForInvoice; the
-// only difference is the gate. RetryTaxForInvoice requires tax_status in
-// (pending, failed) because it backs the operator "Retry" affordance on a
+// only difference is the gate. RetryTaxForInvoice requires tax_status
+// pending because it backs the operator "Retry" affordance on a
 // stuck invoice. This path runs on a fresh draft whose tax_status is still
 // the create-time default ('ok'), so it gates on draft-only.
 func (e *Engine) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
@@ -5625,12 +5625,12 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 		// tax_retry_count ("Tax retries: 1" on every healthy one-off invoice,
 		// found live on FLOW I12/NIM-000258). Derived from the invoice's
 		// PRIOR state rather than the caller: RetryTaxForInvoice gates on
-		// pending/failed so it always counts, and a re-finalize of a STUCK
-		// draft (prior compute failed → pending/failed) counts too — that
+		// pending so it always counts, and a re-finalize of a STUCK
+		// draft (prior compute failed → pending) counts too — that
 		// second compute genuinely is a retry. Cycle invoices never pass
 		// through here at build time, so the counter now uniformly means
 		// "attempts after the initial computation" for both invoice types.
-		InitialAttempt: inv.TaxStatus != domain.InvoiceTaxPending && inv.TaxStatus != domain.InvoiceTaxFailed,
+		InitialAttempt: inv.TaxStatus != domain.InvoiceTaxPending,
 	}
 
 	return e.invoices.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, items)
@@ -5640,7 +5640,7 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 // up again, and when. Three outcomes encoded as a return:
 //
 //   - ok / exempt: nil → "ready now" (the row leaves the retryable
-//     filter anyway because tax_status flips out of pending/failed,
+//     filter anyway because tax_status flips out of pending,
 //     so the value doesn't matter; nil keeps the column tidy).
 //   - retryable failure (provider_outage / unknown) under cap:
 //     time.Now + taxRetryBackoff(attempts). The next reconciler

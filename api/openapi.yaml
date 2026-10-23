@@ -262,7 +262,7 @@ components:
           enum: [monthly, yearly]
         status:
           type: string
-          enum: [draft, active, archived]
+          enum: [active, archived]
         base_amount_cents:
           type: integer
           format: int64
@@ -362,7 +362,7 @@ components:
             $ref: "#/components/schemas/SubscriptionItem"
         status:
           type: string
-          enum: [draft, trialing, active, canceled, archived]
+          enum: [draft, trialing, active, canceled]
         billing_time:
           type: string
           enum: [calendar, anniversary]
@@ -613,13 +613,12 @@ components:
 
     InvoiceTaxStatus:
       type: string
-      enum: [ok, pending, failed]
+      enum: [ok, pending]
       description: |
-        Whether tax has been successfully calculated. Happy path is `ok`.
-        `pending` means a transient calculation failure is awaiting retry;
-        `failed` means retries are exhausted (operator resolves manually).
-        Pending/failed invoices are blocked from finalize so we never send
-        a wrong tax amount.
+        Whether tax has been calculated. `ok`: it has. `pending`: the
+        calculation failed, and `tax_error_code` says why and whether
+        Velox retries it. A pending invoice cannot be finalized, so a wrong
+        tax amount is never sent.
 
     AttentionSeverity:
       type: string
@@ -877,6 +876,9 @@ components:
     InvoiceLineType:
       type: string
       enum: [base_fee, usage, add_on, discount, tax]
+      description: |
+        `discount` and `tax` appear only on lines added before 2026-10-22;
+        a new line cannot use them.
 
     ItemChangeType:
       type: string
@@ -990,12 +992,17 @@ components:
           type: string
         tax_error_code:
           type: string
+          enum:
+            - customer_data_invalid
+            - jurisdiction_unsupported
+            - provider_outage
+            - provider_auth
+            - provider_not_configured
+            - unknown
           description: |
-            Typed taxonomy of `tax_pending_reason`. One of
-            `customer_data_invalid`, `jurisdiction_unsupported`,
-            `provider_outage`, `provider_auth`, `unknown`. Empty for
-            invoices deferred before this column existed (migration
-            0067).
+            Why tax could not be calculated, as a code. Set while
+            `tax_status` is `pending`; `tax_pending_reason` has the
+            detail.
         tax_next_retry_at:
           type: string
           format: date-time
@@ -1014,7 +1021,8 @@ components:
           description: |
             Set when a payment arrived that the invoice did not expect. The
             webhook event name of the cause: `payment.duplicate_charge`,
-            `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+            `payment.amount_mismatch`, `payment.currency_mismatch` or
+            `payment.received_on_voided_invoice`.
             Only the latest one is kept.
         payment_anomaly_payment_intent_id:
           type: string
@@ -1180,11 +1188,9 @@ components:
         stripe_invoice_id:
           type: string
           description: |
-            Source Stripe invoice id (`in_xxx`) for an invoice imported from
-            a Stripe account. Currently always empty: the Stripe importer was
-            removed (deferred until a design-partner cutover) and nothing
-            writes this field today. The column and its unique index remain
-            for a future importer. Empty for Velox-native invoices.
+            Source Stripe invoice id (`in_xxx`). Set only on invoices the
+            Stripe importer wrote before it was removed on 2026-04-29.
+            Empty on every other invoice.
         is_simulated:
           type: boolean
           description: |
@@ -3359,7 +3365,11 @@ components:
           type: string
         state:
           type: string
-          enum: [active, paused, escalated, resolved]
+          enum: [active, escalated, resolved]
+          description: |
+            `active`: retries are running. `escalated`: retries ran out
+            (`resolution` is `retries_exhausted`). `resolved`: the run ended
+            another way; see `resolution`.
         reason:
           type: string
         attempt_count:
@@ -3440,17 +3450,12 @@ components:
           type: string
           enum:
             - dunning_started
-            - retry_scheduled
             - retry_attempted
-            - retry_succeeded
-            - retry_failed
-            - paused
-            - resumed
             - escalated
             - resolved
         state:
           type: string
-          enum: [active, paused, escalated, resolved]
+          enum: [active, escalated, resolved]
         reason:
           type: string
         attempt_count:
@@ -8016,8 +8021,8 @@ paths:
                       live_subscription_count:
                         type: integer
                         description: |
-                          Subscriptions on this plan that are not canceled or
-                          archived. While it is above 0, `base_amount_cents`,
+                          Subscriptions on this plan that are not canceled.
+                          While it is above 0, `base_amount_cents`,
                           `base_bill_timing` and `meter_ids` cannot change
                           (see Update plan).
         "404":
@@ -8036,7 +8041,7 @@ paths:
 
         `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
         subscriptions are billed. Changing any of them is refused while a
-        subscription that is not canceled or archived uses the plan
+        subscription that is not canceled uses the plan
         (`live_subscription_count` on Get plan): create a new plan instead. `base_amount_cents` can only be set to a value above 0.
         Every meter in `meter_ids` must have a price (a default rating rule
         or a pricing rule) in the plan's currency.
@@ -8075,7 +8080,7 @@ paths:
                   description: Replaces the plan's meters. Omit to keep them.
                 status:
                   type: string
-                  enum: [draft, active, archived]
+                  enum: [active, archived]
                 tax_code:
                   type: string
                   description: Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
@@ -8110,18 +8115,15 @@ paths:
           description: |
             `validation_error`: a billing field changed while live
             subscriptions use the plan (param `plan`), an unknown or unpriced
-            meter in `meter_ids`, an invalid `base_bill_timing`, or an invalid
-            `tax_code`.
+            meter in `meter_ids`, an invalid `base_bill_timing`, a `status`
+            other than `active` or `archived`, or an invalid `tax_code`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "500":
           description: |
-            `internal_error`. Among other causes, a `status` outside
-            `draft`, `active` and `archived` is not checked before it is
-            written, so the database refuses it and the call answers 500,
-            not 422. Nothing is changed.
+            `internal_error`. Nothing is changed.
           content:
             application/json:
               schema:
@@ -8332,7 +8334,7 @@ paths:
             a status: use `collection=paused`.
           schema:
             type: string
-            enum: [draft, trialing, active, canceled, archived]
+            enum: [draft, trialing, active, canceled]
         - name: billing
           in: query
           description: |
@@ -8561,8 +8563,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: |
-            Code `invalid_state`: the subscription is already `canceled` or
-            `archived`. Code `unbilled_period`: a billing period ended and
+            Code `invalid_state`: the subscription is already `canceled`.
+            Code `unbilled_period`: a billing period ended and
             could not be invoiced; retry billing first.
           content:
             application/json:
@@ -8632,8 +8634,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: |
-            Code `invalid_state`: the subscription is `canceled` or
-            `archived`, or its status changed while the request ran (read
+            Code `invalid_state`: the subscription is `canceled`, or its
+            status changed while the request ran (read
             it again and retry). Code `unbilled_period`: a billing period
             ended and could not be invoiced; retry billing first.
           content:
@@ -8758,8 +8760,8 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: |
-            Code `invalid_state`: the subscription is `canceled` or
-            `archived`. Code `unbilled_period`: a billing period ended and
+            Code `invalid_state`: the subscription is `canceled`. Code
+            `unbilled_period`: a billing period ended and
             could not be invoiced; retry billing first.
           content:
             application/json:
@@ -8991,7 +8993,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: "Code `invalid_state`: the subscription is `canceled` or `archived`."
+          description: "Code `invalid_state`: the subscription is `canceled`."
           content:
             application/json:
               schema:
@@ -9098,8 +9100,8 @@ paths:
         "409":
           description: |
             Code `already_exists`: the subscription already has an item for
-            this plan. Code `invalid_state`: the subscription is `canceled`
-            or `archived`; the plan is archived; the plan's meters overlap
+            this plan. Code `invalid_state`: the subscription is `canceled`;
+            the plan is archived; the plan's meters overlap
             another live subscription of the customer; or the plan's
             currency differs from the subscription's. Code
             `unpaid_invoice_blocks_change`: the invoice for the current
@@ -11220,7 +11222,7 @@ paths:
       summary: Retry tax calculation on a deferred invoice
       description: |
         Re-runs tax calculation against a draft invoice whose
-        `tax_status` is `pending` or `failed`. Backs the operator-
+        `tax_status` is `pending`. Backs the operator-
         facing "Retry tax" action surfaced by the unified
         `Attention` shape.
 
@@ -11260,7 +11262,7 @@ paths:
         "409":
           description: |
             Invoice is not in a retryable state (status != draft, or
-            tax_status not in pending/failed). Also returned when the
+            tax_status is not pending). Also returned when the
             tax was saved but the invoice's state then stopped the
             finalize.
 
@@ -13022,7 +13024,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [active, paused, escalated, resolved]
+            enum: [active, escalated, resolved]
         - name: limit
           in: query
           description: Page size. Default 50, maximum 100.

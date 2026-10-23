@@ -291,11 +291,20 @@ func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	// ?state= is a closed set: an unknown value matched no row and read as
+	// "none of those".
+	state := r.URL.Query().Get("state")
+	switch domain.DunningRunState(state) {
+	case "", domain.DunningActive, domain.DunningEscalated, domain.DunningResolved:
+	default:
+		respond.BadRequest(w, r, "state must be one of active, escalated, resolved")
+		return
+	}
 
 	runs, total, err := h.svc.ListRuns(r.Context(), RunListFilter{
 		TenantID:  tenantID,
 		InvoiceID: r.URL.Query().Get("invoice_id"),
-		State:     r.URL.Query().Get("state"),
+		State:     state,
 		Limit:     limit,
 		Offset:    offset,
 	})

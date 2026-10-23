@@ -13,7 +13,6 @@ export type ListDunningRunsState = typeof ListDunningRunsState[keyof typeof List
 
 export const ListDunningRunsState = {
   active: 'active',
-  paused: 'paused',
   escalated: 'escalated',
   resolved: 'resolved',
 } as const;

@@ -83,8 +83,8 @@ func TestNextTaxRetry_Outcomes(t *testing.T) {
 		{"retryable-under-cap schedules", domain.InvoiceTaxPending, string(tax.ErrCodeProviderOutage), 0, false},
 		{"unknown is also retryable", domain.InvoiceTaxPending, string(tax.ErrCodeUnknown), 2, false},
 		{"not-configured is retryable (pre-flight, self-heals post-connect)", domain.InvoiceTaxPending, string(tax.ErrCodeProviderNotConfigured), 1, false},
-		{"non-retryable code skips", domain.InvoiceTaxFailed, string(tax.ErrCodeProviderAuth), 0, true},
-		{"customer-data is non-retryable", domain.InvoiceTaxFailed, string(tax.ErrCodeCustomerDataInvalid), 0, true},
+		{"non-retryable code skips", domain.InvoiceTaxPending, string(tax.ErrCodeProviderAuth), 0, true},
+		{"customer-data is non-retryable", domain.InvoiceTaxPending, string(tax.ErrCodeCustomerDataInvalid), 0, true},
 		{"final attempt clears", domain.InvoiceTaxPending, string(tax.ErrCodeProviderOutage), maxTaxRetryAttempts - 1, true},
 	}
 	for _, tc := range cases {

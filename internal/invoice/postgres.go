@@ -1301,7 +1301,7 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 	// editing line items; voided means the invoice was annulled and
 	// must not transition to paid.
 	//
-	// Also reject when tax_status is still pending/failed: even a
+	// Also reject when tax_status is still pending: even a
 	// finalized invoice with unresolved tax (rare — finalize itself
 	// gates on tax_status=ok, but a manual finalize bypassing that
 	// gate could create one) would lock the customer at the wrong
@@ -3338,7 +3338,7 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 // per-row under the correct RLS partition.
 //
 // Filter:
-//   - status='draft' AND tax_status IN (pending, failed)
+//   - status='draft' AND tax_status = pending
 //   - tax_error_code IN retryableCodes (e.g. provider_outage,
 //     unknown). Empty list short-circuits to "none".
 //   - tax_retry_count < maxAttempts (per-invoice cap)
@@ -3370,7 +3370,7 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.livemode = $1
 		  AND i.status = 'draft'
-		  AND i.tax_status IN ('pending', 'failed')
+		  AND i.tax_status = 'pending'
 		  AND COALESCE(i.tax_error_code, '') = ANY($2)
 		  AND i.tax_retry_count < $3
 		  AND (i.tax_next_retry_at IS NULL OR i.tax_next_retry_at <= now())
@@ -3630,7 +3630,7 @@ func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantI
 		WHERE i.tenant_id = $1
 		  AND c.test_clock_id = $2
 		  AND i.status = 'draft'
-		  AND i.tax_status IN ('pending', 'failed')
+		  AND i.tax_status = 'pending'
 		  AND COALESCE(i.tax_error_code, '') = ANY($3)
 		  AND i.tax_retry_count < $4
 		ORDER BY i.created_at ASC
@@ -3671,7 +3671,7 @@ func (s *PostgresStore) ListProviderConfigErrors(ctx context.Context, tenantID s
 		SELECT `+invCols+` FROM invoices
 		WHERE livemode = $1
 		  AND status = 'draft'
-		  AND tax_status IN ('pending', 'failed')
+		  AND tax_status = 'pending'
 		  AND COALESCE(tax_error_code, '') IN ('provider_not_configured', 'provider_auth')
 		ORDER BY created_at ASC
 		LIMIT 1000
@@ -3697,7 +3697,7 @@ func (s *PostgresStore) ListCustomerDataInvalidErrors(ctx context.Context, tenan
 		SELECT `+invCols+` FROM invoices
 		WHERE customer_id = $1
 		  AND status = 'draft'
-		  AND tax_status IN ('pending', 'failed')
+		  AND tax_status = 'pending'
 		  AND COALESCE(tax_error_code, '') = 'customer_data_invalid'
 		ORDER BY created_at ASC
 		LIMIT 1000

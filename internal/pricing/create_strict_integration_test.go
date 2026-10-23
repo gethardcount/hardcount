@@ -90,7 +90,9 @@ func TestPlanCreateAndStatus_Validated(t *testing.T) {
 		t.Fatalf("created plan status=%q base=%d, want active 4900", plan.Status, plan.BaseAmountCents)
 	}
 
-	for _, status := range []string{"Archived", "inactive"} {
+	// draft is not a plan status: create makes every plan active and nothing
+	// read draft differently from active, so it was removed.
+	for _, status := range []string{"Archived", "inactive", "draft"} {
 		rr = do(http.MethodPatch, "/"+plan.ID, `{"status":"`+status+`"}`)
 		if rr.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("PATCH status %q: status %d, want 422; body %s", status, rr.Code, rr.Body.String())

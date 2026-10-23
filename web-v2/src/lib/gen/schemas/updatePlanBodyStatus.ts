@@ -12,7 +12,6 @@ export type UpdatePlanBodyStatus = typeof UpdatePlanBodyStatus[keyof typeof Upda
 
 
 export const UpdatePlanBodyStatus = {
-  draft: 'draft',
   active: 'active',
   archived: 'archived',
 } as const;

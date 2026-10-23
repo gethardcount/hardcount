@@ -606,12 +606,11 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 	if err != nil {
 		return dunning.SubscriptionTerminalState{}, err
 	}
-	// The two states in which BOTH movers refuse: cancelSpec() allows only
-	// draft/trialing/active, and SetPauseCollection rejects canceled and
-	// archived outright.
+	// The state in which BOTH movers refuse: cancelSpec() allows only
+	// draft/trialing/active, and SetPauseCollection rejects canceled
+	// outright.
 	st := dunning.SubscriptionTerminalState{
-		Terminated: sub.Status == domain.SubscriptionCanceled ||
-			sub.Status == domain.SubscriptionArchived,
+		Terminated: sub.Status == domain.SubscriptionCanceled,
 	}
 	if sub.CurrentBillingPeriodStart != nil {
 		st.PeriodStart = *sub.CurrentBillingPeriodStart

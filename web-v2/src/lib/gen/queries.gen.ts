@@ -6178,7 +6178,7 @@ export const getUpdatePlanUrl = (id: string,) => {
  *
  * `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
  * subscriptions are billed. Changing any of them is refused while a
- * subscription that is not canceled or archived uses the plan
+ * subscription that is not canceled uses the plan
  * (`live_subscription_count` on Get plan): create a new plan instead. `base_amount_cents` can only be set to a value above 0.
  * Every meter in `meter_ids` must have a price (a default rating rule
  * or a pricing rule) in the plan's currency.
@@ -11159,7 +11159,7 @@ export const getPostV1InvoicesIdRetryTaxUrl = (id: string,) => {
 
 /**
  * Re-runs tax calculation against a draft invoice whose
- * `tax_status` is `pending` or `failed`. Backs the operator-
+ * `tax_status` is `pending`. Backs the operator-
  * facing "Retry tax" action surfaced by the unified
  * `Attention` shape.
  *

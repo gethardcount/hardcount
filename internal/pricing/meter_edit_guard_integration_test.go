@@ -282,10 +282,9 @@ func TestMeterEditGuard_RefusesEachEditWhileInUse(t *testing.T) {
 func TestMeterEditGuard_AllowsEditsThatRepriceNothing(t *testing.T) {
 	f := newMeterEditFixture(t)
 
-	t.Run("every edit passes when only canceled and archived subscriptions use the meter", func(t *testing.T) {
+	t.Run("every edit passes when only canceled subscriptions use the meter", func(t *testing.T) {
 		pm := f.pricedMeter(t, "free_ended")
 		f.sub(t, pm.plan.ID, "canceled")
-		f.sub(t, pm.plan.ID, "archived")
 		if _, err := f.svc.UpdateMeter(f.ctx, f.tenantID, pm.meter.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")}); err != nil {
 			t.Fatalf("aggregation: %v", err)
 		}

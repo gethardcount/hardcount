@@ -21,7 +21,7 @@ func TestGetPlan_UndecodableMeterIDsFails(t *testing.T) {
 
 	plan, err := store.CreatePlan(ctx, tenantID, domain.Plan{
 		Code: "pro", Name: "Pro", Currency: "USD",
-		BillingInterval: domain.BillingMonthly, Status: domain.PlanDraft,
+		BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
 		BaseAmountCents: 4900, MeterIDs: []string{"mtr_1"},
 	})
 	if err != nil {

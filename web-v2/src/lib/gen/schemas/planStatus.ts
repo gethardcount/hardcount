@@ -12,7 +12,6 @@ export type PlanStatus = typeof PlanStatus[keyof typeof PlanStatus];
 
 
 export const PlanStatus = {
-  draft: 'draft',
   active: 'active',
   archived: 'archived',
 } as const;

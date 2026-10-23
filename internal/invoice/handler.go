@@ -1299,7 +1299,7 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 }
 
 // retryTax re-runs tax calculation against a draft invoice in
-// tax_status pending or failed. Backs the "Retry tax" action surfaced
+// tax_status pending. Backs the "Retry tax" action surfaced
 // by the unified Attention shape. Idempotent — each call increments
 // tax_retry_count and rewrites the per-line + invoice-level tax fields.
 //

@@ -339,11 +339,10 @@ export default function InvoiceDetailPage() {
   //   - uncollectible (operator wrote off as bad debt — Stripe parity
   //     says further diagnosis/resolution framing contradicts the
   //     terminal decision and confuses the page)
-  // Tax pending/failed always shows (independent of status — tax can
+  // Tax pending always shows (independent of status — tax can
   // block finalize on draft, or appear on a finalized invoice).
   const showOperatorContext =
     invoice?.tax_status === 'pending' ||
-    invoice?.tax_status === 'failed' ||
     (!!invoice && invoiceAwaitingPayment(invoice))
   const { data: dunningRunsData } = useQuery({
     queryKey: ['invoice-dunning-runs', id],
@@ -448,13 +447,12 @@ export default function InvoiceDetailPage() {
   // must not silently change what a live subscription bills.
   const [pauseSubOnWriteOff, setPauseSubOnWriteOff] = useState(false)
   // Only offerable when there IS a subscription still collecting: a one-off
-  // invoice has none, a canceled/archived sub refuses the pause outright
+  // invoice has none, a canceled sub refuses the pause outright
   // (SetPauseCollection rejects terminal rows), and an already-paused one has
   // nothing to pause.
   const canPauseSubOnWriteOff = Boolean(
     subscription &&
     subscription.status !== 'canceled' &&
-    subscription.status !== 'archived' &&
     !subscription.pause_collection
   )
   const markUncollectibleMutation = useMutation({
@@ -665,7 +663,7 @@ export default function InvoiceDetailPage() {
             // Server gates Finalize when tax_status != 'ok'. Mirror
             // the gate on the UI so operators see the constraint
             // before clicking. Stripe Dashboard does the same.
-            const taxBlocked = invoice.tax_status === 'pending' || invoice.tax_status === 'failed'
+            const taxBlocked = invoice.tax_status === 'pending'
             if (!taxBlocked) {
               return (
                 <Button size="sm" onClick={() => finalizeMutation.mutate()} disabled={acting}>
@@ -1729,7 +1727,7 @@ function OperatorContextCard({
   invoice: Invoice
   dunningRun?: DunningRun
 }) {
-  const taxState = invoice.tax_status === 'failed' ? 'Failed' : invoice.tax_status === 'pending' ? 'Retrying' : null
+  const taxState = invoice.tax_status === 'pending' ? 'Retrying' : null
 
   // Nothing to show → no section. A freshly finalized invoice awaiting its
   // first charge has no tax issue, no attempt and no recovery run.

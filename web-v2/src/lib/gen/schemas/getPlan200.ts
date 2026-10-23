@@ -11,8 +11,8 @@ import type { Plan } from './plan';
 
 export type GetPlan200 = Plan & {
   /**
-     * Subscriptions on this plan that are not canceled or
-     * archived. While it is above 0, `base_amount_cents`,
+     * Subscriptions on this plan that are not canceled.
+     * While it is above 0, `base_amount_cents`,
      * `base_bill_timing` and `meter_ids` cannot change
      * (see Update plan).
      */

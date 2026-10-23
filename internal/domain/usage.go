@@ -54,24 +54,6 @@ type UsageEvent struct {
 	BillingStatus string `json:"billing_status,omitempty"`
 }
 
-type BilledEntrySource string
-
-const (
-	BilledSourceAPI    BilledEntrySource = "api"
-	BilledSourceReplay BilledEntrySource = "replay_adjustment"
-)
-
-type BilledEntry struct {
-	ID             string            `json:"id"`
-	TenantID       string            `json:"tenant_id,omitempty"`
-	CustomerID     string            `json:"customer_id"`
-	MeterID        string            `json:"meter_id"`
-	AmountCents    int64             `json:"amount_cents"`
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-	Source         BilledEntrySource `json:"source,omitempty"`
-	Timestamp      time.Time         `json:"timestamp"`
-}
-
 // ProviderCostRate is one row of the operator's provider cost table
 // (ADR-079): what THEY pay a provider per token for (provider, model,
 // token_type), in decimal dollars — verified real-world rates reach

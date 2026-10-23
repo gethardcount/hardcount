@@ -16,5 +16,4 @@ export const SubscriptionStatus = {
   trialing: 'trialing',
   active: 'active',
   canceled: 'canceled',
-  archived: 'archived',
 } as const;

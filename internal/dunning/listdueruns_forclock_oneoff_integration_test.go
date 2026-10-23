@@ -141,7 +141,7 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 		// creation-ordered in production; here we pin it explicitly).
 		for _, ev := range []struct{ id, typ string }{
 			{"devt_a_started", "dunning_started"},
-			{"devt_b_retry", "retry_scheduled"},
+			{"devt_b_retry", "retry_attempted"},
 		} {
 			if _, err := tx2.ExecContext(ctx, `INSERT INTO invoice_dunning_events (id, run_id, tenant_id, invoice_id, event_type, state, attempt_count, created_at, livemode)
 				VALUES ($1, 'run_oneoff_pin', $2, 'inv_dun_oneoff', $3, 'active', 0, $4, false)`,
@@ -159,7 +159,7 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 		if len(evts) != 2 {
 			t.Fatalf("events: got %d, want 2", len(evts))
 		}
-		if evts[0].EventType != "dunning_started" || evts[1].EventType != "retry_scheduled" {
+		if evts[0].EventType != "dunning_started" || evts[1].EventType != "retry_attempted" {
 			t.Errorf("equal created_at must order by id (causal): got %s then %s", evts[0].EventType, evts[1].EventType)
 		}
 	})

@@ -64,7 +64,7 @@ export function pollIntervalForInvoice(invoice?: PollableInvoice): number | fals
   // In-flight charge — webhook resolution imminent.
   if (invoice.payment_status === 'processing' || invoice.payment_status === 'unknown') return 2000
   // Tax retry, dunning active, or post-decline waiting for retry.
-  if (invoice.tax_status === 'pending' || invoice.tax_status === 'failed') return 5000
+  if (invoice.tax_status === 'pending') return 5000
   if (invoice.payment_status === 'failed') return 5000
   // Awaiting first charge / customer setup.
   if (invoice.status === 'finalized' && invoice.payment_status === 'pending') return 10000

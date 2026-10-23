@@ -151,7 +151,6 @@ var clockTeardownStatements = []string{
 	// Usage + credit — the ledger MUST precede subscriptions: its
 	// source_subscription_item_id RESTRICT-references subscription_items,
 	// which cascades away when subscriptions is deleted.
-	`DELETE FROM billed_entries         WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM usage_events           WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM customer_credit_ledger WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	// Subscriptions — CASCADE removes subscription_items / _changes /

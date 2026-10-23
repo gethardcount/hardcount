@@ -729,7 +729,6 @@ func (e DunningRunResolution) Valid() bool {
 const (
 	DunningRunStateActive    DunningRunState = "active"
 	DunningRunStateEscalated DunningRunState = "escalated"
-	DunningRunStatePaused    DunningRunState = "paused"
 	DunningRunStateResolved  DunningRunState = "resolved"
 )
 
@@ -739,8 +738,6 @@ func (e DunningRunState) Valid() bool {
 	case DunningRunStateActive:
 		return true
 	case DunningRunStateEscalated:
-		return true
-	case DunningRunStatePaused:
 		return true
 	case DunningRunStateResolved:
 		return true
@@ -780,13 +777,8 @@ func (e DunningRunDetailDegraded) Valid() bool {
 const (
 	DunningRunEventEventTypeDunningStarted DunningRunEventEventType = "dunning_started"
 	DunningRunEventEventTypeEscalated      DunningRunEventEventType = "escalated"
-	DunningRunEventEventTypePaused         DunningRunEventEventType = "paused"
 	DunningRunEventEventTypeResolved       DunningRunEventEventType = "resolved"
-	DunningRunEventEventTypeResumed        DunningRunEventEventType = "resumed"
 	DunningRunEventEventTypeRetryAttempted DunningRunEventEventType = "retry_attempted"
-	DunningRunEventEventTypeRetryFailed    DunningRunEventEventType = "retry_failed"
-	DunningRunEventEventTypeRetryScheduled DunningRunEventEventType = "retry_scheduled"
-	DunningRunEventEventTypeRetrySucceeded DunningRunEventEventType = "retry_succeeded"
 )
 
 // Valid indicates whether the value is a known member of the DunningRunEventEventType enum.
@@ -796,19 +788,9 @@ func (e DunningRunEventEventType) Valid() bool {
 		return true
 	case DunningRunEventEventTypeEscalated:
 		return true
-	case DunningRunEventEventTypePaused:
-		return true
 	case DunningRunEventEventTypeResolved:
 		return true
-	case DunningRunEventEventTypeResumed:
-		return true
 	case DunningRunEventEventTypeRetryAttempted:
-		return true
-	case DunningRunEventEventTypeRetryFailed:
-		return true
-	case DunningRunEventEventTypeRetryScheduled:
-		return true
-	case DunningRunEventEventTypeRetrySucceeded:
 		return true
 	default:
 		return false
@@ -819,7 +801,6 @@ func (e DunningRunEventEventType) Valid() bool {
 const (
 	DunningRunEventStateActive    DunningRunEventState = "active"
 	DunningRunEventStateEscalated DunningRunEventState = "escalated"
-	DunningRunEventStatePaused    DunningRunEventState = "paused"
 	DunningRunEventStateResolved  DunningRunEventState = "resolved"
 )
 
@@ -829,8 +810,6 @@ func (e DunningRunEventState) Valid() bool {
 	case DunningRunEventStateActive:
 		return true
 	case DunningRunEventStateEscalated:
-		return true
-	case DunningRunEventStatePaused:
 		return true
 	case DunningRunEventStateResolved:
 		return true
@@ -869,6 +848,36 @@ func (e HostedInvoicePayUnavailableReason) Valid() bool {
 	case AmountBelowMinimum:
 		return true
 	case OnlinePaymentUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvoiceTaxErrorCode.
+const (
+	InvoiceTaxErrorCodeCustomerDataInvalid     InvoiceTaxErrorCode = "customer_data_invalid"
+	InvoiceTaxErrorCodeJurisdictionUnsupported InvoiceTaxErrorCode = "jurisdiction_unsupported"
+	InvoiceTaxErrorCodeProviderAuth            InvoiceTaxErrorCode = "provider_auth"
+	InvoiceTaxErrorCodeProviderNotConfigured   InvoiceTaxErrorCode = "provider_not_configured"
+	InvoiceTaxErrorCodeProviderOutage          InvoiceTaxErrorCode = "provider_outage"
+	InvoiceTaxErrorCodeUnknown                 InvoiceTaxErrorCode = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the InvoiceTaxErrorCode enum.
+func (e InvoiceTaxErrorCode) Valid() bool {
+	switch e {
+	case InvoiceTaxErrorCodeCustomerDataInvalid:
+		return true
+	case InvoiceTaxErrorCodeJurisdictionUnsupported:
+		return true
+	case InvoiceTaxErrorCodeProviderAuth:
+		return true
+	case InvoiceTaxErrorCodeProviderNotConfigured:
+		return true
+	case InvoiceTaxErrorCodeProviderOutage:
+		return true
+	case InvoiceTaxErrorCodeUnknown:
 		return true
 	default:
 		return false
@@ -1114,7 +1123,6 @@ func (e InvoiceStatus) Valid() bool {
 
 // Defines values for InvoiceTaxStatus.
 const (
-	InvoiceTaxStatusFailed  InvoiceTaxStatus = "failed"
 	InvoiceTaxStatusOk      InvoiceTaxStatus = "ok"
 	InvoiceTaxStatusPending InvoiceTaxStatus = "pending"
 )
@@ -1122,8 +1130,6 @@ const (
 // Valid indicates whether the value is a known member of the InvoiceTaxStatus enum.
 func (e InvoiceTaxStatus) Valid() bool {
 	switch e {
-	case InvoiceTaxStatusFailed:
-		return true
 	case InvoiceTaxStatusOk:
 		return true
 	case InvoiceTaxStatusPending:
@@ -1326,7 +1332,6 @@ func (e PlanBillingInterval) Valid() bool {
 const (
 	PlanStatusActive   PlanStatus = "active"
 	PlanStatusArchived PlanStatus = "archived"
-	PlanStatusDraft    PlanStatus = "draft"
 )
 
 // Valid indicates whether the value is a known member of the PlanStatus enum.
@@ -1335,8 +1340,6 @@ func (e PlanStatus) Valid() bool {
 	case PlanStatusActive:
 		return true
 	case PlanStatusArchived:
-		return true
-	case PlanStatusDraft:
 		return true
 	default:
 		return false
@@ -1700,7 +1703,6 @@ func (e SubscriptionBillingTime) Valid() bool {
 // Defines values for SubscriptionStatus.
 const (
 	SubscriptionStatusActive   SubscriptionStatus = "active"
-	SubscriptionStatusArchived SubscriptionStatus = "archived"
 	SubscriptionStatusCanceled SubscriptionStatus = "canceled"
 	SubscriptionStatusDraft    SubscriptionStatus = "draft"
 	SubscriptionStatusTrialing SubscriptionStatus = "trialing"
@@ -1710,8 +1712,6 @@ const (
 func (e SubscriptionStatus) Valid() bool {
 	switch e {
 	case SubscriptionStatusActive:
-		return true
-	case SubscriptionStatusArchived:
 		return true
 	case SubscriptionStatusCanceled:
 		return true
@@ -2050,19 +2050,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	Failed    WebhookEventDeliveryAttemptStatus = "failed"
-	Pending   WebhookEventDeliveryAttemptStatus = "pending"
-	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
+	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
+	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case Failed:
+	case WebhookEventDeliveryAttemptStatusFailed:
 		return true
-	case Pending:
+	case WebhookEventDeliveryAttemptStatusPending:
 		return true
-	case Succeeded:
+	case WebhookEventDeliveryAttemptStatusSucceeded:
 		return true
 	default:
 		return false
@@ -2430,7 +2430,6 @@ func (e SetDefaultDunningPolicy200JSONResponseBodyStatus) Valid() bool {
 const (
 	ListDunningRunsParamsStateActive    ListDunningRunsParamsState = "active"
 	ListDunningRunsParamsStateEscalated ListDunningRunsParamsState = "escalated"
-	ListDunningRunsParamsStatePaused    ListDunningRunsParamsState = "paused"
 	ListDunningRunsParamsStateResolved  ListDunningRunsParamsState = "resolved"
 )
 
@@ -2440,8 +2439,6 @@ func (e ListDunningRunsParamsState) Valid() bool {
 	case ListDunningRunsParamsStateActive:
 		return true
 	case ListDunningRunsParamsStateEscalated:
-		return true
-	case ListDunningRunsParamsStatePaused:
 		return true
 	case ListDunningRunsParamsStateResolved:
 		return true
@@ -2709,7 +2706,6 @@ func (e GetPlan200JSONResponseBodyBillingInterval) Valid() bool {
 const (
 	GetPlan200JSONResponseBodyStatusActive   GetPlan200JSONResponseBodyStatus = "active"
 	GetPlan200JSONResponseBodyStatusArchived GetPlan200JSONResponseBodyStatus = "archived"
-	GetPlan200JSONResponseBodyStatusDraft    GetPlan200JSONResponseBodyStatus = "draft"
 )
 
 // Valid indicates whether the value is a known member of the GetPlan200JSONResponseBodyStatus enum.
@@ -2718,8 +2714,6 @@ func (e GetPlan200JSONResponseBodyStatus) Valid() bool {
 	case GetPlan200JSONResponseBodyStatusActive:
 		return true
 	case GetPlan200JSONResponseBodyStatusArchived:
-		return true
-	case GetPlan200JSONResponseBodyStatusDraft:
 		return true
 	default:
 		return false
@@ -2748,7 +2742,6 @@ func (e UpdatePlanJSONBodyBaseBillTiming) Valid() bool {
 const (
 	UpdatePlanJSONBodyStatusActive   UpdatePlanJSONBodyStatus = "active"
 	UpdatePlanJSONBodyStatusArchived UpdatePlanJSONBodyStatus = "archived"
-	UpdatePlanJSONBodyStatusDraft    UpdatePlanJSONBodyStatus = "draft"
 )
 
 // Valid indicates whether the value is a known member of the UpdatePlanJSONBodyStatus enum.
@@ -2757,8 +2750,6 @@ func (e UpdatePlanJSONBodyStatus) Valid() bool {
 	case UpdatePlanJSONBodyStatusActive:
 		return true
 	case UpdatePlanJSONBodyStatusArchived:
-		return true
-	case UpdatePlanJSONBodyStatusDraft:
 		return true
 	default:
 		return false
@@ -2957,7 +2948,6 @@ func (e SetStripeWebhookSecretParamsMode) Valid() bool {
 // Defines values for GetV1SubscriptionsParamsStatus.
 const (
 	GetV1SubscriptionsParamsStatusActive   GetV1SubscriptionsParamsStatus = "active"
-	GetV1SubscriptionsParamsStatusArchived GetV1SubscriptionsParamsStatus = "archived"
 	GetV1SubscriptionsParamsStatusCanceled GetV1SubscriptionsParamsStatus = "canceled"
 	GetV1SubscriptionsParamsStatusDraft    GetV1SubscriptionsParamsStatus = "draft"
 	GetV1SubscriptionsParamsStatusTrialing GetV1SubscriptionsParamsStatus = "trialing"
@@ -2967,8 +2957,6 @@ const (
 func (e GetV1SubscriptionsParamsStatus) Valid() bool {
 	switch e {
 	case GetV1SubscriptionsParamsStatusActive:
-		return true
-	case GetV1SubscriptionsParamsStatusArchived:
 		return true
 	case GetV1SubscriptionsParamsStatusCanceled:
 		return true
@@ -4582,8 +4570,12 @@ type DunningRun struct {
 	// minimum charge, so the run ended without its final action.
 	Resolution DunningRunResolution `json:"resolution,omitempty"`
 	ResolvedAt time.Time            `json:"resolved_at,omitempty"`
-	State      DunningRunState      `json:"state"`
-	TenantId   string               `json:"tenant_id,omitempty"`
+
+	// State `active`: retries are running. `escalated`: retries ran out
+	// (`resolution` is `retries_exhausted`). `resolved`: the run ended
+	// another way; see `resolution`.
+	State    DunningRunState `json:"state"`
+	TenantId string          `json:"tenant_id,omitempty"`
 
 	// TestClockId Filled in on list responses.
 	TestClockId string    `json:"test_clock_id,omitempty"`
@@ -4599,7 +4591,9 @@ type DunningRun struct {
 // minimum charge, so the run ended without its final action.
 type DunningRunResolution string
 
-// DunningRunState defines model for DunningRun.State.
+// DunningRunState `active`: retries are running. `escalated`: retries ran out
+// (`resolution` is `retries_exhausted`). `resolved`: the run ended
+// another way; see `resolution`.
 type DunningRunState string
 
 // DunningRunDetail defines model for DunningRunDetail.
@@ -4964,7 +4958,8 @@ type Invoice struct {
 
 	// PaymentAnomalyKind Set when a payment arrived that the invoice did not expect. The
 	// webhook event name of the cause: `payment.duplicate_charge`,
-	// `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+	// `payment.amount_mismatch`, `payment.currency_mismatch` or
+	// `payment.received_on_voided_invoice`.
 	// Only the latest one is kept.
 	PaymentAnomalyKind string `json:"payment_anomaly_kind,omitempty"`
 
@@ -5025,11 +5020,9 @@ type Invoice struct {
 	// nothing).
 	Status InvoiceStatus `json:"status"`
 
-	// StripeInvoiceId Source Stripe invoice id (`in_xxx`) for an invoice imported from
-	// a Stripe account. Currently always empty: the Stripe importer was
-	// removed (deferred until a design-partner cutover) and nothing
-	// writes this field today. The column and its unique index remain
-	// for a future importer. Empty for Velox-native invoices.
+	// StripeInvoiceId Source Stripe invoice id (`in_xxx`). Set only on invoices the
+	// Stripe importer wrote before it was removed on 2026-04-29.
+	// Empty on every other invoice.
 	StripeInvoiceId       string `json:"stripe_invoice_id,omitempty"`
 	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
@@ -5051,15 +5044,13 @@ type Invoice struct {
 	TaxCountry       string    `json:"tax_country,omitempty"`
 	TaxDeferredAt    time.Time `json:"tax_deferred_at,omitempty"`
 
-	// TaxErrorCode Typed taxonomy of `tax_pending_reason`. One of
-	// `customer_data_invalid`, `jurisdiction_unsupported`,
-	// `provider_outage`, `provider_auth`, `unknown`. Empty for
-	// invoices deferred before this column existed (migration
-	// 0067).
-	TaxErrorCode    string `json:"tax_error_code,omitempty"`
-	TaxExemptReason string `json:"tax_exempt_reason,omitempty"`
-	TaxId           string `json:"tax_id,omitempty"`
-	TaxName         string `json:"tax_name,omitempty"`
+	// TaxErrorCode Why tax could not be calculated, as a code. Set while
+	// `tax_status` is `pending`; `tax_pending_reason` has the
+	// detail.
+	TaxErrorCode    InvoiceTaxErrorCode `json:"tax_error_code,omitempty"`
+	TaxExemptReason string              `json:"tax_exempt_reason,omitempty"`
+	TaxId           string              `json:"tax_id,omitempty"`
+	TaxName         string              `json:"tax_name,omitempty"`
 
 	// TaxNextRetryAt The earliest time the background retry may calculate tax again,
 	// after a failed attempt. Absent when a retry may run now.
@@ -5080,11 +5071,10 @@ type Invoice struct {
 	// reversal is not confirmed.
 	TaxReversedAt time.Time `json:"tax_reversed_at,omitempty"`
 
-	// TaxStatus Whether tax has been successfully calculated. Happy path is `ok`.
-	// `pending` means a transient calculation failure is awaiting retry;
-	// `failed` means retries are exhausted (operator resolves manually).
-	// Pending/failed invoices are blocked from finalize so we never send
-	// a wrong tax amount.
+	// TaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
+	// calculation failed, and `tax_error_code` says why and whether
+	// Velox retries it. A pending invoice cannot be finalized, so a wrong
+	// tax amount is never sent.
 	TaxStatus InvoiceTaxStatus `json:"tax_status,omitempty"`
 
 	// TaxTransactionId Provider-side committed transaction reference, captured at
@@ -5111,6 +5101,11 @@ type Invoice struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	VoidedAt        time.Time `json:"voided_at,omitempty"`
 }
+
+// InvoiceTaxErrorCode Why tax could not be calculated, as a code. Set while
+// `tax_status` is `pending`; `tax_pending_reason` has the
+// detail.
+type InvoiceTaxErrorCode string
 
 // InvoiceBillingReason Mirrors Stripe's `invoice.billing_reason`. Classifies the trigger
 // that produced the invoice. Stamped at create time and never mutated.
@@ -5205,15 +5200,18 @@ type InvoiceLineItem struct {
 	// to the customer. May differ from the line price — discounted
 	// commits sell $10k of credits for $9k. add_on lines on manual
 	// invoices only, at most one per invoice. Absent on normal lines.
-	CommitGrantedCents int64                  `json:"commit_granted_cents,omitempty"`
-	CreatedAt          time.Time              `json:"created_at"`
-	Currency           string                 `json:"currency"`
-	Description        string                 `json:"description"`
-	Id                 string                 `json:"id"`
-	InvoiceId          string                 `json:"invoice_id"`
-	LineType           InvoiceLineType        `json:"line_type"`
-	Metadata           map[string]interface{} `json:"metadata,omitempty"`
-	MeterId            string                 `json:"meter_id,omitempty"`
+	CommitGrantedCents int64     `json:"commit_granted_cents,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	Currency           string    `json:"currency"`
+	Description        string    `json:"description"`
+	Id                 string    `json:"id"`
+	InvoiceId          string    `json:"invoice_id"`
+
+	// LineType `discount` and `tax` appear only on lines added before 2026-10-22;
+	// a new line cannot use them.
+	LineType InvoiceLineType        `json:"line_type"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	MeterId  string                 `json:"meter_id,omitempty"`
 
 	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
 	MeterUnit   string `json:"meter_unit,omitempty"`
@@ -5272,7 +5270,8 @@ type InvoiceLineItemInput struct {
 // InvoiceLineItemInputLineType Defaults to `add_on`.
 type InvoiceLineItemInputLineType string
 
-// InvoiceLineType defines model for InvoiceLineType.
+// InvoiceLineType `discount` and `tax` appear only on lines added before 2026-10-22;
+// a new line cannot use them.
 type InvoiceLineType string
 
 // InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that
@@ -5357,11 +5356,10 @@ type InvoicePreviewTotal struct {
 // nothing).
 type InvoiceStatus string
 
-// InvoiceTaxStatus Whether tax has been successfully calculated. Happy path is `ok`.
-// `pending` means a transient calculation failure is awaiting retry;
-// `failed` means retries are exhausted (operator resolves manually).
-// Pending/failed invoices are blocked from finalize so we never send
-// a wrong tax amount.
+// InvoiceTaxStatus Whether tax has been calculated. `ok`: it has. `pending`: the
+// calculation failed, and `tax_error_code` says why and whether
+// Velox retries it. A pending invoice cannot be finalized, so a wrong
+// tax amount is never sent.
 type InvoiceTaxStatus string
 
 // InvoiceTimelineEvent defines model for InvoiceTimelineEvent.

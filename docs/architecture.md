@@ -75,7 +75,7 @@ internal/                     (abridged — one package per domain)
   auth/                     — API key auth (3 stored key types plus dashboard sessions, per-route permissions)
   customer/                 — customer CRUD + billing profiles
   pricing/                  — meters, rating rules, plans, price overrides
-  subscription/             — lifecycle (draft → trialing → active → canceled → archived)
+  subscription/             — lifecycle (draft → trialing → active → canceled)
   usage/                    — event ingestion + multi-dim aggregation
   invoice/                  — lifecycle (draft → finalized → paid, or voided / uncollectible) + PDF
   billing/                  — billing engine + scheduler + preview
