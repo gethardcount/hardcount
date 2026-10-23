@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"os"
 	"strings"
 	"testing"
 )
@@ -151,6 +152,61 @@ func TestMeterOneAggregation_RefusesRulesThatAggregateDifferently(t *testing.T) 
 				t.Error("the refused up changed the schema")
 			}
 		})
+	}
+}
+
+// TestMeterOneAggregation_RefusesMetersWithAnotherAggregation: until 00208
+// a meter's aggregation had no CHECK, so a row written by raw SQL could hold
+// an empty string or a value billing does not know. 00208 adds the CHECK and 00209
+// validates it, so 00208 stops first and counts those meters. The HINT links
+// the runbook section, and that section must explain this line too.
+//
+// Mutation: drop the meters count from the guard and the up stops in 00209
+// with a bare CHECK error, red.
+func TestMeterOneAggregation_RefusesMetersWithAnotherAggregation(t *testing.T) {
+	const section = "docs/ops/runbook/migration-failed-midway.md#00208-found-rows-it-cannot-keep-as-they-bill"
+	for name, agg := range map[string]string{"an empty aggregation": "", "an unknown aggregation": "average"} {
+		t.Run(name, func(t *testing.T) {
+			dsn, db := scratchDB(t, "velox_test_meteragg_f2_migrate_meters")
+			ctx := context.Background()
+			if err := up(ctx, dsn, filesBefore(t, meterOneAggregationVersion)); err != nil {
+				t.Fatalf("up to before %d: %v", meterOneAggregationVersion, err)
+			}
+			if err := deadContractExec(ctx, db, meterOneAggregationSeed+
+				`INSERT INTO meters (id, tenant_id, key, name, aggregation) VALUES ('mtr_odd', 'ten_ma', 'odd', 'Odd', '`+agg+`');`); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			err := up(ctx, dsn, migrationFiles())
+			if err == nil {
+				t.Fatal("the up succeeded over a meter whose aggregation is not sum, count, max or last")
+			}
+			for _, want := range []string{"migration 00208", "1 meter(s) whose aggregation is not sum, count, max or last", section} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not say %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "pricing rule(s)") {
+				t.Errorf("error %q counts pricing rules; the seed's rules match their meters", err)
+			}
+			if !columnExists(t, db, "meter_pricing_rules", "aggregation_mode") || !columnExists(t, db, "meters", "key") {
+				t.Error("the refused up changed the schema")
+			}
+		})
+	}
+
+	runbook, err := os.ReadFile("../../../docs/ops/runbook/migration-failed-midway.md")
+	if err != nil {
+		t.Fatalf("read runbook: %v", err)
+	}
+	_, after, ok := strings.Cut(string(runbook), "\n## 00208 found rows it cannot keep as they bill\n")
+	if !ok {
+		t.Fatalf("the runbook has no section %s", section)
+	}
+	body, _, _ := strings.Cut(after, "\n## ")
+	for _, want := range []string{"pricing rule(s) whose aggregation_mode is not their meter's aggregation", "meter(s) whose aggregation is not sum, count, max or last", "FROM meters WHERE aggregation NOT IN"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the runbook section does not show %q", want)
+		}
 	}
 }
 
