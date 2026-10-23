@@ -236,7 +236,7 @@ func TestUsageIngest_EmptyPropertiesIsAccepted(t *testing.T) {
 	}
 }
 
-// validateQuantity decides both limits from the coefficient's digit count and
+// checkQuantity decides both limits from the coefficient's digit count and
 // the exponent. This sweeps every coefficient length up to 40 digits with the
 // coefficients at the edges of each length (10^(n-1), +1, +2, 10^n-1), where
 // a float digit count goes wrong.
@@ -250,15 +250,15 @@ func TestValidateQuantity_ExactAtEveryDigitCount(t *testing.T) {
 				c := new(big.Int).Mul(c, big.NewInt(sign))
 				// |c| × 10^(27-n) >= 10^26: refused. |c| × 10^(26-n) < 10^26:
 				// taken, while it has at most 12 places (n <= 38).
-				if err := validateQuantity(decimal.NewFromBigInt(c, int32(27-n))); err == nil {
+				if _, err := checkQuantity(decimal.NewFromBigInt(c, int32(27-n))); err == nil {
 					t.Errorf("%s e%d (>= 10^26) accepted", c, 27-n)
 				}
-				if err := validateQuantity(decimal.NewFromBigInt(c, int32(26-n))); n <= 38 && err != nil {
+				if _, err := checkQuantity(decimal.NewFromBigInt(c, int32(26-n))); n <= 38 && err != nil {
 					t.Errorf("%s e%d (< 10^26) refused: %v", c, 26-n, err)
 				}
 				// c × 10^(-11-n) has 11+n written places; it fits 12 only when
 				// the trailing zeros bring it down, which they do for 10^(n-1).
-				err := validateQuantity(decimal.NewFromBigInt(c, int32(-11-n)))
+				_, err := checkQuantity(decimal.NewFromBigInt(c, int32(-11-n)))
 				if fits := new(big.Int).Abs(c).Cmp(lo) == 0 || n == 1; fits != (err == nil) {
 					t.Errorf("%s e%d: fits=%v, err=%v", c, -11-n, fits, err)
 				}

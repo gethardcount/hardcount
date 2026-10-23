@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -127,7 +128,7 @@ const quantityMessage = `quantity must be a JSON number (5) or a string holding 
 
 // parseQuantity reads the event's quantity the way the spec states it: a JSON
 // number, or a string holding one, and present. The scale and size limits
-// are the service's (validateQuantity), so every ingest path shares them.
+// are the service's (checkQuantity), so every ingest path shares them.
 func parseQuantity(raw json.RawMessage) (decimal.Decimal, error) {
 	text := strings.TrimSpace(string(raw))
 	if text == "" || text == "null" {
@@ -144,10 +145,18 @@ func parseQuantity(raw json.RawMessage) (decimal.Decimal, error) {
 	}
 	q, err := decimal.NewFromString(text)
 	if err != nil {
+		// shopspring parses any digits; on a well-formed number it fails
+		// only when the exponent does not fit an int32.
+		if jsonNumber.MatchString(text) {
+			return decimal.Decimal{}, errs.Invalid("quantity", "quantity cannot be read: its exponent is out of range")
+		}
 		return decimal.Decimal{}, errs.Invalid("quantity", quantityMessage)
 	}
 	return q, nil
 }
+
+// jsonNumber is the JSON number grammar (RFC 8259, section 6).
+var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 // resolveCache memoizes the customer and meter lookups for the lifetime of
 // ONE request. Each lookup opens its own RLS transaction (BEGIN + three

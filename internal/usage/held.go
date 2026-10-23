@@ -108,7 +108,8 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 		return domain.HeldUsageEvent{}, err
 	}
 	// The same limits as an event, so a held row can always be released.
-	if err := validateQuantity(in.Quantity); err != nil {
+	quantity, err := checkQuantity(in.Quantity)
+	if err != nil {
 		return domain.HeldUsageEvent{}, err
 	}
 	// No customer exists, so there is no test clock to read: wall-clock is
@@ -129,7 +130,7 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 		Source:             source,
 		ExternalCustomerID: in.ExternalCustomerID,
 		MeterKey:           in.MeterKey,
-		Quantity:           in.Quantity,
+		Quantity:           quantity,
 		Dimensions:         in.Dimensions,
 		IdempotencyKey:     in.IdempotencyKey,
 		EventAt:            at,
