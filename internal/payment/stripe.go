@@ -85,9 +85,12 @@ type CustomerEmailResolver interface {
 // no PM on file at finalize (no charge was ever attempted). Same
 // signature as dunning.EmailNotifier so OutboxSender satisfies both.
 type EmailPaymentFailed interface {
-	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
+	// ask selects the copy (domain.DeclineAskOf the decline code):
+	// DeclineAskConfirm is the "confirm your payment" email, sent when the
+	// bank wants the customer to confirm the payment.
+	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
 	// SendPaymentFailedTx enqueues on the settle transaction (ADR-040 amendment).
-	SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
+	SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
 }
 
 // Stripe is the payment adapter. It creates PaymentIntents for finalized invoices
@@ -967,8 +970,9 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// methods; or a non-terminal PI Stripe can return because
 	// error_on_requires_action is not set, see ADR-107) stay `processing` and
 	// await the webhook. NOT "off-session SCA": that raises the
-	// authentication_required DECLINE (a card error → definite failure), it
-	// does not park a PI here — the phrase was retracted 2026-07-31.
+	// authentication_required DECLINE (a card error → definite failure,
+	// domain.IsAuthenticationRequired), it does not park a PI here — the
+	// phrase was retracted 2026-07-31.
 	if result.Status == "succeeded" {
 		if serr := s.SettleSucceeded(withChargeAnchor(ctx), tenantID, inv, result.ID, inv.AmountDueCents, SourceChargeResponse); serr != nil {
 			return domain.Invoice{}, fmt.Errorf("settle succeeded inline: %w", serr)

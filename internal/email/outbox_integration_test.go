@@ -1,6 +1,7 @@
 package email_test
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -436,7 +437,7 @@ func (f *fakeDeliverer) SendPaymentReceipt(_ context.Context, tenantID, to strin
 	f.lastPublicToken = publicToken
 	return nil
 }
-func (f *fakeDeliverer) SendDunningWarning(_ context.Context, tenantID, to string, cc []string, name, inv string, n, max int, next, failureReason, publicToken string, _ bool) error {
+func (f *fakeDeliverer) SendDunningWarning(_ context.Context, tenantID, to string, cc []string, name, inv string, n, max int, next, failureReason, publicToken string, _ domain.DeclineAsk) error {
 	f.calls++
 	f.lastCc = cc
 	f.lastType, f.lastTenant, f.lastTo, f.lastName, f.lastInvoice = email.TypeDunningWarning, tenantID, to, name, inv
@@ -453,7 +454,7 @@ func (f *fakeDeliverer) SendDunningEscalation(_ context.Context, tenantID, to st
 	f.lastPublicToken = publicToken
 	return nil
 }
-func (f *fakeDeliverer) SendPaymentFailed(_ context.Context, tenantID, to string, cc []string, name, inv, reason, publicToken string) error {
+func (f *fakeDeliverer) SendPaymentFailed(_ context.Context, tenantID, to string, cc []string, name, inv, reason, publicToken string, _ domain.DeclineAsk) error {
 	f.calls++
 	f.lastCc = cc
 	f.lastType, f.lastTenant, f.lastTo, f.lastName, f.lastInvoice = email.TypePaymentFailed, tenantID, to, name, inv
@@ -522,6 +523,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 		EscalationOutcome  domain.DunningEscalationOutcome `json:"escalation_outcome"`
 		FailureReason      string                          `json:"failure_reason"`
 		CardNeedsReplacing bool                            `json:"card_needs_replacing"`
+		DeclineAsk         domain.DeclineAsk               `json:"decline_ask"`
 		UpdateURL          string                          `json:"update_url"`
 		InvoiceWrittenOff  bool                            `json:"invoice_written_off"`
 		PublicToken        string                          `json:"public_token"`
@@ -536,11 +538,11 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 	case email.TypePaymentReceipt:
 		return d.SendPaymentReceipt(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PublicToken)
 	case email.TypeDunningWarning:
-		return d.SendDunningWarning(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AttemptNumber, m.MaxAttempts, m.NextRetryDate, m.FailureReason, m.PublicToken, m.CardNeedsReplacing)
+		return d.SendDunningWarning(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AttemptNumber, m.MaxAttempts, m.NextRetryDate, m.FailureReason, m.PublicToken, m.DeclineAsk)
 	case email.TypeDunningEscalation:
 		return d.SendDunningEscalation(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.EscalationOutcome, m.PublicToken)
 	case email.TypePaymentFailed:
-		return d.SendPaymentFailed(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.Reason, m.PublicToken)
+		return d.SendPaymentFailed(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, cmp.Or(m.FailureReason, m.Reason), m.PublicToken, m.DeclineAsk)
 	case email.TypePaymentSetupRequest:
 		return d.SendPaymentSetupRequest(ctx, row.TenantID, m.To, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.UpdateURL, m.InvoiceWrittenOff, m.Trigger)
 	case email.TypeCreditNote:

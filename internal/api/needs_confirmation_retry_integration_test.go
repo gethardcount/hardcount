@@ -53,9 +53,8 @@ func TestNeedsConfirmation_WebhookReportStopsTheRetry_RealStore(t *testing.T) {
 			// Twice in a row: the first skip must release the charge lease, or
 			// the second comes back as an uncounted transient skip instead.
 			for i := 1; i <= 2; i++ {
-				err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID)
-				if err == nil || errors.Is(err, dunning.ErrTransientSkip) {
-					t.Fatalf("retry %d: %v, want a counted retry that charges nothing", i, err)
+				if err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID); !errors.Is(err, domain.ErrCardNeedsConfirmation) {
+					t.Fatalf("retry %d: %v, want ErrCardNeedsConfirmation: a counted retry that charges nothing", i, err)
 				}
 			}
 			if len(r.charges.charged) != 0 {

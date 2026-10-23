@@ -84,10 +84,16 @@ type outboxMessage struct {
 	// the customer can act (insufficient_funds → top up; lost_card →
 	// swap card).
 	FailureReason string `json:"failure_reason,omitempty"`
-	// CardNeedsReplacing selects the dunning warning's "use a different card"
-	// copy: the bank refused the card for good, so no retry is promised
-	// (#966). Rows enqueued by an older binary decode to false, the ordinary
-	// warning they were written for.
+	// DeclineAsk selects the copy of a dunning warning or payment-failed
+	// email: "new_card" for a card the bank refused for good (#966),
+	// "confirm" for a payment the bank wants the customer to confirm
+	// (authentication_required). Empty is the ordinary copy.
+	DeclineAsk domain.DeclineAsk `json:"decline_ask,omitempty"`
+	// CardNeedsReplacing is the older binary's flag for the dunning
+	// warning's "use a different card" copy. It is still written beside
+	// DeclineAsk "new_card", so an older replica sending the row picks the
+	// same copy, and read when DeclineAsk is empty, for rows the older
+	// binary queued.
 	CardNeedsReplacing bool `json:"card_needs_replacing,omitempty"`
 	// EscalationOutcome is what dunning's exhaustion actually did to this
 	// invoice (ADR-112) — it replaced the single `action` verb, which could
@@ -117,6 +123,15 @@ type outboxMessage struct {
 	InvoiceWrittenOff bool   `json:"invoice_written_off,omitempty"`
 	PublicToken       string `json:"public_token,omitempty"`
 	PDF               []byte `json:"pdf,omitempty"`
+}
+
+// declineAsk is the copy the row asks for: DeclineAsk, or for a row an older
+// binary queued, "new_card" when it set CardNeedsReplacing.
+func (m outboxMessage) declineAsk() domain.DeclineAsk {
+	if m.DeclineAsk == domain.DeclineAskNone && m.CardNeedsReplacing {
+		return domain.DeclineAskNewCard
+	}
+	return m.DeclineAsk
 }
 
 // scrubbedPayloadKeys are the outboxMessage keys removed from a row's
@@ -272,7 +287,7 @@ func (s *OutboxSender) SendPaymentReceipt(ctx context.Context, tenantID, to stri
 }
 
 // SendDunningWarning enqueues a dunning-warning email. Satisfies dunning.EmailNotifier.
-func (s *OutboxSender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
+func (s *OutboxSender) SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error {
 	return s.enqueue(ctx, tenantID, TypeDunningWarning, outboxMessage{
 		To:                 to,
 		Cc:                 cc,
@@ -283,13 +298,14 @@ func (s *OutboxSender) SendDunningWarning(ctx context.Context, tenantID, to stri
 		NextRetryDate:      nextRetryDate,
 		FailureReason:      failureReason,
 		PublicToken:        publicToken,
-		CardNeedsReplacing: cardNeedsReplacing,
+		DeclineAsk:         ask,
+		CardNeedsReplacing: ask == domain.DeclineAskNewCard,
 	})
 }
 
 // SendDunningWarningTx is SendDunningWarning on the caller's transaction —
 // the dunning reschedule and its warning email commit together (ADR-040).
-func (s *OutboxSender) SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
+func (s *OutboxSender) SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error {
 	return s.enqueueTx(ctx, tx, tenantID, TypeDunningWarning, outboxMessage{
 		To:                 to,
 		Cc:                 cc,
@@ -300,7 +316,8 @@ func (s *OutboxSender) SendDunningWarningTx(ctx context.Context, tx *sql.Tx, ten
 		NextRetryDate:      nextRetryDate,
 		FailureReason:      failureReason,
 		PublicToken:        publicToken,
-		CardNeedsReplacing: cardNeedsReplacing,
+		DeclineAsk:         ask,
+		CardNeedsReplacing: ask == domain.DeclineAskNewCard,
 	})
 }
 
@@ -345,7 +362,7 @@ func (s *OutboxSender) SendPaymentReceiptTx(ctx context.Context, tx *sql.Tx, ten
 
 // SendPaymentFailedTx is SendPaymentFailed on the caller's transaction — the
 // failed-stamp and its notice commit together (ADR-040 amendment).
-func (s *OutboxSender) SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error {
+func (s *OutboxSender) SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error {
 	return s.enqueueTx(ctx, tx, tenantID, TypePaymentFailed, outboxMessage{
 		To:            to,
 		Cc:            cc,
@@ -353,11 +370,12 @@ func (s *OutboxSender) SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tena
 		InvoiceNumber: invoiceNumber,
 		FailureReason: reason,
 		PublicToken:   publicToken,
+		DeclineAsk:    ask,
 	})
 }
 
 // SendPaymentFailed enqueues a payment-failed email. Satisfies dunning.EmailNotifier.
-func (s *OutboxSender) SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error {
+func (s *OutboxSender) SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error {
 	return s.enqueue(ctx, tenantID, TypePaymentFailed, outboxMessage{
 		To:            to,
 		Cc:            cc,
@@ -365,6 +383,7 @@ func (s *OutboxSender) SendPaymentFailed(ctx context.Context, tenantID, to strin
 		InvoiceNumber: invoiceNumber,
 		Reason:        reason,
 		PublicToken:   publicToken,
+		DeclineAsk:    ask,
 	})
 }
 

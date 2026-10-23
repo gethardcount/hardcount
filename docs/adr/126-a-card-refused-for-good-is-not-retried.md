@@ -1,7 +1,7 @@
 # ADR-126: A card the bank refused for good is not retried until another card is the default
 
 **Date:** 2026-10-18
-**Status:** Accepted (amended 2026-10-22)
+**Status:** Accepted (amended 2026-10-22, 2026-10-23)
 
 ## Summary
 
@@ -194,6 +194,7 @@ customer as a plain decline, never with the reason
   it once, the bank refuses it again, and retries skip it from then on.
 - **`authentication_required` keeps the normal schedule.** It needs the
   customer to confirm the payment, not a new card. It needs its own copy.
+  (Amended 2026-10-23: no longer so; see below.)
 - **Codes outside Stripe's list keep the normal schedule**, among them
   `stop_payment_order` and `invalid_account`, which Visa's list may cover (R0,
   46), and `restricted_card` and `fraudulent`. Stripe's decline-code page
@@ -207,6 +208,46 @@ customer as a plain decline, never with the reason
   while the notice shows is a dashboard change for a later PR.
 - **The migration adds two columns** with a constant default: instant, and
   older copies ignore them.
+
+## Amendment 2026-10-23: a payment the bank wants the customer to confirm
+
+The Stripe card-flow review of 2026-10-22 (P4) charged a 3-D Secure card
+off-session. Stripe answered `authentication_required`; Velox showed "The
+customer's card was declined" with **Retry payment**, put Stripe's developer
+text in the activity, emailed the generic decline, and every dunning retry
+charged the card off-session again. The customer could pay on the hosted
+invoice page, which runs 3-D Secure.
+
+What Stripe Billing does (read 2026-10-23):
+[Automate payment retries](https://docs.stripe.com/billing/revenue-recovery/smart-retries#non-retryable-decline-codes)
+lists `authentication_required` among the hard decline codes: "the scheduled
+retries continue but the payment only executes if you obtain a new payment
+method". [Customer emails](https://docs.stripe.com/billing/revenue-recovery/customer-emails#payment-confirmation-notifications)
+sends "a Stripe-hosted link for customers to confirm their payments" and,
+optionally, reminders until they do. Stripe also sends the code as an error
+code ([error codes](https://docs.stripe.com/error-codes)).
+
+Decision:
+
+1. **Retries.** `authentication_required` stops a retry from charging the
+   card, the way a hard decline does, with its own error
+   (`domain.ErrCardNeedsConfirmation`). The attempt counts and the schedule
+   carries on. Unlike a hard decline it is not final: it applies while it is
+   the newest decline code recorded for that card on the invoice. A later
+   ordinary decline (an operator's **Collect payment**) ends it. A hard
+   decline on the card still decides over it.
+2. **The customer.** The payment-failed email and each dunning reminder say
+   "Your bank asked you to confirm the payment" with the hosted invoice
+   link, and nothing about a decline or a retry date.
+3. **The operator.** The notice has code `payment.authentication_required`,
+   reason `payment_failed`, severity warning, and the one action **Email
+   payment link**. The activity reads "The bank asked the customer to
+   confirm this payment"; a skipped retry reads "not attempted". **Collect
+   payment** answers in the same words.
+4. **Not changed.** The default-card rule of decision 6 still lists only
+   the hard declines: a card the customer pays with on the hosted page is
+   added beside the default that needed confirmation. A card saved through
+   a setup or update link becomes the default, as for every customer.
 
 ## References
 

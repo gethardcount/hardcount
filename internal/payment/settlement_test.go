@@ -110,11 +110,13 @@ func (r *recordingReceiptEmail) SendPaymentReceipt(_ context.Context, _, _ strin
 type recordingFailedEmail struct {
 	sends   int
 	reasons []string
+	asks    []domain.DeclineAsk
 }
 
-func (r *recordingFailedEmail) SendPaymentFailed(_ context.Context, _, _ string, _ []string, _, _, reason, _ string) error {
+func (r *recordingFailedEmail) SendPaymentFailed(_ context.Context, _, _ string, _ []string, _, _, reason, _ string, ask domain.DeclineAsk) error {
 	r.sends++
 	r.reasons = append(r.reasons, reason)
+	r.asks = append(r.asks, ask)
 	return nil
 }
 
@@ -523,7 +525,7 @@ func TestSettleFailed_NoticeRidesFailStampTx_BeforeDunningStart(t *testing.T) {
 
 type sequencedFailedEmail struct{ seq *callSequencer }
 
-func (r sequencedFailedEmail) SendPaymentFailed(ctx context.Context, _, _ string, _ []string, _, _, _, _ string) error {
+func (r sequencedFailedEmail) SendPaymentFailed(ctx context.Context, _, _ string, _ []string, _, _, _, _ string, _ domain.DeclineAsk) error {
 	r.seq.record("failed_email_enqueue", ctx)
 	return nil
 }
@@ -566,14 +568,14 @@ func (r *recordingReceiptEmail) SendPaymentReceiptTx(ctx context.Context, _ *sql
 	return r.SendPaymentReceipt(ctx, tenantID, to, cc, name, num, amt, cur, tok)
 }
 
-func (r *recordingFailedEmail) SendPaymentFailedTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num, reason, tok string) error {
-	return r.SendPaymentFailed(ctx, tenantID, to, cc, name, num, reason, tok)
+func (r *recordingFailedEmail) SendPaymentFailedTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num, reason, tok string, ask domain.DeclineAsk) error {
+	return r.SendPaymentFailed(ctx, tenantID, to, cc, name, num, reason, tok, ask)
 }
 
 func (r sequencedReceiptEmail) SendPaymentReceiptTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num string, amt int64, cur, tok string) error {
 	return r.SendPaymentReceipt(ctx, tenantID, to, cc, name, num, amt, cur, tok)
 }
 
-func (r sequencedFailedEmail) SendPaymentFailedTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num, reason, tok string) error {
-	return r.SendPaymentFailed(ctx, tenantID, to, cc, name, num, reason, tok)
+func (r sequencedFailedEmail) SendPaymentFailedTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, name, num, reason, tok string, ask domain.DeclineAsk) error {
+	return r.SendPaymentFailed(ctx, tenantID, to, cc, name, num, reason, tok, ask)
 }

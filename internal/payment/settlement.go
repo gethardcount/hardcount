@@ -306,10 +306,16 @@ const refusedCardCustomerMessage = "Your bank declined this card, and we won't t
 
 // customerFailureReason is the reason the payment-failed email shows the
 // customer: Stripe's own message, except for a card the bank refused for
-// good, where "try again later" would be the wrong advice.
+// good, where "try again later" would be the wrong advice, and for a payment
+// the bank wants the customer to confirm, whose email has its own copy and
+// no reason line: Stripe's message for it is written for the developer ("If
+// the customer is off session, ask them to return to your application").
 func customerFailureReason(f PaymentFailure) string {
-	if domain.IsHardDecline(f.DeclineCode) {
+	switch domain.DeclineAskOf(f.DeclineCode) {
+	case domain.DeclineAskNewCard:
 		return refusedCardCustomerMessage
+	case domain.DeclineAskConfirm:
+		return ""
 	}
 	return f.Message
 }
@@ -393,7 +399,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// on the first notice by the store — the same shape as the paid twin.
 	var failedTx func(tx *sql.Tx, fresh domain.Invoice) error
 	if !report.External && !failureEmailSuppressed(f.Purpose) {
-		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f))
+		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f), domain.DeclineAskOf(f.DeclineCode))
 	}
 	fresh, res, err := s.invoices.MarkPaymentFailedReportingTransition(ctx, tenantID, inv.ID, report, failedTx)
 	if err != nil {
@@ -674,8 +680,8 @@ func (s *Stripe) buildReceiptHook(ctx context.Context, tenantID string, inv doma
 // buildPaymentFailedHook is the decline-notice counterpart of
 // buildReceiptHook. SettleFailed skips it for a dunning retry
 // (failureEmailSuppressed) and for a hosted attempt — dunning still runs;
-// only this email is skipped.
-func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, inv domain.Invoice, failureMsg string) func(tx *sql.Tx, fresh domain.Invoice) error {
+// only this email is skipped. ask selects the email's copy.
+func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, inv domain.Invoice, failureMsg string, ask domain.DeclineAsk) func(tx *sql.Tx, fresh domain.Invoice) error {
 	if s.emailPaymentFailed == nil {
 		return nil
 	}
@@ -696,6 +702,6 @@ func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, in
 			return nil
 		}
 		return s.emailPaymentFailed.SendPaymentFailedTx(ctx, tx, tenantID, email, cc, name,
-			inv.InvoiceNumber, failureMsg, inv.PublicToken)
+			inv.InvoiceNumber, failureMsg, inv.PublicToken, ask)
 	}
 }

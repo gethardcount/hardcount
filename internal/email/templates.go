@@ -232,6 +232,42 @@ func cardRefusedSentence(invoiceNumber string) string {
 
 const cardRefusedAsk = "Please pay the invoice with a different card."
 
+// renderConfirmPaymentHTML is the email for a payment the customer's bank
+// wants them to confirm (domain.DeclineAskConfirm: Stripe's
+// authentication_required, usually 3-D Secure). It is both the first notice
+// and each dunning reminder, as Stripe Billing sends a confirmation link and
+// reminders until the customer confirms
+// (https://docs.stripe.com/billing/revenue-recovery/customer-emails#payment-confirmation-notifications).
+// Nothing was declined, so it says nothing about a decline, and no retry
+// date: a charge made without the customer cannot pass the bank's check.
+// The hosted invoice page runs the confirmation when the customer pays.
+func renderConfirmPaymentHTML(customerName, invoiceNumber, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+	subject = "Action required — confirm your payment for invoice " + invoiceNumber
+	var b strings.Builder
+	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Please confirm your payment</h1>`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
+	b.WriteString(`<p style="margin:0 0 12px;color:#4b5563;">` + escape(confirmPaymentSentence(invoiceNumber)) + `</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(confirmPaymentAsk(hostedURL != "")) + `</p>`)
+	if hostedURL != "" {
+		ctaURL = hostedURL
+		ctaLabel = "Pay invoice"
+	}
+	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// confirmPaymentSentence and confirmPaymentAsk are the confirm email's copy,
+// shared by its HTML and plain-text parts so the two cannot drift.
+func confirmPaymentSentence(invoiceNumber string) string {
+	return "Your bank asked you to confirm the payment for invoice " + invoiceNumber + " before it can go through."
+}
+
+func confirmPaymentAsk(hasLink bool) string {
+	if hasLink {
+		return "Please pay the invoice using the link below. Your bank will ask you to confirm the payment."
+	}
+	return "Please contact us to pay the invoice. Your bank will ask you to confirm the payment."
+}
+
 func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Action required for invoice " + invoiceNumber
 	var b strings.Builder

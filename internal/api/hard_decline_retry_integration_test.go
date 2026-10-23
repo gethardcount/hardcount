@@ -301,8 +301,8 @@ func TestHardDecline_RetrySkipsTheRefusedCardUntilANewCardArrives_RealStore(t *t
 	r.assertOnlyDefault(custID, "pm_new")
 	// The hard decline is recorded on the old card only: it does not block
 	// the new one.
-	if code, err := r.invoices.HardDeclineOnCard(r.ctx, r.tenantID, inv.ID, "pm_new"); err != nil || code != "" {
-		t.Fatalf("HardDeclineOnCard(pm_new) = %q, %v; want none — the refusal was on pm_lost", code, err)
+	if code, err := r.invoices.RetryBlockingDecline(r.ctx, r.tenantID, inv.ID, "pm_new"); err != nil || code != "" {
+		t.Fatalf("RetryBlockingDecline(pm_new) = %q, %v; want none — the refusal was on pm_lost", code, err)
 	}
 	if code := r.attentionCode(inv.ID); code != "payment.declined" {
 		t.Errorf("attention after the card was replaced: %q, want payment.declined", code)
@@ -347,7 +347,7 @@ func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.
 
 	err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID)
 	var re *dunning.RetryError
-	if !errors.As(err, &re) || re.PaymentIntentID != "pi_nsf_2" || re.CardNeedsReplacing {
+	if !errors.As(err, &re) || re.PaymentIntentID != "pi_nsf_2" || re.Ask != domain.DeclineAskNone {
 		t.Fatalf("retry: %#v, want a counted decline on pi_nsf_2 that does not ask for a new card", err)
 	}
 	if len(r.charges.charged) != 2 || r.charges.charged[1] != "pm_nsf" {
@@ -426,8 +426,8 @@ func TestHardDecline_WebhookReportStopsTheRetry_RealStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
-	if code, err := r.invoices.HardDeclineOnCard(r.ctx, r.tenantID, inv.ID, "pm_stolen"); err != nil || code != "stolen_card" {
-		t.Fatalf("HardDeclineOnCard = %q, %v, want stolen_card", code, err)
+	if code, err := r.invoices.RetryBlockingDecline(r.ctx, r.tenantID, inv.ID, "pm_stolen"); err != nil || code != "stolen_card" {
+		t.Fatalf("RetryBlockingDecline = %q, %v, want stolen_card", code, err)
 	}
 	if err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID); !errors.Is(err, domain.ErrCardNeedsReplacing) {
 		t.Fatalf("retry: %v, want ErrCardNeedsReplacing", err)
@@ -445,8 +445,8 @@ func TestHardDecline_WebhookReportStopsTheRetry_RealStore(t *testing.T) {
 	r.charges.answers = []scriptedCharge{{err: stripeDeclined("pi_pickup_1", "pickup_card", "Your card was declined.")}}
 	err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID)
 	var re *dunning.RetryError
-	if !errors.As(err, &re) || re.PaymentIntentID != "pi_pickup_1" || !re.CardNeedsReplacing {
-		t.Fatalf("retry on the second card: %#v, want a counted pickup_card decline flagged CardNeedsReplacing", err)
+	if !errors.As(err, &re) || re.PaymentIntentID != "pi_pickup_1" || re.Ask != domain.DeclineAskNewCard {
+		t.Fatalf("retry on the second card: %#v, want a counted pickup_card decline asking for a new card", err)
 	}
 	if err := r.retrier.RetryPayment(r.ctx, r.tenantID, inv.ID, custID); !errors.Is(err, domain.ErrCardNeedsReplacing) {
 		t.Fatalf("next retry: %v, want ErrCardNeedsReplacing (the second card is refused too)", err)

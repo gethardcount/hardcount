@@ -104,6 +104,7 @@ func TestOutboxMessage_EveryPayloadKeyIsClassified(t *testing.T) {
 		"tenant_name": true, "invoice_written_off": true,
 		// A yes/no on which warning copy was sent (#966): no link, no token.
 		"card_needs_replacing": true,
+		"decline_ask":          true,
 	}
 	scrubbed := map[string]bool{}
 	for _, k := range scrubbedPayloadKeys {
