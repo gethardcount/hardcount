@@ -204,8 +204,9 @@ works](how-velox-works.md). Back to the [docs index](README.md).
 - **write-off**: Marking an invoice uncollectible. Velox stops collecting
   it, but keeps it in the records. Nothing charges it again, a Checkout
   page still open for it closes, and its tax is not reversed, but you can
-  still record a payment made outside Stripe. For its subscription it still
-  counts as unpaid. An operator, or dunning's final action, writes an
+  still record a payment made outside Stripe. If it billed its
+  subscription's current period, it still counts as unpaid when that
+  subscription changes. An operator, or dunning's final action, writes an
   invoice off.
   [More](adr/110-written-off-invoices-close-self-service-payment.md)
 

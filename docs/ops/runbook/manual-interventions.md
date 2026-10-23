@@ -51,16 +51,17 @@ invoice is still being confirmed with Stripe: see
 
 ## A subscription change is refused with `unpaid_invoice_blocks_change`
 
-An upgrade, added item or seat increase would charge more for a period
-whose invoice is unpaid. A written-off invoice counts as unpaid. Do one of:
+A plan change, added item or seat increase would charge for the rest of
+the current period, and the invoice that billed that period still has an
+amount due. A written-off invoice counts as unpaid. Do one of:
 
 - record the payment, if the customer paid outside Stripe (above);
 - void the invoice, if it should not be owed. A void hands back the credits
   applied to it and reverses its tax.
 
 Then make the change again. A cancel, downgrade or removed item is never
-refused for this: it lowers what the unpaid or written-off invoice asks
-for by the unused time.
+refused for this: it lowers what that invoice asks for by the unused time
+(a cancel on the period's first day voids it).
 
 ## A customer has no usable payment method on file
 

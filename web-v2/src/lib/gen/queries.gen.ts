@@ -9800,11 +9800,17 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  *
  * Closes any Stripe Checkout page still open for the invoice.
  *
- * A written-off invoice still counts as unpaid for its subscription.
- * A change that would charge more for the current period is refused
- * with `unpaid_invoice_blocks_change` until the invoice is paid or
- * voided. A cancel, downgrade, removed item or plan swap lowers what
- * it asks for by the unused time.
+ * If the invoice billed its subscription's current period in advance,
+ * it still counts as unpaid for that subscription. While it has an
+ * amount due, a plan change, added item or seat increase that would
+ * charge for the rest of the period is refused with
+ * `unpaid_invoice_blocks_change`, unless a charge on the invoice is
+ * still being confirmed with Stripe. A cancel, downgrade, removed item
+ * or plan swap lowers what it asks for by the unused time; a cancel or
+ * a change of billing interval on the period's first day voids it
+ * instead, when it bills nothing else. A written-off invoice from an earlier period, or one not
+ * tied to a subscription's period, does not affect subscription
+ * changes.
  * @summary Write off an invoice as uncollectible
  */
 export const markInvoiceUncollectible = async (id: string, options?: RequestInit): Promise<Invoice> => {

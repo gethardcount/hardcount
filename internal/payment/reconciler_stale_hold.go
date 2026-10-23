@@ -491,8 +491,11 @@ func (r *Reconciler) clearStaleHold(ctx context.Context, h domain.StaleChargeHol
 // succeed later keeps the hold and rotates the row. One that will not
 // (Stripe disconnected, the key rejected, the customer gone from the
 // account) keeps the hold on an open invoice, parked or not — charges stay
-// blocked and write-off is the exit — and clears it on a settled, voided or
-// written-off invoice, which nothing can charge.
+// blocked and write-off is the exit — and on a written-off park: the hold is
+// what brings this sweep back to end the park once Stripe answers, and a
+// relief credit note held on the invoice waits for that (ADR-050 amendment
+// 2026-10-23). It clears the hold on any other settled, voided or written-off
+// invoice, which nothing can charge.
 func (r *Reconciler) staleHoldReadFailed(ctx context.Context, h domain.StaleChargeHold, err error) (string, error) {
 	inv := h.Invoice
 	if !refusedForGood(err) {
@@ -505,6 +508,13 @@ func (r *Reconciler) staleHoldReadFailed(ctx context.Context, h domain.StaleChar
 		r.markChecked(ctx, inv)
 		slog.ErrorContext(ctx, "stale charge check: can't confirm an earlier charge with Stripe; write the invoice off or fix the Stripe connection. Charges on this invoice stay blocked until then",
 			"invoice_id", inv.ID, "tenant_id", inv.TenantID, "invoice_number", inv.InvoiceNumber,
+			"stripe_customer_id", h.StripeCustomerID, "error", err)
+		return staleHoldCannotAsk, nil
+	}
+	if inv.Parked() {
+		r.markChecked(ctx, inv)
+		slog.ErrorContext(ctx, "stale charge check: can't confirm an earlier charge with Stripe on a written-off invoice; fix the Stripe connection. Until Stripe can be asked, the invoice stays waiting on that charge, and so does any credit note held on it",
+			"invoice_id", inv.ID, "tenant_id", inv.TenantID, "invoice_number", inv.InvoiceNumber, "status", inv.Status,
 			"stripe_customer_id", h.StripeCustomerID, "error", err)
 		return staleHoldCannotAsk, nil
 	}

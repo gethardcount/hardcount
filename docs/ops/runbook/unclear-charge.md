@@ -116,8 +116,8 @@ A park with no hold is always counted.
    one too.
 2. If nothing was charged and the park does not end, or the customer paid
    another way, mark the invoice uncollectible. It is the one action the
-   invoice page allows on a parked invoice. It also releases the invoice's
-   deferred clawback draft and closes its dunning run.
+   invoice page allows on a parked invoice. It closes its dunning run. A
+   credit note draft held on the invoice still waits until the park ends.
 3. A write-off closes the invoice's dunning run without the policy's final
    action (cancel or pause the subscription). Check whether that action was
    due:
@@ -197,7 +197,9 @@ look for a payment whose metadata `velox_invoice_id` is the invoice's id.
    1. **Mark uncollectible** (write-off). It moves no money and is allowed
       while the check waits.
    2. Wait for the next check. It clears the claim on the written-off
-      invoice, with one more ERROR.
+      invoice, with one more ERROR. A parked invoice keeps its claim, with
+      an ERROR every check, until Stripe can be asked: see
+      [Parked](#parked-no-paymentintent).
    3. If Stripe shows a payment for this invoice, record it with **Record
       payment**. That moves the invoice from uncollectible to paid.
 

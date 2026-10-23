@@ -212,20 +212,34 @@ open-invoice part as `adjusted_cents`, and the timeline shows both parts.
 
 A written-off (`uncollectible`) invoice is billed but unpaid. A write-off
 ends collection, not the sale (ADR-111), and it can still be paid later
-(ADR-113). So this policy treats it exactly as it treats an unpaid
-invoice. There is no third behaviour.
+(ADR-113). So this policy treats it as it treats an unpaid invoice: the
+same refusals and the same money. The one difference is its status: an
+unpaid invoice relieved to nothing due is settled as paid, and a
+written-off one stays written off (below).
+
+Scope: the lookups below find the invoices that billed the subscription's
+current period in advance (the base invoice, and for credits also that
+period's proration invoices). A written-off invoice from an earlier period,
+or a one-off invoice, plays no part in a subscription change, written off
+or not.
 
 - **Net charge.** `FindBaseInvoiceForPeriod` now returns a written-off base,
   so an upgrade, added item or seat increase over it is refused with
   `unpaid_invoice_blocks_change`, the same 409 as over an unpaid one: record
   the payment or void the invoice first. Before, the lookup skipped it, the
   change took the "no base invoice yet" branch, and nothing was charged for
-  the rest of the period.
+  the rest of the period. As for an unpaid base, a charge still being
+  confirmed with Stripe (in flight, a park included) does not block. A base
+  with nothing left to pay (no amount due, tax done) does not block either:
+  an unpaid one is settled as paid at that point, and a written-off one is
+  owed nothing (review round 1: it used to be refused with "0.00
+  outstanding").
 - **Net credit.** `FindFundingInvoicesForPeriod` now returns written-off
   invoices. A cancel, swap, downgrade, removed item or seat decrease credits
   one as it credits an unpaid one. It writes an adjustment credit note that
   lowers what the invoice asks for, capped at amount due plus credits
-  applied, or voids the invoice when none of its period was used. A customer who pays the written-off
+  applied. A cancel or a change of billing interval on the period's first
+  day voids the invoice instead, when it bills nothing else. A customer who pays the written-off
   invoice later pays only for the time used, the same money as paying the
   unpaid invoice after the same change. Before, the lookup skipped it and no
   relief was written, so a later payment paid for the unused time too.
@@ -250,10 +264,17 @@ What it took beyond the two lookups (one predicate, `baseFundsPeriod`,
 - The reconciler scan for held relief drafts (`ListPendingClawbackDrafts`)
   releases only a voided source. A draft on a written-off invoice whose
   charge is in flight (a park, ADR-107) waits until the stale-hold sweep
-  answers it (ADR-127), then issues on the branch the payment status picks.
+  ends the park (ADR-127), then issues on the branch the payment status
+  picks. So that the sweep can end it, a written-off park keeps its charge
+  hold when Stripe refuses the check for good (not connected, key rejected,
+  customer missing); the sweep used to clear it, and then nothing looked at
+  the invoice again (ADR-127 amendment 2026-10-23). While Stripe cannot be
+  asked, the draft waits, with an ERROR each check.
 
 Tests: `TestE2E_WrittenOffBase_UpgradeIsRefusedAsUnpaid`,
 `TestE2E_WrittenOffBase_CancelThenLatePayment`,
 `TestE2E_WrittenOffBase_RemovedItemLowersWhatIsDue` (each with the unpaid and
-paid controls), `TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues`,
+paid controls), `TestE2E_WrittenOffBase_NothingDue_UpgradeGoesAhead` (with the
+unpaid control), `TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues`,
+`TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers`,
 `TestIssue_WrittenOffWhileWaitingForItsRow_StillRelieves`.
