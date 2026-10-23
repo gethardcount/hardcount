@@ -45,8 +45,8 @@ func newPauseRig(t *testing.T, name string, invoiceAction domain.DunningInvoiceA
 	r.invs = invoice.NewPostgresStore(r.db)
 	r.runs = dunning.NewPostgresStore(r.db)
 	pol, err := r.srv.DunningSvc.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
-		Name: "pause on exhaustion", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 1,
-		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: invoiceAction, GracePeriodDays: 3,
+		Name: "pause on exhaustion", Enabled: true, RetryDays: []int{3},
+		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: invoiceAction,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -91,14 +91,14 @@ func (r *pauseRig) armRun(invoiceID, customerID string, next time.Time) string {
 	r.t.Helper()
 	if run, err := r.runs.GetActiveRunByInvoice(r.ctx, r.tenantID, invoiceID); err == nil {
 		if _, err := r.admin.Exec(`UPDATE invoice_dunning_runs SET policy_id = $1, attempt_count = $2, next_action_at = $3
-			WHERE id = $4`, r.pol.ID, r.pol.MaxRetryAttempts, next, run.ID); err != nil {
+			WHERE id = $4`, r.pol.ID, r.pol.Retries(), next, run.ID); err != nil {
 			r.t.Fatalf("arm run: %v", err)
 		}
 		return run.ID
 	}
 	run, err := r.runs.CreateRun(r.ctx, r.tenantID, domain.InvoiceDunningRun{
 		InvoiceID: invoiceID, CustomerID: customerID, PolicyID: r.pol.ID,
-		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: r.pol.MaxRetryAttempts, NextActionAt: &next,
+		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: r.pol.Retries(), NextActionAt: &next,
 	})
 	if err != nil {
 		r.t.Fatalf("create run: %v", err)

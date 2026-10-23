@@ -4361,14 +4361,14 @@ type DunningPolicy struct {
 	Enabled                 bool                                 `json:"enabled"`
 	FinalInvoiceAction      DunningPolicyFinalInvoiceAction      `json:"final_invoice_action"`
 	FinalSubscriptionAction DunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	GracePeriodDays         int                                  `json:"grace_period_days"`
 	Id                      string                               `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault        bool     `json:"is_default"`
-	MaxRetryAttempts int      `json:"max_retry_attempts"`
-	Name             string   `json:"name"`
-	RetrySchedule    []string `json:"retry_schedule"`
+	IsDefault bool   `json:"is_default"`
+	Name      string `json:"name"`
+
+	// RetryDays Days to wait before each retry; the number of retries is its length.
+	RetryDays []int `json:"retry_days"`
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
@@ -4395,18 +4395,15 @@ type DunningPolicyInput struct {
 
 	// FinalSubscriptionAction What happens to the subscription when retries run out.
 	FinalSubscriptionAction DunningPolicyInputFinalSubscriptionAction `json:"final_subscription_action,omitempty"`
+	Name                    string                                    `json:"name,omitempty"`
 
-	// GracePeriodDays Days before the first retry. 0 or less means the default, 3.
-	GracePeriodDays int `json:"grace_period_days,omitempty"`
-
-	// MaxRetryAttempts 0 or less means the default, 3.
-	MaxRetryAttempts int    `json:"max_retry_attempts,omitempty"`
-	Name             string `json:"name,omitempty"`
-
-	// RetrySchedule Waits before retries 2 to N, as Go durations (h, m, s units; no
-	// days, so 3 days is "72h"). Needs at least
-	// `max_retry_attempts - 1` entries, each above zero.
-	RetrySchedule []string `json:"retry_schedule,omitempty"`
+	// RetryDays Days to wait before each retry. The first counts from the failed
+	// payment, or, with no card on file, from the collection that found
+	// none. Each later one counts from the retry before it: `[3, 4, 7]`
+	// retries on day 3, 7 and 14. The number of retries is the length
+	// of the list. A day is 24 hours. `retry_schedule`,
+	// `max_retry_attempts` and `grace_period_days` are refused.
+	RetryDays []int `json:"retry_days"`
 }
 
 // DunningPolicyInputFinalInvoiceAction What happens to the invoice when retries run out.
@@ -4423,14 +4420,14 @@ type DunningPolicyListItem struct {
 	Enabled                 bool                                         `json:"enabled"`
 	FinalInvoiceAction      DunningPolicyListItemFinalInvoiceAction      `json:"final_invoice_action"`
 	FinalSubscriptionAction DunningPolicyListItemFinalSubscriptionAction `json:"final_subscription_action"`
-	GracePeriodDays         int                                          `json:"grace_period_days"`
 	Id                      string                                       `json:"id"`
 
 	// IsDefault Customers without an assigned policy use the default.
-	IsDefault        bool     `json:"is_default"`
-	MaxRetryAttempts int      `json:"max_retry_attempts"`
-	Name             string   `json:"name"`
-	RetrySchedule    []string `json:"retry_schedule"`
+	IsDefault bool   `json:"is_default"`
+	Name      string `json:"name"`
+
+	// RetryDays Days to wait before each retry; the number of retries is its length.
+	RetryDays []int `json:"retry_days"`
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
@@ -4468,7 +4465,8 @@ type DunningRun struct {
 	InvoiceNumber string    `json:"invoice_number,omitempty"`
 	LastAttemptAt time.Time `json:"last_attempt_at,omitempty"`
 
-	// MaxRetryAttempts The run's policy's retry limit. Filled in on list responses.
+	// MaxRetryAttempts How many retries the run's policy makes: the length of its
+	// `retry_days`. Filled in on list responses.
 	// When `attempt_count` has reached it, no charge is retried:
 	// `next_action_at` is when the final action (pause, cancel or
 	// mark uncollectible) runs.
@@ -5774,9 +5772,10 @@ type RecipeDunningPolicy struct {
 
 	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
 	FinalSubscriptionAction RecipeDunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	IntervalsHours          []int                                      `json:"intervals_hours"`
-	MaxRetries              int                                        `json:"max_retries"`
 	Name                    string                                     `json:"name"`
+
+	// RetryDays The policy's schedule, as `retry_days` on a dunning policy.
+	RetryDays []int `json:"retry_days"`
 }
 
 // RecipeDunningPolicyFinalInvoiceAction What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.

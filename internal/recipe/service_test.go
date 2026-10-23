@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -302,14 +303,14 @@ func TestRatingRuleFromRecipe(t *testing.T) {
 
 func TestDunningFromRecipe(t *testing.T) {
 	got := dunningFromRecipe(domain.RecipeDunningPolicy{
-		Name: "Test", MaxRetries: 4, IntervalsHours: []int{24, 72},
+		Name: "Test", RetryDays: []int{3, 1, 3, 7},
 		FinalSubscriptionAction: "cancel", FinalInvoiceAction: "mark_uncollectible",
 	})
 	if !got.Enabled {
 		t.Error("Enabled should be true")
 	}
-	if got.MaxRetryAttempts != 4 {
-		t.Errorf("MaxRetryAttempts: got %d, want 4", got.MaxRetryAttempts)
+	if fmt.Sprint(got.RetryDays) != "[3 1 3 7]" {
+		t.Errorf("RetryDays: got %v, want [3 1 3 7]", got.RetryDays)
 	}
 	// Discriminating fixture: cancel+write-off is the combination the old
 	// single enum could NOT express (ADR-112), so a translation that dropped
@@ -319,12 +320,6 @@ func TestDunningFromRecipe(t *testing.T) {
 	}
 	if got.FinalInvoiceAction != domain.InvActionMarkUncollectible {
 		t.Errorf("FinalInvoiceAction: got %q, want mark_uncollectible", got.FinalInvoiceAction)
-	}
-	if len(got.RetrySchedule) != 2 || got.RetrySchedule[0] != "24h" || got.RetrySchedule[1] != "72h" {
-		t.Errorf("RetrySchedule: got %v, want [24h 72h]", got.RetrySchedule)
-	}
-	if got.GracePeriodDays != 3 {
-		t.Errorf("GracePeriodDays default: got %d, want 3", got.GracePeriodDays)
 	}
 }
 
@@ -337,7 +332,7 @@ func TestDunningFromRecipe(t *testing.T) {
 // to prevent: a recipe author who omits the key gets an error naming both
 // fields, not a terminal action nobody chose.
 func TestDunningFromRecipe_NoSilentDefault(t *testing.T) {
-	got := dunningFromRecipe(domain.RecipeDunningPolicy{Name: "T", MaxRetries: 1})
+	got := dunningFromRecipe(domain.RecipeDunningPolicy{Name: "T", RetryDays: []int{1}})
 	if got.FinalSubscriptionAction != "" || got.FinalInvoiceAction != "" {
 		t.Errorf("got (%q, %q) — dunningFromRecipe must not invent a terminal action; parse rejects the recipe instead",
 			got.FinalSubscriptionAction, got.FinalInvoiceAction)

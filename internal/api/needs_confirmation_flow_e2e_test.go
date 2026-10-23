@@ -149,8 +149,7 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 		return flowDo(t, ts, method, path, req)
 	}
 	call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-		"name": "Confirm policy", "enabled": true, "max_retry_attempts": 3, "retry_schedule": []string{"72h", "72h"},
-		"grace_period_days": 1,
+		"name": "Confirm policy", "enabled": true, "retry_days": []int{1, 3, 3},
 	}}).want(t, 201, "create dunning policy")
 	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
 		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_needs_confirm", PublishableKey: "pk_test_needs_confirm",

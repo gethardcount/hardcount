@@ -6377,8 +6377,8 @@ export interface paths {
          * Replace dunning policy settings
          * @description Replaces every setting of the policy with the body. This is not a
          *     partial update: an omitted field takes its default (`enabled`
-         *     false, `name` empty, 3 attempts, 3 grace days, pause the
-         *     subscription, leave the invoice open). Send the full policy.
+         *     false, `name` empty, pause the subscription, leave the invoice
+         *     open), and `retry_days` is required. Send the full policy.
          *     `is_default` cannot be changed here; use set-default.
          */
         patch: operations["updateDunningPolicy"];
@@ -8018,8 +8018,8 @@ export interface components {
         };
         RecipeDunningPolicy: {
             name: string;
-            max_retries: number;
-            intervals_hours: number[];
+            /** @description The policy's schedule, as `retry_days` on a dunning policy. */
+            retry_days: number[];
             /**
              * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
              * @enum {string}
@@ -9124,7 +9124,8 @@ export interface components {
             /** @description Filled in on list responses. */
             test_clock_id?: string;
             /**
-             * @description The run's policy's retry limit. Filled in on list responses.
+             * @description How many retries the run's policy makes: the length of its
+             *     `retry_days`. Filled in on list responses.
              *     When `attempt_count` has reached it, no charge is retried:
              *     `next_action_at` is when the final action (pause, cancel or
              *     mark uncollectible) runs.
@@ -9257,25 +9258,19 @@ export interface components {
              */
             enabled: boolean;
             /**
-             * @description 0 or less means the default, 3.
-             * @default 3
-             */
-            max_retry_attempts: number;
-            /**
-             * @description Days before the first retry. 0 or less means the default, 3.
-             * @default 3
-             */
-            grace_period_days: number;
-            /**
-             * @description Waits before retries 2 to N, as Go durations (h, m, s units; no
-             *     days, so 3 days is "72h"). Needs at least
-             *     `max_retry_attempts - 1` entries, each above zero.
+             * @description Days to wait before each retry. The first counts from the failed
+             *     payment, or, with no card on file, from the collection that found
+             *     none. Each later one counts from the retry before it: `[3, 4, 7]`
+             *     retries on day 3, 7 and 14. The number of retries is the length
+             *     of the list. A day is 24 hours. `retry_schedule`,
+             *     `max_retry_attempts` and `grace_period_days` are refused.
              * @example [
-             *       "72h",
-             *       "120h"
+             *       3,
+             *       4,
+             *       7
              *     ]
              */
-            retry_schedule?: string[];
+            retry_days: number[];
             /**
              * @description What happens to the subscription when retries run out.
              * @default pause
@@ -9304,13 +9299,19 @@ export interface components {
              *     recipe) becomes the default instead. Ignored in request bodies.
              */
             seeded: boolean;
-            retry_schedule: string[] | null;
-            max_retry_attempts: number;
+            /**
+             * @description Days to wait before each retry; the number of retries is its length.
+             * @example [
+             *       3,
+             *       4,
+             *       7
+             *     ]
+             */
+            retry_days: number[];
             /** @enum {string} */
             final_subscription_action: "none" | "pause" | "cancel";
             /** @enum {string} */
             final_invoice_action: "none" | "mark_uncollectible";
-            grace_period_days: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -15432,10 +15433,10 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: body is not valid JSON, the old
-             *     `final_action` field was sent, a limit was exceeded, an unknown
-             *     final action, or a `retry_schedule` entry that is too short or
-             *     not a valid duration.
+             * @description `validation_error`: body is not valid JSON, a replaced field was
+             *     sent (`final_action`, `retry_schedule`, `max_retry_attempts`,
+             *     `grace_period_days`), `retry_days` is missing or out of bounds,
+             *     or an unknown final action.
              */
             422: {
                 headers: {

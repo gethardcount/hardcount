@@ -218,8 +218,8 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	r.dsvc.SetEmailNotifier(email.NewOutboxSender(email.NewOutboxStore(db)))
 	r.dsvc.SetCustomerEmailFetcher(customerEmails{customers})
 	r.policy, err = r.dsvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-		Name: "cancel at the end", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 1,
-		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

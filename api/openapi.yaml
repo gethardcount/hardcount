@@ -1687,16 +1687,15 @@ components:
 
     RecipeDunningPolicy:
       type: object
-      required: [name, max_retries, intervals_hours, final_subscription_action, final_invoice_action]
+      required: [name, retry_days, final_subscription_action, final_invoice_action]
       properties:
         name:
           type: string
-        max_retries:
-          type: integer
-        intervals_hours:
+        retry_days:
           type: array
           items:
             type: integer
+          description: The policy's schedule, as `retry_days` on a dunning policy.
         final_subscription_action:
           type: string
           enum: [none, pause, cancel]
@@ -3405,7 +3404,8 @@ components:
         max_retry_attempts:
           type: integer
           description: |
-            The run's policy's retry limit. Filled in on list responses.
+            How many retries the run's policy makes: the length of its
+            `retry_days`. Filled in on list responses.
             When `attempt_count` has reached it, no charge is retried:
             `next_action_at` is when the final action (pause, cancel or
             mark uncollectible) runs.
@@ -3601,6 +3601,7 @@ components:
 
     DunningPolicyInput:
       type: object
+      required: [retry_days]
       properties:
         name:
           type: string
@@ -3609,27 +3610,22 @@ components:
           type: boolean
           default: false
           description: A disabled policy starts no dunning.
-        max_retry_attempts:
-          type: integer
-          minimum: 1
-          maximum: 15
-          default: 3
-          description: 0 or less means the default, 3.
-        grace_period_days:
-          type: integer
-          minimum: 1
-          maximum: 30
-          default: 3
-          description: Days before the first retry. 0 or less means the default, 3.
-        retry_schedule:
+        retry_days:
           type: array
+          minItems: 1
+          maxItems: 15
           items:
-            type: string
-          example: ["72h", "120h"]
+            type: integer
+            minimum: 1
+            maximum: 30
+          example: [3, 4, 7]
           description: |
-            Waits before retries 2 to N, as Go durations (h, m, s units; no
-            days, so 3 days is "72h"). Needs at least
-            `max_retry_attempts - 1` entries, each above zero.
+            Days to wait before each retry. The first counts from the failed
+            payment, or, with no card on file, from the collection that found
+            none. Each later one counts from the retry before it: `[3, 4, 7]`
+            retries on day 3, 7 and 14. The number of retries is the length
+            of the list. A day is 24 hours. `retry_schedule`,
+            `max_retry_attempts` and `grace_period_days` are refused.
         final_subscription_action:
           type: string
           enum: [none, pause, cancel]
@@ -3643,7 +3639,7 @@ components:
 
     DunningPolicy:
       type: object
-      required: [id, name, enabled, is_default, seeded, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, created_at, updated_at]
+      required: [id, name, enabled, is_default, seeded, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3664,21 +3660,18 @@ components:
             with, until you edit it or make it the default. While it is
             true, the next enabled policy you create (by hand or from a
             recipe) becomes the default instead. Ignored in request bodies.
-        retry_schedule:
+        retry_days:
           type: array
-          nullable: true
           items:
-            type: string
-        max_retry_attempts:
-          type: integer
+            type: integer
+          example: [3, 4, 7]
+          description: Days to wait before each retry; the number of retries is its length.
         final_subscription_action:
           type: string
           enum: [none, pause, cancel]
         final_invoice_action:
           type: string
           enum: [none, mark_uncollectible]
-        grace_period_days:
-          type: integer
         created_at:
           type: string
           format: date-time
@@ -12808,10 +12801,10 @@ paths:
                 $ref: "#/components/schemas/DunningPolicy"
         "422":
           description: |
-            `validation_error`: body is not valid JSON, the old
-            `final_action` field was sent, a limit was exceeded, an unknown
-            final action, or a `retry_schedule` entry that is too short or
-            not a valid duration.
+            `validation_error`: body is not valid JSON, a replaced field was
+            sent (`final_action`, `retry_schedule`, `max_retry_attempts`,
+            `grace_period_days`), `retry_days` is missing or out of bounds,
+            or an unknown final action.
           content:
             application/json:
               schema:
@@ -12847,8 +12840,8 @@ paths:
       description: |
         Replaces every setting of the policy with the body. This is not a
         partial update: an omitted field takes its default (`enabled`
-        false, `name` empty, 3 attempts, 3 grace days, pause the
-        subscription, leave the invoice open). Send the full policy.
+        false, `name` empty, pause the subscription, leave the invoice
+        open), and `retry_days` is required. Send the full policy.
         `is_default` cannot be changed here; use set-default.
       operationId: updateDunningPolicy
       parameters:

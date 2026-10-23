@@ -26,8 +26,7 @@ plans:
 dunning:
   policy:
     name: Retry
-    max_retries: 1
-    intervals_hours: [24]
+    retry_days: [1]
     final_subscription_action: pause
     final_invoice_action: none
 `
@@ -45,7 +44,12 @@ func TestParseRecipe_RejectsUnknownKey(t *testing.T) {
 	}{
 		{"top level", "name: Strict check", "nmae: Strict check"},
 		{"plan", "base_bill_timing: in_advance", "base_bill_timming: in_advance"},
-		{"dunning policy", "max_retries: 1", "max_retry: 1"},
+		{"dunning policy", "retry_days: [1]", "retry_day: [1]"},
+		// The schedule fields retry_days replaced are refused too, as
+		// unknown keys, so a recipe cannot carry a count or hours that
+		// would be dropped.
+		{"old retry count", "retry_days: [1]", "max_retries: 1"},
+		{"old hour waits", "retry_days: [1]", "intervals_hours: [24]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

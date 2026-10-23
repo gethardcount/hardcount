@@ -46,7 +46,7 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 	// With a dunning policy, finalizing an invoice that has no card on file
 	// starts payment recovery. The first policy becomes the default.
 	call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-		"name": "Activity lines policy", "enabled": true, "max_retry_attempts": 2, "retry_schedule": []string{"72h", "120h"},
+		"name": "Activity lines policy", "enabled": true, "retry_days": []int{3, 3},
 	}}).want(t, 201, "create dunning policy")
 
 	const frozen = "2027-02-01T04:30:00Z"

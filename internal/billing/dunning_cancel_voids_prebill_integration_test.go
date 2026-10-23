@@ -182,7 +182,7 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	r.insertRun(saved.ID, policy.MaxRetryAttempts)
+	r.insertRun(saved.ID, policy.Retries())
 	return r
 }
 
@@ -268,8 +268,8 @@ func (r *prebillVoidRig) requireVoidedAndRunClosed() {
 // attempt is not due for days.
 func waitingPolicy() domain.DunningPolicy {
 	return domain.DunningPolicy{
-		Name: "three retries", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "three retries", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	}
 }
 
@@ -338,8 +338,8 @@ func TestDunningFinalCancel_VoidsTheUnusedPrebillUnderItsOwnHold(t *testing.T) {
 	for _, action := range []domain.DunningInvoiceAction{domain.InvActionMarkUncollectible, domain.InvActionNone} {
 		t.Run(string(action), func(t *testing.T) {
 			r := newPrebillVoidRig(t, "Dunning Cancel Voids Prebill "+string(action), domain.DunningPolicy{
-				Name: "cancel at the end", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 1,
-				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: action, GracePeriodDays: 3,
+				Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: action,
 			})
 			if _, errs := r.dsvc.ProcessDueRuns(r.ctx, r.tenantID, 50); len(errs) != 0 {
 				t.Fatalf("dunning tick: %v", errs)

@@ -40,29 +40,27 @@ func NewPostgresStore(db *postgres.DB) *PostgresStore {
 
 // scanPolicy is the shared row decoder for the policy SELECTs below.
 // Returned columns are fixed: id, tenant_id, name, enabled, is_default,
-// retry_schedule (jsonb), max_retry_attempts, final_subscription_action,
-// final_invoice_action, grace_period_days, created_at, updated_at — in
-// that order.
+// seeded, retry_days (jsonb), final_subscription_action,
+// final_invoice_action, created_at, updated_at — in that order.
 func scanPolicy(row interface {
 	Scan(dest ...any) error
 }) (domain.DunningPolicy, error) {
 	var p domain.DunningPolicy
-	var scheduleJSON []byte
-	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Enabled, &p.IsDefault, &p.Seeded, &scheduleJSON,
-		&p.MaxRetryAttempts, &p.FinalSubscriptionAction, &p.FinalInvoiceAction,
-		&p.GracePeriodDays, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	var daysJSON []byte
+	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Enabled, &p.IsDefault, &p.Seeded, &daysJSON,
+		&p.FinalSubscriptionAction, &p.FinalInvoiceAction,
+		&p.CreatedAt, &p.UpdatedAt); err != nil {
 		return domain.DunningPolicy{}, err
 	}
-	// A retry_schedule that does not decode is a broken row, not "no
-	// retries": read as empty, a run charges and then fails its bounds check
-	// without advancing, so it charges again every tick.
-	if err := json.Unmarshal(scheduleJSON, &p.RetrySchedule); err != nil {
-		return domain.DunningPolicy{}, fmt.Errorf("decode retry_schedule for dunning policy %s: %w", p.ID, err)
+	// The column's CHECK keeps retry_days a list of 1 to 15 whole days, so
+	// a decode error here is a broken database, not "no retries": fail.
+	if err := json.Unmarshal(daysJSON, &p.RetryDays); err != nil {
+		return domain.DunningPolicy{}, fmt.Errorf("decode retry_days for dunning policy %s: %w", p.ID, err)
 	}
 	return p, nil
 }
 
-const policyColumns = `id, tenant_id, name, enabled, is_default, seeded, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, created_at, updated_at`
+const policyColumns = `id, tenant_id, name, enabled, is_default, seeded, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at`
 
 // GetPolicyByID looks up a single policy by its id within the tenant.
 func (s *PostgresStore) GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error) {
@@ -246,7 +244,10 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 	// timestamps elsewhere DO use clock.Now(ctx) — those live on the customer's
 	// simulated timeline; policy config writes escape the simulation boundary.)
 	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
-	scheduleJSON, _ := json.Marshal(p.RetrySchedule)
+	daysJSON, err := json.Marshal(p.RetryDays)
+	if err != nil {
+		return domain.DunningPolicy{}, fmt.Errorf("encode retry_days: %w", err)
+	}
 	if p.ID == "" {
 		// INSERT new policy. The FIRST policy in a (tenant, livemode) scope is
 		// born is_default=true (ADR-036 amendment): NOT EXISTS(... WHERE is_default)
@@ -290,12 +291,11 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		newID := postgres.NewID("vlx_dpol")
 		row := tx.QueryRowContext(ctx, `
 			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default,
-				retry_schedule, max_retry_attempts, final_subscription_action,
-				final_invoice_action, grace_period_days, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,NOT EXISTS(SELECT 1 FROM dunning_policies WHERE is_default),$5,$6,$7,$8,$9,$10,$10)
+				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,NOT EXISTS(SELECT 1 FROM dunning_policies WHERE is_default),$5,$6,$7,$8,$8)
 			RETURNING `+policyColumns,
-			newID, tenantID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
-			p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
+			newID, tenantID, p.Name, p.Enabled, daysJSON,
+			p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 		)
 		return scanPolicy(row)
 	}
@@ -304,14 +304,13 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 	// operator's own, and a later create must not take its default (ADR-123).
 	row := tx.QueryRowContext(ctx, `
 		UPDATE dunning_policies
-		SET name = $2, enabled = $3, retry_schedule = $4, seeded = false,
-			max_retry_attempts = $5, final_subscription_action = $6,
-			final_invoice_action = $7, grace_period_days = $8,
-			updated_at = $9
+		SET name = $2, enabled = $3, retry_days = $4, seeded = false,
+			final_subscription_action = $5, final_invoice_action = $6,
+			updated_at = $7
 		WHERE id = $1
 		RETURNING `+policyColumns,
-		p.ID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
-		p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
+		p.ID, p.Name, p.Enabled, daysJSON,
+		p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 	)
 	stored, err := scanPolicy(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -340,9 +339,9 @@ func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, t
 		return fmt.Errorf("read livemode: %w", err)
 	}
 	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
-	scheduleJSON, err := json.Marshal(p.RetrySchedule)
+	daysJSON, err := json.Marshal(p.RetryDays)
 	if err != nil {
-		return fmt.Errorf("encode retry_schedule: %w", err)
+		return fmt.Errorf("encode retry_days: %w", err)
 	}
 	for _, livemode := range []bool{false, true} {
 		mode := "off"
@@ -354,12 +353,11 @@ func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, t
 		}
 		stored, err := scanPolicy(tx.QueryRowContext(ctx, `
 			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, seeded,
-				retry_schedule, max_retry_attempts, final_subscription_action,
-				final_invoice_action, grace_period_days, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,true,true,$5,$6,$7,$8,$9,$10,$10)
+				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,true,true,$5,$6,$7,$8,$8)
 			RETURNING `+policyColumns,
-			postgres.NewID("vlx_dpol"), tenantID, p.Name, p.Enabled, scheduleJSON, p.MaxRetryAttempts,
-			p.FinalSubscriptionAction, p.FinalInvoiceAction, p.GracePeriodDays, now,
+			postgres.NewID("vlx_dpol"), tenantID, p.Name, p.Enabled, daysJSON,
+			p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 		))
 		if err != nil {
 			return fmt.Errorf("seed %s-mode dunning policy: %w", mode, err)
@@ -534,15 +532,15 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 	}
 	defer postgres.Rollback(tx)
 
-	// The bound policy's limit rides along (LEFT JOIN: a run is never
-	// dropped for its policy), so a reader can tell a run with a retry still
-	// to come from one whose next step is only its final action
-	// (InvoiceDunningRun.RetryScheduled).
+	// The bound policy's retry count (the length of its retry_days) rides
+	// along (LEFT JOIN: a run is never dropped for its policy), so a reader
+	// can tell a run with a retry still to come from one whose next step is
+	// only its final action (InvoiceDunningRun.RetryScheduled).
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
 			COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 			r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
-			COALESCE(p.max_retry_attempts, 0)
+			COALESCE(jsonb_array_length(p.retry_days), 0)
 		FROM invoice_dunning_runs r
 		LEFT JOIN dunning_policies p ON p.id = r.policy_id
 		WHERE r.invoice_id = ANY($1::text[])
@@ -643,14 +641,14 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 	// fetches + N clock fetches; now: 1 query). LEFT JOINs because
 	// invoice / sub / clock references can be NULL or unresolvable
 	// (RLS gap, deleted) without dropping the dunning row itself. The bound
-	// policy's max_retry_attempts rides along too, so the page can tell a
+	// policy's retry count rides along too, so the page can tell a
 	// run with a retry still to come from one whose next step is only its
 	// final action (InvoiceDunningRun.RetryScheduled).
 	query := `SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
 		COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 		r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
 		COALESCE(i.invoice_number, ''), COALESCE(i.amount_due_cents, 0), COALESCE(i.currency, ''),
-		tc.frozen_time, COALESCE(tc.id, ''), COALESCE(p.max_retry_attempts, 0)
+		tc.frozen_time, COALESCE(tc.id, ''), COALESCE(jsonb_array_length(p.retry_days), 0)
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id
 		LEFT JOIN customers cu ON cu.id = i.customer_id
@@ -742,7 +740,7 @@ func (s *PostgresStore) ResolveRun(ctx context.Context, tenantID string, run dom
 // ListDueRuns' claim tx is rolled back before processing, so rows are not
 // leased) — both read N, both wrote N+1, and the charge-lease loser's rewind
 // then clobbered the winner's recorded attempt back to N: one charge burned
-// zero budget, and a tenant's MaxRetryAttempts over-ran by one charge per
+// zero budget, and a tenant's retry count over-ran by one charge per
 // overlap. The money itself was never double-charged (ClaimChargeForDunningRetry
 // is the per-invoice charge lease); the CAS makes the BOOKKEEPING honest, and
 // email-money-in-tx builds on it.

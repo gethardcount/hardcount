@@ -32,8 +32,8 @@ func TestGetStats_AtRiskScopedToDefaultCurrency(t *testing.T) {
 	store := dunning.NewPostgresStore(db)
 	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
 		Name: "default", Enabled: true,
-		RetrySchedule: []string{"72h", "120h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		RetryDays:               []int{3, 3, 5},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -99,8 +99,8 @@ func TestGetStats_AtRiskByCurrency(t *testing.T) {
 	store := dunning.NewPostgresStore(db)
 	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
 		Name: "default", Enabled: true,
-		RetrySchedule: []string{"72h", "120h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		RetryDays:               []int{3, 3, 5},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

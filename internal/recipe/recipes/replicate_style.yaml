@@ -1,5 +1,5 @@
 key: replicate_style
-version: 3.0.0
+version: 4.0.0
 name: GPU compute pricing (per-second)
 summary: |
   Ready-made pricing for reselling GPU compute. Bills each customer per
@@ -112,8 +112,10 @@ plans:
 dunning:
   policy:
     name: GPU compute retry
-    max_retries: 4
-    intervals_hours: [24, 72, 168, 336]
+    # Retries on day 3, 4, 7 and 14 after the failed payment (or the
+    # collection that found no card): the first waits 3 days, each next
+    # one 1, 3 and 7 days after the one before.
+    retry_days: [3, 1, 3, 7]
     final_subscription_action: pause
     final_invoice_action: none
 

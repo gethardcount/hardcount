@@ -166,8 +166,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		return flowDo(t, ts, method, path, req)
 	}
 	call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-		"name": "Min charge policy", "enabled": true, "max_retry_attempts": 2, "retry_schedule": []string{"72h"},
-		"grace_period_days": 1,
+		"name": "Min charge policy", "enabled": true, "retry_days": []int{1, 3},
 	}}).want(t, 201, "create dunning policy")
 
 	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{

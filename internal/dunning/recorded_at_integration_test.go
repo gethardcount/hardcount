@@ -45,8 +45,8 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 	}
 
 	policy, err := dunStore.UpsertPolicy(base, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

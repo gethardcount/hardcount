@@ -37,7 +37,7 @@ func TestOfflinePayment_LeavesNoPaymentIntent_EveryReader(t *testing.T) {
 
 	// A dunning policy, so finalizing an invoice with no card opens a run.
 	call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-		"name": "Offline payment policy", "enabled": true, "max_retry_attempts": 2, "retry_schedule": []string{"72h", "120h"},
+		"name": "Offline payment policy", "enabled": true, "retry_days": []int{3, 3},
 	}}).want(t, 201, "create dunning policy")
 	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
 		"external_id": "offline-pay", "display_name": "Offline Payer", "email": "ap@offline-pay.test",

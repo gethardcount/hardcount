@@ -193,8 +193,8 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 			svc := dunning.NewService(runs, retrier, nil)
 			svc.SetResolver(resolver)
 			policy, err := svc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-				Name: "two retries", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 2,
-				FinalSubscriptionAction: tc.sub, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+				Name: "two retries", Enabled: true, RetryDays: []int{3, 3},
+				FinalSubscriptionAction: tc.sub, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 			})
 			if err != nil {
 				t.Fatalf("upsert policy: %v", err)
