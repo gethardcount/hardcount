@@ -355,14 +355,22 @@ type UpdateMeterInput struct {
 // rule was silently unbilled at cycle close with no operator remedy short
 // of recreating the meter. The default binding is the escape hatch: it
 // prices every event no dimension rule claims (Orb's required
-// default_unit_amount is the peer shape). Aggregation switches are
-// supported per FLOW B13 (re-bills next cycle; finalized invoices are
-// immutable).
+// default_unit_amount is the peer shape).
+//
+// The aggregation and the default binding price the open period at billing
+// time, so changing them is refused while subscriptions use the meter, except
+// a first default and a re-point to another version of the same price (D05,
+// meter_edit_guard.go). A rename or unit change is never refused for that.
+//
+// The UPDATE writes every column from the read below, so the write locks the
+// meter and refuses if another write changed it since that read; otherwise a
+// rename could put back an aggregation or default another PATCH just changed.
 func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input UpdateMeterInput) (domain.Meter, error) {
 	m, err := s.store.GetMeter(ctx, tenantID, id)
 	if err != nil {
 		return domain.Meter{}, err
 	}
+	before := m
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if name == "" {
@@ -402,23 +410,22 @@ func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input Up
 			if err := s.guardMeterBinding(ctx, tenantID, m.ID, rid); err != nil {
 				return domain.Meter{}, err
 			}
-		} else if m.RatingRuleVersionID != "" {
-			// Clearing the default: refused (409) when it is the meter's
-			// last price and a live subscription's plan wires the meter
-			// (#981; see guardMeterStaysPriced).
-			rules, err := s.store.ListMeterPricingRulesByMeter(ctx, tenantID, m.ID)
-			if err != nil {
-				return domain.Meter{}, fmt.Errorf("list pricing rules for meter %s: %w", m.ID, err)
-			}
-			if len(rules) == 0 {
-				if err := s.guardMeterStaysPriced(ctx, tenantID, m.ID, m.Key); err != nil {
-					return domain.Meter{}, err
-				}
-			}
 		}
 		m.RatingRuleVersionID = rid
 	}
-	return s.store.UpdateMeterAudited(ctx, tenantID, m, s.meterUpdateEmission(ctx, input))
+	want := m
+	guard := s.meterEditGuard(ctx, m.ID, func(_ *sql.Tx, locked domain.Meter) (repricing, error) {
+		if locked.Name != before.Name || locked.Unit != before.Unit ||
+			locked.Aggregation != before.Aggregation || locked.RatingRuleVersionID != before.RatingRuleVersionID {
+			return repricing{}, errs.InvalidState("This meter changed while the request was running. Refresh the page and try again.")
+		}
+		if want.Aggregation != locked.Aggregation {
+			return repricing{reprices: true}, nil
+		}
+		reprices, err := s.defaultChangeReprices(ctx, tenantID, locked, want.RatingRuleVersionID)
+		return repricing{reprices: reprices}, err
+	})
+	return s.store.UpdateMeterAudited(ctx, tenantID, m, guard, s.meterUpdateEmission(ctx, input))
 }
 
 // meterUpdateEmission builds the in-tx audit emission for a meter PATCH.
@@ -817,6 +824,10 @@ const maxDimensionKeys = 16
 //   - dimension_match values are scalars (string / number / bool); object
 //     and array values are rejected — Postgres `@>` would still match
 //     them but the semantics aren't well-defined for v1
+//
+// While subscriptions use the meter, an edit of an existing rule, or a new
+// rule that could take events a price bills now, is refused (D05,
+// meter_edit_guard.go). Posting a rule again unchanged passes.
 func (s *Service) UpsertMeterPricingRule(ctx context.Context, tenantID string, input UpsertMeterPricingRuleInput) (domain.MeterPricingRule, error) {
 	meterID := strings.TrimSpace(input.MeterID)
 	rrvID := strings.TrimSpace(input.RatingRuleVersionID)
@@ -864,12 +875,21 @@ func (s *Service) UpsertMeterPricingRule(ctx context.Context, tenantID string, i
 		}
 	}
 
-	return s.store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
+	rule := domain.MeterPricingRule{
 		MeterID:             meterID,
 		RatingRuleVersionID: rrvID,
 		DimensionMatch:      match,
 		AggregationMode:     mode,
 		Priority:            input.Priority,
+	}
+	return s.store.UpsertMeterPricingRule(ctx, tenantID, rule, s.ruleUpsertGuard(ctx, rule))
+}
+
+// ruleUpsertGuard is the D05 check for upserting rule, shared by the public
+// path and the recipe's Tx path.
+func (s *Service) ruleUpsertGuard(ctx context.Context, rule domain.MeterPricingRule) func(tx *sql.Tx) error {
+	return s.meterEditGuard(ctx, rule.MeterID, func(tx *sql.Tx, locked domain.Meter) (repricing, error) {
+		return s.ruleUpsertReprices(ctx, tx, locked, rule)
 	})
 }
 
@@ -896,9 +916,10 @@ func (s *Service) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, me
 // not retroactively re-scored; deletion only affects future billing
 // finalize cycles.
 //
-// Deleting the meter's last price is refused (409) while a plan wiring the
-// meter has a live subscription: see guardMeterStaysPriced (#981). The last
-// price means no other rule remains and the meter has no default binding.
+// Refused (409 meter_in_use) while subscriptions use the meter: the rule's
+// events would move to another price, or to no price, in the open period
+// (D05, meter_edit_guard.go). That also keeps a meter's last price from
+// being removed under a live subscription (#981).
 //
 // The audit row rides the DELETE's own tx (ADR-090). Before this, the route
 // was covered only by the HTTP catch-all, which recorded it as
@@ -908,33 +929,16 @@ func (s *Service) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, me
 // filter vocabulary already use it), so a rule's create/update and its
 // delete land on one resource timeline.
 func (s *Service) DeleteMeterPricingRule(ctx context.Context, tenantID, id string) error {
+	// A rule's meter_id never changes (the upsert conflict key holds it), so
+	// this read names the meter to lock.
 	rule, err := s.store.GetMeterPricingRule(ctx, tenantID, id)
 	if err != nil {
 		return err
 	}
-	meter, err := s.store.GetMeter(ctx, tenantID, rule.MeterID)
-	if err != nil {
-		return err
-	}
-	if meter.RatingRuleVersionID == "" {
-		rules, err := s.store.ListMeterPricingRulesByMeter(ctx, tenantID, meter.ID)
-		if err != nil {
-			return fmt.Errorf("list pricing rules for meter %s: %w", meter.ID, err)
-		}
-		othersRemain := false
-		for _, r := range rules {
-			if r.ID != id {
-				othersRemain = true
-				break
-			}
-		}
-		if !othersRemain {
-			if err := s.guardMeterStaysPriced(ctx, tenantID, meter.ID, meter.Key); err != nil {
-				return err
-			}
-		}
-	}
-	return s.store.DeleteMeterPricingRuleAudited(ctx, tenantID, id, s.pricingRuleDeleteEmission(ctx))
+	guard := s.meterEditGuard(ctx, rule.MeterID, func(*sql.Tx, domain.Meter) (repricing, error) {
+		return repricing{reprices: true}, nil
+	})
+	return s.store.DeleteMeterPricingRuleAudited(ctx, tenantID, id, guard, s.pricingRuleDeleteEmission(ctx))
 }
 
 // pricingRuleDeleteEmission builds the in-tx audit emission for a
@@ -1021,6 +1025,14 @@ func (s *Service) CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID string,
 // it would falsely refuse every fresh install. Recipe-level coherence is
 // enforced in recipe.Instantiate (single {{ .currency }} + adopted-meter
 // currency check); the guarded public path is UpsertMeterPricingRule.
+//
+// The meter-in-use guard (D05) does run here, on the recipe's tx: a recipe
+// that adopts a meter subscriptions use must not reprice their open period.
+// Its reads run on tx, so a meter the same apply created is seen, with no
+// subscription.
 func (s *Service) UpsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error) {
+	if err := s.ruleUpsertGuard(ctx, rule)(tx); err != nil {
+		return domain.MeterPricingRule{}, err
+	}
 	return s.store.UpsertMeterPricingRuleTx(ctx, tx, tenantID, rule)
 }

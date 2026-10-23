@@ -1,14 +1,14 @@
 # ADR-096: Unpriced meter on a plan — guard at authoring, loud at finalize
 
 Date: 2026-07-18
-Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage)). Current rule: an invoice is still built without usage that has no price. Removing a meter's last price is refused while a live subscription's plan uses the meter, and every invoice built without priceless usage logs it and counts its quantity.
+Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage); the last-price guard was replaced on 2026-10-23 by the wider meter-in-use guard of [ADR-070](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter)). Current rule: an invoice is still built without usage that has no price. Removing a meter's last price is refused while a live subscription's plan uses the meter, and every invoice built without priceless usage logs it and counts its quantity.
 
 Original status: Accepted. The **guard + loud-log** below is IMPLEMENTED in this PR. The fuller "durable marker + critical banner + metering-only flag" design (from the design panel) is **deferred** — see *Deferred* — because live-doc verification showed it has no industry precedent and the guard already fixes the real defect.
 Relates: ADR-070 (no-silent-fallbacks in billing — this extends its fail-LOUD mandate to the finalize path), ADR-044 (multi-dim `{model,token_type}` rating — the meters this most affects), ADR-034 (plan immutability — the guard runs after it).
 
 ## Summary
 
-A plan can attach a usage meter only if the meter has a price: a default rating rule or at least one meter pricing rule. Without this check, a meter that only looked priced billed its usage at $0 with no signal. Amended 2026-10-14: removing a meter's last price is refused with 409 `invalid_state` while a plan using the meter has a draft, trialing or active subscription. Usage that still matches no price is left off the invoice and never billed later; each invoice that leaves such usage out logs a WARN and adds the quantity to `velox_usage_unpriced_quantity_total`. Status: active, amended 2026-10-14.
+A plan can attach a usage meter only if the meter has a price: a default rating rule or at least one meter pricing rule. Without this check, a meter that only looked priced billed its usage at $0 with no signal. Amended 2026-10-14: removing a meter's last price was refused with 409 `invalid_state` while a plan using the meter had a draft, trialing or active subscription. Since 2026-10-23 the wider guard of the [ADR-070 amendment](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter) replaces it: while such a subscription uses the meter, a rule delete, a default price pointed at another price or removed, and any other edit that would reprice usage is refused with 409 `meter_in_use`. Usage that still matches no price is left off the invoice and never billed later; each invoice that leaves such usage out logs a WARN and adds the quantity to `velox_usage_unpriced_quantity_total`. Status: active, amended 2026-10-14 and 2026-10-23.
 
 ## Context
 
@@ -115,7 +115,11 @@ research file `wrong-invoice-holes-981-980-design-2026-10-14.json`):
 the unpriced usage, and Velox does not bill it again later (the shape of
 ADR-120). Close the two gaps:
 
-1. **Guard.** Two writes are refused: `DeleteMeterPricingRule`, and
+1. **Guard** (replaced 2026-10-23 by ADR-070's amendment). While a
+   subscription uses the meter, every pricing-rule delete and every change
+   or removal of the default price is now refused with 409 `meter_in_use`.
+   So the last price cannot be removed either. As first shipped, two writes
+   are refused: `DeleteMeterPricingRule`, and
    `UpdateMeter` clearing the default binding. They are refused when the
    meter would have no pricing rule and no default binding while a plan
    wiring it has a live subscription. The answer is 409 `invalid_state`,

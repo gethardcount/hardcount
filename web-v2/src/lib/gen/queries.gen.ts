@@ -3171,11 +3171,17 @@ export const getPatchV1MetersIdUrl = (id: string,) => {
  * the meter's DEFAULT rating rule — the rate applied to usage no
  * dimension pricing rule claims (the remedy for silently-unbilled
  * unmatched usage); pass an empty string to clear it. The rule must
- * exist on the tenant. Clearing it is refused with 409 when the meter
- * has no pricing rule either and a plan with a live (draft, trialing
- * or active) subscription uses the meter: that usage would be left off
- * every invoice. Add a pricing rule first, or move the subscriptions
- * to a plan without this meter.
+ * exist on the tenant.
+ *
+ * While a draft, trialing or active subscription uses the meter,
+ * changing `aggregation`, pointing the default at another rating
+ * rule, or clearing it is refused with 409 `meter_in_use`: the
+ * change would reprice the billing period already open. A first
+ * default, or another version of the same rating rule, is allowed. To
+ * change a rate, publish a new version of the rating rule; it applies
+ * from each subscription's next period (on a test clock, it can apply
+ * to the current simulated period). `name` and `unit` can always
+ * change.
  * @summary Update meter (incl. the default rating-rule binding)
  */
 export const patchV1MetersId = async (id: string,
@@ -3194,7 +3200,7 @@ export const patchV1MetersId = async (id: string,
 
 
 
-export const getPatchV1MetersIdMutationOptions = <TError = void,
+export const getPatchV1MetersIdMutationOptions = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1MetersId>>, TError,{id: string;data: PatchV1MetersIdBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof patchV1MetersId>>, TError,{id: string;data: PatchV1MetersIdBody}, TContext> => {
 
@@ -3223,12 +3229,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PatchV1MetersIdMutationResult = NonNullable<Awaited<ReturnType<typeof patchV1MetersId>>>
     export type PatchV1MetersIdMutationBody = PatchV1MetersIdBody
-    export type PatchV1MetersIdMutationError = void
+    export type PatchV1MetersIdMutationError = void | Error
 
     /**
  * @summary Update meter (incl. the default rating-rule binding)
  */
-export const usePatchV1MetersId = <TError = void,
+export const usePatchV1MetersId = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1MetersId>>, TError,{id: string;data: PatchV1MetersIdBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof patchV1MetersId>>,
@@ -3459,6 +3465,16 @@ export const getUpsertMeterPricingRuleUrl = (meterId: string,) => {
  * `dimension_match`, `aggregation_mode` and `priority` on the existing
  * rule and keeps its id. Both cases return 201. The meter id in the
  * path is used; a `meter_id` in the body is ignored.
+ *
+ * While a draft, trialing or active subscription uses the meter, the
+ * change must not reprice the billing period already open, or it is
+ * refused with 409 `meter_in_use`. Updating a rule is refused, unless
+ * nothing changes. A new rule is allowed only when the meter has no
+ * default rating rule and every rule that could match the same events
+ * has a higher priority: then it prices only usage no rule prices
+ * now. To change a rate, publish a new version of the rating rule; it
+ * applies from each subscription's next period (on a test clock, it
+ * can apply to the current simulated period).
  * @summary Create or update a meter pricing rule
  */
 export const upsertMeterPricingRule = async (meterId: string,
@@ -3645,9 +3661,9 @@ export const getDeleteMeterPricingRuleUrl = (meterId: string,
  * Removes the rule. Usage already invoiced is not changed; the next
  * invoices bill the meter's usage without this rule. The rule is
  * looked up by `id` alone; `meter_id` is not checked against it.
- * Deleting the meter's last price (no other rule and no default
- * rating rule on the meter) is refused while a plan with a draft,
- * trialing or active subscription uses the meter.
+ * Refused with 409 `meter_in_use` while a draft, trialing or active
+ * subscription uses the meter: the rule's usage would move to another
+ * price, or to none, in the billing period already open.
  * @summary Delete a meter pricing rule
  */
 export const deleteMeterPricingRule = async (meterId: string,

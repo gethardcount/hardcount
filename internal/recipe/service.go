@@ -411,11 +411,12 @@ func (s *Service) Instantiate(
 
 	// Meters — adopt an existing key only if its AGGREGATION matches (the sole
 	// billing-consulted field; sum vs max/count/last silently mis-rolls-up
-	// usage), else refuse LOUD. No live-sub clause: adoption only READS the
-	// meter to wire a fresh plan and append disjoint pricing bindings — it
-	// never mutates the meter — so aggregation-match is the complete safety
-	// condition, and it lets a second AI recipe adopt the shared ADR-044
-	// `tokens` meter after go-live (ADR-085).
+	// usage), else refuse LOUD. Adoption never mutates the meter row, but the
+	// pricing rules below are added to it: on a meter that subscriptions use,
+	// UpsertMeterPricingRuleTx refuses (meter_in_use, D05) a rule that would
+	// take events from a price that bills them now. Rules for models no price
+	// covers still go on, which lets a second AI recipe adopt the shared
+	// ADR-044 `tokens` meter after go-live (ADR-085, amended).
 	meterIDByKey := make(map[string]string, len(rendered.Meters))
 	for _, m := range rendered.Meters {
 		if existing, err := s.pricing.GetMeterByKey(ctx, tenantID, m.Key); err == nil {
@@ -468,6 +469,11 @@ func (s *Service) Instantiate(
 			Priority:            pr.Priority,
 		})
 		if err != nil {
+			// The meter-in-use refusal (D05) is the operator's answer as it
+			// stands; an index prefix would only bury it.
+			if errs.Code(err) == errs.CodeMeterInUse {
+				return domain.RecipeInstance{}, err
+			}
 			return domain.RecipeInstance{}, fmt.Errorf("pricing_rules[%d]: %w", i, err)
 		}
 		objs.PricingRuleIDs = append(objs.PricingRuleIDs, created.ID)

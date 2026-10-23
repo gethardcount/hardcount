@@ -175,6 +175,11 @@ func EmailNotConfigured() *DomainError {
 	return InvalidState("Email isn't set up on this server, so nothing was sent.").WithCode(CodeEmailNotConfigured)
 }
 
+// CodeMeterInUse is the 409 code for a meter pricing edit refused while
+// subscriptions use the meter (pricing.Service, D05): the edit would reprice
+// a billing period already open. A recipe apply returns it unwrapped too.
+const CodeMeterInUse = "meter_in_use"
+
 // Sentinel errors for store and service layers.
 var (
 	ErrNotFound           = errors.New("not found")

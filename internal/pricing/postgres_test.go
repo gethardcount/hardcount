@@ -218,7 +218,7 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 	defRule, err := store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
 		MeterID: meter.ID, RatingRuleVersionID: rrv1.ID,
 		DimensionMatch: map[string]any{}, AggregationMode: domain.AggSum, Priority: 0,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("upsert default: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 		MeterID: meter.ID, RatingRuleVersionID: rrv2.ID,
 		DimensionMatch:  map[string]any{"model": "gpt-4", "cached": true},
 		AggregationMode: domain.AggSum, Priority: 100,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("upsert specific: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 		MeterID: meter.ID, RatingRuleVersionID: rrv2.ID,
 		DimensionMatch:  map[string]any{"model": "gpt-4-turbo"},
 		AggregationMode: domain.AggMax, Priority: 200,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("upsert update: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestPostgresStore_MeterPricingRules_RLS(t *testing.T) {
 	ruleA, err := store.UpsertMeterPricingRule(ctx, tenantA, domain.MeterPricingRule{
 		MeterID: meterA.ID, RatingRuleVersionID: rrvA.ID,
 		DimensionMatch: map[string]any{}, AggregationMode: domain.AggSum,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("seed tenant A rule: %v", err)
 	}
