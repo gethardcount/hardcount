@@ -178,8 +178,7 @@ func readWriterTokens(t *testing.T) writerTokens {
 	// A resolved run holds the resolution its resolver passed. Every
 	// resolution named anywhere in the code is a candidate, except the two
 	// the exhaust path stores on runs that are NOT resolved (escalated, or
-	// still active with a failed final action). manually_resolved has no
-	// writer since 0170 but its rows remain (legacy).
+	// still active with a failed final action).
 	resConsts := constsOfType(t, domainDir, "DunningResolution")
 	for _, name := range grepSource(t, filepath.Join(root, "internal"), regexp.MustCompile(`domain\.(Resolution\w+)`)) {
 		v, ok := resConsts[name]
@@ -599,9 +598,6 @@ func TestActivityLines_NoFallback(t *testing.T) {
 		if _, _, ok := recoveryOutcome(domain.DunningResolution(res)); !ok {
 			t.Errorf("a resolved run can hold %q, which has no outcome words", res)
 		}
-	}
-	if o, _, _ := recoveryOutcome(domain.ResolutionManuallyResolved); o != "Closed unpaid" {
-		t.Errorf("legacy manually_resolved reads %q, want Closed unpaid (B16)", o)
 	}
 	for _, et := range w.emailTypes {
 		if _, ok := activity.EmailName(et); !ok {

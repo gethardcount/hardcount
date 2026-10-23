@@ -13,12 +13,7 @@ export type DunningRunEventEventType = typeof DunningRunEventEventType[keyof typ
 
 export const DunningRunEventEventType = {
   dunning_started: 'dunning_started',
-  retry_scheduled: 'retry_scheduled',
   retry_attempted: 'retry_attempted',
-  retry_succeeded: 'retry_succeeded',
-  retry_failed: 'retry_failed',
-  paused: 'paused',
-  resumed: 'resumed',
   escalated: 'escalated',
   resolved: 'resolved',
 } as const;

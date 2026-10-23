@@ -200,7 +200,7 @@ func (m *memStore) CancelAtomic(ctx context.Context, tenantID, id string) (domai
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot cancel %s subscription (already terminated)", s.Status))
 	}
 	now := clock.Now(ctx)
@@ -253,7 +253,7 @@ func (m *memStore) ScheduleCancellation(ctx context.Context, tenantID, id string
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, fmt.Errorf("A %s subscription can't be scheduled to cancel.", s.Status)
 	}
 	// Mirror the store's ADR-069 status CAS.
@@ -333,7 +333,7 @@ func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, 
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, fmt.Errorf("Collection can't be paused on a %s subscription.", s.Status)
 	}
 	pcCopy := pc
@@ -356,7 +356,7 @@ func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ strin
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, 0, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, 0, errs.InvalidState("terminal")
 	}
 	if s.PauseCollection.InForceAt(clock.Now(ctx)) {
@@ -790,7 +790,7 @@ func (m *memStore) SetBillingThresholds(ctx context.Context, tenantID, id string
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	if s.Status == domain.SubscriptionCanceled || s.Status == domain.SubscriptionArchived {
+	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, errs.InvalidState("cannot configure billing thresholds on terminated subscription")
 	}
 	bt := t

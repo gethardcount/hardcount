@@ -7522,25 +7522,6 @@
     ]
   },
   {
-    "case": "dunning/type/paused",
-    "line": {
-      "id": "dunning/type/paused",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
     "case": "dunning/type/resolved",
     "line": {
       "id": "dunning/type/resolved",
@@ -7555,25 +7536,6 @@
     },
     "text": [
       "Payment recovery ended",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "dunning/type/resumed",
-    "line": {
-      "id": "dunning/type/resumed",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
       "meta: Automatic",
       "tone: neutral"
     ]
@@ -7595,63 +7557,6 @@
       "Payment retry 1 failed",
       "meta: Automatic",
       "tone: failure"
-    ]
-  },
-  {
-    "case": "dunning/type/retry_failed",
-    "line": {
-      "id": "dunning/type/retry_failed",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "dunning/type/retry_scheduled",
-    "line": {
-      "id": "dunning/type/retry_scheduled",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "dunning/type/retry_succeeded",
-    "line": {
-      "id": "dunning/type/retry_succeeded",
-      "kind": "payment_recovery.updated",
-      "title": "Payment recovery updated",
-      "detail": [],
-      "actor": {
-        "kind": "automatic"
-      },
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery updated",
-      "meta: Automatic",
-      "tone: neutral"
     ]
   },
   {
@@ -8473,28 +8378,6 @@
     "text": [
       "Payment recovery ended",
       "meta: Invoice voided · Automatic",
-      "tone: neutral"
-    ]
-  },
-  {
-    "case": "dunning/resolved/manually_resolved",
-    "line": {
-      "id": "dunning/resolved/manually_resolved",
-      "kind": "payment_recovery.ended",
-      "title": "Payment recovery ended",
-      "detail": [
-        [
-          {
-            "text": "Closed unpaid"
-          }
-        ]
-      ],
-      "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z"
-    },
-    "text": [
-      "Payment recovery ended",
-      "meta: Closed unpaid",
       "tone: neutral"
     ]
   },

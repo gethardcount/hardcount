@@ -188,18 +188,17 @@ const (
 // InvoiceTaxStatus tracks whether tax has been successfully calculated for
 // an invoice. The happy path is ok: calculation succeeded (including
 // zero-tax outcomes from none/manual/exempt/reverse-charge). Pending means
-// calculation failed transiently and a retry worker will try again.
-// Failed means retries have been exhausted — operators resolve manually.
+// calculation failed and the invoice waits; tax_error_code says whether the
+// retry worker tries again or the operator must act.
 //
-// Invoices in pending or failed are blocked from finalize: sending a wrong
-// tax amount creates audit/compliance exposure, so we defer rather than
-// silently fall back to an incorrect rate.
+// A pending invoice is blocked from finalize: sending a wrong tax amount
+// creates audit/compliance exposure, so we defer rather than silently fall
+// back to an incorrect rate.
 type InvoiceTaxStatus string
 
 const (
 	InvoiceTaxOK      InvoiceTaxStatus = "ok"
 	InvoiceTaxPending InvoiceTaxStatus = "pending"
-	InvoiceTaxFailed  InvoiceTaxStatus = "failed"
 )
 
 // InvoiceFinalizationStatus returns the invoice Status that must be
@@ -426,16 +425,6 @@ type Invoice struct {
 	// scan re-tick is idempotent under retry.
 	BillingReason InvoiceBillingReason `json:"billing_reason,omitempty"`
 
-	// StripeInvoiceID is the source Stripe invoice id (in_xxx) for an invoice
-	// imported from a Stripe account. Empty for Velox-native invoices. The
-	// column and its partial unique index (idx_invoices_stripe_invoice_id;
-	// migration 0063) remain from the Stripe importer that was deliberately
-	// removed in the 2026-04-29 lean-cut — nothing currently writes this
-	// field. The importer is deferred until a design partner announces a
-	// cutover; the index already enforces dedup so a rebuilt importer is
-	// idempotent on rerun without ever overwriting an existing row.
-	StripeInvoiceID string `json:"stripe_invoice_id,omitempty"`
-
 	// IsSimulated records, at write time, whether this invoice's domain
 	// timestamps (created/issued/due/paid) were stamped on a test clock's
 	// simulated time rather than wall-clock. Set true when the creating
@@ -479,12 +468,12 @@ const (
 )
 
 // InvoiceTaxRetryUpdate is the snapshot UpdateTaxAtomic writes to a
-// pending or failed invoice when an operator (or the retry worker)
+// pending invoice when an operator (or the retry worker)
 // triggers a tax recompute. Carries the new tax decision plus the
 // resulting headline totals; per-line tax stamps travel via the
 // lineItems argument.
 //
-// Empty TaxCalculationID + TaxStatus=pending|failed signals the
+// Empty TaxCalculationID + TaxStatus=pending signals the
 // retry itself failed — the row stays blocked from finalize and the
 // dashboard banner picks up the new error code.
 type InvoiceTaxRetryUpdate struct {
@@ -502,7 +491,7 @@ type InvoiceTaxRetryUpdate struct {
 	// means "ready now"; a future timestamp gates the row out of
 	// the worker's scan until the backoff window expires. Set
 	// per the exponential schedule in internal/billing/tax_retry.go
-	// when Status remains pending/failed; cleared (nil) when
+	// when Status remains pending; cleared (nil) when
 	// status flips to ok/exempt. Auto-finalize on a clean tax
 	// outcome happens at the service layer (so it shares the same
 	// public-token + tax-commit side-effects as manual Finalize),

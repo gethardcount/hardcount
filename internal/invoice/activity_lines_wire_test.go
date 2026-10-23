@@ -299,18 +299,6 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 		}
 	})
 
-	// B16: a run closed with the legacy manually_resolved read "Invoice
-	// voided"; the one kind of row that still holds it is a run whose invoice
-	// never changed state.
-	t.Run("B16 a run closed with the legacy value reads Closed unpaid", func(t *testing.T) {
-		events := fetchWire(t, wireCase{
-			inv:    finalized,
-			runs:   []domain.InvoiceDunningRun{{ID: "run_1", State: domain.DunningResolved, Resolution: domain.ResolutionManuallyResolved}},
-			events: []domain.InvoiceDunningEvent{{ID: "e9", EventType: domain.DunningEventResolved, CreatedAt: at, Reason: "manually_resolved"}},
-		})
-		wantRow(t, oneRow(t, events, "resolved"), "Payment recovery ended", "neutral", "", "Closed unpaid")
-	})
-
 	// B8: the timeline showed raw reason codes; the credit note total is the
 	// one amount, and the parts say where it went.
 	t.Run("B8 one credit-note title, its reason in plain words, its parts", func(t *testing.T) {

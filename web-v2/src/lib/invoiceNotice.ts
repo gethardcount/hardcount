@@ -42,7 +42,7 @@ export function writtenOffSubscriptionLine(
 ): WrittenOffSubscriptionLine | null {
   // A one-off invoice has no subscription, so there is nothing to say.
   if (!subscription) return null
-  if (subscription.status === 'canceled' || subscription.status === 'archived') {
+  if (subscription.status === 'canceled') {
     return { state: 'ended', text: 'The subscription is canceled.', openSubscription: false }
   }
   if (subscription.pause_collection) {

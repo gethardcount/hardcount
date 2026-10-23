@@ -110,8 +110,8 @@ type ChargeHoldClaimer interface {
 }
 
 // SubscriptionTerminalState reports whether a subscription can still be
-// acted on. Terminated: `canceled` and `archived` are the two states in
-// which BOTH movers refuse.
+// acted on. Terminated: `canceled` is the state in which BOTH movers
+// refuse.
 type SubscriptionTerminalState struct {
 	Terminated bool
 	// PeriodStart is the start of the subscription's current billing
@@ -127,7 +127,7 @@ type SubscriptionTerminalState struct {
 // independently, and a failed exhaustion is re-attempted 24h later. Both
 // subscription movers refuse when the sub is already terminal —
 // cancelSpec() allows only draft/trialing/active, and SetPauseCollection
-// rejects canceled/archived outright — so without a skip-if-done read, a
+// rejects canceled outright — so without a skip-if-done read, a
 // re-attempt after a partial failure would fail forever on the half that
 // already succeeded and never reach the half that did not. Same reason the
 // invoice half checks status==uncollectible first: MarkUncollectible
@@ -1455,7 +1455,7 @@ func (s *Service) applySubscriptionAction(ctx context.Context, tenantID string, 
 			return false, true, false, time.Time{}
 		}
 		if st.Terminated {
-			// Already canceled or archived — by this run's earlier attempt,
+			// Already canceled — by this run's earlier attempt,
 			// by another flow, or by an operator. A `cancel` request is
 			// satisfied by that (whoever did it, the end state holds). A
 			// `pause` request is NOT: a terminated subscription has no

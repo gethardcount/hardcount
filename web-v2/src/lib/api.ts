@@ -275,7 +275,7 @@ export const api = {
   rotateInvoicePublicToken: (id: string) =>
     apiRequest<Invoice>('POST', `/invoices/${id}/rotate-public-token`),
   // retryInvoiceTax re-runs tax calculation against a draft invoice
-  // currently in tax_status pending or failed. Backs the "Retry tax"
+  // currently in tax_status pending. Backs the "Retry tax"
   // action surfaced by Attention. Returns the updated invoice with
   // its Attention re-derived — so the caller can render the new
   // banner state without a follow-up GET.
@@ -929,7 +929,7 @@ export interface Invoice {
   // upstream failure and is awaiting retry (or has exhausted retries).
   // 'ok' is the happy path; 'pending' / 'failed' surface in the operator
   // context card so debugging context is one click away.
-  tax_status?: 'ok' | 'pending' | 'failed'
+  tax_status?: 'ok' | 'pending'
   tax_pending_reason?: string
   tax_retry_count?: number
   tax_deferred_at?: string

@@ -15,6 +15,4 @@ export const InvoiceLineType = {
   base_fee: 'base_fee',
   usage: 'usage',
   add_on: 'add_on',
-  discount: 'discount',
-  tax: 'tax',
 } as const;

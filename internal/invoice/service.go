@@ -1493,8 +1493,7 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// wrong or missing tax creates compliance exposure; we defer until the
 	// retry worker lifts the block (TaxStatus=ok) or an operator resolves
 	// a failed calculation manually.
-	switch inv.TaxStatus {
-	case domain.InvoiceTaxPending:
+	if inv.TaxStatus == domain.InvoiceTaxPending {
 		// The block message mirrors the reconciler's REAL policy
 		// (domain.TaxRetryableErrorCodes / MaxTaxRetryAttempts) — the old
 		// blanket "retry in progress" claimed retries for non-retryable
@@ -1512,14 +1511,6 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 		default:
 			return domain.Invoice{}, errs.InvalidState("tax calculation pending — operator action required (" + code + "), finalize blocked")
 		}
-	case domain.InvoiceTaxFailed:
-		// Unreachable at HEAD: no writer sets tax_status='failed' — the
-		// engine parks every failure at 'pending' (engine.go). The arm
-		// stays because the CHECK constraint admits the value and an
-		// exhaustion→failed flip is a registered open design question;
-		// the message no longer narrates a retries-then-failed story
-		// that cannot have happened.
-		return domain.Invoice{}, errs.InvalidState("tax calculation failed — operator intervention required")
 	}
 	// Expired-calculation check, BEFORE the transition — and ONLY for a
 	// calculation whose transaction was never recorded. The tax commit
@@ -2470,7 +2461,7 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 //
 // Once the tax write commits, an engine draft with tax ok and no pause is
 // owed a finalize, and no sweep lists it again: every tax sweep lists only
-// pending or failed tax. So everything after the tax write runs on a
+// pending tax. So everything after the tax write runs on a
 // detached ctx. A SIGTERM or a lost lease cancels the tax_retry tick's ctx
 // (main.go); a finalize on that ctx failed and left the period unissued for
 // good. After a lease loss the new leader's sweep does not list this row

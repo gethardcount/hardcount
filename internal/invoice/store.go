@@ -118,7 +118,7 @@ type Store interface {
 	AddLineItemAtomicAudited(ctx context.Context, tenantID, invoiceID string, item domain.InvoiceLineItem, emit func(tx *sql.Tx, item domain.InvoiceLineItem, inv domain.Invoice) error) (domain.InvoiceLineItem, domain.Invoice, error)
 
 	// UpdateTaxAtomic re-stamps an invoice's tax decision after a manual
-	// retry. Locks the invoice row, gates on tax_status in (pending, failed)
+	// retry. Locks the invoice row, gates on tax_status pending
 	// and status='draft', rewrites per-line tax stamps and invoice-level tax
 	// columns, increments tax_retry_count, recomputes total + amount_due.
 	// Returns errs.InvalidState when a gate fails (caller surfaces 409) and
@@ -126,7 +126,7 @@ type Store interface {
 	UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error)
 
 	// ListPendingTaxRetry returns draft invoices awaiting another
-	// tax-calculation attempt: tax_status in (pending, failed),
+	// tax-calculation attempt: tax_status pending,
 	// tax_error_code is in the retryable set (the worker filters
 	// further on this side), tax_next_retry_at is NULL or in the
 	// past, and tax_retry_count is below the per-invoice cap.
@@ -215,15 +215,6 @@ type Store interface {
 	// UNIQUE indexed) so cross-tenant probing isn't feasible. Returns
 	// errs.ErrNotFound on miss.
 	GetByPublicToken(ctx context.Context, token string) (domain.Invoice, bool, error)
-
-	// GetByStripeInvoiceID resolves a Stripe invoice id (in_xxx) to its
-	// imported Velox invoice row. Built as the idempotency check for the
-	// Stripe importer removed in the 2026-04-29 lean-cut (rebuild deferred
-	// until a design-partner cutover) — no production caller today. The
-	// partial unique index from migration 0063 makes stripe_invoice_id the
-	// dedup key for imported rows. Returns errs.ErrNotFound when no invoice
-	// carries that Stripe id.
-	GetByStripeInvoiceID(ctx context.Context, tenantID, stripeInvoiceID string) (domain.Invoice, error)
 
 	// FindBaseInvoiceForPeriod returns the most-recent NON-VOIDED invoice
 	// carrying a base-fee line item with billing_period_start = the given

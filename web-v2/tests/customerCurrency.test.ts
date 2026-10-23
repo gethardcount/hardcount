@@ -136,11 +136,3 @@ test('a draft subscription sets the currency, as the server pin counts it', () =
   assert.notEqual(invoiceCurrencyPin(c), null)
 })
 
-test('an archived subscription does not set the currency', () => {
-  const c = resolveCustomerCurrency({
-    subscriptions: [{ status: 'archived', items: [{ plan_id: 'pln_eur' }] }],
-    plans,
-    workspaceDefault: 'USD',
-  })
-  assert.deepEqual(c, { currency: 'USD', source: 'workspace' })
-})

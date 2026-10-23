@@ -291,11 +291,20 @@ func (h *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	// ?state= is a closed set: an unknown value matched no row and read as
+	// "none of those".
+	state := r.URL.Query().Get("state")
+	switch domain.DunningRunState(state) {
+	case "", domain.DunningActive, domain.DunningEscalated, domain.DunningResolved:
+	default:
+		respond.BadRequest(w, r, "state must be one of active, escalated, resolved")
+		return
+	}
 
 	runs, total, err := h.svc.ListRuns(r.Context(), RunListFilter{
 		TenantID:  tenantID,
 		InvoiceID: r.URL.Query().Get("invoice_id"),
-		State:     r.URL.Query().Get("state"),
+		State:     state,
 		Limit:     limit,
 		Offset:    offset,
 	})
@@ -400,15 +409,6 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 	switch domain.DunningResolution(input.Resolution) {
 	case domain.ResolutionPaymentRecovered, domain.ResolutionInvoiceVoided, domain.ResolutionInvoiceNotCollectible:
 	default:
-		// manually_resolved is deliberately NOT accepted: it is the legacy
-		// pre-0170 value that meant "voided OR uncollectible", and accepting
-		// it would reintroduce exactly the ambiguity the split removed. The
-		// message names it explicitly rather than letting an integrator who
-		// still sends it read a generic refusal and guess.
-		if domain.DunningResolution(input.Resolution) == domain.ResolutionManuallyResolved {
-			respond.ValidationField(w, r, "resolution", "manually_resolved is no longer accepted — it meant both 'voided' and 'written off'. Use invoice_voided to annul the invoice, or invoice_not_collectible to write it off.")
-			return
-		}
 		respond.ValidationField(w, r, "resolution", "resolution must be one of payment_recovered, invoice_voided, invoice_not_collectible")
 		return
 	}

@@ -89,7 +89,7 @@ const subCols = `id, tenant_id, code, display_name, customer_id, status, billing
 	trial_start_at, trial_end_at, started_at, activated_at, canceled_at,
 	cancel_at, COALESCE(cancel_at_period_end, false),
 	pause_collection_behavior, pause_collection_resumes_at, pause_collection_invoice_id,
-	billing_threshold_amount_gte, COALESCE(billing_threshold_reset_cycle, true),
+	billing_threshold_amount_gte, COALESCE(billing_threshold_reset_cycle, false),
 	current_billing_period_start, current_billing_period_end, next_billing_at,
 	COALESCE(billing_anchor_day, 0),
 	COALESCE(test_clock_id,''),
@@ -484,7 +484,7 @@ func cancelSpec() transitionSpec {
 // every non-terminal status — draft (operator scrapping a never-activated
 // row), trialing (customer abandoning during trial — by far the dominant
 // industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
-// and active. Only canceled/archived are rejected (the row already
+// and active. Only canceled is rejected (the row already
 // terminated). Note: the `paused` source state was removed in PR-8
 // when the hard-pause API was deleted — no path now produces
 // status='paused', so it's not in allowedFrom.
@@ -584,7 +584,7 @@ func retireLiveOnlyStateTx(ctx context.Context, tx *sql.Tx, id string) (domain.S
 // a "free at trial end" intent on a sub an activation writer just flipped
 // would silently turn it into a paid-period cancel. Status drift returns
 // InvalidState (409, re-read). Paused subs remain schedulable (Stripe
-// parity); canceled/archived are rejected — nothing to schedule once
+// parity); canceled is rejected — nothing to schedule once
 // terminated.
 func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id string, cancelAt *time.Time, cancelAtPeriodEnd bool, observedStatus domain.SubscriptionStatus) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -604,7 +604,7 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET cancel_at = $1, cancel_at_period_end = $2, updated_at = $3
-		WHERE id = $4 AND status = $5 AND status NOT IN ('canceled','archived')
+		WHERE id = $4 AND status = $5 AND status <> 'canceled'
 		RETURNING `+subCols,
 		postgres.NullableTime(cancelAt), cancelAtPeriodEnd, now, id, observedStatus,
 	), &sub)
@@ -853,7 +853,7 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 // SetPauseCollection writes the operator's (behavior, resumes_at) onto the
 // row and clears pause_collection_invoice_id: an operator who re-pauses a
 // subscription dunning paused takes the pause over, and a payment no longer
-// lifts it. Rejects rows in canceled/archived since collection-pause on a
+// lifts it. Rejects a canceled row since collection-pause on a
 // terminated sub has no meaning — the engine wouldn't observe the row
 // anyway, but failing loudly here keeps the API honest. Active and paused
 // (hard) are both allowed: a hard-paused sub can simultaneously have
@@ -873,7 +873,7 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 		    pause_collection_resumes_at = $2,
 		    pause_collection_invoice_id = NULL,
 		    updated_at = $3
-		WHERE id = $4 AND status NOT IN ('canceled','archived')
+		WHERE id = $4 AND status <> 'canceled'
 		RETURNING `+subCols,
 		string(pc.Behavior), postgres.NullableTime(pc.ResumesAt), now, id,
 	), &sub)
@@ -918,8 +918,7 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 // operator's; a dunning pause already set, by this run's earlier attempt or
 // by another invoice's dunning, keeps its invoice. A pause whose resumes_at
 // has passed but which the resumer has not cleared yet is not in force, and
-// is replaced. errs.InvalidState covers a canceled or archived
-// subscription.
+// is replaced. errs.InvalidState covers a canceled subscription.
 func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -935,7 +934,7 @@ func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, in
 	if err != nil {
 		return domain.Subscription{}, 0, fmt.Errorf("lock subscription for the dunning pause: %w", err)
 	}
-	if status == string(domain.SubscriptionCanceled) || status == string(domain.SubscriptionArchived) {
+	if status == string(domain.SubscriptionCanceled) {
 		return domain.Subscription{}, 0, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", status))
 	}
 
@@ -1028,14 +1027,14 @@ func (s *PostgresStore) LockDunningPauseTx(ctx context.Context, tx *sql.Tx, invo
 // Only the payment of the invoice whose dunning set the pause lifts it
 // (Sagar's A3 decision, 2026-10-21); another invoice still owed does not
 // hold it. An operator's pause (no invoice), a pause already timed, and a
-// canceled or archived subscription are left alone.
+// canceled subscription are left alone.
 func (s *PostgresStore) ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, subID, paidInvoiceID string, at time.Time) error {
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE subscriptions SET pause_collection_resumes_at = $1, updated_at = $1
 		WHERE id = $2
 		  AND pause_collection_invoice_id = $3
 		  AND pause_collection_resumes_at IS NULL
-		  AND status NOT IN ('canceled','archived')`, at, subID, paidInvoiceID); err != nil {
+		  AND status <> 'canceled'`, at, subID, paidInvoiceID); err != nil {
 		return fmt.Errorf("release the dunning pause: %w", err)
 	}
 	return nil
@@ -2527,7 +2526,7 @@ func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, custom
 // set: any item_thresholds row not in the new slice is deleted, present
 // rows are upserted by primary key (subscription_item_id).
 //
-// Rejects rows in canceled/archived since a threshold on a terminal
+// Rejects a canceled row since a threshold on a terminal
 // subscription has no meaning — the engine wouldn't observe it anyway,
 // but the API surface should be consistent. Service layer is responsible
 // for validating that every t.ItemThresholds[i].SubscriptionItemID
@@ -2554,7 +2553,7 @@ func (s *PostgresStore) SetBillingThresholds(ctx context.Context, tenantID, id s
 		SET billing_threshold_amount_gte = $1,
 		    billing_threshold_reset_cycle = $2,
 		    updated_at = $3
-		WHERE id = $4 AND status NOT IN ('canceled','archived')
+		WHERE id = $4 AND status <> 'canceled'
 		RETURNING `+subCols,
 		amountArg, t.ResetBillingCycle, now, id,
 	), &sub)
@@ -2619,7 +2618,7 @@ func (s *PostgresStore) SetBillingThresholds(ctx context.Context, tenantID, id s
 }
 
 // ClearBillingThresholds nulls the amount_gte column, resets reset_cycle
-// to its default (true), and deletes every per-item threshold row for
+// to its default (false, as the API and the column default), and deletes every per-item threshold row for
 // this subscription. Idempotent — clearing on a sub with no threshold
 // returns the unchanged subscription.
 func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
@@ -2634,7 +2633,7 @@ func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET billing_threshold_amount_gte = NULL,
-		    billing_threshold_reset_cycle = TRUE,
+		    billing_threshold_reset_cycle = FALSE,
 		    updated_at = $1
 		WHERE id = $2
 		RETURNING `+subCols,
@@ -3321,14 +3320,14 @@ func buildSubWhere(f ListFilter) (string, []any) {
 }
 
 // CountLiveSubsByPlan returns the number of subscriptions referencing
-// the given plan whose status is not canceled or archived. Used by
+// the given plan whose status is not canceled. Used by
 // pricing.Service.UpdatePlan (ADR-034) to gate billing-affecting
 // field mutations — once any live sub attaches, the plan's base
 // price / timing / meter set is frozen.
 //
-// "Live" excludes canceled + archived. Draft / active / trialing /
-// paused all qualify because they can still produce future invoices
-// and need deterministic terms.
+// "Live" excludes canceled. Draft, trialing and active all qualify
+// because they can still produce future invoices and need
+// deterministic terms.
 func (s *PostgresStore) CountLiveSubsByPlan(ctx context.Context, tenantID, planID string) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -3342,7 +3341,7 @@ func (s *PostgresStore) CountLiveSubsByPlan(ctx context.Context, tenantID, planI
 		FROM subscriptions s
 		JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
 		WHERE si.plan_id = $1
-		  AND s.status NOT IN ('canceled', 'archived')
+		  AND s.status <> 'canceled'
 	`, planID).Scan(&count)
 	if err != nil {
 		return 0, err

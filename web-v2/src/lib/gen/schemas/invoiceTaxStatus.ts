@@ -9,11 +9,10 @@
  */
 
 /**
- * Whether tax has been successfully calculated. Happy path is `ok`.
- * `pending` means a transient calculation failure is awaiting retry;
- * `failed` means retries are exhausted (operator resolves manually).
- * Pending/failed invoices are blocked from finalize so we never send
- * a wrong tax amount.
+ * Whether tax has been calculated. `ok`: it has. `pending`: the
+ * calculation failed, and `tax_error_code` says why and whether
+ * Velox retries it. A pending invoice cannot be finalized, so a wrong
+ * tax amount is never sent.
  */
 export type InvoiceTaxStatus = typeof InvoiceTaxStatus[keyof typeof InvoiceTaxStatus];
 
@@ -21,5 +20,4 @@ export type InvoiceTaxStatus = typeof InvoiceTaxStatus[keyof typeof InvoiceTaxSt
 export const InvoiceTaxStatus = {
   ok: 'ok',
   pending: 'pending',
-  failed: 'failed',
 } as const;

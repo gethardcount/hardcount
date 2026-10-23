@@ -14,7 +14,7 @@ test('the Paused tab asks for paused collection, not a status no subscription ha
 })
 
 test('every tab maps to a filter the API accepts', () => {
-  const statuses = new Set(['draft', 'trialing', 'active', 'canceled', 'archived'])
+  const statuses = new Set(['draft', 'trialing', 'active', 'canceled'])
   for (const tab of SUBSCRIPTION_TABS) {
     const params = subscriptionTabParams(tab.value)
     if (params.status !== undefined) assert.ok(statuses.has(params.status), `${tab.value} sends status=${params.status}`)

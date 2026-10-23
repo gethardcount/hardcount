@@ -27,13 +27,6 @@ var teardownKeepAllowlist = map[string]string{
 	// act, so a surviving row is inert by construction. Discovered by the
 	// test_clock_id widening (ADR-104), not newly exempted behavior.
 	"audit_log": "documented ADR-086 survivor; forensic, wall-clock, never actioned by billing planes",
-	// coupons is a tenant-level catalog object, not a customer-owned row. Its
-	// customer_id is a nullable, FK-less "restrict to this customer" target on a
-	// feature that is CUT pre-launch (ADR-039 — the credit ledger is the discount
-	// primitive; coupons stays dormant until the first promo-code ask). No
-	// wall-clock plane reads coupons by customer, so a dangling customer_id is
-	// inert. Revisit teardown if coupons is ever rebuilt.
-	"coupons": "dormant cut feature (ADR-039); tenant catalog, customer_id nullable + FK-less; inert",
 }
 
 var deleteFromRe = regexp.MustCompile(`(?i)\bDELETE\s+FROM\s+([a-z_][a-z0-9_]*)`)

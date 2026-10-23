@@ -206,7 +206,7 @@ type Store interface {
 	// SetBillingThresholds writes the (amount_gte, reset_cycle, item_thresholds)
 	// triple onto the row in one transaction. Replaces the full item_thresholds
 	// set — the per-item rows for any item not in the new slice are deleted.
-	// Rejects rows in canceled/archived since a threshold on a terminated sub
+	// Rejects a canceled row since a threshold on a terminated sub
 	// has no meaning. The service layer is responsible for validating that
 	// every subscription_item_id in t.ItemThresholds belongs to this
 	// subscription.

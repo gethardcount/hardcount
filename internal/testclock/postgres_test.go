@@ -36,13 +36,13 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 	}
 
 	// A customer pinned to the clock (the ADR-027 customer-level pin) with two
-	// subs on it: one active, one already archived (terminal). The teardown keys
+	// subs on it: one active, one already canceled (terminal). The teardown keys
 	// on the customer's pin, so it reaches every row the customer owns — both
 	// subs go, regardless of state.
 	customerID := insertCustomer(t, db, tenantID)
 	pinCustomerToClock(t, db, customerID, clk.ID)
 	insertSub(t, db, "sub_active", tenantID, customerID, clk.ID, "active")
-	insertSub(t, db, "sub_archived", tenantID, customerID, clk.ID, "archived")
+	insertSub(t, db, "sub_canceled", tenantID, customerID, clk.ID, "canceled")
 
 	if err := store.Delete(ctx, tenantID, clk.ID); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -62,7 +62,7 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 		}
 	}
 
-	// The pinned customer and BOTH subs are torn down — including the archived
+	// The pinned customer and BOTH subs are torn down — including the canceled
 	// one the old soft-delete model left in place.
 	if rowExists(t, db, "customers", "id", customerID) {
 		t.Error("pinned customer must be torn down")
@@ -70,8 +70,8 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 	if rowExists(t, db, "subscriptions", "code", "sub_active") {
 		t.Error("active subscription must be torn down")
 	}
-	if rowExists(t, db, "subscriptions", "code", "sub_archived") {
-		t.Error("archived (terminal) subscription must be torn down too")
+	if rowExists(t, db, "subscriptions", "code", "sub_canceled") {
+		t.Error("canceled (terminal) subscription must be torn down too")
 	}
 
 	// Idempotent: re-deleting a gone clock returns ErrNotFound.

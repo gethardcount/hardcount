@@ -135,7 +135,7 @@ func (s *PostgresStore) List(ctx context.Context, tenantID string) ([]domain.Tes
 // self-documenting record the completeness arch-test asserts against.
 //
 // NOT torn down (survivors): the audit log and all tenant config — meters,
-// plans, coupons, dunning_policies, api_keys, stripe_webhook_events. Keep
+// plans, dunning_policies, api_keys, stripe_webhook_events. Keep
 // this list in sync with TestTeardownCoversEverySimulatedTable.
 var clockTeardownStatements = []string{
 	// Invoice sub-graph — children first (leaves have no customer_id; keyed via parent).
@@ -146,24 +146,21 @@ var clockTeardownStatements = []string{
 	`DELETE FROM credit_notes           WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM invoice_line_items     WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,
 	`DELETE FROM payment_update_tokens  WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
-	`DELETE FROM coupon_redemptions     WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM invoices               WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	// Usage + credit — the ledger MUST precede subscriptions: its
 	// source_subscription_item_id RESTRICT-references subscription_items,
 	// which cascades away when subscriptions is deleted.
-	`DELETE FROM billed_entries         WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM usage_events           WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM customer_credit_ledger WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	// Subscriptions — CASCADE removes subscription_items / _changes /
 	// _thresholds / billing_intervals (ADR-101; the intervals FK is the
 	// ADR-086 teardown carve-out).
 	`DELETE FROM subscriptions          WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
-	// Per-customer config + portal (customer_discounts / payment_methods /
-	// portal also ON DELETE CASCADE from the customer; deleted explicitly so
+	// Per-customer config + portal (payment_methods / portal also
+	// ON DELETE CASCADE from the customer; deleted explicitly so
 	// the set is the complete self-documenting record the arch-test asserts).
 	`DELETE FROM customer_price_overrides    WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM customer_billing_profiles   WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
-	`DELETE FROM customer_discounts          WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM payment_methods             WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM customer_portal_sessions    WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM customer_portal_magic_links WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,

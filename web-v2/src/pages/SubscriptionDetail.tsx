@@ -831,7 +831,7 @@ export default function SubscriptionDetailPage() {
               Issues an invoice early when this period's running total, or an item's usage, reaches a set level. Checked by the hourly billing run. Usage is not stopped.
             </p>
           </div>
-          {sub.status !== 'canceled' && sub.status !== 'archived' && (
+          {sub.status !== 'canceled' && (
             <Button size="sm" variant="outline" onClick={() => setShowThresholdsDialog(true)}>
               {sub.billing_thresholds ? 'Edit' : 'Set thresholds'}
             </Button>
@@ -952,7 +952,7 @@ export default function SubscriptionDetailPage() {
       {/* Invoice Preview. Hidden on terminal subs — a canceled sub has no
           next invoice, and the full-period estimate read as a real upcoming
           charge (found in the FLOW B14 walk: canceled sub advertising $490). */}
-      {sub.status !== 'canceled' && sub.status !== 'archived' && (() => {
+      {sub.status !== 'canceled' && (() => {
         const view = previewable
           ? previewView(preview, previewError, firstItemPlan?.currency ?? 'USD')
           : { kind: 'none' as const, message: 'Activate the subscription to see its next invoice.' }

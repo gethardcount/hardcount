@@ -81,9 +81,6 @@ const RESOLUTION_LABELS: Record<string, string> = {
   action_failed: 'Final action failed',
   // A retry Stripe refused because the amount is below its minimum charge.
   amount_below_minimum: 'Below Stripe\u2019s minimum',
-  // LEGACY, pre-0170: meant voided OR written off. Rows that could not be
-  // mapped from their invoice's status keep it, so the label must too.
-  manually_resolved: 'Closed unpaid',
 }
 
 function relativeTime(dateStr: string, now: EffectiveNow): string {
@@ -399,7 +396,7 @@ function RunsTab() {
                             <div className="flex items-center gap-2">
                               <Badge variant={statusBadgeVariant(run.state)}>{run.state}</Badge>
                               {run.resolution && run.resolution !== run.state && (
-                                <Badge variant={run.resolution === 'payment_recovered' ? 'success' : run.resolution === 'invoice_voided' || run.resolution === 'manually_resolved' ? 'info' : run.resolution === 'invoice_not_collectible' ? 'warning' : 'outline'}>{RESOLUTION_LABELS[run.resolution] ?? run.resolution}</Badge>
+                                <Badge variant={run.resolution === 'payment_recovered' ? 'success' : run.resolution === 'invoice_voided' ? 'info' : run.resolution === 'invoice_not_collectible' ? 'warning' : 'outline'}>{RESOLUTION_LABELS[run.resolution] ?? run.resolution}</Badge>
                               )}
                               {!isFinished && (
                                 <Button variant="outline" size="sm" className="h-6 text-xs ml-1"
@@ -523,12 +520,7 @@ function RunsTab() {
 
 const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   dunning_started: { label: 'Dunning started', color: 'bg-blue-400' },
-  retry_scheduled: { label: 'Retry scheduled', color: 'bg-muted-foreground' },
   retry_attempted: { label: 'Retry attempted', color: 'bg-blue-400' },
-  retry_succeeded: { label: 'Payment recovered', color: 'bg-emerald-500' },
-  retry_failed: { label: 'Retry failed', color: 'bg-red-400' },
-  paused: { label: 'Dunning paused', color: 'bg-amber-400' },
-  resumed: { label: 'Dunning resumed', color: 'bg-blue-400' },
   escalated: { label: 'Escalated', color: 'bg-violet-500' },
   resolved: { label: 'Resolved', color: 'bg-emerald-500' },
 }

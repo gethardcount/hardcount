@@ -14,6 +14,7 @@ import type { InvoiceBillingReason } from './invoiceBillingReason';
 import type { InvoiceMetadata } from './invoiceMetadata';
 import type { InvoicePaymentStatus } from './invoicePaymentStatus';
 import type { InvoiceStatus } from './invoiceStatus';
+import type { InvoiceTaxErrorCode } from './invoiceTaxErrorCode';
 import type { InvoiceTaxStatus } from './invoiceTaxStatus';
 import type { ItemChangeType } from './itemChangeType';
 import type { RecoveryWarning } from './recoveryWarning';
@@ -72,13 +73,11 @@ export interface Invoice {
   tax_retry_count?: number;
   tax_pending_reason?: string;
   /**
-     * Typed taxonomy of `tax_pending_reason`. One of
-     * `customer_data_invalid`, `jurisdiction_unsupported`,
-     * `provider_outage`, `provider_auth`, `unknown`. Empty for
-     * invoices deferred before this column existed (migration
-     * 0067).
+     * Why tax could not be calculated, as a code. Set while
+     * `tax_status` is `pending`; `tax_pending_reason` has the
+     * detail.
      */
-  tax_error_code?: string;
+  tax_error_code?: InvoiceTaxErrorCode;
   /**
      * The earliest time the background retry may calculate tax again,
      * after a failed attempt. Absent when a retry may run now.
@@ -93,7 +92,8 @@ export interface Invoice {
   /**
      * Set when a payment arrived that the invoice did not expect. The
      * webhook event name of the cause: `payment.duplicate_charge`,
-     * `payment.amount_mismatch` or `payment.received_on_voided_invoice`.
+     * `payment.amount_mismatch`, `payment.currency_mismatch` or
+     * `payment.received_on_voided_invoice`.
      * Only the latest one is kept.
      */
   payment_anomaly_kind?: string;
@@ -197,14 +197,6 @@ export interface Invoice {
   source_subscription_item_id?: string;
   source_change_type?: ItemChangeType;
   billing_reason?: InvoiceBillingReason;
-  /**
-     * Source Stripe invoice id (`in_xxx`) for an invoice imported from
-     * a Stripe account. Currently always empty: the Stripe importer was
-     * removed (deferred until a design-partner cutover) and nothing
-     * writes this field today. The column and its unique index remain
-     * for a future importer. Empty for Velox-native invoices.
-     */
-  stripe_invoice_id?: string;
   /**
      * Whether this invoice's domain timestamps (created/issued/due/paid)
      * were stamped on a test clock's simulated time rather than

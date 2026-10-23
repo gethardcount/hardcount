@@ -24,12 +24,12 @@ func TestListPendingTaxRetry_ExcludesSimulatedOneOff(t *testing.T) {
 
 	sim := seedSweepInvoice(t, ctx, db, "TaxRetry Sim One-Off", `
 		UPDATE invoices SET subscription_id = NULL, status = 'draft',
-		       tax_status = 'failed', tax_error_code = 'provider_outage',
+		       tax_status = 'pending', tax_error_code = 'provider_outage',
 		       tax_retry_count = 0, tax_next_retry_at = NULL,
 		       is_simulated = true, updated_at = now()
 		 WHERE id = $1`)
 	real := seedSweepInvoice(t, ctx, db, "TaxRetry Real", `
-		UPDATE invoices SET status = 'draft', tax_status = 'failed',
+		UPDATE invoices SET status = 'draft', tax_status = 'pending',
 		       tax_error_code = 'provider_outage', tax_retry_count = 0,
 		       tax_next_retry_at = NULL, is_simulated = false, updated_at = now()
 		 WHERE id = $1`)

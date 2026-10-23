@@ -57,7 +57,7 @@ func (m dunningMovers) GetTerminalState(ctx context.Context, tenantID, id string
 		return dunning.SubscriptionTerminalState{}, err
 	}
 	st := dunning.SubscriptionTerminalState{
-		Terminated: sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived,
+		Terminated: sub.Status == domain.SubscriptionCanceled,
 	}
 	if sub.CurrentBillingPeriodStart != nil {
 		st.PeriodStart = *sub.CurrentBillingPeriodStart

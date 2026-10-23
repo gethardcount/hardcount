@@ -1187,7 +1187,7 @@ func addItemQuantity(input AddItemInput) (int64, error) {
 // as "added, then archived": an existing item on an archived plan, which
 // keeps billing (ADR-067).
 func (s *Service) validateAddItem(ctx context.Context, tenantID string, sub domain.Subscription, planID string) error {
-	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
+	if sub.Status == domain.SubscriptionCanceled {
 		return errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))
 	}
 
@@ -3453,7 +3453,7 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 	if err != nil {
 		return domain.Subscription{}, err
 	}
-	if sub.Status == domain.SubscriptionCanceled || sub.Status == domain.SubscriptionArchived {
+	if sub.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, errs.InvalidState(
 			fmt.Sprintf("Spend thresholds can't be set on a %s subscription.", sub.Status))
 	}
