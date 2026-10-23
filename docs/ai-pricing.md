@@ -575,7 +575,9 @@ The margin covers usage only: base fees, credits and taxes are left out.
 Revenue Velox cannot match to a model is shown apart, in
 `unattributed_revenue_cents`. A token event that names its `provider`,
 `token_type` and `model` but matches no cost rate is counted in
-`unresolved_events`, and while any such event is in the window,
+`unresolved_events`. So is an event whose cost, quantity ×
+`cost_per_token`, is too large to record (about $9.2 trillion or more);
+it is still billed. While any such event is in the window,
 `margin_bps` is left out. An event sent through the usage API without one
 of those three labels, such as usage on a meter that is not for tokens,
 gets no cost and is not counted. Its price is still in `revenue_cents`, so

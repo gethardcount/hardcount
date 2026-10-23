@@ -37,7 +37,8 @@ type UsageEvent struct {
 	// (1e-6), resolved from provider_cost_rates at INGEST time — snapshot
 	// semantics; later rate edits never rewrite it. Nil = unresolved
 	// (costable dims but no matching rate — the actionable "add a rate"
-	// signal) or pre-feature row. Operator-facing only.
+	// signal — or a cost that does not fit BIGINT micros) or pre-feature
+	// row. Operator-facing only.
 	ProviderCostMicros *int64 `json:"provider_cost_micros,omitempty"`
 	// ProviderCostSource: 'table' (inferred from provider_cost_rates),
 	// 'not_applicable' (no costable dims — non-token meters), 'observed'

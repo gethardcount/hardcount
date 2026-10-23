@@ -17,10 +17,10 @@ export type PostV1UsageEventsBody = {
   /**
      * A JSON number (`5`) or a string holding one (`"5.5"`,
      * for exact decimals). At most 12 decimal places; trailing
-     * zeros do not count. Its size must be under 10^26. A
-     * negative value is a correction. A missing quantity, or
-     * any other value, is refused with 422 and `param:
-     * quantity`.
+     * zeros do not count. Its size must be under 10^26, and it
+     * is at most 100 characters. A negative value is a
+     * correction. A missing quantity, or any other value, is
+     * refused with 422 and `param: quantity`.
      */
   quantity: number | string;
   /** Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */

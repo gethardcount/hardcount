@@ -5430,7 +5430,7 @@ type MarginReport struct {
 	To                       time.Time `json:"to"`
 	UnattributedRevenueCents int64     `json:"unattributed_revenue_cents"`
 
-	// UnresolvedEvents Token events with costable dims but no matching rate — add a rate to cost new events.
+	// UnresolvedEvents Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `cost_per_token`, was too large to record (about $9.2 trillion or more, either sign).
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
@@ -5599,7 +5599,7 @@ type RatingRule struct {
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	Currency  string    `json:"currency,omitempty"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Arbitrary precision; invoice line amounts and totals still round to whole cents.
+	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents.
 	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
 	GraduatedTiers  []struct {
 		// UnitAmountCents Per-unit rate in cents, as a decimal string (see flat_amount_cents).
@@ -7897,20 +7897,20 @@ type ListPriceOverridesParams struct {
 type CreatePriceOverrideJSONBody struct {
 	CustomerId string `json:"customer_id"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more.
+	// FlatAmountCents Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field.
 	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
 
 	// GraduatedTiers Used when `mode` is `graduated`. Each `up_to` must be larger
 	// than the one before, and the last tier must have
 	// `up_to: 0` (no upper bound).
 	GraduatedTiers []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
+		// UnitAmountCents Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0).
 		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 		UpTo            int64  `json:"up_to,omitempty"`
 	} `json:"graduated_tiers,omitempty"`
 	Mode CreatePriceOverrideJSONBodyMode `json:"mode"`
 
-	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string.
+	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`.
 	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
 
 	// PackageAmountCents Price of one package in cents. Used when `mode` is `package`.
@@ -7943,7 +7943,7 @@ type DeletePriceOverride200JSONResponseBodyActive bool
 
 // PutV1ProviderCostsJSONBody defines parameters for PutV1ProviderCosts.
 type PutV1ProviderCostsJSONBody struct {
-	// CostPerToken Decimal dollars per token (e.g. "0.000003").
+	// CostPerToken Dollars per token, as a decimal string (e.g. "0.000003"). 0 or more, under 10^8, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read.
 	CostPerToken string `json:"cost_per_token"`
 
 	// Currency Rates are in USD only, the currency LiteLLM reports cost
@@ -7992,17 +7992,17 @@ type GetV1RatingRulesParamsLifecycleState string
 type PostV1RatingRulesJSONBody struct {
 	Currency string `json:"currency"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units).
+	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field.
 	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
 	GraduatedTiers  []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
+		// UnitAmountCents Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0).
 		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 		UpTo            int    `json:"up_to,omitempty"`
 	} `json:"graduated_tiers,omitempty"`
 	Mode PostV1RatingRulesJSONBodyMode `json:"mode"`
 	Name string                        `json:"name"`
 
-	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string. Fixed fees (package_amount_cents) stay integer cents.
+	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`. Fixed fees (package_amount_cents) stay integer cents.
 	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
 	PackageAmountCents     int    `json:"package_amount_cents,omitempty"`
 	PackageSize            int    `json:"package_size,omitempty"`
@@ -8244,7 +8244,7 @@ type SetSubscriptionBillingThresholdsJSONBody struct {
 		// SubscriptionItemId An item of this subscription. Each item can appear once.
 		SubscriptionItemId string `json:"subscription_item_id"`
 
-		// UsageGte Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14").
+		// UsageGte Invoice early when the item's usage in the period reaches this quantity. A decimal string (e.g. "1000" or "3.14"): more than 0, under 10^26, at most 12 decimal places (trailing zeros do not count), and at most 100 characters.
 		UsageGte string `json:"usage_gte"`
 	} `json:"item_thresholds,omitempty"`
 }
@@ -8504,10 +8504,10 @@ type PostV1UsageEventsJSONBody struct {
 
 	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
 	// for exact decimals). At most 12 decimal places; trailing
-	// zeros do not count. Its size must be under 10^26. A
-	// negative value is a correction. A missing quantity, or
-	// any other value, is refused with 422 and `param:
-	// quantity`.
+	// zeros do not count. Its size must be under 10^26, and it
+	// is at most 100 characters. A negative value is a
+	// correction. A missing quantity, or any other value, is
+	// refused with 422 and `param: quantity`.
 	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                          `json:"timestamp,omitempty"`
 }
@@ -8570,10 +8570,10 @@ type BackfillUsageEventJSONBody struct {
 
 	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
 	// for exact decimals). At most 12 decimal places; trailing
-	// zeros do not count. Its size must be under 10^26. A
-	// negative value is a correction. A missing quantity, or
-	// any other value, is refused with 422 and `param:
-	// quantity`.
+	// zeros do not count. Its size must be under 10^26, and it
+	// is at most 100 characters. A negative value is a
+	// correction. A missing quantity, or any other value, is
+	// refused with 422 and `param: quantity`.
 	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity"`
 
 	// Timestamp RFC 3339. Must not be in the future.
@@ -8617,8 +8617,9 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
 	// for exact decimals). At most 12 decimal places;
 	// trailing zeros do not count. Its size must be under
-	// 10^26. A negative value is a correction. A missing
-	// quantity, or any other value, fails validation.
+	// 10^26, and it is at most 100 characters. A negative
+	// value is a correction. A missing quantity, or any
+	// other value, fails validation.
 	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                               `json:"timestamp,omitempty"`
 }

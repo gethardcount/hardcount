@@ -10,6 +10,6 @@
 
 export type PostV1RatingRulesBodyGraduatedTiersItem = {
   up_to?: number;
-  /** Per-unit rate in cents, as a decimal string. */
+  /** Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0). */
   unit_amount_cents?: string;
 };

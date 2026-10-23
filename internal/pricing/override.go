@@ -292,7 +292,11 @@ func (s *Service) CreateOverride(ctx context.Context, tenantID string, input Cre
 	// qty=1 compute probe never reached tier 2+, so a non-monotonic or
 	// bounded-final tier table was accepted here and then hard-failed
 	// billOnePeriod at cycle close.
-	if err := validatePricingShape(input.Mode, input.FlatAmountCents, input.GraduatedTiers, input.PackageSize, input.PackageAmountCents); err != nil {
+	if input.FlatAmountCents, input.GraduatedTiers, input.OverageUnitAmountCents, err = checkRates(
+		input.FlatAmountCents, input.GraduatedTiers, input.OverageUnitAmountCents); err != nil {
+		return domain.CustomerPriceOverride{}, err
+	}
+	if err := validatePricingShape(input.Mode, input.GraduatedTiers, input.PackageSize, input.PackageAmountCents); err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
 	// Compute probe against the PATCHED rule — validates the override

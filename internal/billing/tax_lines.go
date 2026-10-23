@@ -2,6 +2,7 @@ package billing
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/money"
@@ -138,6 +139,35 @@ func commitLineTaxReason(providerName string) string {
 		return ""
 	}
 	return domain.TaxReasonPrepaidCreditPurchase
+}
+
+// checkLineAmountsFit returns ErrAmountOverflow when the sizes of the line
+// amounts sum past int64. Each line fits (the rater refuses one that does
+// not), but two can sum past it; inside the bound, every sum of these lines,
+// whatever their signs, fits.
+func checkLineAmountsFit(lineItems []domain.InvoiceLineItem) error {
+	var sum int64
+	for i, li := range lineItems {
+		a := li.AmountCents
+		if a == math.MinInt64 {
+			return fmt.Errorf("line %d amount: %w", i, domain.ErrAmountOverflow)
+		}
+		var err error
+		if sum, err = domain.AddCents(sum, max(a, -a)); err != nil {
+			return fmt.Errorf("invoice lines sum past int64 cents: %w", err)
+		}
+	}
+	return nil
+}
+
+// addCentsSigned adds two cent amounts of any sign; ok is false when the sum
+// does not fit int64.
+func addCentsSigned(a, b int64) (int64, bool) {
+	c := a + b
+	if (a > 0 && b > 0 && c < 0) || (a < 0 && b < 0 && c >= 0) {
+		return 0, false
+	}
+	return c, true
 }
 
 // commitInvoiceSubtotal is the subtotal to tax an invoice from. For an
