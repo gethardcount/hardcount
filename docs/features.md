@@ -43,12 +43,11 @@ full access ([Roadmap](roadmap.md#later)).
 | Dunning | When a card payment fails, Velox retries it on a schedule and, once email is set up, emails the customer. If every retry fails, it does what your policy says. | [How Velox works](how-velox-works.md) |
 | Billing thresholds | Set a spend or usage level, and Velox makes an invoice early once the period's total reaches it. It bills earlier; it does not stop usage. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
 
-A threshold fires at most once per period, unless `reset_billing_cycle`
-starts a new one. It is checked on each scheduled billing run: every hour,
-or every 5 minutes with `APP_ENV=local`. `POST /v1/billing/run` does not
-check it. Without
-`reset_billing_cycle`, the period's own invoice does not bill again what the
-threshold invoice billed, even after you write the threshold invoice off.
+A threshold fires at most once per period, and the period keeps its dates.
+It is checked on each scheduled billing run: every hour, or every 5 minutes
+with `APP_ENV=local`. `POST /v1/billing/run` does not check it. The
+period's own invoice does not bill again what the threshold invoice billed,
+even after you write the threshold invoice off.
 Voiding it before the period's invoice is built does: that invoice then
 bills those charges too ([runbook](ops/runbook/invoice-timing-late-usage.md)).
 

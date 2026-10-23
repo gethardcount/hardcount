@@ -59,9 +59,8 @@ func p21FireAt700(t *testing.T, name string, beforeFire func(p *p21Fire)) *p21Fi
 		beforeFire(p)
 	}
 
-	noReset := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: 5000, ResetBillingCycle: &noReset,
+		AmountGTE: 5000,
 	}); err != nil {
 		t.Fatalf("set thresholds: %v", err)
 	}

@@ -393,15 +393,13 @@ type SubscriptionItemThreshold struct {
 //
 // Either alone or both. First to fire wins.
 //
-// ResetBillingCycle controls whether the cycle resets after fire. When
-// true, the new cycle starts at fire time and the next bill
-// is the natural cycle invoice for the new cycle. When false (the default), the
-// original cycle continues and a second invoice fires at the natural
-// cycle end with whatever residual usage accumulated.
+// A fire always keeps the billing period: the threshold invoice bills the
+// period so far, and the period's own invoice bills the rest at its normal
+// end (Stripe's default). Starting a new period at the fire
+// (reset_billing_cycle) was removed on 2026-10-23.
 type BillingThresholds struct {
-	AmountGTE         int64                       `json:"amount_gte,omitempty"`
-	ResetBillingCycle bool                        `json:"reset_billing_cycle"`
-	ItemThresholds    []SubscriptionItemThreshold `json:"item_thresholds"`
+	AmountGTE      int64                       `json:"amount_gte,omitempty"`
+	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
 }
 
 // SubscriptionItem is a single priced line on a subscription. A subscription
@@ -534,7 +532,7 @@ type Subscription struct {
 	// Mar 31, … instead of ratcheting off month-end (ADR-055). 0 for
 	// calendar-monthly subs (always the 1st) and legacy/unset rows (the
 	// advance then falls back to the historical path). Recomputed whenever the
-	// cycle re-anchors to "now" (cross-interval swap, threshold reset).
+	// cycle re-anchors to "now" (a cross-interval swap).
 	BillingAnchorDay int `json:"billing_anchor_day,omitempty"`
 	// Subscriptions have no per-sub billing timezone: every sub in a tenant
 	// bills in the one org timezone (default UTC), resolved live from tenant

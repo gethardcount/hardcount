@@ -89,7 +89,7 @@ const subCols = `id, tenant_id, code, display_name, customer_id, status, billing
 	trial_start_at, trial_end_at, started_at, activated_at, canceled_at,
 	cancel_at, COALESCE(cancel_at_period_end, false),
 	pause_collection_behavior, pause_collection_resumes_at, pause_collection_invoice_id,
-	billing_threshold_amount_gte, COALESCE(billing_threshold_reset_cycle, false),
+	billing_threshold_amount_gte,
 	current_billing_period_start, current_billing_period_end, next_billing_at,
 	COALESCE(billing_anchor_day, 0),
 	COALESCE(test_clock_id,''),
@@ -690,8 +690,8 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 //
 // The CAS proves `expected` (period start + watermark) as well as
 // status='active': a closer that planned this terminal close from a period
-// another writer has since moved (a threshold reset, a swap, a sibling
-// close) writes nothing. Zero rows disambiguate to ErrNotFound (row gone) or
+// another writer has since moved (a swap, a sibling close) writes
+// nothing. Zero rows disambiguate to ErrNotFound (row gone) or
 // ErrWatermarkMoved — ONE sentinel for "already canceled" and "period
 // moved", because in both cases the closer's snapshot is stale and it must
 // roll back and re-read; the engine's bounded retry then finds the sub
@@ -1863,9 +1863,9 @@ func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context,
 // invoice exists.
 //
 // Normal cycle close passes the sub's existing BillingAnchorDay unchanged;
-// the re-anchor paths (cross-interval plan swap, threshold reset) pass the
-// recomputed anchor day for the new "now" cadence (ADR-055). A verify-only
-// caller (the reset=false threshold fire) passes the row's CURRENT values: it
+// the re-anchor path (cross-interval plan swap) passes the recomputed anchor
+// day for the new "now" cadence (ADR-055). A verify-only caller (the
+// threshold fire) passes the row's CURRENT values: it
 // must be an UPDATE, not SELECT … FOR UPDATE, so every closer shares one
 // statement, one lock mode and one test — FOR UPDATE would also take the
 // stronger lock that blocks the FK FOR KEY SHARE of unrelated invoice inserts.
@@ -2650,8 +2650,8 @@ func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, custom
 // Billing thresholds
 // ---------------------------------------------------------------------------
 
-// SetBillingThresholds writes the (amount_gte, reset_cycle, item_thresholds)
-// triple onto the row in one transaction. Replaces the per-item threshold
+// SetBillingThresholds writes the (amount_gte, item_thresholds) pair onto
+// the row in one transaction. Replaces the per-item threshold
 // set: any item_thresholds row not in the new slice is deleted, present
 // rows are upserted by primary key (subscription_item_id).
 //
@@ -2680,11 +2680,10 @@ func (s *PostgresStore) SetBillingThresholds(ctx context.Context, tenantID, id s
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET billing_threshold_amount_gte = $1,
-		    billing_threshold_reset_cycle = $2,
-		    updated_at = $3
-		WHERE id = $4 AND status <> 'canceled'
+		    updated_at = $2
+		WHERE id = $3 AND status <> 'canceled'
 		RETURNING `+subCols,
-		amountArg, t.ResetBillingCycle, now, id,
+		amountArg, now, id,
 	), &sub)
 	if err == sql.ErrNoRows {
 		var currentStatus string
@@ -2746,9 +2745,8 @@ func (s *PostgresStore) SetBillingThresholds(ctx context.Context, tenantID, id s
 	return sub, nil
 }
 
-// ClearBillingThresholds nulls the amount_gte column, resets reset_cycle
-// to its default (false, as the API and the column default), and deletes every per-item threshold row for
-// this subscription. Idempotent — clearing on a sub with no threshold
+// ClearBillingThresholds nulls the amount_gte column and deletes every
+// per-item threshold row for this subscription. Idempotent — clearing on a sub with no threshold
 // returns the unchanged subscription.
 func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -2762,7 +2760,6 @@ func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET billing_threshold_amount_gte = NULL,
-		    billing_threshold_reset_cycle = FALSE,
 		    updated_at = $1
 		WHERE id = $2
 		RETURNING `+subCols,
@@ -3162,15 +3159,14 @@ type rowScanner interface {
 
 // scanSubRow scans subCols into sub. Handles fields that need post-processing
 // — currently the nullable (behavior, resumes_at) pair that composes into
-// the *PauseCollection field on the domain struct, plus the (amount_gte,
-// reset_cycle) pair that composes into BillingThresholds. Per-item
+// the *PauseCollection field on the domain struct, plus amount_gte, which
+// composes into BillingThresholds. Per-item
 // thresholds are hydrated separately by hydrateThresholds since they
 // live in an aux table.
 func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	var pauseBehavior, pauseInvoiceID sql.NullString
 	var pauseResumesAt sql.NullTime
 	var thresholdAmountGTE sql.NullInt64
-	var thresholdResetCycle bool
 	var failedFor, failedAt, nextAttemptAt sql.NullTime
 	var failureCount int
 	var lastError string
@@ -3180,7 +3176,7 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 		&sub.ActivatedAt, &sub.CanceledAt,
 		&sub.CancelAt, &sub.CancelAtPeriodEnd,
 		&pauseBehavior, &pauseResumesAt, &pauseInvoiceID,
-		&thresholdAmountGTE, &thresholdResetCycle,
+		&thresholdAmountGTE,
 		&sub.CurrentBillingPeriodStart,
 		&sub.CurrentBillingPeriodEnd, &sub.NextBillingAt,
 		&sub.BillingAnchorDay,
@@ -3209,15 +3205,11 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 	// BillingThresholds is partially populated here from the columns on the
 	// row. ItemThresholds is filled in by hydrateThresholds because it lives
 	// in an aux table. The struct is allocated here only when amount_gte is
-	// set; for item-only thresholds hydrateThresholds allocates it and
-	// re-reads the row's reset_cycle column itself (it is NOT derivable
-	// from struct-nilness — assuming the column default here is the bug
-	// fixed 2026-07-21).
+	// set; for item-only thresholds hydrateThresholds allocates it.
 	if thresholdAmountGTE.Valid {
 		sub.BillingThresholds = &domain.BillingThresholds{
-			AmountGTE:         thresholdAmountGTE.Int64,
-			ResetBillingCycle: thresholdResetCycle,
-			ItemThresholds:    []domain.SubscriptionItemThreshold{},
+			AmountGTE:      thresholdAmountGTE.Int64,
+			ItemThresholds: []domain.SubscriptionItemThreshold{},
 		}
 	}
 	// ADR-069: derive the read-only cancel_effective_at at THE scan choke
@@ -3318,21 +3310,8 @@ func hydrateThresholds(ctx context.Context, tx *sql.Tx, sub *domain.Subscription
 	}
 	if sub.BillingThresholds == nil {
 		// Item-only thresholds: scanSubRow allocates the struct only when
-		// amount_gte is set, so the row's real reset_cycle value was
-		// discarded — read it back rather than guess. Fabricating `true`
-		// here made every item-only threshold sub re-anchor its cycle on
-		// fire regardless of the stored flag (found live, FLOW B14
-		// 2026-07-21: engine + API both consumed the fabricated value).
-		var resetCycle bool
-		if err := tx.QueryRowContext(ctx, `
-			SELECT billing_threshold_reset_cycle FROM subscriptions WHERE id = $1
-		`, sub.ID).Scan(&resetCycle); err != nil {
-			return fmt.Errorf("read reset_cycle for item thresholds on %s: %w", sub.ID, err)
-		}
-		sub.BillingThresholds = &domain.BillingThresholds{
-			ResetBillingCycle: resetCycle,
-			ItemThresholds:    items,
-		}
+		// amount_gte is set.
+		sub.BillingThresholds = &domain.BillingThresholds{ItemThresholds: items}
 		return nil
 	}
 	sub.BillingThresholds.ItemThresholds = items

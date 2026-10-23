@@ -845,9 +845,6 @@ export default function SubscriptionDetailPage() {
                   <span className="text-sm text-muted-foreground w-40 shrink-0">Period total</span>
                   <span className="text-sm text-foreground">
                     {firstItemPlan ? formatCents(sub.billing_thresholds.amount_gte, firstItemPlan.currency) : formatCentsBare(sub.billing_thresholds.amount_gte)}
-                    <span className="text-xs text-muted-foreground ml-2">
-                      ({sub.billing_thresholds.reset_billing_cycle ? 'starts a new billing period' : 'keeps the billing period'})
-                    </span>
                   </span>
                 </div>
               )}
@@ -1825,7 +1822,6 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
   const [amountStr, setAmountStr] = useState(
     existing?.amount_gte != null ? (existing.amount_gte / 100).toFixed(2) : ''
   )
-  const [resetCycle, setResetCycle] = useState(existing?.reset_billing_cycle ?? false)
   const [perItem, setPerItem] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {}
     for (const t of existing?.item_thresholds ?? []) {
@@ -1837,9 +1833,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const body: { amount_gte?: number; reset_billing_cycle?: boolean; item_thresholds?: { subscription_item_id: string; usage_gte: string }[] } = {
-      reset_billing_cycle: resetCycle,
-    }
+    const body: { amount_gte?: number; item_thresholds?: { subscription_item_id: string; usage_gte: string }[] } = {}
 
     const trimmedAmount = amountStr.trim()
     if (trimmedAmount !== '') {
@@ -1897,7 +1891,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         <DialogHeader>
           <DialogTitle>{existing ? 'Edit spend thresholds' : 'Set spend thresholds'}</DialogTitle>
           <DialogDescription>
-            When this period's running total, or an item's usage, reaches a level you set, an invoice is issued early at the next hourly billing run. Usage is not stopped. Set at least one level.
+            When this period's running total, or an item's usage, reaches a level you set, an invoice is issued early at the next hourly billing run. The period keeps running, and the rest of it is billed at its normal end. Usage is not stopped. Set at least one level.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">
@@ -1916,20 +1910,6 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
             <p className="text-xs text-muted-foreground">
               An invoice is issued early when the period's total reaches this amount. Leave blank for none.
             </p>
-          </div>
-
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id="reset-cycle"
-              checked={resetCycle}
-              onCheckedChange={(v) => setResetCycle(v === true)}
-            />
-            <div className="space-y-1">
-              <Label htmlFor="reset-cycle" className="font-normal">Start a new billing period when reached</Label>
-              <p className="text-xs text-muted-foreground">
-                Unchecked, the period keeps running and the rest of its usage is billed at its normal end.
-              </p>
-            </div>
           </div>
 
           {items.length > 0 && (

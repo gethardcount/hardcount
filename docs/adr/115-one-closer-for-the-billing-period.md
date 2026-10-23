@@ -1,6 +1,6 @@
 # ADR-115: One closer for the billing period
 
-**Status:** Accepted (2026-08-30)
+**Status:** Accepted (2026-08-30; amended 2026-10-23: `reset_billing_cycle` is removed, so a threshold fire never moves the period, see the [amendment](#amendment-2026-10-23-a-threshold-fire-never-moves-the-period))
 **Supersedes:** the watermark compare-and-swap of ADR-114 PR-B (`AdvanceBillingCycle`) and the never-shipped monotonic guard [ADR-114, "Fencing boundary"](114-leader-leases-tick-scoped-fencing.md#fencing-boundary-the-five-claim-funnels) named; extends ADR-066's fire+re-anchor atomicity to every period writer.
 **Related:** ADR-065 (threshold scan boundary / fire-once), ADR-066 (threshold watermark protocol), ADR-114 (leader leases; `POST /v1/billing/run` stays unfenced).
 
@@ -276,3 +276,20 @@ them read before any writes:
 - `TestAddItem_WaitingOnAPeriodMove_PricedFromTheNewPeriod`.
 - In the six-pair table, a plan change that finds the item on another plan
   gets 409 `item_changed`.
+
+## Amendment 2026-10-23: a threshold fire never moves the period
+
+`reset_billing_cycle` is removed ([ADR-066 amendment](066-threshold-money-semantics.md#amendment-2026-10-23-reset_billing_cycle-is-removed)).
+A subscription's period is now written by three things: the cycle close, an
+immediate cross-interval plan swap and a cancel. A threshold fire still runs
+the CAS, verify-only, as the first statement of its transaction (decision
+3), so it serializes against all three. The tests of the reset arm are
+removed: `TestThresholdFire_vs_OperatorClose_CloseFirst_ResetTrue`,
+`TestThresholdFire_vs_Close_FireFirst_ResetTrue` and
+`TestThresholdFire_vs_Close_FireFirst_ResetTrue_CalendarStartOnly` (the
+start predicate stays locked on its own by
+`TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly`). The barrier
+test `TestCloseVsThresholdFire_BothOrders_BillsUsageOnce` now races the
+keep-anchor fire: close first, the fire's CAS loses; fire first, the close's
+in-tx watermark re-read sees the fire and bills only the rest. Both orders
+are still asserted, and 1000c of usage is billed once in each.

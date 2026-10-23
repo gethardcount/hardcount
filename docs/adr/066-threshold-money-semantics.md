@@ -1,9 +1,9 @@
 # ADR-066: Threshold money semantics — prorated reset base, atomic fire→reset, $0 auto-pay, max/last deferral
 
 **Date:** 2026-07-02
-**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4's rule-bucket granularity, the ladder seed key, the package clamp and the flat threshold window), not built yet
+**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11 and 2026-10-23; `reset_billing_cycle` removed 2026-10-23, see the [last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed)); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4's rule-bucket granularity, the ladder seed key, the package clamp and the flat threshold window), not built yet
 
-**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. In decision 4, "granularity is the rule bucket, not the meter" goes, because a meter has one aggregation and `last_ever` is dropped (PR-2). In the 2026-10-11 amendment, the ladder seed keys on the price id instead of the resolved rule version. The ambiguous-config failure goes, because lines carry the price id the seed keys on (PR-4). The non-monotone package clamp goes, because a package always rounds up with no overage (PR-3). The threshold invoice prices each plan window instead of one flat window (PR-4). ADR-130 leaves the prorated reset base, the one-transaction fire, the $0 rule and the write-off amendment as they are. Removing `reset_billing_cycle=true` is a separate change, approved on 2026-10-23.
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. In decision 4, "granularity is the rule bucket, not the meter" goes, because a meter has one aggregation and `last_ever` is dropped (PR-2). In the 2026-10-11 amendment, the ladder seed keys on the price id instead of the resolved rule version. The ambiguous-config failure goes, because lines carry the price id the seed keys on (PR-4). The non-monotone package clamp goes, because a package always rounds up with no overage (PR-3). The threshold invoice prices each plan window instead of one flat window (PR-4). ADR-130 leaves the prorated reset base, the one-transaction fire, the $0 rule and the write-off amendment as they are. Removing `reset_billing_cycle=true` was a separate change, approved and made on 2026-10-23 ([last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed)).
 
 ## Summary
 
@@ -21,6 +21,8 @@ materially amended the plan's §4.1 sketch; plan doc updated same-day).
 ## Decisions
 
 ### 1. reset=true fires bill a PRORATED in_arrears base (shipped, P1b)
+
+*(Removed 2026-10-23 with `reset_billing_cycle`: a fire always keeps the period and bills the in_arrears base in full, and the close skips it. See the [last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed).)*
 
 With `reset_billing_cycle=true` the fire re-anchors the cycle at the fire
 instant, so the cycle close never true-ups the fired window's base — the
@@ -150,6 +152,8 @@ now so P1c implements against them without re-litigating:
   is never re-billed; calendar subs snap back and are unaffected).
   Customer-favored, rare, pre-existing. DOCUMENTED, not fixed in-window;
   trigger to revisit = first DP configuring reset=true on in_advance plans.
+  *(Ended 2026-10-23: `reset_billing_cycle` is removed, so no fire starts a
+  period. See the [last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed).)*
 
 ## Test locks (mutation- or fault-injection-verified)
 
@@ -270,8 +274,9 @@ the built invoice never changes (ADR-120), and nothing else bills it. The
 operator bills it with a one-off invoice if wanted. The late-usage runbook
 says so.
 
-**`reset=true` is unchanged.** The fire starts a new period at the fire
-instant, so the threshold invoice is outside every later watermark window
+**`reset=true` is unchanged.** *(Removed later on 2026-10-23 with the
+option itself; the test named here went with it.)* The fire starts a new
+period at the fire instant, so the threshold invoice is outside every later watermark window
 and no later invoice bills `[periodStart, fire)`: a write-off keeps it
 billed, and a void at any time forgives it. Locked by
 `TestThresholdResetTrue_VoidOrWriteOff_CloseBillsOnlyTheNewPeriod`. The
@@ -419,3 +424,55 @@ re-read; the close waits and bills the window),
 `TestThresholdPayment_vs_Close_PaymentAfterReRead` (a payment after the
 re-read waits, no deadlock, the close bills the residual), and the
 `reset=true` test above.
+
+## Amendment 2026-10-23: `reset_billing_cycle` is removed
+
+A spend threshold always keeps the billing period. The option to start a
+new period at each fire is removed from the API, the dashboard and the
+database (migration 00203), approved by the product owner on 2026-10-23.
+Only Stripe has it; no open-source peer does.
+
+**The under-bill this ends.** §5's `{in_advance base × reset=true}`: on an
+anniversary subscription the fire started a period at the fire instant,
+the prepaid base covered it only to the old period's end, and the
+re-anchored period's close prepaid from its own end. The stretch between
+was billed by no invoice, once per fire. Reproduced on real Postgres before
+the removal: a sub starting April 1 on a 3000c in_advance base, a fire on
+April 20, closes through June. 6000c of base was billed where 9000c was
+owed, and May 1-20 was on no invoice. Locked by
+`TestThresholdInAdvanceBase_FireThenCloseBillsEveryMonth`: the API now
+refuses the option with 422, and the same scenario bills April, May and
+June in full.
+
+**What goes with it.** Decision 1 (the prorated base on a reset fire); the
+re-anchor arm of decision 2 (the fire keeps its one transaction, opened by
+the verify-only period CAS of ADR-115); the reset halves of decision 4 (a
+max or last bucket rode the fire and did not count toward the cap); and the
+`reset=true` paragraph of the write-off amendment. Everything this ADR
+says about `reset=false` is now what every fire does.
+
+**Keep-anchor results do not change.** `TestThresholdKeepAnchor_InvoicesUnchanged`
+compares every invoice and line of four keep-anchor cases (an in_arrears
+base with sum and max meters closed by the cycle and by an immediate
+cancel, an in_advance base, an item threshold) with a golden file written
+on the code before the removal.
+
+**Tests.** Removed with the path: `TestEvaluateThresholds_ResetProratesBase`
+and its three denominator tests, `TestThresholdFire_ResetProratesBase_RealStore`,
+`TestFireThreshold_ResetTrue_MaxRides_ButExcludedFromCap` and
+`TestThresholdResetTrue_VoidOrWriteOff_CloseBillsOnlyTheNewPeriod`.
+Converted to the keep-anchor fire:
+`TestThresholdFire_ResetAtomic_RollsBackOnAdvanceFailure` is now
+`TestThresholdFire_Atomic_RollsBackOnInsertFailure`, and
+`TestScanThresholds_ResetAdvanceFailure_IsLoud` is now
+`TestScanThresholds_PeriodCASFailure_IsLoud`.
+
+**Data.** Under the clean break (no upgrade from 0.8.x) only a local
+database can hold `billing_threshold_reset_cycle = true`. The migration
+drops the column; it does not refuse. The value was configuration read only
+when a threshold fired, so no issued invoice changes, and keep-anchor is a
+true value for every such subscription from its next fire on. Its open
+period stays consistent: a fire that had re-anchored it left no threshold
+invoice in the new period, so the next fire or close bills it as any
+keep-anchor period. The CHANGELOG has the query that lists such
+subscriptions before upgrading.

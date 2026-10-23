@@ -1,7 +1,7 @@
 # ADR-065: Threshold-scan kernel — boundary-skip, fire-once probe, full drain
 
 **Date:** 2026-07-02
-**Status:** Accepted (amended 2026-08-30)
+**Status:** Accepted (amended 2026-08-30 and 2026-10-23)
 
 ## Summary
 
@@ -176,3 +176,9 @@ tick re-evaluated the crossing and ran a paid tax calculation before the
 index refused the insert: the burn this decision exists to stop. The probe
 now reads `GetThresholdInvoiceForCycleAnyStatus`, which is never a
 watermark. Locked by `TestThresholdScan_FireOnceProbe_SeesWrittenOffAndVoided`.
+
+## Amendment 2026-10-23 (ADR-066 amendment): every fire keeps the period
+
+`reset_billing_cycle` is removed, so every fire is the `reset=false` case
+"Why this is the bug" describes: the period stays put and the probe is what
+stops a re-fire on the next tick. The follow-up's reset proration is moot.

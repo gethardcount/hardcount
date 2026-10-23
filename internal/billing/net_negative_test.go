@@ -285,7 +285,7 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 // [Apr 10, May 1), not of the whole period. The row names that window for
 // each meter: it is the range of events that netted below zero.
 func TestCycleClose_AfterThresholdFire_NetNegativeRowNamesItsWindow(t *testing.T) {
-	_, usage, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: false})
+	_, usage, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000})
 	seedThresholdInvoice(invoices, domain.InvoiceFinalized)
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)

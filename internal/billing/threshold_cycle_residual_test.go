@@ -93,7 +93,7 @@ func cycleInvoiceLines(t *testing.T, inv *mockInvoices, invoiceID string) (base,
 }
 
 func TestCycleClose_AfterThresholdFire_BillsOnlyResidual(t *testing.T) {
-	_, _, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: false})
+	_, _, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000})
 	seedThresholdInvoice(invoices, domain.InvoiceFinalized)
 
 	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
@@ -132,7 +132,7 @@ func TestCycleClose_AfterThresholdFire_BillsOnlyResidual(t *testing.T) {
 }
 
 func TestCycleClose_NoThresholdInvoice_FullPeriodUnchanged(t *testing.T) {
-	_, _, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: false})
+	_, _, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000})
 
 	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
 		t.Fatalf("cycle errors: %v", errs)
@@ -176,7 +176,7 @@ func TestCycleClose_ThresholdsRemovedAfterFire_StillBillsResidual(t *testing.T) 
 // A VOIDED threshold invoice returned the money — its window is billable
 // again, so the cycle close must fall back to full-period billing.
 func TestCycleClose_VoidedThresholdInvoice_BillsFullPeriod(t *testing.T) {
-	_, _, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: false})
+	_, _, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000})
 	seedThresholdInvoice(invoices, domain.InvoiceVoided)
 
 	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {

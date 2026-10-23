@@ -224,7 +224,7 @@ func TestThresholdWriteOff_CrossIntervalSwapBillsOnlyTheResidual(t *testing.T) {
 	r.ingest(time.Date(2026, 4, 10, 9, 0, 0, 0, time.UTC), 100)
 	fireAt := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(-time.Hour),
-		map[string]any{"amount_gte": 100, "reset_billing_cycle": false}, http.StatusOK)
+		map[string]any{"amount_gte": 100}, http.StatusOK)
 	if n := r.scanThresholds(fireAt); n != 1 {
 		t.Fatalf("threshold scan fired %d invoices, want 1", n)
 	}

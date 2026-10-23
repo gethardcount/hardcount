@@ -21,9 +21,8 @@ import (
 func firedAndWrittenOff(t *testing.T, f *thresholdFixture, ctx context.Context) (*invoice.Service, domain.Invoice) {
 	t.Helper()
 	f.ingestUsage(t, ctx, 100, 10)
-	resetFalse := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: 500, ResetBillingCycle: &resetFalse,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
@@ -145,7 +144,7 @@ func TestThresholdBilledThroughTx_WriteOffKeepsVoidDrops(t *testing.T) {
 // Mutation check: put 'uncollectible' back in the watermark predicate → the
 // cycle invoice's usage line starts at P0 and bills 1000c.
 func TestThresholdWriteOff_vs_Close_WriteOffInFlight(t *testing.T) {
-	r := newS1Rig(t, "Write-off vs close", 200, false)
+	r := newS1Rig(t, "Write-off vs close", 200)
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
 	}
@@ -178,7 +177,7 @@ func TestThresholdWriteOff_vs_Close_WriteOffInFlight(t *testing.T) {
 // the control: a void gives the window back, so the close's re-read sees the
 // watermark gone, re-plans and bills [P0, P1) = 1000c.
 func TestThresholdVoid_vs_Close_VoidInFlight(t *testing.T) {
-	r := newS1Rig(t, "Void vs close", 200, false)
+	r := newS1Rig(t, "Void vs close", 200)
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
 	}
@@ -331,7 +330,7 @@ func (v *racingVoid) wantOrderHonored(t *testing.T, r *s1Rig, closerInv domain.I
 // residual it had planned: a void that came first, and the window billed
 // nowhere.
 func TestThresholdVoid_vs_Close_VoidAfterReRead(t *testing.T) {
-	r := newS1Rig(t, "Void after the close's re-read", 200, false)
+	r := newS1Rig(t, "Void after the close's re-read", 200)
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
 	}
@@ -367,7 +366,7 @@ func TestThresholdVoid_vs_Close_VoidAfterReRead(t *testing.T) {
 // UPDATE against the re-read's FOR KEY SHARE), and the close bills the
 // residual whichever lands first: a paid invoice keeps its window billed.
 func TestThresholdPayment_vs_Close_PaymentAfterReRead(t *testing.T) {
-	r := newS1Rig(t, "Payment after the close's re-read", 200, false)
+	r := newS1Rig(t, "Payment after the close's re-read", 200)
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
 	}
@@ -417,7 +416,7 @@ func TestThresholdPayment_vs_Close_PaymentAfterReRead(t *testing.T) {
 // the close. The close's watermark read must not wait for the payment, or
 // the two deadlock and Postgres fails one of them (40P01).
 func TestThresholdPayment_vs_Close_DunningPauseInFlight(t *testing.T) {
-	r := newS1Rig(t, "Payment vs close, dunning pause in flight", 200, false)
+	r := newS1Rig(t, "Payment vs close, dunning pause in flight", 200)
 	r.f.invStore.SetDunningPauseReleaser(r.f.subStore) // as the server wires it
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
@@ -525,7 +524,7 @@ func (b *blockingReverser) RetireCommitGrantForInvoiceTx(context.Context, *sql.T
 // for the lock: a re-read that returned the row as it was before the void
 // would commit the residual after a void that committed first.
 func TestThresholdVoid_vs_Close_VoidHoldsTheRow(t *testing.T) {
-	r := newS1Rig(t, "Void holds the row at the close's re-read", 200, false)
+	r := newS1Rig(t, "Void holds the row at the close's re-read", 200)
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
 	}
@@ -580,7 +579,7 @@ func TestThresholdVoid_vs_Close_VoidHoldsTheRow(t *testing.T) {
 // and is forgiven. Before, the read ran on its own connection: the void
 // committed first and the cancel's final invoice billed only [t1, tc).
 func TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead(t *testing.T) {
-	r := newS1Rig(t, "Void after the cancel's read", 200, false)
+	r := newS1Rig(t, "Void after the cancel's read", 200)
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
 	}
@@ -624,7 +623,7 @@ func TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead(t *testing.T) {
 // is forgiven. Before, the void committed first and the swap invoice billed
 // only [t1, swap).
 func TestThresholdVoid_vs_PlanSwap_VoidAfterRead(t *testing.T) {
-	r := newS1Rig(t, "Void after the swap's read", 200, false)
+	r := newS1Rig(t, "Void after the swap's read", 200)
 	sw, _ := newInAdvanceSwapRig(t, r)
 	if fired := r.runFire(t); fired != 1 {
 		t.Fatalf("fire reported %d, want 1", fired)
@@ -664,57 +663,4 @@ func TestThresholdVoid_vs_PlanSwap_VoidAfterRead(t *testing.T) {
 	}
 	v.wantOrderHonored(t, r, swapInv[0], 1000, 700)
 	assertUsageBilledOnce(t, r.base)
-}
-
-// TestThresholdResetTrue_VoidOrWriteOff_CloseBillsOnlyTheNewPeriod is the
-// reset_billing_cycle=true control. The fire bills [P0, t1) and starts a
-// new period at t1, so the next close bills only [t1, end) whatever happens
-// to the threshold invoice: a write-off keeps [P0, t1) billed on it, and a
-// void, even before that close, does not give it back. The void dialog and
-// the API describe both settings, so this is what they must match.
-func TestThresholdResetTrue_VoidOrWriteOff_CloseBillsOnlyTheNewPeriod(t *testing.T) {
-	for _, action := range []string{"void", "write-off"} {
-		t.Run(action, func(t *testing.T) {
-			r := newS1Rig(t, "Reset true "+action, 200, true)
-			if fired := r.runFire(t); fired != 1 {
-				t.Fatalf("fire reported %d, want 1", fired)
-			}
-			_, threshold, _ := r.liveInvoices(t)
-			if len(threshold) != 1 || threshold[0].SubtotalCents != 300 {
-				t.Fatalf("threshold invoices after the fire: %+v, want one of 300c", threshold)
-			}
-			sub := r.assertPeriod(t, r.t1, nil)
-			invSvc := invoice.NewService(r.f.invStore, clock.Real(), r.f.settings)
-			ctx := r.at(r.t1.Add(time.Hour))
-			var err error
-			if action == "void" {
-				_, err = invSvc.Void(ctx, r.f.tenantID, threshold[0].ID)
-			} else {
-				_, err = invSvc.MarkUncollectible(ctx, r.f.tenantID, threshold[0].ID)
-			}
-			if err != nil {
-				t.Fatalf("%s the threshold invoice: %v", action, err)
-			}
-
-			gen, failures := r.closer.engine.RunCycleForTenant(r.at(sub.CurrentBillingPeriodEnd.Add(time.Nanosecond)), r.f.tenantID, 50)
-			if len(failures) != 0 || gen != 1 {
-				t.Fatalf("close of [t1, end): generated %d, failures %v, want 1 and none", gen, failures)
-			}
-			cycle, _, _ := r.liveInvoices(t)
-			if len(cycle) != 1 || !cycle[0].BillingPeriodStart.Equal(r.t1) {
-				t.Fatalf("cycle invoices: %d, want one headed at t1", len(cycle))
-			}
-			var billed int64
-			for _, l := range r.usageLines(t, cycle[0].ID) {
-				billed += l.AmountCents
-				if l.BillingPeriodStart == nil || l.BillingPeriodStart.Before(r.t1) {
-					t.Errorf("cycle usage line starts %v, before the fire t1 %v: the %s gave [P0, t1) back", l.BillingPeriodStart, r.t1, action)
-				}
-			}
-			if billed != 700 {
-				t.Fatalf("cycle usage = %dc, want 700c (only [t1, end))", billed)
-			}
-			assertUsageBilledOnce(t, r.base)
-		})
-	}
 }

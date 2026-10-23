@@ -406,7 +406,7 @@ func thresholdFiredWithCredit(t *testing.T, grantCents int64) (*lagRig, time.Tim
 	r.postEvent("/v1/usage-events", "peak", "peak-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 5, http.StatusCreated)
 	fireAt := lagP0.AddDate(0, 0, 19)
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(-time.Hour),
-		map[string]any{"amount_gte": 100, "reset_billing_cycle": false}, http.StatusOK)
+		map[string]any{"amount_gte": 100}, http.StatusOK)
 	if n := r.scanThresholds(fireAt); n != 1 {
 		t.Fatalf("threshold scan fired %d invoices, want 1", n)
 	}
@@ -610,7 +610,7 @@ func TestUsageAfterClose_HeldReleaseAroundThresholdWatermark(t *testing.T) {
 	r.postEvent("/v1/usage-events", "tokens", "tokens-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
 	fireAt := lagP0.AddDate(0, 0, 19)
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(-time.Hour),
-		map[string]any{"amount_gte": 100, "reset_billing_cycle": false}, http.StatusOK)
+		map[string]any{"amount_gte": 100}, http.StatusOK)
 	if n := r.scanThresholds(fireAt); n != 1 {
 		t.Fatalf("threshold scan fired %d invoices, want 1", n)
 	}
@@ -654,7 +654,7 @@ func TestUsageAfterClose_HeldReleaseUnderWrittenOffThresholdInvoice(t *testing.T
 	r.postEvent("/v1/usage-events", "tokens", "tokens-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 100, http.StatusCreated)
 	fireAt := lagP0.AddDate(0, 0, 19)
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", fireAt.Add(-time.Hour),
-		map[string]any{"amount_gte": 100, "reset_billing_cycle": false}, http.StatusOK)
+		map[string]any{"amount_gte": 100}, http.StatusOK)
 	if n := r.scanThresholds(fireAt); n != 1 {
 		t.Fatalf("threshold scan fired %d invoices, want 1", n)
 	}

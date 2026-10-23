@@ -45,15 +45,13 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   line names the customer, meter and timestamp. There is no list of such
   events yet.
 - **What is not flagged.** Usage on a canceled subscription. And usage
-  stamped before a spend-threshold invoice made with
-  `reset_billing_cycle: false` that is not paid yet: if that invoice is
-  voided before the period-end invoice is built, the period-end invoice
-  bills all the period's usage again, late events included. So such an
+  stamped before a spend-threshold invoice that is not paid yet: if that
+  invoice is voided before the period-end invoice is built, the period-end
+  invoice bills all the period's usage again, late events included. So such an
   event is flagged only after a paid spend-threshold invoice, which cannot
   be voided.
 - **Writing off or voiding a spend-threshold invoice.** A spend-threshold
-  invoice made with `reset_billing_cycle: false` bills the usage up to when
-  it fired, and the base fee if the plan bills it in arrears. It leaves out
+  invoice bills the usage up to when it fired, and the base fee if the plan bills it in arrears. It leaves out
   usage priced with `max`, `last_during_period` or `last_ever`: the
   period-end invoice bills that for the whole period. What happens to the
   charges on the threshold invoice depends on what you do with it, and
@@ -69,11 +67,6 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
     nowhere. That invoice does not change. If they should be charged,
     bill them with a one-off invoice. A void that arrives while that invoice
     is being saved waits for it, and then counts as after.
-
-  A spend-threshold invoice made with `reset_billing_cycle: true` starts a
-  new period when it fires, so no later invoice bills its charges. Write it
-  off and they stay billed on it. Void it, at any time, and they are billed
-  nowhere; bill them with a one-off invoice if they should be charged.
 
   Before 2026-10-23 a write-off behaved like a void here, and the
   period-end invoice billed the window again. If you relied on that, void

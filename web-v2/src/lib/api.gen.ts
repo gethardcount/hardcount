@@ -2652,6 +2652,11 @@ export interface paths {
          *     block usage. Set `amount_gte`, `item_thresholds`, or both. The
          *     first threshold reached triggers the invoice.
          *
+         *     The threshold invoice bills the period so far. The period keeps its
+         *     dates: the period's own invoice bills the rest at its normal end.
+         *     `reset_billing_cycle`, which started a new period at the threshold
+         *     invoice, was removed; a body that sends it is refused with 422.
+         *
          *     Each call replaces the whole configuration. Item thresholds left
          *     out of the body are removed.
          */
@@ -3669,12 +3674,11 @@ export interface paths {
          *     it) and resolves any active dunning run with `invoice_voided`.
          *     Fires the `invoice.voided` webhook event.
          *
-         *     A spend-threshold invoice (`billing_reason = threshold`) that fired
-         *     with `reset_billing_cycle: false` and is voided before its period's
-         *     invoice is built gives its charges back: that invoice bills them
-         *     too. Voided after that, or
-         *     fired with `reset_billing_cycle: true`, its charges are billed on no
-         *     invoice; bill them with a one-off invoice if they should be charged.
+         *     A spend-threshold invoice (`billing_reason = threshold`) that is
+         *     voided before its period's invoice is built gives its charges back:
+         *     that invoice bills them too. Voided after that, its charges are
+         *     billed on no invoice; bill them with a one-off invoice if they
+         *     should be charged.
          *
          *     A paid invoice cannot be voided: issue a credit note instead.
          */
@@ -7169,10 +7173,9 @@ export interface components {
              *     subscription that prices this meter already invoiced the
              *     event's time, so the event is stored but billed on no invoice,
              *     now or later. Bill it with a one-off invoice if it should be
-             *     charged. A spend-threshold invoice that fired with
-             *     `reset_billing_cycle: false` counts only once it is paid: until
-             *     then it can be voided, and then the period's invoice bills the
-             *     event. Absent otherwise, which is not a promise that the event
+             *     charged. A spend-threshold invoice counts only once it is
+             *     paid: until then it can be voided, and then the period's
+             *     invoice bills the event. Absent otherwise, which is not a promise that the event
              *     will be billed. Never sent on a replay or a read.
              * @enum {string}
              */
@@ -8376,15 +8379,17 @@ export interface components {
              */
             readonly set_by: "operator" | "dunning";
         };
-        /** @description Limits that make Velox invoice before the period ends. */
+        /**
+         * @description Limits that make Velox invoice before the period ends. A threshold
+         *     invoice bills the period so far; the period keeps its dates, and
+         *     the period's own invoice bills the rest at its normal end.
+         */
         SubscriptionBillingThresholds: {
             /**
              * Format: int64
              * @description Running-subtotal threshold in cents. Absent when not set.
              */
             amount_gte?: number;
-            /** @description Whether a threshold invoice starts a new billing period. */
-            reset_billing_cycle: boolean;
             item_thresholds: components["schemas"]["SubscriptionItemThreshold"][];
         };
         SubscriptionItemThreshold: {
@@ -12715,13 +12720,6 @@ export interface operations {
                      * @description Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
                      */
                     amount_gte?: number;
-                    /**
-                     * @description `true` starts a new billing period when a threshold
-                     *     invoice is issued. `false` keeps the period; the rest of
-                     *     the period's usage is billed at its normal end.
-                     * @default false
-                     */
-                    reset_billing_cycle?: boolean;
                     item_thresholds?: {
                         /** @description An item of this subscription. Each item can appear once. */
                         subscription_item_id: string;

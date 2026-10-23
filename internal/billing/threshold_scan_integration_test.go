@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,7 +19,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
@@ -239,8 +237,7 @@ func (f *thresholdFixture) createPreview(t *testing.T, ctx context.Context, cust
 
 // TestThresholdScan_AmountCrossFiresEarly is the headline test: usage drives
 // the running subtotal past AmountGTE, the scan emits a threshold-billed
-// invoice, the cycle resets, and a second scan against the new (empty) cycle
-// is a no-op. End-to-end against real Postgres so the CreateWithLineItems
+// invoice, and the period keeps its anchor. End-to-end against real Postgres so the CreateWithLineItems
 // path, partial unique index, and ListWithThresholds candidate query are
 // all exercised together.
 func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
@@ -254,14 +251,9 @@ func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
 	// 100 events × qty 10 × 1c = 1000c subtotal.
 	f.ingestUsage(t, ctx, 100, 10)
 
-	// Configure amount threshold at 500c — well below 1000c. This test
-	// exercises RESET semantics, so reset_billing_cycle is explicit: the
-	// omitted-field default flipped to false (keep-anchor, Stripe parity)
-	// on 2026-07-10.
-	resetCycle := true
+	// Configure amount threshold at 500c — well below 1000c.
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE:         500,
-		ResetBillingCycle: &resetCycle,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
@@ -292,24 +284,20 @@ func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
 		t.Errorf("billing_period_start: got %v, want %v", inv.BillingPeriodStart, f.cycleStart)
 	}
 
-	// Cycle reset: with reset_billing_cycle=true (explicit), the sub's
-	// current_billing_period_start should now be the fire-time, not the
-	// original cycleStart.
+	// The period keeps its anchor (TestThresholdScan_ResetCycleFalse locks
+	// it too): the cycle close bills the rest of the period.
 	updated, err := f.subStore.Get(ctx, f.tenantID, f.subID)
 	if err != nil {
 		t.Fatalf("reload sub: %v", err)
 	}
-	if updated.CurrentBillingPeriodStart == nil {
-		t.Fatal("current_billing_period_start should be set after reset")
-	}
-	if updated.CurrentBillingPeriodStart.Equal(f.cycleStart) {
-		t.Error("expected period_start to advance after reset_billing_cycle=true")
+	if updated.CurrentBillingPeriodStart == nil || !updated.CurrentBillingPeriodStart.Equal(f.cycleStart) {
+		t.Errorf("period_start = %v after the fire, want %v (the anchor is kept)", updated.CurrentBillingPeriodStart, f.cycleStart)
 	}
 }
 
 // TestThresholdScan_Idempotent guards against double-finalize on retry AND
 // against the re-fire burn. A second ScanThresholds tick over the same
-// reset=false cycle must emit zero new invoices — and, critically, do so
+// cycle must emit zero new invoices — and, critically, do so
 // WITHOUT allocating an invoice number or a tax calculation. The fire-once
 // probe (GetThresholdInvoiceForCycleAnyStatus) short-circuits before fireThreshold's
 // NextInvoiceNumber/ApplyTax; the partial unique index remains the correctness
@@ -326,14 +314,11 @@ func TestThresholdScan_Idempotent(t *testing.T) {
 
 	f.ingestUsage(t, ctx, 100, 10)
 
-	// reset_billing_cycle=false means the cycle stays put after fire, so
-	// the next tick observes the same partial cycle that already fired —
+	// The cycle stays put after the fire, so the next tick observes the same partial cycle that already fired —
 	// the partial unique index is the only thing preventing a second
 	// invoice. Perfect setup for verifying the idempotency seam.
-	resetFalse := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE:         500,
-		ResetBillingCycle: &resetFalse,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
@@ -442,12 +427,10 @@ func TestThresholdScan_ItemUsageCross(t *testing.T) {
 
 // TestThresholdScan_ItemOnlyKeepsAnchor pins the coverage cell where the
 // 2026-07-21 FLOW B14 money bug lived: an ITEM-ONLY threshold (amount_gte
-// NULL) with reset_billing_cycle omitted (defaults false). scanSubRow only
-// builds the thresholds struct when amount_gte is set, so hydrateThresholds
-// allocated it for item-only subs — with a fabricated ResetBillingCycle=true
-// that both the engine (re-anchored the cycle on fire) and the API echo
-// consumed. Mutation seam: restore the hardcoded `true` in hydrateThresholds
-// and both assertions below fail.
+// NULL). scanSubRow only builds the thresholds struct when amount_gte is set,
+// so hydrateThresholds allocates it for item-only subs; it once fabricated a
+// cycle reset there. The fire must hydrate the thresholds and keep the
+// period's anchor.
 func TestThresholdScan_ItemOnlyKeepsAnchor(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -458,8 +441,6 @@ func TestThresholdScan_ItemOnlyKeepsAnchor(t *testing.T) {
 
 	f.ingestUsage(t, ctx, 100, 10)
 
-	// reset_billing_cycle deliberately OMITTED — the documented default is
-	// false (Stripe keep-anchor), and item-only subs must honor it.
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
 		ItemThresholds: []subscription.ItemThresholdInput{
 			{SubscriptionItemID: f.itemID, UsageGTE: "500"},
@@ -468,16 +449,12 @@ func TestThresholdScan_ItemOnlyKeepsAnchor(t *testing.T) {
 		t.Fatalf("set threshold: %v", err)
 	}
 
-	// The hydrated read must report the stored flag, not the column default.
 	stored, err := f.subStore.Get(ctx, f.tenantID, f.subID)
 	if err != nil {
 		t.Fatalf("reload sub: %v", err)
 	}
-	if stored.BillingThresholds == nil {
-		t.Fatal("BillingThresholds should hydrate for item-only thresholds")
-	}
-	if stored.BillingThresholds.ResetBillingCycle {
-		t.Error("item-only threshold hydrated ResetBillingCycle=true; stored value is false")
+	if stored.BillingThresholds == nil || len(stored.BillingThresholds.ItemThresholds) != 1 {
+		t.Fatalf("BillingThresholds should hydrate the item threshold, got %+v", stored.BillingThresholds)
 	}
 
 	fired, errs := f.engine.ScanThresholds(ctx, 50)
@@ -496,7 +473,7 @@ func TestThresholdScan_ItemOnlyKeepsAnchor(t *testing.T) {
 		t.Fatal("period_start should be set")
 	}
 	if !updated.CurrentBillingPeriodStart.Equal(f.cycleStart) {
-		t.Errorf("item-only cap with default reset=false re-anchored the cycle: period_start %v, want %v",
+		t.Errorf("item-only cap re-anchored the cycle: period_start %v, want %v",
 			*updated.CurrentBillingPeriodStart, f.cycleStart)
 	}
 }
@@ -560,10 +537,10 @@ func TestThresholdScan_NoConfigSkipped(t *testing.T) {
 	}
 }
 
-// TestThresholdScan_ResetCycleFalse confirms the cycle stays put when the
-// caller explicitly opts out. The threshold invoice still fires, but the
-// next natural cycle invoice will pick up where the original cycle ended —
-// not where the threshold fired.
+// TestThresholdScan_ResetCycleFalse confirms the cycle stays put after a
+// fire (the only behavior since reset_billing_cycle was removed). The next
+// natural cycle invoice picks up where the original cycle ends — not where
+// the threshold fired.
 func TestThresholdScan_ResetCycleFalse(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -574,10 +551,8 @@ func TestThresholdScan_ResetCycleFalse(t *testing.T) {
 
 	f.ingestUsage(t, ctx, 100, 10)
 
-	resetFalse := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE:         500,
-		ResetBillingCycle: &resetFalse,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
@@ -597,9 +572,9 @@ func TestThresholdScan_ResetCycleFalse(t *testing.T) {
 	if updated.CurrentBillingPeriodStart == nil {
 		t.Fatal("period_start should be set")
 	}
-	// reset_billing_cycle=false means period_start should NOT have advanced.
+	// period_start must NOT have advanced.
 	if !updated.CurrentBillingPeriodStart.Equal(f.cycleStart) {
-		t.Errorf("period_start should remain %v with reset=false, got %v",
+		t.Errorf("period_start should remain %v, got %v",
 			f.cycleStart, *updated.CurrentBillingPeriodStart)
 	}
 }
@@ -623,10 +598,8 @@ func TestThresholdScan_BoundaryDefersToCycle(t *testing.T) {
 
 	// 100 events x qty 10 @ 1c = 1000c, all inside the first hour of the cycle.
 	f.ingestUsage(t, ctx, 100, 10)
-	resetFalse := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE:         500,
-		ResetBillingCycle: &resetFalse,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
@@ -716,9 +689,9 @@ func (f *thresholdFixture) seedThresholdFleet(t *testing.T, ctx context.Context,
 			INSERT INTO subscriptions (
 				id, tenant_id, code, display_name, customer_id, status, billing_time,
 				current_billing_period_start, current_billing_period_end, next_billing_at,
-				billing_threshold_amount_gte, billing_threshold_reset_cycle,
+				billing_threshold_amount_gte,
 				created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, 'active', 'anniversary', $6, $7, $7, 100, FALSE, $8, $8)
+			) VALUES ($1, $2, $3, $4, $5, 'active', 'anniversary', $6, $7, $7, 100, $8, $8)
 		`, subID, f.tenantID, "code-fleet-"+subID, "Fleet Sub "+subID, f.customerID, f.cycleStart, f.cycleEnd, now); err != nil {
 			t.Fatalf("insert fleet sub %d: %v", i, err)
 		}
@@ -847,10 +820,8 @@ func TestThresholdScan_ConcurrentDoubleFire_IndexHolds(t *testing.T) {
 	defer cancel()
 
 	f.ingestUsage(t, ctx, 100, 10)
-	resetFalse := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE:         500,
-		ResetBillingCycle: &resetFalse,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
@@ -965,56 +936,42 @@ func (a *failableInvoiceAdapter) CreateInvoiceWithLineItemsTx(ctx context.Contex
 	return out, err
 }
 
-// TestThresholdFire_ResetAtomic_RollsBackOnAdvanceFailure is the ADR-066
-// crash-point test on real Postgres: a reset=true fire whose tx fails AFTER
-// the cycle re-anchor — the invoice insert, now the second write behind the
-// period CAS (ADR-115) — must leave NO invoice and NO re-anchor behind
-// (single-tx rollback), so the next tick retries the whole fire cleanly. The
-// pre-fix two-write shape left the invoice committed with the reset stranded
-// forever — the fire-once probe blocked every retry, and under base proration
-// (fix 4) the customer's base was permanently under-billed. A failure on the
-// CAS side trivially yields no invoice (it runs first), so the injection sits
-// on the insert.
-func TestThresholdFire_ResetAtomic_RollsBackOnAdvanceFailure(t *testing.T) {
+// TestThresholdFire_Atomic_RollsBackOnInsertFailure is the ADR-066/ADR-115
+// crash-point test on real Postgres: a fire whose tx fails AFTER the period
+// CAS — at the invoice insert, the second write — must leave NO invoice
+// behind (single-tx rollback), so the next tick retries the whole fire
+// cleanly. A committed invoice would block every retry through the
+// fire-once probe. A failure on the CAS side trivially yields no invoice (it
+// runs first), so the injection sits on the insert.
+func TestThresholdFire_Atomic_RollsBackOnInsertFailure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
 	}
-	f := newThresholdFixture(t, "Threshold Atomic Reset")
+	f := newThresholdFixture(t, "Threshold Atomic Fire")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	defer cancel()
 
 	f.ingestUsage(t, ctx, 100, 10)
-	resetTrue := true
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE:         500,
-		ResetBillingCycle: &resetTrue,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set threshold: %v", err)
 	}
 
-	// Fault-inject the insert inside the coordinator tx, after the re-anchor.
+	// Fault-inject the insert inside the fire tx, after the period CAS.
 	f.invAdapter.createTxErr = fmt.Errorf("injected: invoice insert failed inside tx")
 	fired, errs := f.engine.ScanThresholds(ctx, 50)
 	if fired != 0 {
-		t.Fatalf("fired = %d, want 0 on a failed reset fire", fired)
+		t.Fatalf("fired = %d, want 0 on a failed fire", fired)
 	}
 	if len(errs) == 0 {
-		t.Fatal("scan swallowed the advance failure — want a loud, retryable error")
+		t.Fatal("scan swallowed the insert failure — want a loud, retryable error")
 	}
 	if got := len(f.listInvoices(t, ctx)); got != 0 {
-		t.Fatalf("invoice survived the rollback: %d invoices, want 0 (the pre-fix stranded-reset shape)", got)
-	}
-	// The sub's cycle must be untouched.
-	sub, err := f.subStore.Get(ctx, f.tenantID, f.subID)
-	if err != nil {
-		t.Fatalf("get sub: %v", err)
-	}
-	if !sub.CurrentBillingPeriodStart.Equal(f.cycleStart) {
-		t.Fatalf("cycle re-anchored despite rollback: period_start %v, want %v", *sub.CurrentBillingPeriodStart, f.cycleStart)
+		t.Fatalf("invoice survived the rollback: %d invoices, want 0", got)
 	}
 
-	// Clear the fault: the next tick retries the WHOLE fire cleanly — invoice
-	// lands and the cycle re-anchors, atomically.
+	// Clear the fault: the next tick retries the WHOLE fire cleanly.
 	f.invAdapter.createTxErr = nil
 	fired2, errs2 := f.engine.ScanThresholds(ctx, 50)
 	if len(errs2) > 0 {
@@ -1023,114 +980,20 @@ func TestThresholdFire_ResetAtomic_RollsBackOnAdvanceFailure(t *testing.T) {
 	if fired2 != 1 {
 		t.Fatalf("retry fired = %d, want 1 (rollback made the failure retryable)", fired2)
 	}
-	invoices := f.listInvoices(t, ctx)
-	if len(invoices) != 1 {
+	if invoices := f.listInvoices(t, ctx); len(invoices) != 1 {
 		t.Fatalf("expected exactly 1 invoice after clean retry, got %d", len(invoices))
 	}
-	sub, err = f.subStore.Get(ctx, f.tenantID, f.subID)
+	sub, err := f.subStore.Get(ctx, f.tenantID, f.subID)
 	if err != nil {
 		t.Fatalf("get sub after retry: %v", err)
 	}
-	if sub.CurrentBillingPeriodStart.Equal(f.cycleStart) {
-		t.Fatal("cycle did not re-anchor on the successful retry")
-	}
-	if !sub.CurrentBillingPeriodStart.Equal(invoices[0].BillingPeriodEnd) {
-		t.Errorf("new period_start %v != threshold invoice period_end %v (re-anchor must align with the fire window)",
-			*sub.CurrentBillingPeriodStart, invoices[0].BillingPeriodEnd)
-	}
-}
-
-// TestThresholdFire_ResetProratesBase_RealStore locks fix 4 through the real
-// path (previewWithWindow → evaluateThresholds post-processing → persisted
-// line items): a reset=true fire on a base-fee plan bills only the elapsed
-// fraction of the base, with the standard prorated description and a
-// reconciling unit amount, and the cycle re-anchors atomically with the
-// insert. The unit tests pin the denominator math; this pins the wiring.
-func TestThresholdFire_ResetProratesBase_RealStore(t *testing.T) {
-	if testing.Short() {
-		t.Skip("integration: skipped in -short mode")
-	}
-	f := newThresholdFixture(t, "Threshold Prorated Base")
-	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
-	defer cancel()
-
-	// One base-fee sub (fleet helper seeds amount_gte=100, reset=false);
-	// flip it to reset=true for the proration arm.
-	ids := f.seedThresholdFleet(t, ctx, 1)
-	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET billing_threshold_reset_cycle = TRUE WHERE id = $1`, ids[0]); err != nil {
-		t.Fatalf("flip reset: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	fired, errs := f.engine.ScanThresholds(ctx, 50)
-	if len(errs) > 0 {
-		t.Fatalf("scan errors: %v", errs)
-	}
-	if fired != 1 {
-		t.Fatalf("fired = %d, want 1", fired)
-	}
-
-	// Expected proration mirrors the engine convention: segDays = elapsed
-	// whole days since cycleStart (fixture anchors 72h ago ⇒ 3), denominator
-	// = the plan's full monthly interval from cycleStart (month-length
-	// dependent), RoundHalfToEven.
-	segDays := int64(3)
-	// The period length comes from the engine's own helper, not AddDate:
-	// AddDate rolls an out-of-range day into the next month (Oct 31 + 1 month
-	// = Dec 1, 31 days), while billing clamps to the month's last day (Nov 30,
-	// 30 days). With AddDate this test failed whenever "72 hours ago" fell on
-	// a day the next month lacks, about six days a year.
-	anchorDay := domain.AnchorDayFor(f.cycleStart, domain.BillingTimeAnniversary, domain.BillingMonthly, time.UTC)
-	periodEnd := domain.AddBillingInterval(f.cycleStart, domain.BillingMonthly, time.UTC, anchorDay)
-	fullDays := int64(math.Round(periodEnd.Sub(f.cycleStart).Hours() / 24))
-	wantBase := money.RoundHalfToEven(4900*segDays, fullDays)
-
-	invoices := f.listInvoices(t, ctx)
-	if len(invoices) != 1 {
-		t.Fatalf("invoices = %d, want 1", len(invoices))
-	}
-	inv := invoices[0]
-	if inv.SubtotalCents != wantBase {
-		t.Errorf("subtotal = %d, want %d (prorated %d/%d of 4900)", inv.SubtotalCents, wantBase, segDays, fullDays)
-	}
-	lines, err := f.invStore.ListLineItems(ctx, f.tenantID, inv.ID)
-	if err != nil {
-		t.Fatalf("line items: %v", err)
-	}
-	if len(lines) != 1 {
-		t.Fatalf("lines = %d, want 1 (base only)", len(lines))
-	}
-	li := lines[0]
-	if li.AmountCents != wantBase {
-		t.Errorf("base line amount = %d, want %d", li.AmountCents, wantBase)
-	}
-	if li.UnitAmountCents != wantBase {
-		t.Errorf("base line unit = %d, want %d (qty 1 — must reconcile qty × unit == amount)", li.UnitAmountCents, wantBase)
-	}
-	wantDesc := fmt.Sprintf("prorated %d/%d days", segDays, fullDays)
-	if !strings.Contains(li.Description, wantDesc) {
-		t.Errorf("base line description = %q, want %q suffix", li.Description, wantDesc)
-	}
-
-	// The re-anchor committed with the insert: new period starts at the fire.
-	sub, err := f.subStore.Get(ctx, f.tenantID, ids[0])
-	if err != nil {
-		t.Fatalf("get sub: %v", err)
-	}
-	if !sub.CurrentBillingPeriodStart.Equal(inv.BillingPeriodEnd) {
-		t.Errorf("period_start %v != invoice period_end %v (atomic re-anchor)", *sub.CurrentBillingPeriodStart, inv.BillingPeriodEnd)
+	if !sub.CurrentBillingPeriodStart.Equal(f.cycleStart) {
+		t.Fatalf("period_start %v after the fire, want %v (the anchor is kept)", *sub.CurrentBillingPeriodStart, f.cycleStart)
 	}
 }
 
 // TestThresholdCycle_DeferredMax_FullWindowOnce is the ADR-066 §4 money lock
-// on real Postgres: a reset=false fire (crossed by sum usage + the max
+// on real Postgres: a fire (crossed by sum usage + the max
 // bucket's committed spend) DROPS the max line; at cycle close the max meter
 // must bill over the FULL window — its peak predates the fire, so the
 // watermark-clamped residual window contains no peak at all. Pre-fix the
@@ -1196,9 +1059,9 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 			INSERT INTO subscriptions (
 				id, tenant_id, code, display_name, customer_id, status, billing_time,
 				current_billing_period_start, current_billing_period_end, next_billing_at,
-				billing_threshold_amount_gte, billing_threshold_reset_cycle,
+				billing_threshold_amount_gte,
 				created_at, updated_at
-			) VALUES ($1, $2, $3, $4, $5, 'active', 'anniversary', $6, $7, $7, 500, FALSE, $8, $8)
+			) VALUES ($1, $2, $3, $4, $5, 'active', 'anniversary', $6, $7, $7, 500, $8, $8)
 		`, subID, f.tenantID, "code-"+subID, "Deferred Max "+subID, cust.ID, f.cycleStart, f.cycleEnd, now); err != nil {
 			t.Fatalf("insert sub %d: %v", i, err)
 		}
@@ -1239,7 +1102,7 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 	}
 
 	// Fire: both subs cross (sum 1000c + max committed 10000c ≥ 500).
-	// reset=false ⇒ the max line is DROPPED from both threshold invoices.
+	// The max line is DROPPED from both threshold invoices.
 	fired, errs := f.engine.ScanThresholds(ctx, 50)
 	if len(errs) > 0 {
 		t.Fatalf("scan errors: %v", errs)
@@ -1329,7 +1192,7 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 // TestImmediateCancel_AfterThresholdFire_NoDoubleBill is the ADR-066 §5
 // site-set fix on real Postgres: the immediate cancel is the period's SECOND
 // closer, and pre-fix it ignored the threshold watermark entirely — after a
-// reset=false fire it re-billed the pre-fire sum usage AND the full
+// fire it re-billed the pre-fire sum usage AND the full
 // in_arrears base (both already on the fire invoice). The final cancel
 // invoice must bill only the post-fire residual sum, zero base, and the
 // deferred max bucket over the FULL window.
@@ -1381,9 +1244,9 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 		INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
-			billing_threshold_amount_gte, billing_threshold_reset_cycle,
+			billing_threshold_amount_gte,
 			created_at, updated_at
-		) VALUES ($1, $2, 'code-cf', 'Cancel Fire Sub', $3, 'active', 'anniversary', $4, $5, $5, 500, FALSE, $6, $6)
+		) VALUES ($1, $2, 'code-cf', 'Cancel Fire Sub', $3, 'active', 'anniversary', $4, $5, $5, 500, $6, $6)
 	`, subID, f.tenantID, cust.ID, f.cycleStart, f.cycleEnd, now); err != nil {
 		t.Fatalf("insert sub: %v", err)
 	}
@@ -1421,7 +1284,7 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 		}
 	}
 
-	// Fire (reset=false): full base 3000 + sum 1000 ride the invoice; max
+	// Fire: full base 3000 + sum 1000 ride the invoice; max
 	// dropped (deferred).
 	fired, errs := f.engine.ScanThresholds(ctx, 50)
 	if len(errs) > 0 {

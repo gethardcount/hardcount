@@ -258,9 +258,8 @@ func TestPriceChange_FireThenPublishThenClose(t *testing.T) {
 	// Threshold: fire once the running subtotal crosses $5, keep the
 	// cycle (reset=false) so the close bills the residual window of the
 	// SAME period.
-	noReset := false
 	if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: 500, ResetBillingCycle: &noReset,
+		AmountGTE: 500,
 	}); err != nil {
 		t.Fatalf("set thresholds: %v", err)
 	}

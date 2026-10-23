@@ -508,8 +508,8 @@ type SubscriptionReader interface {
 	// ClosePeriodTx is THE period writer: one UPDATE that row-locks the
 	// subscription and proves `expected` (status, period start, watermark),
 	// then re-stamps the period. subscription.ErrWatermarkMoved when the
-	// snapshot is stale — the caller wrote nothing. The reset=false threshold
-	// fire calls it verify-only (same values) to take the lock and prove the
+	// snapshot is stale — the caller wrote nothing. The threshold fire calls
+	// it verify-only (same values) to take the lock and prove the
 	// snapshot before inserting.
 	ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
 	// ClosePeriod is the own-tx wrapper for the trial-active advance (no
@@ -2806,12 +2806,11 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	terminalCycleClose := shouldFireScheduledCancel(sub, periodEnd, now)
 
 	// Threshold-fired invoice for THIS cycle: when fireThreshold ran
-	// mid-cycle and the cycle was NOT reset (reset_billing_cycle=false),
-	// that invoice already billed (and typically charged) usage through its
+	// mid-cycle (the period keeps its anchor), that invoice already billed (and typically charged) usage through its
 	// billing_period_end PLUS the full in_arrears base fee
 	// (evaluateThresholds → previewWithWindow emits the unprorated base).
 	// Without this watermark the cycle close re-billed both: usage from
-	// periodStart and the base again — every reset=false threshold cycle
+	// periodStart and the base again — every threshold cycle
 	// double-charged. Keyed on the invoice (ground truth), not the
 	// mutable BillingThresholds config, so an operator removing
 	// thresholds mid-cycle doesn't resurrect the double-bill.
@@ -4491,7 +4490,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 
 	// Threshold watermark (ADR-066 §4/§5): the immediate cancel is the
 	// period's SECOND closer, and pre-fix it ignored the fire entirely — a
-	// reset=false threshold fire followed by an immediate cancel re-billed
+	// threshold fire followed by an immediate cancel re-billed
 	// the pre-fire sum usage AND the full in_arrears base (both already on
 	// the fire invoice, typically already charged). Shared protocol with
 	// billOnePeriod: base skipped when a fire exists, additive buckets

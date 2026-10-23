@@ -15,11 +15,5 @@ export type SetSubscriptionBillingThresholdsBody = {
      * @minimum 1
      */
   amount_gte?: number;
-  /**
-     * `true` starts a new billing period when a threshold
-     * invoice is issued. `false` keeps the period; the rest of
-     * the period's usage is billed at its normal end.
-     */
-  reset_billing_cycle?: boolean;
   item_thresholds?: SetSubscriptionBillingThresholdsBodyItemThresholdsItem[];
 };

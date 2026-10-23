@@ -27,8 +27,8 @@ type closeBaseLine struct {
 // segsByItem is windowSegments over the period; plans must already hold
 // every plan a segment references. terminalCycleClose skips the upcoming
 // in_advance base when a scheduled cancel fires at this boundary;
-// thresholdBilled skips the in_arrears base when a reset=false threshold
-// invoice already billed it this cycle.
+// thresholdBilled skips the in_arrears base when a threshold invoice already
+// billed it this cycle.
 func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, terminalCycleClose, thresholdBilled bool) []closeBaseLine {
 	var out []closeBaseLine
 
