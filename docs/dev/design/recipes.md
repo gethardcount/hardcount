@@ -186,7 +186,7 @@ Response `200`:
       "..."
     ],
     "plans": [{ "code": "ai_api_pro", "name": "AI API", "currency": "USD", "billing_interval": "monthly", "base_amount_cents": 0, "meter_keys": ["tokens"] }],
-    "dunning_policies": [{ "name": "AI default retry", "max_retries": 4, "intervals_hours": [24, 72, 168, 336] }],
+    "dunning_policies": [{ "name": "AI default retry", "retry_days": [3, 1, 3, 7] }],
     "webhook_endpoints": [{ "url": "https://example.com/webhooks/velox", "events": ["invoice.finalized", "invoice.paid", "subscription.updated"], "_placeholder": true }]
   },
   "warnings": []
