@@ -875,7 +875,10 @@ components:
 
     InvoiceLineType:
       type: string
-      enum: [base_fee, usage, add_on]
+      enum: [base_fee, usage, add_on, discount, tax]
+      description: |
+        `discount` and `tax` appear only on lines added before 2026-10-22;
+        a new line cannot use them.
 
     ItemChangeType:
       type: string

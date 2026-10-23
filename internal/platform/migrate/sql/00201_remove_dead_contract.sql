@@ -1,10 +1,10 @@
 -- +goose Up
--- Removes values, a column and four tables that no Velox code writes, before
--- the first release makes them part of the contract:
---   - subscription status archived, plan status draft (a plan is created
---     active; its default becomes active);
+-- Removes values, a column and four tables that no Velox code writes any
+-- more:
+--   - subscription status archived;
+--   - plan status draft (a plan is created active; its default becomes
+--     active);
 --   - invoice tax_status failed (a failed calculation stays pending);
---   - invoice line types discount and tax (refused since #1324);
 --   - payment recovery run state paused (the paused flag stays), resolution
 --     manually_resolved, and event types retry_scheduled, retry_succeeded,
 --     retry_failed, paused and resumed;
@@ -14,8 +14,16 @@
 -- The run and event state and the event type get a CHECK for the first time.
 -- billing_threshold_reset_cycle defaults to false, as the API does.
 --
--- Nothing is rewritten to make room. If a row holds a removed value, the
--- upgrade stops here before changing anything, and the error lists them.
+-- Invoice line types discount and tax stay allowed: lines added before #1324
+-- have them, and an issued invoice's lines are never changed. The API
+-- refuses them on a new line.
+--
+-- A draft plan becomes active: it was already sold and billed like an
+-- active one, so nothing about it changes but the label. Nothing else is
+-- rewritten. If any other row holds a removed value, the upgrade stops here
+-- before changing anything, and the error lists them. No Velox release
+-- since v0.2.0 writes those values.
+--
 -- These tables force row-level security, and the user that runs migrations
 -- may be subject to it, so the file turns the bypass on for its own
 -- transaction.
@@ -29,14 +37,10 @@ DECLARE
 BEGIN
     SELECT count(*) INTO n FROM subscriptions WHERE status = 'archived';
     IF n > 0 THEN found := found || format(E'\n  %s subscription(s) with status archived', n); END IF;
-    SELECT count(*) INTO n FROM plans WHERE status = 'draft';
-    IF n > 0 THEN found := found || format(E'\n  %s plan(s) with status draft', n); END IF;
     SELECT count(*) INTO n FROM invoices WHERE tax_status = 'failed';
     IF n > 0 THEN found := found || format(E'\n  %s invoice(s) with tax_status failed', n); END IF;
     SELECT count(*) INTO n FROM invoices WHERE stripe_invoice_id IS NOT NULL;
     IF n > 0 THEN found := found || format(E'\n  %s invoice(s) with a stripe_invoice_id', n); END IF;
-    SELECT count(*) INTO n FROM invoice_line_items WHERE line_type IN ('discount', 'tax');
-    IF n > 0 THEN found := found || format(E'\n  %s invoice line(s) with line_type discount or tax', n); END IF;
     SELECT count(*) INTO n FROM invoice_dunning_runs WHERE state NOT IN ('active', 'escalated', 'resolved');
     IF n > 0 THEN found := found || format(E'\n  %s payment recovery run(s) with state paused or another state outside active, escalated, resolved', n); END IF;
     SELECT count(*) INTO n FROM invoice_dunning_runs WHERE resolution = 'manually_resolved';
@@ -56,11 +60,13 @@ BEGIN
     IF n > 0 THEN found := found || format(E'\n  %s row(s) in billed_entries', n); END IF;
     IF found <> '' THEN
         RAISE EXCEPTION 'migration 00201 removes values that no Velox code writes, and this database has rows that hold them:%', found
-            USING HINT = 'Nothing was changed. Velox does not rewrite an invoice or its lines to make room. These rows come from builds before this release; install fresh, or remove the rows yourself and run the upgrade again';
+            USING HINT = 'Nothing was changed. No Velox release since v0.2.0 writes these values, and Velox does not rewrite stored history to make room. Keep running the release you have, or install this one on a new database';
     END IF;
 END
 $$;
 -- +goose StatementEnd
+
+UPDATE plans SET status = 'active' WHERE status = 'draft';
 
 DROP TABLE coupon_redemptions;
 DROP TABLE customer_discounts;
@@ -86,10 +92,6 @@ ALTER TABLE invoices DROP CONSTRAINT invoices_tax_status_check;
 ALTER TABLE invoices ADD CONSTRAINT invoices_tax_status_check
     CHECK (tax_status IN ('ok', 'pending')) NOT VALID;
 
-ALTER TABLE invoice_line_items DROP CONSTRAINT invoice_line_items_line_type_check;
-ALTER TABLE invoice_line_items ADD CONSTRAINT invoice_line_items_line_type_check
-    CHECK (line_type IN ('base_fee', 'usage', 'add_on')) NOT VALID;
-
 ALTER TABLE invoice_dunning_runs DROP CONSTRAINT invoice_dunning_runs_resolution_check;
 ALTER TABLE invoice_dunning_runs ADD CONSTRAINT invoice_dunning_runs_resolution_check
     CHECK (resolution IS NULL OR resolution IN ('payment_recovered', 'invoice_voided', 'invoice_not_collectible',
@@ -105,6 +107,7 @@ ALTER TABLE invoice_dunning_events ADD CONSTRAINT invoice_dunning_events_state_c
 -- +goose Down
 -- Rollback runs only with APP_ENV=local. It puts back the old schema; rows
 -- the tables held before the Up were none (the Up refuses to run otherwise).
+-- A plan the Up made active stays active.
 ALTER TABLE invoice_dunning_events DROP CONSTRAINT invoice_dunning_events_state_check;
 ALTER TABLE invoice_dunning_events DROP CONSTRAINT invoice_dunning_events_event_type_check;
 ALTER TABLE invoice_dunning_runs DROP CONSTRAINT invoice_dunning_runs_state_check;
@@ -112,9 +115,6 @@ ALTER TABLE invoice_dunning_runs DROP CONSTRAINT invoice_dunning_runs_resolution
 ALTER TABLE invoice_dunning_runs ADD CONSTRAINT invoice_dunning_runs_resolution_check
     CHECK (resolution IS NULL OR resolution IN ('payment_recovered', 'invoice_voided', 'invoice_not_collectible',
         'retries_exhausted', 'action_failed', 'manually_resolved', 'amount_below_minimum'));
-ALTER TABLE invoice_line_items DROP CONSTRAINT invoice_line_items_line_type_check;
-ALTER TABLE invoice_line_items ADD CONSTRAINT invoice_line_items_line_type_check
-    CHECK (line_type IN ('base_fee', 'usage', 'add_on', 'discount', 'tax'));
 ALTER TABLE invoices DROP CONSTRAINT invoices_tax_status_check;
 ALTER TABLE invoices ADD CONSTRAINT invoices_tax_status_check
     CHECK (tax_status IN ('ok', 'pending', 'failed'));

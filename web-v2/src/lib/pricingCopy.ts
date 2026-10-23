@@ -9,8 +9,8 @@ function subscriptionsUse(n: number): string {
 export const PLAN_LOCKED_TITLE = 'Plan in use'
 
 // The plan lock (ADR-034): the server refuses a base price, billing timing
-// or meter change while any subscription that is not canceled or archived
-// uses the plan (pricing.Service.UpdatePlan). `liveSubscriptions` is the
+// or meter change while any subscription that is not canceled uses the
+// plan (pricing.Service.UpdatePlan). `liveSubscriptions` is the
 // server's own count of those (GET /v1/plans/{id} live_subscription_count),
 // so the page and the refusal agree. Same sentence as the refusal.
 export function planLockedSentence(liveSubscriptions: number): string {

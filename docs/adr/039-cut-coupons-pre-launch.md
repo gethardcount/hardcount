@@ -8,7 +8,7 @@ shipped between Week 4 and Week 8.
 
 ## Summary
 
-Coupons are removed: the `internal/coupon` package, its API endpoints, its billing-engine hooks and its dashboard pages were deleted. Velox targets AI and usage-based billing, where peers use credits rather than promo codes, and the credit ledger already covers every discount need seen so far. The `coupons`, `coupon_redemptions` and `customer_discounts` tables stayed until migration 00201 dropped them before the first release (amendment below). Status: active.
+Coupons are removed: the `internal/coupon` package, its API endpoints, its billing-engine hooks and its dashboard pages were deleted. Velox targets AI and usage-based billing, where peers use credits rather than promo codes, and the credit ledger already covers every discount need seen so far. The `coupons`, `coupon_redemptions` and `customer_discounts` tables stayed until migration 00201 dropped them on 2026-10-23 (amendment below). Status: active.
 
 ## Context
 
@@ -94,10 +94,10 @@ remain in place. Destructive drops have asymmetric risk pre-launch
 keep, and a future rebuild would start from the existing schema if
 a DP names a coupon use case.
 
-**Amendment 2026-10-23: the tables are dropped.** No code wrote
-them, and after the first release a dropped table is a breaking
-change, so migration 00201 drops `coupons`, `coupon_redemptions` and
-`customer_discounts` (and `billed_entries`). It refuses to run while
+**Amendment 2026-10-23: the tables are dropped.** No code has
+written them since coupons were cut, so migration 00201 drops
+`coupons`, `coupon_redemptions` and `customer_discounts` (and
+`billed_entries`). It refuses to run while
 any of them holds a row. A rebuild starts from the schema that
 00201's Down recreates.
 

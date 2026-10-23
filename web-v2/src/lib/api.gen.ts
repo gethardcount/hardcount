@@ -7654,8 +7654,12 @@ export interface components {
          * @enum {string}
          */
         InvoiceBillingReason: "subscription_cycle" | "subscription_create" | "subscription_cancel" | "subscription_update" | "manual" | "threshold";
-        /** @enum {string} */
-        InvoiceLineType: "base_fee" | "usage" | "add_on";
+        /**
+         * @description `discount` and `tax` appear only on lines added before 2026-10-22;
+         *     a new line cannot use them.
+         * @enum {string}
+         */
+        InvoiceLineType: "base_fee" | "usage" | "add_on" | "discount" | "tax";
         /**
          * @description Classifies per-item proration artifacts so the dedup index can
          *     distinguish a plan-change and a quantity-change that happen to

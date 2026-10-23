@@ -970,9 +970,11 @@ func (e InvoiceLineItemInputLineType) Valid() bool {
 
 // Defines values for InvoiceLineType.
 const (
-	InvoiceLineTypeAddOn   InvoiceLineType = "add_on"
-	InvoiceLineTypeBaseFee InvoiceLineType = "base_fee"
-	InvoiceLineTypeUsage   InvoiceLineType = "usage"
+	InvoiceLineTypeAddOn    InvoiceLineType = "add_on"
+	InvoiceLineTypeBaseFee  InvoiceLineType = "base_fee"
+	InvoiceLineTypeDiscount InvoiceLineType = "discount"
+	InvoiceLineTypeTax      InvoiceLineType = "tax"
+	InvoiceLineTypeUsage    InvoiceLineType = "usage"
 )
 
 // Valid indicates whether the value is a known member of the InvoiceLineType enum.
@@ -981,6 +983,10 @@ func (e InvoiceLineType) Valid() bool {
 	case InvoiceLineTypeAddOn:
 		return true
 	case InvoiceLineTypeBaseFee:
+		return true
+	case InvoiceLineTypeDiscount:
+		return true
+	case InvoiceLineTypeTax:
 		return true
 	case InvoiceLineTypeUsage:
 		return true
@@ -5184,15 +5190,18 @@ type InvoiceLineItem struct {
 	// to the customer. May differ from the line price — discounted
 	// commits sell $10k of credits for $9k. add_on lines on manual
 	// invoices only, at most one per invoice. Absent on normal lines.
-	CommitGrantedCents int64                  `json:"commit_granted_cents,omitempty"`
-	CreatedAt          time.Time              `json:"created_at"`
-	Currency           string                 `json:"currency"`
-	Description        string                 `json:"description"`
-	Id                 string                 `json:"id"`
-	InvoiceId          string                 `json:"invoice_id"`
-	LineType           InvoiceLineType        `json:"line_type"`
-	Metadata           map[string]interface{} `json:"metadata,omitempty"`
-	MeterId            string                 `json:"meter_id,omitempty"`
+	CommitGrantedCents int64     `json:"commit_granted_cents,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	Currency           string    `json:"currency"`
+	Description        string    `json:"description"`
+	Id                 string    `json:"id"`
+	InvoiceId          string    `json:"invoice_id"`
+
+	// LineType `discount` and `tax` appear only on lines added before 2026-10-22;
+	// a new line cannot use them.
+	LineType InvoiceLineType        `json:"line_type"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	MeterId  string                 `json:"meter_id,omitempty"`
 
 	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
 	MeterUnit   string `json:"meter_unit,omitempty"`
@@ -5251,7 +5260,8 @@ type InvoiceLineItemInput struct {
 // InvoiceLineItemInputLineType Defaults to `add_on`.
 type InvoiceLineItemInputLineType string
 
-// InvoiceLineType defines model for InvoiceLineType.
+// InvoiceLineType `discount` and `tax` appear only on lines added before 2026-10-22;
+// a new line cannot use them.
 type InvoiceLineType string
 
 // InvoicePaymentStatus Payment-attempt status. `unknown` marks a Stripe charge attempt that

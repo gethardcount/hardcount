@@ -73,7 +73,7 @@ original text.
 - **Migrations 199 and 200 give every credit ledger row a currency ([#1361](https://github.com/getvelox/velox/pull/1361)).** 199 fills it for existing rows with the currency each customer's balance was shown in, then requires one on new rows; 200 checks the rows and makes the column NOT NULL. Once 199 has run, a copy of the previous release cannot write credit: stop the old copies before you migrate.
 - **API callers: credit is per currency ([#1361](https://github.com/getvelox/velox/pull/1361)).** `POST /v1/credits/grant` and `/adjust` require `currency`. `GET /v1/credits/balance/{id}` returns `{data: [...]}`, one balance per currency; the live balance returns `balances`; grants return `remaining_by_currency`; the cost dashboard's `credits` is an array; analytics returns `credit_balance_by_currency` instead of `credit_balance_total`. Ledger rows and `credit.*` webhooks carry `currency`.
 - **API callers: `POST /v1/invoices` refuses a currency that is not the customer's, with 409 `customer_currency_conflict` ([#1361](https://github.com/getvelox/velox/pull/1361)).** The billing profile's and every live subscription's plan currency must agree with it. With no currency sent, the invoice takes the profile's, then the plan's, then the workspace default.
-- **Migrations 201 and 202 remove values, a column and four tables that no Velox code writes ([#1365](https://github.com/getvelox/velox/pull/1365)).** 201 first counts the rows that hold any of them; if there are any, it stops without changing anything and lists them, because Velox does not rewrite an invoice to make room. 202 checks the existing rows without blocking writes. Once 201 has run, a copy of the previous release cannot read invoices (it asks for `stripe_invoice_id`): stop the old copies before you migrate.
+- **Migrations 201 and 202 remove values, a column and four tables that no Velox code writes any more ([#1365](https://github.com/getvelox/velox/pull/1365)).** 201 makes draft plans active (a draft plan already billed like an active one). It then counts the rows that hold any other removed value; if there are any, it stops without changing anything and lists them. No release since v0.2.0 writes those values. 202 checks the existing rows without blocking writes. Once 201 has run, a copy of the previous release cannot read invoices (it asks for `stripe_invoice_id`): stop the old copies before you migrate.
 
 ### Added
 
@@ -126,10 +126,10 @@ original text.
 
 ### Removed
 
-- **Breaking for API callers: values no Velox code ever wrote (2026-10-23, [#1365](https://github.com/getvelox/velox/pull/1365)).** No response changes. Code that lists these values can drop them:
+- **Breaking for API callers: values no Velox code writes any more (2026-10-23, [#1365](https://github.com/getvelox/velox/pull/1365)).** Code that lists these values can drop them:
   - subscription `status` `archived`; `GET /v1/subscriptions?status=archived` is a 400;
-  - plan `status` `draft`; a `PATCH` that sends it is a 422;
-  - invoice `tax_status` `failed` (a failed calculation stays `pending`), and line types `discount` and `tax`;
+  - plan `status` `draft`; a `PATCH` that sends it is a 422, and a draft plan is now `active` (it already billed like one);
+  - invoice `tax_status` `failed` (a failed calculation stays `pending`);
   - dunning run `state` `paused` (the `paused` flag stays); `GET /v1/dunning/runs?state=paused`, or any state but `active`, `escalated` and `resolved`, is a 400;
   - dunning run `resolution` `manually_resolved`;
   - dunning event types `retry_scheduled`, `retry_succeeded`, `retry_failed`, `paused` and `resumed`.
