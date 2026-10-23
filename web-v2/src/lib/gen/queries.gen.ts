@@ -15327,8 +15327,8 @@ export const getUpdateDunningPolicyUrl = (id: string,) => {
 /**
  * Replaces every setting of the policy with the body. This is not a
  * partial update: an omitted field takes its default (`enabled`
- * false, `name` empty, 3 attempts, 3 grace days, pause the
- * subscription, leave the invoice open). Send the full policy.
+ * false, `name` empty, pause the subscription, leave the invoice
+ * open), and `retry_days` is required. Send the full policy.
  * `is_default` cannot be changed here; use set-default.
  * @summary Replace dunning policy settings
  */

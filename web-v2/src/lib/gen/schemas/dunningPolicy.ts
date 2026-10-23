@@ -24,12 +24,10 @@ export interface DunningPolicy {
      * recipe) becomes the default instead. Ignored in request bodies.
      */
   seeded: boolean;
-  /** @nullable */
-  retry_schedule: string[] | null;
-  max_retry_attempts: number;
+  /** Days to wait before each retry; the number of retries is its length. */
+  retry_days: number[];
   final_subscription_action: DunningPolicyFinalSubscriptionAction;
   final_invoice_action: DunningPolicyFinalInvoiceAction;
-  grace_period_days: number;
   created_at: string;
   updated_at: string;
 }

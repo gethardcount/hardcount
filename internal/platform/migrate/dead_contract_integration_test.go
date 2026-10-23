@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,8 +33,17 @@ func deadContractExec(ctx context.Context, db *sql.DB, q string) error {
 	return tx.Commit()
 }
 
-// deadContractSeed is the parent rows every statement below hangs off.
-const deadContractSeed = `
+// deadContractSeed is the parent rows every statement below hangs off, in
+// the schema before 00206 (a dunning policy's schedule is its three old
+// columns; one retry needs no retry_schedule entry; a meter has a key).
+// deadContractSeedNow is the same rows in the schema after 00206 and 00208
+// (retry_days; a meter has an event_name).
+var (
+	deadContractSeed    = fmt.Sprintf(deadContractSeedRows, "max_retry_attempts", "1", "key")
+	deadContractSeedNow = fmt.Sprintf(deadContractSeedRows, "retry_days", "'[3]'", "event_name")
+)
+
+const deadContractSeedRows = `
 INSERT INTO tenants (id, name) VALUES ('ten_dc', 'Dead contract');
 INSERT INTO customers (id, tenant_id, external_id, display_name) VALUES ('cus_dc', 'ten_dc', 'dc', 'DC');
 INSERT INTO plans (id, tenant_id, code, name, currency, billing_interval, status) VALUES ('pln_dc', 'ten_dc', 'dc', 'DC', 'USD', 'monthly', 'active');
@@ -41,10 +51,10 @@ INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, statu
 INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status, currency,
 		subtotal_cents, total_amount_cents, amount_due_cents, billing_period_start, billing_period_end)
 	VALUES ('inv_dc', 'ten_dc', 'cus_dc', 'DC-1', 'finalized', 'pending', 'USD', 1000, 1000, 1000, now() - interval '30 days', now());
-INSERT INTO dunning_policies (id, tenant_id, name) VALUES ('dpol_dc', 'ten_dc', 'DC');
+INSERT INTO dunning_policies (id, tenant_id, name, %s) VALUES ('dpol_dc', 'ten_dc', 'DC', %s);
 INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state)
 	VALUES ('drun_dc', 'ten_dc', 'inv_dc', 'cus_dc', 'dpol_dc', 'active');
-INSERT INTO meters (id, tenant_id, key, name) VALUES ('mtr_dc', 'ten_dc', 'dc', 'DC');
+INSERT INTO meters (id, tenant_id, %s, name) VALUES ('mtr_dc', 'ten_dc', 'dc', 'DC');
 `
 
 // TestDeadContract_RefusesRowsHoldingRemovedValues: 00201 removes values
@@ -267,10 +277,7 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// The seed is written for the schema before 00208, which names a
-	// meter's key event_name.
-	seed := strings.Replace(deadContractSeed, "INSERT INTO meters (id, tenant_id, key, name)", "INSERT INTO meters (id, tenant_id, event_name, name)", 1)
-	if err := deadContractExec(ctx, db, seed); err != nil {
+	if err := deadContractExec(ctx, db, deadContractSeedNow); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 

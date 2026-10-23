@@ -94,9 +94,8 @@ type rawDunningSection struct {
 }
 
 type rawDunningPolicy struct {
-	Name           string `yaml:"name"`
-	MaxRetries     int    `yaml:"max_retries"`
-	IntervalsHours []int  `yaml:"intervals_hours"`
+	Name      string `yaml:"name"`
+	RetryDays []int  `yaml:"retry_days"`
 	// The two terminal decisions (ADR-112).
 	FinalSubscriptionAction string `yaml:"final_subscription_action"`
 	FinalInvoiceAction      string `yaml:"final_invoice_action"`
@@ -325,8 +324,8 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 			return domain.Recipe{}, fmt.Errorf("recipe %q: dunning.policy.final_invoice_action %q must be one of none, mark_uncollectible", raw.Key, dp.FinalInvoiceAction)
 		}
 		out.DunningPolicy = &domain.RecipeDunningPolicy{
-			Name: dp.Name, MaxRetries: dp.MaxRetries,
-			IntervalsHours:          dp.IntervalsHours,
+			Name:                    dp.Name,
+			RetryDays:               dp.RetryDays,
 			FinalSubscriptionAction: dp.FinalSubscriptionAction,
 			FinalInvoiceAction:      dp.FinalInvoiceAction,
 		}

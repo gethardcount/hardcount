@@ -80,9 +80,7 @@ function planBilledInAdvance(): Promise<Plan> {
 async function ownRetryPolicy(customerId: string) {
   const policy = {
     name: `E2E Activity retries ${uniq()}`,
-    max_retry_attempts: 3,
-    grace_period_days: 3,
-    retry_schedule: ['96h', '168h'],
+    retry_days: [3, 4, 7],
     final_subscription_action: 'pause',
     final_invoice_action: 'none',
   }

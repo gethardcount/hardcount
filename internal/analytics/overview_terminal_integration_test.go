@@ -63,7 +63,7 @@ func TestOverview_ClosedInvoicesLeaveFailedPaymentsAndRecovery(t *testing.T) {
 	policyID := postgres.NewID("vlx_dpol")
 	// A tenant tx, so the set_livemode trigger stamps the test mode the
 	// overview reads.
-	execTenant(t, db, tenantID, `INSERT INTO dunning_policies (id, tenant_id, name) VALUES ($1, $2, 'p')`, policyID, tenantID)
+	execTenant(t, db, tenantID, `INSERT INTO dunning_policies (id, tenant_id, name, retry_days) VALUES ($1, $2, 'p', '[3, 3, 3]')`, policyID, tenantID)
 	run := func(invoiceID, state, resolution string) {
 		t.Helper()
 		execTenant(t, db, tenantID, `INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, resolution, created_at)

@@ -144,8 +144,8 @@ func newDunningRetryRig(t *testing.T, name string) *dunningRetryRig {
 	d.credits = credit.NewService(d.ledgerFaults)
 	d.faults = &faultInvoices{PostgresStore: r.invoices}
 	policy, err := d.runs.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -551,7 +551,7 @@ func TestDunningRetry_FinalAttemptDBError_NoFinalAction(t *testing.T) {
 	d := newDunningRetryRig(t, "Retry Final Attempt Error")
 	custID := d.customerWithCard("final", "pm_final")
 	inv := d.dunnedInvoice(custID, "INV-G2-FINAL")
-	before := d.dueRun(inv.ID, custID, d.policy.MaxRetryAttempts-1)
+	before := d.dueRun(inv.ID, custID, d.policy.Retries()-1)
 	d.charges.answers = []scriptedCharge{{pi: "pi_final_paid"}}
 	d.faults.method, d.faults.nth = "Get", 1
 

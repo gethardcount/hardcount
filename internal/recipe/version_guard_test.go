@@ -26,14 +26,14 @@ import (
 // anthropic_style 6.0.0 on 2026-10-22: the new lineup's prices, Haiku 5.5's
 // two prompt tiers (rules on context_tier), and Sonnet 5 at $2 / $10. A
 // MAJOR bump because an install of 5.0.0 does not get these on re-apply.
-// MAJOR bumps on 2026-10-23 (anthropic 7.0.0, openai 6.0.0, replicate
-// 4.0.0): a meter is named by `event_name`, not `key`, and a pricing rule has
-// no `aggregation_mode` (ADR-130 §2). parseRecipe refuses both old keys, so
-// a recipe at the previous version no longer parses. Prices are unchanged.
+// MAJOR bumps on 2026-10-23 (all three): the dunning block's max_retries
+// and intervals_hours became one list, retry_days, and parseRecipe refuses
+// the old keys. The policy a recipe makes retries on the same days.
+// Re-pinned under the same versions, unreleased, when only a comment changed.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@7.0.0": "88d563162ebf13ba08a5aecd11a7b1ec817c330538d9dffcb86ac927cedef77f",
-	"openai_style@6.0.0":    "479dc1c969652bcfda9f57ccd9f5d2d7a9abdc36e4f385af9615baed5ce2c4b7",
-	"replicate_style@4.0.0": "59ad79463f2f497c98784d29513609fd8dd146caff13bdb0232f170012f468e0",
+	"anthropic_style@7.0.0": "1f615d44fefe324558c26598c3627f47dcca50a14858591a49fa081ebc943b9d",
+	"openai_style@6.0.0":    "1e4eddc63a70f01126bb8dac32d106245798f8a9120d98b0238187d931938001",
+	"replicate_style@4.0.0": "7506c6ef22d7e92a84b0f8f80f89843fc1103e70936cc3fd1ebc3a9cbfd7a0d9",
 }
 
 // TestRecipeCatalog_VersionMovesWithContent asserts every embedded recipe's

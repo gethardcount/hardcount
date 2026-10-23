@@ -1,7 +1,7 @@
 # ADR-036: Dunning campaigns model (multi-policy-per-tenant)
 
 **Date:** 2026-05-16
-**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a collection pause does not stop open runs; amended 2026-10-22 — a dunning pause lifts when its invoice is paid; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
+**Status:** Accepted (amended 2026-05-16 — terminal-action set + pause-semantics fix; amended 2026-07-05 — initial-default-at-first-create + no-policy = deliberate skip; amended 2026-10-17 — new accounts start with a seeded default, [ADR-123](123-new-accounts-start-with-a-default-dunning-policy.md); amended 2026-10-22 — a collection pause does not stop open runs; amended 2026-10-22 — a dunning pause lifts when its invoice is paid; amended 2026-10-23 — the schedule is one list of days, `retry_days`; **the terminal-action half is SUPERSEDED by [ADR-112](112-dunning-exhaustion-settles-two-questions.md), 2026-08-05**; see Amendment sections below)
 
 > ⚠️ **The 2026-05-16 amendment below describes a `final_action` column that no
 > longer exists.** [ADR-112](112-dunning-exhaustion-settles-two-questions.md)
@@ -105,6 +105,10 @@ policy** even if the customer's assignment changes. The new
 assignment takes effect on the NEXT run.
 
 ### Save-time validation (closes the silent-fallback gap)
+
+*(2026-10-23: replaced. The schedule is one list, `retry_days`, whose length
+is the retry count, so there is no count to check it against. See
+[the amendment](#amendment-2026-10-23--the-schedule-is-one-list-of-days).)*
 
 `UpsertPolicy` now rejects when `max_retry_attempts > len(retry_schedule) + 1`.
 The runtime `idx >= len(retryIntervals)` reuse-last-interval branch is
@@ -482,3 +486,59 @@ webhook (the operator's does). The operator's resume sends
 `subscription.collection_resumed` even when nothing was paused. The
 resumer's clear does not check that `resumes_at` is unchanged since it
 listed the row. Each waits for a reported need.
+
+## Amendment 2026-10-23 — the schedule is one list of days
+
+**Decision.** A policy's schedule is one ordered list, `retry_days`: the
+whole days to wait before each retry. The first wait counts from the failed
+payment, or, with no card on file (ADR-060), from the collection that found
+none. Each later one counts from the retry before it, so `[3, 4, 7]` retries
+on day 3, 7 and 14. The number of retries is the list's length. It replaces
+three fields that had to agree: `grace_period_days` (the wait before retry
+1), `retry_schedule` (Go durations for retries 2 to N) and
+`max_retry_attempts` (N). The save-time check above existed only because
+they could disagree, and the retry path still carried an out-of-bounds
+error for the case. Simplification audit item B8, decided under the owner's
+delegation.
+
+**Why one list.** Kill Bill's `org.killbill.payment.retry.days` is the same
+shape: a list of days, its length the retry count, the first entry counted
+from the failed payment (`PaymentConfig.java:31-34`,
+`InvoicePaymentControlPluginApi.java:591-609`, killbill `3548b02`).
+Stripe's custom retry schedule is up to three retries "each with a specific
+number of days after the previous attempt"
+([Automate payment retries](https://docs.stripe.com/billing/revenue-recovery/smart-retries#custom-retry-schedule),
+read 2026-10-23). Lago has one `days_between_attempts` and a separate
+`max_attempts` (lago-api `2e52dfc`, `app/models/dunning_campaign.rb:23-24, 62-65`,
+`app/services/dunning_campaigns/process_customer_service.rb:99-105`).
+
+**The grace period is the first entry.** It was only ever the wait before
+the first retry: `StartDunning` was its one reader. ADR-112 and ADR-113
+give it no other meaning, and the invoice grace of ADR-120 (late usage
+before a period closes) is a different thing that shared the word.
+
+**Days, not hours.** Every peer above counts in days. The seed, the recipes
+and the dashboard's defaults all wrote whole days; no Velox writer asks for
+a shorter wait. A day is 24 hours, as `grace_period_days` was. Each
+wait is 1 to 30 days and a policy has 1 to 15 retries. Before, only the
+first wait had an upper bound (30 days); a later wait over 30 days is now
+refused.
+
+**Kept as it was.** When a run starts (ADR-064), the card-less enrollment
+(ADR-060), exhaustion and its two questions (ADR-112), the final actions,
+the run's `paused` flag and test clocks. A run still reads its bound
+policy every tick, so shortening `retry_days` below a run's attempts
+exhausts it on its next tick, as lowering `max_retry_attempts` did.
+`GET /v1/dunning/runs` keeps a run's `max_retry_attempts`, now the length
+of the policy's list.
+
+**Stored policies.** Migration 00206 converts each one exactly: the first
+wait, then the waits its retries used, in days. Entries past the last
+retry were never used and are dropped. A schedule left out (one retry
+needed none) was stored as JSON null and read as an empty list, so it
+converts as one. A policy whose retries used a wait
+that is not whole days from 1 to 30 stops the migration, named in the
+error: rounding would retry on a day nobody chose, and under the clean
+break from 0.8.x only local databases can hold one. The API refuses the
+three old fields by name with a 422.
+

@@ -178,7 +178,7 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	// SB-1: an active run with no next action is invisible to both due-run
 	// pickers forever — flagged. Control: an escalated run with no next action
 	// is the legal terminal shape — NOT flagged by the new check.
-	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name) VALUES ('vlx_dpol_doc', $1, 'doc')`, tenantID)
+	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, retry_days) VALUES ('vlx_dpol_doc', $1, 'doc', '[3]')`, tenantID)
 	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count, last_attempt_at)
 		VALUES ('vlx_drun_doc_strand', $1, 'vlx_inv_doc1', 'cus_doc1', 'vlx_dpol_doc', 'active', 3, now())`, tenantID)
 	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count, last_attempt_at, resolved_at, resolution)

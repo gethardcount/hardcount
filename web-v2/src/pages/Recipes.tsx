@@ -33,6 +33,7 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Box, Loader2, Eye, Sparkles, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { ScrollPane } from '@/components/ui/scroll-pane'
+import { retryPlanText } from '@/lib/dunningSchedule'
 
 export default function RecipesPage() {
   usePageTitle('Recipes')
@@ -403,7 +404,7 @@ function ObjectsList({ preview }: { preview: RecipePreviewResult }) {
   if (preview.objects.dunning_policies?.length) sections.push({
     label: 'Payment retries',
     items: preview.objects.dunning_policies.map(d =>
-      `${d.name} — up to ${d.max_retries} retries` + (currentPolicies ? `, ${recipeRetryNote(currentPolicies)}` : ''),
+      `${d.name} — ${retryPlanText(d.retry_days)}` + (currentPolicies ? `, ${recipeRetryNote(currentPolicies)}` : ''),
     ),
   })
   if (preview.objects.webhook_endpoints?.length) sections.push({ label: 'Notifications', items: preview.objects.webhook_endpoints.map(w => `${w.url_placeholder} — set your real URL after install`) })

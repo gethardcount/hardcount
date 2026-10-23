@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"strconv"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
@@ -664,27 +663,19 @@ func ratingRuleFromRecipe(r domain.RecipeRatingRule) domain.RatingRuleVersion {
 	}
 }
 
-// dunningFromRecipe converts the recipe's dunning shape (max_retries +
-// intervals_hours) to the engine's DunningPolicy (MaxRetryAttempts +
-// retry_schedule of duration strings). intervals_hours is an int slice
-// in the recipe so YAML stays human-friendly; the policy stores
-// "Xh"-style strings to match how operators author policies in the API.
+// dunningFromRecipe converts the recipe's dunning policy to the engine's.
+// The schedule is the same list in both (retry_days); UpsertPolicyTx
+// validates it like every other writer.
 func dunningFromRecipe(p domain.RecipeDunningPolicy) domain.DunningPolicy {
-	schedule := make([]string, 0, len(p.IntervalsHours))
-	for _, h := range p.IntervalsHours {
-		schedule = append(schedule, strconv.Itoa(h)+"h")
-	}
-	// Both are required and validated at parse time, so no defaulting here
-	// — a recipe silently falling back to a terminal action its author did
-	// not write is exactly what parse.go now refuses.
+	// Both final actions are required and validated at parse time, so no
+	// defaulting here — a recipe silently falling back to a terminal action
+	// its author did not write is exactly what parse.go refuses.
 	return domain.DunningPolicy{
 		Name:                    p.Name,
 		Enabled:                 true,
-		RetrySchedule:           schedule,
-		MaxRetryAttempts:        p.MaxRetries,
+		RetryDays:               append([]int(nil), p.RetryDays...),
 		FinalSubscriptionAction: domain.DunningSubscriptionAction(p.FinalSubscriptionAction),
 		FinalInvoiceAction:      domain.DunningInvoiceAction(p.FinalInvoiceAction),
-		GracePeriodDays:         3,
 	}
 }
 

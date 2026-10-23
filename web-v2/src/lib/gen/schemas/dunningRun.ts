@@ -51,7 +51,8 @@ export interface DunningRun {
   /** Filled in on list responses. */
   test_clock_id?: string;
   /**
-     * The run's policy's retry limit. Filled in on list responses.
+     * How many retries the run's policy makes: the length of its
+     * `retry_days`. Filled in on list responses.
      * When `attempt_count` has reached it, no charge is retried:
      * `next_action_at` is when the final action (pause, cancel or
      * mark uncollectible) runs.
