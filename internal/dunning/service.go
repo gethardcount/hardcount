@@ -26,11 +26,13 @@ import (
 type RetryError struct {
 	PaymentIntentID string
 	Err             error
-	// CardNeedsReplacing marks a decline after which the card must not be
-	// charged again for this invoice (domain.IsHardDecline, #966). The
-	// attempt counts as usual; what changes is the customer's warning email,
-	// which asks for a different card instead of promising a retry.
-	CardNeedsReplacing bool
+	// Ask marks a decline after which the card must not be charged again
+	// for this invoice (domain.DeclineAskOf the decline code): the bank
+	// refused it for good (#966), or wants the customer to confirm the
+	// payment. The attempt counts as usual; what changes is the customer's
+	// warning email, which asks for a different card, or for the
+	// confirmation, instead of promising a retry.
+	Ask domain.DeclineAsk
 }
 
 func (e *RetryError) Error() string { return e.Err.Error() }
@@ -39,7 +41,8 @@ func (e *RetryError) Unwrap() error { return e.Err }
 // ErrTransientSkip signals that this tick's retry got no definite answer, so
 // dunning must NOT tick attempt_count or emit a failure event; the next tick
 // retries. The PaymentRetrier returns it for everything except a definite
-// decline, no card, or a card refused for good: the circuit breaker open,
+// decline, no card, a card refused for good, or a card whose payment the
+// bank wants the customer to confirm: the circuit breaker open,
 // Stripe rate limiting or unreachable, an unconfirmed outcome, a database
 // error before or after the charge. The adapter maps payment's errors to
 // this dunning-visible sentinel so peer domains don't import each other.
@@ -151,7 +154,7 @@ type CustomerEmailFetcher interface {
 // (drafts, pre-addendum invoices); the sender gracefully omits the CTA.
 // ctx carries livemode for the underlying enqueue / brand lookup.
 type EmailNotifier interface {
-	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string) error
+	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
 	// SendDunningWarning emails the customer about a failed retry.
 	// failureReason is the latest decline reason (from the retrier's
 	// error message) — surfaced inline so customers can act
@@ -160,11 +163,12 @@ type EmailNotifier interface {
 	// tone exists: the exhausting attempt sends the escalation email
 	// instead of a warning (see the warning-enqueue gate in processRun).
 	//
-	// cardNeedsReplacing selects the "use a different card" copy: the bank
-	// refused the card for good, so dunning will not charge it again and
-	// the email must not promise a retry on a date (#966). failureReason is
-	// empty then.
-	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
+	// ask selects the copy. DeclineAskNewCard is "use a different card": the
+	// bank refused the card for good (#966). DeclineAskConfirm is "confirm
+	// your payment": the bank wants the customer to confirm it. Either way
+	// dunning retries skip that card, so the email must not promise a retry
+	// on a date, and failureReason is empty.
+	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	// outcome is what exhaustion actually did to THIS invoice, not what
 	// the policy asked for — the copy is composed from it (ADR-112).
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
@@ -173,7 +177,7 @@ type EmailNotifier interface {
 	// so a failover between the two can no longer lose the email with the
 	// state standing. The store wraps the call in a SAVEPOINT — returning an
 	// error skips the email, never the money write.
-	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error
+	SendDunningWarningTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	SendDunningEscalationTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 }
 
@@ -888,13 +892,17 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		// vocabulary the start event uses — the timeline renders it as a
 		// reminder tick, not a charge failure. A retry that skipped a card
 		// the bank refused for good charged nothing either, and says so
-		// (#966). Real declines keep their provider reason text.
+		// (#966), as does one that skipped a card whose payment the bank
+		// wants the customer to confirm. Real declines keep their provider
+		// reason text.
 		evtReason := retryErr.Error()
 		switch {
 		case errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry):
 			evtReason = string(domain.DunningCauseNoPaymentMethod)
 		case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
 			evtReason = domain.DunningRetryReasonCardRefused
+		case errors.Is(retryErr, domain.ErrCardNeedsConfirmation):
+			evtReason = domain.DunningRetryReasonNeedsConfirmation
 		}
 		_, _ = s.store.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
 			RunID:        run.ID,
@@ -990,17 +998,18 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// timeline strips it (min-charge check 2026-10-22, finding 4.1).
 	//
 	// A card the bank refused for good (#966) gets the "use a different
-	// card" copy, on the retry that drew the decline and on every retry that
-	// then skips the card: "we'll try again on <date>" would promise a charge
-	// that cannot succeed.
+	// card" copy, and a payment the bank wants the customer to confirm the
+	// "confirm your payment" copy, on the retry that drew the decline and
+	// on every retry that then skips the card: "we'll try again on <date>"
+	// would promise a charge that cannot succeed.
 	var warnTx func(tx *sql.Tx) error
 	if run.AttemptCount < policy.MaxRetryAttempts && s.emailNotifier != nil && s.customerEmail != nil {
-		needsNewCard := cardNeedsReplacing(retryErr)
+		ask := retryAsk(retryErr)
 		reason := activity.StripWrapper(retryErr.Error())
-		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || needsNewCard {
+		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || ask != domain.DeclineAskNone {
 			reason = ""
 		}
-		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, needsNewCard)
+		warnTx = s.buildDunningWarningTx(ctx, tenantID, run, policy, reason, ask)
 	}
 	if applied, err := s.store.UpdateRunIfActive(ctx, tenantID, run, run.AttemptCount, warnTx); err != nil {
 		return err
@@ -1962,7 +1971,7 @@ func (s *Service) GetStats(ctx context.Context, tenantID string) (Stats, error) 
 // hook that enqueues the dunning-warning email on the reschedule's own tx
 // (ADR-040). nil when the recipient cannot be resolved — logged, best-effort,
 // exactly the old posture.
-func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string, cardNeedsReplacing bool) func(tx *sql.Tx) error {
+func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErrMsg string, ask domain.DeclineAsk) func(tx *sql.Tx) error {
 	email, name, cc, err := s.customerEmail.GetCustomerEmail(ctx, tenantID, run.CustomerID)
 	if err != nil || email == "" {
 		slog.Warn("skip dunning warning email — cannot resolve customer email",
@@ -1988,20 +1997,27 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 		nextRetry = run.NextActionAt.In(domain.LoadLocationOrUTC(billTZ)).Format("January 2, 2006")
 	}
 	return func(tx *sql.Tx) error {
-		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken, cardNeedsReplacing)
+		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken, ask)
 	}
 }
 
-// cardNeedsReplacing reports whether a failed retry leaves the customer
-// needing a different card (#966): the retry skipped a card the bank had
-// refused for good (domain.ErrCardNeedsReplacing), or its charge drew such a
-// refusal (RetryError.CardNeedsReplacing).
-func cardNeedsReplacing(retryErr error) bool {
-	if errors.Is(retryErr, domain.ErrCardNeedsReplacing) {
-		return true
+// retryAsk is what a failed retry asks of the customer: a different card
+// (#966) when the retry skipped a card the bank had refused for good
+// (domain.ErrCardNeedsReplacing), the confirmation the bank wants when it
+// skipped a card for that (domain.ErrCardNeedsConfirmation), or what its
+// charge drew (RetryError.Ask).
+func retryAsk(retryErr error) domain.DeclineAsk {
+	switch {
+	case errors.Is(retryErr, domain.ErrCardNeedsReplacing):
+		return domain.DeclineAskNewCard
+	case errors.Is(retryErr, domain.ErrCardNeedsConfirmation):
+		return domain.DeclineAskConfirm
 	}
 	var re *RetryError
-	return errors.As(retryErr, &re) && re.CardNeedsReplacing
+	if errors.As(retryErr, &re) {
+		return re.Ask
+	}
+	return domain.DeclineAskNone
 }
 
 // buildDunningEscalationTx is the escalation counterpart of

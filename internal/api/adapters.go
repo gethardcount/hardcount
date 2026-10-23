@@ -301,7 +301,7 @@ type retryInvoiceStore interface {
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
 	SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error)
-	HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
+	RetryBlockingDecline(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error)
 }
 
 // paymentRetrierAdapter bridges Stripe + invoice/customer stores → dunning.PaymentRetrier.
@@ -321,7 +321,8 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 // classifyDunningRetryResult is the one rule for which retry results use up a
 // dunning attempt: a decline Stripe returned (*payment.PaymentError with
 // Unknown=false), no card to charge (counted so a card-less invoice reaches
-// its dunning terminal, ADR-060), a card the bank refused for good, or an
+// its dunning terminal, ADR-060), a card the bank refused for good or whose
+// payment it wants the customer to confirm, or an
 // amount below Stripe's minimum charge (domain.ErrBelowMinimumCharge, which
 // ends the run instead of counting toward its final action).
 // Everything else becomes dunning.ErrTransientSkip, which dunning does not
@@ -335,6 +336,7 @@ func (a *paymentRetrierAdapter) RetryPayment(ctx context.Context, tenantID, invo
 func classifyDunningRetryResult(ctx context.Context, invoiceID string, err error) error {
 	if err == nil || errors.Is(err, dunning.ErrTransientSkip) ||
 		errors.Is(err, domain.ErrNoPaymentMethodOnRetry) || errors.Is(err, domain.ErrCardNeedsReplacing) ||
+		errors.Is(err, domain.ErrCardNeedsConfirmation) ||
 		errors.Is(err, domain.ErrBelowMinimumCharge) {
 		return err
 	}
@@ -452,27 +454,31 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 		return domain.ErrNoPaymentMethodOnRetry
 	}
 
-	// A card the bank refused for good on this invoice (lost, stolen and the
-	// rest of domain.IsHardDecline, #966) is not charged again: the retry
-	// cannot succeed, and the card networks charge merchants for trying.
-	// Stripe Billing does the same — its schedule and attempt count carry on,
-	// but a retry charges only once it sees a new payment method. So this
-	// attempt counts and charges nothing until a different card is the
-	// customer's default; then the next scheduled retry charges that card.
-	// Provably pre-Stripe, so the lease is released. A read error is not "no
+	// Two answers from the bank stop a retry from charging the card for this
+	// invoice. A card refused for good (lost, stolen and the rest of
+	// domain.IsHardDecline, #966): the retry cannot succeed, and the card
+	// networks charge merchants for trying. And authentication_required: the
+	// bank wants the customer to confirm the payment, which a charge made
+	// without them cannot do; the customer pays on the hosted invoice page,
+	// where Stripe runs the confirmation. Stripe Billing lists both among the
+	// codes it does not retry — its schedule and attempt count carry on, but
+	// a retry charges only once it sees a new payment method. So this attempt
+	// counts and charges nothing until a different card is the customer's
+	// default; then the next scheduled retry charges that card. Provably
+	// pre-Stripe, so the lease is released. A read error is not "no
 	// refusal": skip this tick uncounted, as for the payment-setup read.
-	refusedCode, err := a.invoiceStore.HardDeclineOnCard(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
+	blockCode, err := a.invoiceStore.RetryBlockingDecline(ctx, tenantID, invoiceID, ps.StripePaymentMethodID)
 	if err != nil {
 		release()
 		slog.WarnContext(ctx, "dunning retry: refused-card read failed; skipping this attempt",
 			"invoice_id", invoiceID, "customer_id", customerID, "error", err)
 		return dunning.ErrTransientSkip
 	}
-	if refusedCode != "" {
+	if block := domain.RetryBlock(blockCode); block != nil {
 		release()
-		slog.InfoContext(ctx, "dunning retry: not charging a card the bank refused for good; waiting for a different default card",
-			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", refusedCode)
-		return domain.ErrCardNeedsReplacing
+		slog.InfoContext(ctx, "dunning retry: not charging this card; the bank refused it for good or wants the customer to confirm the payment; waiting for the customer or a different default card",
+			"invoice_id", invoiceID, "customer_id", customerID, "decline_code", blockCode)
+		return block
 	}
 
 	// 15s bound on the Stripe leg. Scheduler ticks run tens of retries
@@ -495,14 +501,15 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// wrapper, no payment import in dunning) so the failed retry's timeline
 	// row can be matched to its exact payment_intent.payment_failed webhook
 	// twin. A hard decline is flagged so the customer's warning asks for a
-	// different card (#966); the next retry's HardDeclineOnCard read is what
-	// stops the card being charged again. RetryPayment classifies the rest.
+	// different card (#966), and authentication_required so it asks for the
+	// confirmation; the next retry's RetryBlockingDecline read is what stops
+	// the card being charged again. RetryPayment classifies the rest.
 	var pe *payment.PaymentError
 	if errors.As(err, &pe) && !pe.Unknown && pe.PaymentIntentID != "" {
 		return &dunning.RetryError{
-			PaymentIntentID:    pe.PaymentIntentID,
-			Err:                err,
-			CardNeedsReplacing: domain.IsHardDecline(pe.DeclineCode),
+			PaymentIntentID: pe.PaymentIntentID,
+			Err:             err,
+			Ask:             domain.DeclineAskOf(pe.DeclineCode),
 		}
 	}
 	return err

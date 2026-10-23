@@ -489,16 +489,17 @@ type AttentionContext struct {
 	// finalized, unpaid invoices only.
 	PaymentPageOpen bool
 
-	// RefusedCardDeclineCode is set when the bank refused the customer's
-	// current default card for good on this invoice: Stripe's decline code
-	// (one IsHardDecline accepts), recorded on one of the invoice's charge
-	// attempts with that card. Dunning retries skip that card, so the
-	// payment-failure notice says the customer needs a different card and
-	// does not offer Retry. Empty once another card is the default — a card
-	// the customer saves now becomes the default by itself (ADR-126) — and
-	// the ordinary decline notice comes back. The invoice service reads it
-	// for failed invoices only.
-	RefusedCardDeclineCode string
+	// RetryBlockingDeclineCode is set when dunning retries skip the
+	// customer's current default card on this invoice: Stripe's decline code,
+	// recorded on the invoice's charge attempts with that card. Either the
+	// bank refused the card for good (IsHardDecline), so the notice says the
+	// customer needs a different card, or the bank asked the customer to
+	// confirm the payment (IsAuthenticationRequired), so the notice offers
+	// the payment link. Neither offers Retry. Empty once another card is the
+	// default — a card the customer saves now becomes the default by itself
+	// (ADR-126) — and the ordinary decline notice comes back. The invoice
+	// service reads it for failed invoices only.
+	RetryBlockingDeclineCode string
 
 	// DunningRetrying is true when a charge retry on the invoice's dunning
 	// run is still to come (InvoiceDunningRun.RetryScheduled: active, not
@@ -1088,8 +1089,11 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	if atc.LastFailedChargeAt != nil {
 		since = *atc.LastFailedChargeAt
 	}
-	if atc.RefusedCardDeclineCode != "" {
-		return classifyRefusedCard(inv, atc.RefusedCardDeclineCode, atc.DunningRetrying, since)
+	switch code := atc.RetryBlockingDeclineCode; {
+	case IsHardDecline(code):
+		return classifyRefusedCard(inv, code, atc.DunningRetrying, since)
+	case IsAuthenticationRequired(code):
+		return classifyNeedsConfirmation(inv, atc.DunningRetrying, since)
 	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
@@ -1159,6 +1163,46 @@ func classifyRefusedCard(inv Invoice, declineCode string, retrying bool, since t
 	}
 }
 
+// classifyNeedsConfirmation is the payment-failure notice when the bank asked
+// the customer to confirm the last charge of their default card on this
+// invoice (authentication_required, usually 3-D Secure). The card is not
+// refused: the customer confirms the payment on the hosted invoice page,
+// where Stripe runs 3-D Secure. So the one action is emailing them the
+// payment link. Retry payment is not offered: it charges without the
+// customer, and the bank asks again. Dunning retries skip the card, as
+// Stripe Billing does for this code, and each reminder email carries the
+// payment link.
+//
+// Warning, not Critical: nothing is broken, the customer has to act, as on
+// the no-payment-method notice.
+func classifyNeedsConfirmation(inv Invoice, retrying bool, since time.Time) *Attention {
+	const (
+		why     = "Stripe's code is authentication_required: the bank wants the customer to confirm this payment, usually with 3-D Secure, and a charge made without the customer can't do that. "
+		howPay  = "The customer pays on the hosted invoice page, where their bank may ask them to confirm. "
+		newCard = "A different card the customer saves through a setup or update link becomes the default; "
+	)
+	detail := why + howPay +
+		"Dunning keeps its schedule and counts each retry, but doesn't charge this card; each reminder email carries the payment link. " +
+		newCard + "the next retry charges it."
+	if !retrying {
+		detail = why + howPay + "No automatic retry is scheduled. " +
+			newCard + "Collect payment charges it."
+	}
+	return &Attention{
+		Severity: AttentionSeverityWarning,
+		Reason:   AttentionReasonPaymentFailed,
+		Code:     "payment.authentication_required",
+		Message:  "The customer's bank needs them to confirm this payment; email them the payment link to pay and confirm it.",
+		Detail:   detail,
+		DocURL:   docURL("payment-failed"),
+		Actions: []AttentionActionItem{
+			{Code: AttentionActionSendReminder, Label: "Email payment link"},
+		},
+		ProviderResponse: inv.LastPaymentError,
+		Since:            &since,
+	}
+}
+
 func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 	since := attentionSince(inv)
 	// No operator action: the reconciler re-queries the provider on the next
@@ -1210,8 +1254,8 @@ func classifyPaymentUnconfirmed(inv Invoice) *Attention {
 		// into ADR-107 before anyone checked it: it blamed "off-session SCA
 		// nobody completes". Off-session SCA is a DECLINE — Stripe's
 		// authentication_required is a decline code, which arrives as a card
-		// error and settles the invoice FAILED with dunning started, never
-		// reaching this banner. A live requires_action PaymentIntent comes from
+		// error and settles the invoice FAILED (classifyNeedsConfirmation),
+		// never reaching this banner. A live requires_action PaymentIntent comes from
 		// the hosted checkout, where the customer is present and mid-3DS, and
 		// that one expires with its session inside the hour.
 		Message: "Stripe hasn't confirmed this charge yet, and Velox re-checks automatically until it does.",

@@ -528,12 +528,13 @@ func (s *Service) SetPaymentPageReader(r PaymentPageReader) {
 	s.paymentPages = r
 }
 
-// CardRefusalReader reports, for a page of invoices, which ones the bank
-// refused the customer's current default card on for good (#966): invoice id
-// → Stripe's decline code. Satisfied by *PostgresStore (HardDeclinesOnDefaultCards),
-// the same rule the dunning retry skips the card on.
+// CardRefusalReader reports, for a page of invoices, the ones whose next
+// dunning retry would skip the customer's current default card: invoice id →
+// Stripe's decline code, a hard decline (#966) or authentication_required.
+// Satisfied by *PostgresStore (RetryBlockingDeclinesOnDefaultCards), the same
+// rule the dunning retry skips the card on.
 type CardRefusalReader interface {
-	HardDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error)
+	RetryBlockingDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error)
 }
 
 // SetCardRefusalReader wires the refused-card lookup for the attention
@@ -1060,7 +1061,7 @@ type attentionFacts struct {
 	escalated       map[string]bool                  // invoice id → dunning run escalated
 	paused          map[string]bool                  // subscription id → pause_collection in force
 	pageLive        map[string]bool                  // invoice id → hosted payment page live
-	refusedCard     map[string]string                // invoice id → hard decline code on the default card
+	refusedCard     map[string]string                // invoice id → decline code that stops retries charging the default card
 	retrying        map[string]bool                  // invoice id → a charge retry is still to come (RetryScheduled)
 	lostDispute     map[string]domain.InvoiceDispute // invoice id → newest dispute closed as lost
 }
@@ -1157,8 +1158,9 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		}
 	}
 
-	// A refused card (#966) changes only the payment-failure notice, so only
-	// failed, finalized invoices join the read. A read error leaves it empty:
+	// A refused card (#966), or a bank's request that the customer confirm
+	// the payment, changes only the payment-failure notice, so only failed,
+	// finalized invoices join the read. A read error leaves it empty:
 	// the notice then shows the ordinary decline, which still leads with
 	// Update payment method. Read before the dunning runs, which it gates.
 	if s.cardRefusals != nil {
@@ -1169,7 +1171,7 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 			return ""
 		})
 		if len(ids) > 0 {
-			refused, err := s.cardRefusals.HardDeclinesOnDefaultCards(ctx, tenantID, ids)
+			refused, err := s.cardRefusals.RetryBlockingDeclinesOnDefaultCards(ctx, tenantID, ids)
 			if err != nil {
 				slog.Warn("invoice: attention could not read refused cards", "error", err,
 					"tenant_id", tenantID, "invoices", len(ids))
@@ -1184,7 +1186,8 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 	// banner shows the normal pre-escalation copy, which is the safe
 	// direction of drift.
 	//
-	// The refused-card notice (#966) joins the same read: it may say that
+	// The refused-card notice (#966), and the must-confirm one, join the same
+	// read: each may say that
 	// retries keep their schedule only while a charge retry is still to come
 	// (InvoiceDunningRun.RetryScheduled: active, not paused, attempts left
 	// under the bound policy). No run, or a read error, leaves retrying false, and the notice
@@ -1321,7 +1324,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 		atc.CollectionPaused = f.paused[inv.SubscriptionID]
 	}
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
-	atc.RefusedCardDeclineCode = f.refusedCard[inv.ID]
+	atc.RetryBlockingDeclineCode = f.refusedCard[inv.ID]
 	atc.DunningRetrying = f.retrying[inv.ID]
 	if d, ok := f.lostDispute[inv.ID]; ok {
 		atc.LostDispute = &d

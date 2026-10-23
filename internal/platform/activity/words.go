@@ -65,6 +65,11 @@ var declineReasons = map[string]string{
 	"generic_decline":    "Card declined by the bank",
 	"card_declined":      "Card declined by the bank",
 	"do_not_honor":       "Card declined by the bank",
+	// Not a decline of the card: the bank wants the customer to confirm the
+	// payment (3-D Secure), which a charge made without them can't do.
+	// Stripe's own message for it is written for developers ("If the
+	// customer is off session, ask them to return to your application").
+	"authentication_required": "The bank asked the customer to confirm this payment",
 }
 
 // DeclineCodes lists the mapped decline codes, for tests.

@@ -4698,16 +4698,24 @@ func (s *PostgresStore) PaymentPagesLive(ctx context.Context, tenantID string, i
 	return out, rows.Err()
 }
 
-// HardDeclineOnCard returns Stripe's decline code when the bank refused this
-// card for good on this invoice (domain.IsHardDecline, #966), or "" when no
-// attempt on the invoice records such a decline for the card. A dunning retry
-// asks it about the card it is about to charge, and charges nothing when the
-// answer is not empty. The question is per invoice and per card, as Stripe
-// Billing's is: another invoice, or another card, is charged as usual.
+// RetryBlockingDecline returns the Stripe decline code that stops a dunning
+// retry from charging this card for this invoice, or "" when the card may be
+// charged. Two codes do (domain.RetryBlock):
+//   - a hard decline (domain.IsHardDecline, #966) on any attempt with the
+//     card: the bank refused it for good, so it decides whatever came after;
+//   - otherwise authentication_required (domain.IsAuthenticationRequired) on
+//     the newest attempt with the card that names a decline code: the bank
+//     wants the customer to confirm the payment, which an off-session retry
+//     cannot do. A later ordinary decline (a Collect payment the bank
+//     answered differently) is the newer answer and ends it.
 //
-// Any one matching row answers it; LIMIT 1 picks the newest for the code it
-// names, not because the set is singular.
-func (s *PostgresStore) HardDeclineOnCard(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error) {
+// A dunning retry asks it about the card it is about to charge. The question
+// is per invoice and per card, as Stripe Billing's is: another invoice, or
+// another card, is charged as usual.
+//
+// Hard declines sort first, then the newest row; LIMIT 1 takes the deciding
+// row, not because the set is singular.
+func (s *PostgresStore) RetryBlockingDecline(ctx context.Context, tenantID, invoiceID, stripePaymentMethodID string) (string, error) {
 	if stripePaymentMethodID == "" {
 		return "", nil
 	}
@@ -4721,27 +4729,30 @@ func (s *PostgresStore) HardDeclineOnCard(ctx context.Context, tenantID, invoice
 	err = tx.QueryRowContext(ctx, `
 		SELECT decline_code FROM invoice_charge_attempts
 		WHERE invoice_id = $1 AND stripe_payment_method_id = $2
-		  AND decline_code = ANY($3::text[])
-		ORDER BY created_at DESC, id DESC
+		  AND decline_code <> ''
+		ORDER BY decline_code = ANY($3::text[]) DESC, created_at DESC, id DESC
 		LIMIT 1`,
 		invoiceID, stripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
 	).Scan(&code)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("read hard decline on card: %w", err)
+		return "", fmt.Errorf("read retry-blocking decline on card: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
+	if domain.RetryBlock(code) == nil {
+		return "", nil
+	}
 	return code, nil
 }
 
-// HardDeclinesOnDefaultCards is HardDeclineOnCard for a page of invoices, each
-// asked about its customer's current default card: invoice id → Stripe's
-// decline code, for the invoices whose default card the bank refused for good
-// on that invoice. The attention notice reads it, so it says "needs a
-// different card" exactly while the next dunning retry would skip the card.
-// Invoices without such a decline are absent. One read for the page.
-func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error) {
+// RetryBlockingDeclinesOnDefaultCards is RetryBlockingDecline for a page of
+// invoices, each asked about its customer's current default card: invoice id
+// → Stripe's decline code, for the invoices whose next dunning retry would
+// skip that card. The attention notice reads it, so it says "needs a
+// different card" or "the customer must confirm" exactly while the retry
+// would skip the card. Other invoices are absent. One read for the page.
+func (s *PostgresStore) RetryBlockingDeclinesOnDefaultCards(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]string, error) {
 	out := make(map[string]string, len(invoiceIDs))
 	if len(invoiceIDs) == 0 {
 		return out, nil
@@ -4761,11 +4772,11 @@ func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID
 			AND pm.stripe_payment_method_id = a.stripe_payment_method_id
 		WHERE a.invoice_id = ANY($1::text[])
 		  AND a.stripe_payment_method_id <> ''
-		  AND a.decline_code = ANY($2::text[])
-		ORDER BY a.invoice_id, a.created_at DESC, a.id DESC`,
+		  AND a.decline_code <> ''
+		ORDER BY a.invoice_id, a.decline_code = ANY($2::text[]) DESC, a.created_at DESC, a.id DESC`,
 		postgres.StringArray(invoiceIDs), postgres.StringArray(domain.HardDeclineCodes()))
 	if err != nil {
-		return nil, fmt.Errorf("read hard declines on default cards: %w", err)
+		return nil, fmt.Errorf("read retry-blocking declines on default cards: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
@@ -4773,7 +4784,9 @@ func (s *PostgresStore) HardDeclinesOnDefaultCards(ctx context.Context, tenantID
 		if err := rows.Scan(&id, &code); err != nil {
 			return nil, err
 		}
-		out[id] = code
+		if domain.RetryBlock(code) != nil {
+			out[id] = code
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

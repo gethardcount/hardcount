@@ -23,6 +23,11 @@ test('the payment_processing cases are told apart by code', () => {
   assert.equal(attentionReasonLabel('payment_scheduled', 'payment.scheduled'), 'Payment scheduled')
 })
 
+test('a payment the customer must confirm is told apart from a decline by its code', () => {
+  assert.equal(attentionReasonLabel('payment_failed', 'payment.authentication_required'), 'Customer must confirm payment')
+  assert.equal(attentionReasonLabel('payment_failed', 'payment.declined'), 'Payment failed')
+})
+
 test('an unmapped reason never shows the raw code', () => {
   const label = attentionReasonLabel('brand_new_reason')
   assert.equal(label, 'Needs attention')

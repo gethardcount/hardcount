@@ -405,6 +405,9 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 		case evt.Reason == domain.DunningRetryReasonCardRefused:
 			l.Kind, l.Title, l.Tone = "payment_recovery.retry_not_attempted", fmt.Sprintf("Payment retry %d not attempted", evt.AttemptCount), activity.ToneWarning
 			l.Problem = "The bank refused this card for good. The customer needs to add a different card."
+		case evt.Reason == domain.DunningRetryReasonNeedsConfirmation:
+			l.Kind, l.Title, l.Tone = "payment_recovery.retry_not_attempted", fmt.Sprintf("Payment retry %d not attempted", evt.AttemptCount), activity.ToneWarning
+			l.Problem = "The bank asked the customer to confirm this payment. They can pay and confirm it on the hosted invoice page."
 		case evt.Reason == domain.DunningRetryReasonBelowMinimum:
 			// Stripe refused the amount, not the card: nothing was charged
 			// and recovery ends on it.

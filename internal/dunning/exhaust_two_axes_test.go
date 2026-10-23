@@ -50,11 +50,11 @@ type capturingEscalationEmail struct {
 	outcomes []domain.DunningEscalationOutcome
 }
 
-func (e *capturingEscalationEmail) SendPaymentFailed(context.Context, string, string, []string, string, string, string, string) error {
+func (e *capturingEscalationEmail) SendPaymentFailed(context.Context, string, string, []string, string, string, string, string, domain.DeclineAsk) error {
 	return nil
 }
 
-func (e *capturingEscalationEmail) SendDunningWarning(context.Context, string, string, []string, string, string, int, int, string, string, string, bool) error {
+func (e *capturingEscalationEmail) SendDunningWarning(context.Context, string, string, []string, string, string, int, int, string, string, string, domain.DeclineAsk) error {
 	return nil
 }
 
@@ -63,8 +63,8 @@ func (e *capturingEscalationEmail) SendDunningEscalation(_ context.Context, _, _
 	return nil
 }
 
-func (e *capturingEscalationEmail) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, cardNeedsReplacing bool) error {
-	return e.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken, cardNeedsReplacing)
+func (e *capturingEscalationEmail) SendDunningWarningTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error {
+	return e.SendDunningWarning(ctx, tenantID, to, cc, customerName, invoiceNumber, attemptNumber, maxAttempts, nextRetryDate, failureReason, publicToken, ask)
 }
 
 func (e *capturingEscalationEmail) SendDunningEscalationTx(ctx context.Context, _ *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error {

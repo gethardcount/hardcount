@@ -152,6 +152,13 @@ const (
 // way it shows a retry with no card (DunningCauseNoPaymentMethod).
 const DunningRetryReasonCardRefused = "card_refused"
 
+// DunningRetryReasonNeedsConfirmation is the reason on a retry_attempted
+// event for a scheduled retry that charged nothing because the bank asked
+// the customer to confirm the last charge of their default card on this
+// invoice (ErrCardNeedsConfirmation). The attempt counts, and the timeline
+// shows it as not charged.
+const DunningRetryReasonNeedsConfirmation = "needs_confirmation"
+
 // DunningRetryReasonBelowMinimum is the reason on a retry_attempted event for
 // a retry Stripe refused because the amount is below its minimum charge
 // (ErrBelowMinimumCharge). Nothing was charged and the run ends on it.

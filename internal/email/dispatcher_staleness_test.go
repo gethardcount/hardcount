@@ -20,7 +20,7 @@ func (r *recordingDeliverer) SendPaymentReceipt(_ context.Context, _, _ string, 
 	r.sent = append(r.sent, TypePaymentReceipt)
 	return nil
 }
-func (r *recordingDeliverer) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, _, _ string, _ bool) error {
+func (r *recordingDeliverer) SendDunningWarning(_ context.Context, _, _ string, _ []string, _, _ string, _, _ int, _, _, _ string, _ domain.DeclineAsk) error {
 	r.sent = append(r.sent, TypeDunningWarning)
 	return nil
 }
@@ -28,7 +28,7 @@ func (r *recordingDeliverer) SendDunningEscalation(_ context.Context, _, _ strin
 	r.sent = append(r.sent, TypeDunningEscalation)
 	return nil
 }
-func (r *recordingDeliverer) SendPaymentFailed(_ context.Context, _, _ string, _ []string, _, _, _, _ string) error {
+func (r *recordingDeliverer) SendPaymentFailed(_ context.Context, _, _ string, _ []string, _, _, _, _ string, _ domain.DeclineAsk) error {
 	r.sent = append(r.sent, TypePaymentFailed)
 	return nil
 }

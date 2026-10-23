@@ -6,10 +6,12 @@ import (
 	"testing"
 )
 
-// #966: when the bank refused the card for good, dunning will not charge it
-// again, so the warning asks for a different card and promises no retry
-// date. It does not say why (Stripe asks that lost, stolen and fraud declines
-// reach the customer as a plain decline).
+// #966: when the bank refused the card for good, dunning retries skip it, so
+// the warning asks for a different card and promises no retry date. It does
+// not say why (Stripe asks that lost, stolen and fraud declines reach the
+// customer as a plain decline). Nor does it say the card won't be charged
+// again: Collect payment and the customer's next invoice still charge it
+// (review of #1360, round 2).
 func TestCardRefusedWarning_AsksForADifferentCardWithoutARetryDate(t *testing.T) {
 	subject, rawHTML, ctaURL, ctaLabel := renderCardRefusedWarningHTML("Ada", "INV-0042", "https://pay.example.com/i/tok")
 	html := stdhtml.UnescapeString(rawHTML) // the copy is escaped into the markup
@@ -19,13 +21,13 @@ func TestCardRefusedWarning_AsksForADifferentCardWithoutARetryDate(t *testing.T)
 		t.Errorf("subject %q, want the invoice number and \"different card\"", subject)
 	}
 	for part, body := range map[string]string{"html": html, "text": text} {
-		for _, want := range []string{"INV-0042", "won't charge that card again", "different card"} {
+		for _, want := range []string{"INV-0042", "Your bank declined the card on file", "different card"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s part does not say %q:\n%s", part, want, body)
 			}
 		}
 		lower := strings.ToLower(body)
-		for _, never := range []string{"try again", "attempt", "lost", "stolen", "fraud"} {
+		for _, never := range []string{"again", "attempt", "lost", "stolen", "fraud"} {
 			if strings.Contains(lower, never) {
 				t.Errorf("%s part says %q:\n%s", part, never, body)
 			}

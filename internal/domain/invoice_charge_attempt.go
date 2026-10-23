@@ -74,7 +74,9 @@ type InvoiceChargeAttempt struct {
 	DeclineCode string
 	// StripePaymentMethodID is the card the attempt charged. With
 	// DeclineCode it tells a dunning retry whether the card it is about to
-	// charge was refused for good on this invoice (IsHardDecline).
+	// charge was refused for good on this invoice (IsHardDecline), or whether
+	// the bank asked the customer to confirm its last charge
+	// (IsAuthenticationRequired).
 	StripePaymentMethodID string
 	AmountCents           int64
 	OccurredAt            time.Time  // wall-clock
