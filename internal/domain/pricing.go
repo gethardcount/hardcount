@@ -21,8 +21,8 @@ const (
 type RatingTier struct {
 	// UpTo is a tier boundary in whole meter units (never fractional).
 	UpTo int64 `json:"up_to"`
-	// UnitAmountCents is the per-unit price in cents, carried as an
-	// arbitrary-precision decimal so sub-cent unit prices (e.g. $3.00 per
+	// UnitAmountCents is the per-unit price in cents, carried as a decimal
+	// (RateLimits: at most 12 places on write) so sub-cent unit prices (e.g. $3.00 per
 	// 1,000,000 tokens = 0.0003 cents/token) bill linearly and exactly. This
 	// is the Stripe `unit_amount_decimal` model. Marshals to/from JSON as a
 	// string (shopspring/decimal). Invoice line amounts and totals stay whole
@@ -60,7 +60,7 @@ type RatingRuleVersion struct {
 	Mode           PricingMode         `json:"mode"`
 	Currency       string              `json:"currency"`
 	// FlatAmountCents and OverageUnitAmountCents are PER-UNIT rates (multiplied
-	// by a decimal quantity), so they carry arbitrary-precision decimals for
+	// by a decimal quantity), so they carry decimals (RateLimits on write) for
 	// sub-cent linear pricing (Stripe unit_amount_decimal model). PackageSize
 	// and PackageAmountCents stay whole int64 — a package is a fixed fee for a
 	// whole block, not a per-unit rate.

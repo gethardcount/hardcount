@@ -663,7 +663,7 @@ The breaks that concerned moving 0.8.x data went with the clean break.
 
 ## ADRs this changes
 
-None of these changes is built yet. Each ADR's status line links here,
+None of these changes is built yet, except where a row says so. Each ADR's status line links here,
 and a banner under it names the part that changes and the PR that changes
 it.
 
@@ -672,7 +672,7 @@ it.
 | [031](031-per-plan-base-bill-timing.md) | `base_bill_timing` no longer defaults to `in_arrears` when the base fee is above 0; in_advance with a base of 0 is refused (PR-4). |
 | [034](034-plan-billing-field-immutability.md) | The meter-set lock goes with `meter_ids` (PR-4). The base-fee lock becomes next-period edits (PR-7), or stays if PR-7 is cut. The `base_bill_timing` lock holds once a plan is used (PR-4). |
 | [044](044-canonical-ai-token-metering-model.md) | Decision 4: token prices are plan prices on the `tokens` meter, most specific wins, no priority (PR-4). |
-| [045](045-decimal-per-unit-pricing-rates.md) | `package_amount_cents` becomes a decimal too, rates take at most 12 decimal places, `flat` becomes `per_unit` and overage goes (PR-3). |
+| [045](045-decimal-per-unit-pricing-rates.md) | `package_amount_cents` becomes a decimal too, `flat` becomes `per_unit` and overage goes (PR-3). Rates take at most 12 decimal places: built in #1378, ahead of PR-3. |
 | [066](066-threshold-money-semantics.md) | Decision 4's rule-bucket granularity becomes the meter (PR-2). The ladder seed keys on price id, so the ambiguous-config failure goes (PR-4). The package clamp goes (PR-3). The fire prices per plan window (PR-4). |
 | [070](070-price-change-semantics.md) | Decision 1: overrides key on the price, not `rule_key`. Decision 4's earliest-version fallback and test-clock caveat go. Decision 5's currency guard goes. The 2026-10-23 meter-in-use amendment is replaced. Customer usage over an explicit window is priced at each subscription's current pin (section 10). All in PR-4. The period-start pin stays. |
 | [085](085-recipe-idempotent-apply.md) | Rule adoption, the rule conformance check, the currency taken from adopted rules and the 2026-10-23 amendment go (PR-4); recipes no longer create a dunning policy or webhook endpoint (PR-5). |

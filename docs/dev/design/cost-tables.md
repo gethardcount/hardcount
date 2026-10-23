@@ -83,7 +83,8 @@ INSERT — resolve `(provider, model_raw→model fallback, token_type)` from
 the event's dims against provider_cost_rates. Zero extra round trips, no
 cache, always fresh, empty table ≈ free. Events with no resolvable dims
 (non-token meters) stamp source='not_applicable'; token events with no
-matching rate stay NULL ('unresolved'). A resolution error must not fail
+matching rate stay NULL ('unresolved'), as do events whose cost does not
+fit BIGINT micros (2026-10-24, #1378: the event is still stored and billed). A resolution error must not fail
 ingestion beyond the tx it rides (it's one INSERT — atomic by shape).
 
 **D3. Resolution key order:** `model_raw` exact → `model` (family) →

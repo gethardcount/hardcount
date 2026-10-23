@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -3454,7 +3452,8 @@ type BillingThresholdsInput struct {
 // SetBillingThresholds writes (amount_gte, item_thresholds) onto
 // a subscription. Validates: at least one of amount_gte or item_thresholds is
 // supplied (a body with neither is a no-op masquerade); amount_gte > 0 if
-// supplied; usage_gte parses as a non-negative decimal; every
+// supplied; usage_gte is a decimal string above 0 inside
+// domain.QuantityLimits; every
 // subscription_item_id in item_thresholds belongs to this subscription;
 // duplicate item ids are rejected so the underlying PK doesn't surface as a
 // mid-tx integrity error. Multi-currency rejection happens upstream at the
@@ -3503,16 +3502,18 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 				fmt.Sprintf("item_thresholds[%d].subscription_item_id", i),
 				fmt.Sprintf("item %q does not belong to this subscription", t.SubscriptionItemID))
 		}
-		usage, derr := decimal.NewFromString(strings.TrimSpace(t.UsageGTE))
-		if derr != nil {
-			return domain.Subscription{}, errs.Invalid(
-				fmt.Sprintf("item_thresholds[%d].usage_gte", i),
-				"must be a numeric string (e.g. \"1000\" or \"3.14\")")
+		// The column is NUMERIC(38,12) with CHECK usage_gte > 0: a 13th
+		// decimal place was rounded away, and 0 or 10^26 failed the write.
+		field := fmt.Sprintf("item_thresholds[%d].usage_gte", i)
+		usage, err := domain.ParseDecimalString(field, t.UsageGTE)
+		if err != nil {
+			return domain.Subscription{}, err
 		}
-		if usage.IsNegative() {
-			return domain.Subscription{}, errs.Invalid(
-				fmt.Sprintf("item_thresholds[%d].usage_gte", i),
-				"must be >= 0")
+		if usage, err = domain.CheckDecimal(field, usage, domain.QuantityLimits); err != nil {
+			return domain.Subscription{}, err
+		}
+		if !usage.IsPositive() {
+			return domain.Subscription{}, errs.Invalid(field, field+" must be greater than 0")
 		}
 		parsed = append(parsed, domain.SubscriptionItemThreshold{
 			SubscriptionItemID: t.SubscriptionItemID,

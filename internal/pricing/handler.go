@@ -107,8 +107,13 @@ func (h *Handler) createOverride(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	// Strict: 0 is a valid free rate, so a dropped rate key would be a $0 price.
-	var input CreateOverrideInput
-	if !respond.DecodeStrict(w, r, &input) {
+	var req overrideRequest
+	if !respond.DecodeStrict(w, r, &req) {
+		return
+	}
+	input, err := req.input()
+	if err != nil {
+		respond.FromError(w, r, err, "price_override")
 		return
 	}
 
@@ -153,8 +158,13 @@ func (h *Handler) createRatingRule(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
 	// Strict: 0 is a valid free rate, so a dropped rate key would be a $0 price.
-	var input CreateRatingRuleInput
-	if !respond.DecodeStrict(w, r, &input) {
+	var req ratingRuleRequest
+	if !respond.DecodeStrict(w, r, &req) {
+		return
+	}
+	input, err := req.input()
+	if err != nil {
+		respond.FromError(w, r, err, "rating_rule")
 		return
 	}
 

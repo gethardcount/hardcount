@@ -18,8 +18,9 @@ export type PostV1UsageEventsBatchBodyItem = {
      * A JSON number (`5`) or a string holding one (`"5.5"`,
      * for exact decimals). At most 12 decimal places;
      * trailing zeros do not count. Its size must be under
-     * 10^26. A negative value is a correction. A missing
-     * quantity, or any other value, fails validation.
+     * 10^26, and it is at most 100 characters. A negative
+     * value is a correction. A missing quantity, or any
+     * other value, fails validation.
      */
   quantity: number | string;
   dimensions?: PostV1UsageEventsBatchBodyItemDimensions;
