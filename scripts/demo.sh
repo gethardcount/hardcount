@@ -117,8 +117,7 @@ SUB=$(req POST "/v1/subscriptions" "{
   \"display_name\": \"ACME — usage\",
   \"customer_id\": \"$CUST_ID\",
   \"items\": [{\"plan_id\": \"$PLAN_ID\", \"quantity\": 1}],
-  \"billing_time\": \"anniversary\",
-  \"start_now\": true
+  \"billing_time\": \"anniversary\"
 }")
 SUB_ID=$(echo "$SUB" | jq -r '.id')
 [ "$SUB_ID" != "null" ] || { echo "✗ subscription create failed"; echo "$SUB" | jq .; exit 1; }

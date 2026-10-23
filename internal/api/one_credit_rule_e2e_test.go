@@ -60,7 +60,7 @@ func newSeatRig(t *testing.T, start time.Time, seats int) *seatRig {
 	r.planAddOn = addOn["id"].(string)
 	sub := r.must(http.MethodPost, "/v1/subscriptions", start, map[string]any{
 		"code": "seat-sub", "display_name": "Seat Sub", "customer_id": r.custID, "billing_time": "calendar",
-		"items": []map[string]any{{"plan_id": r.planTeam, "quantity": seats}}, "start_now": true,
+		"items": []map[string]any{{"plan_id": r.planTeam, "quantity": seats}},
 	}, http.StatusCreated)
 	r.subID = sub["id"].(string)
 	r.itemA = r.sub().Items[0].ID

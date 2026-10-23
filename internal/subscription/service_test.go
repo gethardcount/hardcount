@@ -876,17 +876,21 @@ func TestCreate(t *testing.T) {
 	svc := NewService(newMemStore(), nil)
 	ctx := context.Background()
 
-	t.Run("draft by default", func(t *testing.T) {
+	t.Run("draft only when asked", func(t *testing.T) {
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-001", DisplayName: "Pro Monthly",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
+			Status:     domain.SubscriptionDraft,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if sub.Status != domain.SubscriptionDraft {
 			t.Errorf("got status %q, want draft", sub.Status)
+		}
+		if sub.StartedAt != nil || sub.ActivatedAt != nil || sub.CurrentBillingPeriodStart != nil || sub.NextBillingAt != nil {
+			t.Errorf("a draft must not start: started %v activated %v period %v next %v", sub.StartedAt, sub.ActivatedAt, sub.CurrentBillingPeriodStart, sub.NextBillingAt)
 		}
 		if sub.BillingTime != domain.BillingTimeCalendar {
 			t.Errorf("got billing_time %q, want calendar", sub.BillingTime)
@@ -913,12 +917,35 @@ func TestCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("start_now activates immediately", func(t *testing.T) {
+	t.Run("status other than draft is refused", func(t *testing.T) {
+		for _, st := range []domain.SubscriptionStatus{domain.SubscriptionActive, domain.SubscriptionTrialing, domain.SubscriptionCanceled, "later"} {
+			_, err := svc.Create(ctx, "t1", CreateInput{
+				Code: "sub-bad-status", DisplayName: "Bad", CustomerID: "cus_1",
+				Items: []CreateItemInput{{PlanID: "pln_1"}}, Status: st,
+			})
+			var de *errs.DomainError
+			if !errors.As(err, &de) || de.Field != "status" {
+				t.Errorf("status %q: got %v, want a validation error on status", st, err)
+			}
+		}
+	})
+
+	t.Run("a draft with a trial is refused", func(t *testing.T) {
+		_, err := svc.Create(ctx, "t1", CreateInput{
+			Code: "sub-draft-trial", DisplayName: "Draft trial", CustomerID: "cus_1",
+			Items: []CreateItemInput{{PlanID: "pln_1"}}, Status: domain.SubscriptionDraft, TrialDays: 14,
+		})
+		var de *errs.DomainError
+		if !errors.As(err, &de) || de.Field != "trial_days" {
+			t.Errorf("got %v, want a validation error on trial_days", err)
+		}
+	})
+
+	t.Run("starts now by default", func(t *testing.T) {
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-002", DisplayName: "Active",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -934,9 +961,9 @@ func TestCreate(t *testing.T) {
 		// here (the old bug) makes the sub count in headline MRR but
 		// vanish from New/Net movement, so the dashboard never reconciles.
 		if sub.ActivatedAt == nil {
-			t.Error("start_now must stamp activated_at (else invisible to MRR movement)")
+			t.Error("a start-now create must stamp activated_at (else invisible to MRR movement)")
 		} else if sub.StartedAt != nil && !sub.ActivatedAt.Equal(*sub.StartedAt) {
-			t.Errorf("activated_at %v should equal started_at %v for start_now", *sub.ActivatedAt, *sub.StartedAt)
+			t.Errorf("activated_at %v should equal started_at %v on a start-now create", *sub.ActivatedAt, *sub.StartedAt)
 		}
 	})
 
@@ -991,7 +1018,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-bill-active", DisplayName: "Active",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
@@ -1094,7 +1120,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-mid", DisplayName: "Mid-period cancel",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1127,7 +1152,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-final-err", DisplayName: "Final errpath",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1157,7 +1181,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-active", DisplayName: "Active to cancel",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1182,7 +1205,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-cancel-errpath", DisplayName: "Error on cancel",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err != nil {
 			t.Fatalf("create: %v", err)
@@ -1218,7 +1240,6 @@ func TestCreate(t *testing.T) {
 			Code: "sub-bill-err", DisplayName: "Error path",
 			CustomerID: "cus_1",
 			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:   true,
 		})
 		if err == nil {
 			t.Fatal("a day-1 billing failure must fail Create (atomic), not orphan a sub with no first-period invoice")
@@ -1423,7 +1444,6 @@ func TestPeriod_DayGradeSnap(t *testing.T) {
 		Code: "sub-snap-calendar", DisplayName: "Snap Calendar",
 		CustomerID: "cus_1",
 		Items:      []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1444,7 +1464,6 @@ func TestPeriod_DayGradeSnap(t *testing.T) {
 		Code: "sub-snap-anniversary", DisplayName: "Snap Anniversary",
 		CustomerID:  "cus_1",
 		Items:       []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:    true,
 		BillingTime: domain.BillingTimeAnniversary,
 	})
 	if err != nil {
@@ -1466,7 +1485,6 @@ func TestPeriod_DayGradeSnap(t *testing.T) {
 		Code: "sub-snap-utc", DisplayName: "Snap UTC",
 		CustomerID: "cus_1",
 		Items:      []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1487,7 +1505,7 @@ func TestActivateAndCancel(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-act", DisplayName: "Test", CustomerID: "c",
-		Items: []CreateItemInput{{PlanID: "p"}},
+		Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
 	})
 
 	t.Run("activate draft", func(t *testing.T) {
@@ -1516,7 +1534,7 @@ func TestActivateAndCancel(t *testing.T) {
 		svcB.SetBiller(fb)
 		draft, err := svcB.Create(ctx, "t1", CreateInput{
 			Code: "sub-act-bill", DisplayName: "ActBill", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}},
+			Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
 		})
 		if err != nil {
 			t.Fatalf("create draft: %v", err)
@@ -1545,7 +1563,7 @@ func TestActivateAndCancel(t *testing.T) {
 		svcB.SetBiller(fb)
 		draft, err := svcB.Create(ctx, "t1", CreateInput{
 			Code: "sub-act-fail", DisplayName: "ActFail", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}},
+			Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
 		})
 		if err != nil {
 			t.Fatalf("create draft: %v", err)
@@ -1593,8 +1611,8 @@ func TestCancel_NonTerminalStatuses(t *testing.T) {
 		svc := NewService(newMemStore(), nil)
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-draft", DisplayName: "Draft", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}},
-			// No StartNow, no TrialDays → status defaults to draft.
+			Items:  []CreateItemInput{{PlanID: "p"}},
+			Status: domain.SubscriptionDraft,
 		})
 		if sub.Status != domain.SubscriptionDraft {
 			t.Fatalf("setup: expected draft, got %q", sub.Status)
@@ -1640,7 +1658,7 @@ func TestCancel_NonTerminalStatuses(t *testing.T) {
 		svc := NewService(newMemStore(), nil)
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-2x", DisplayName: "Twice", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, _, _ = svc.Cancel(ctx, "t1", sub.ID)
 		_, _, err := svc.Cancel(ctx, "t1", sub.ID)
@@ -1661,8 +1679,7 @@ func TestUpdateItem_PlanChange(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-change", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_old"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_old"}},
 	})
 
 	// Set billing period so scheduled-change effective_at lines up with it.
@@ -1724,8 +1741,7 @@ func TestUpdateItem_Scheduled(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-sched", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_old"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_old"}},
 	})
 
 	store := svc.store.(*memStore)
@@ -1816,8 +1832,7 @@ func TestAddRemoveItem(t *testing.T) {
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-items", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_base"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_base"}},
 	})
 
 	t.Run("add second item", func(t *testing.T) {
@@ -1878,8 +1893,7 @@ func TestScheduleCancel(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-sched", DisplayName: "Test", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, _ = svc.Activate(context.Background(), "t1", sub.ID)
 		// Stamp a billing period so cancel_at validation has something to compare against.
@@ -2001,8 +2015,7 @@ func TestPauseCollection(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-pause", DisplayName: "Test", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, _ = svc.Activate(context.Background(), "t1", sub.ID)
 		stored, _ := svc.Get(context.Background(), "t1", sub.ID)
@@ -2159,8 +2172,7 @@ func TestEndTrial(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-active", DisplayName: "Active", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		_, err := svc.EndTrial(context.Background(), "t1", sub.ID)
 		if err == nil {
@@ -2237,8 +2249,7 @@ func TestExtendTrial(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(context.Background(), "t1", CreateInput{
 			Code: "sub-active", DisplayName: "Active", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p"}},
 		})
 		future := now.AddDate(0, 0, 30)
 		if _, err := svc.ExtendTrial(context.Background(), "t1", sub.ID, future); err == nil {
@@ -2544,7 +2555,7 @@ func TestProcessExpiredTrials(t *testing.T) {
 
 // TestPeriodAnchoring locks in the post-Bug-1/2/11 contract for how the
 // first billing period anchors across every entry point (Create with
-// trial / Create with start_now / Activate from draft / EndTrial-early /
+// trial / Create that starts now / Activate from draft / EndTrial-early /
 // ExtendTrial). Calendar billing must produce a stub period bounded by
 // the next calendar month; anniversary must produce a full cycle from
 // the anchor instant. Pre-fix Create+trial+calendar dropped the stub
@@ -2633,8 +2644,9 @@ func TestPeriodAnchoring(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:       []CreateItemInput{{PlanID: "p"}}, // no StartNow, no TrialDays → draft
+			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeCalendar,
+			Status:      domain.SubscriptionDraft,
 		})
 		if sub.Status != domain.SubscriptionDraft {
 			t.Fatalf("precondition: want draft, got %q", sub.Status)
@@ -2664,6 +2676,7 @@ func TestPeriodAnchoring(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeAnniversary,
+			Status:      domain.SubscriptionDraft,
 		})
 		activated, _ := svc.Activate(ctx, "t1", sub.ID)
 		wantPeriodStart := time.Date(2025, 11, 29, 0, 0, 0, 0, time.UTC)
@@ -2796,7 +2809,6 @@ func TestPeriodAnchoring(t *testing.T) {
 				{PlanID: "p_monthly"},
 				{PlanID: "p_yearly"},
 			},
-			StartNow: true,
 		})
 		if err == nil {
 			t.Fatal("expected error for mixed monthly + yearly items")
@@ -2811,8 +2823,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		_, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p1"}, {PlanID: "p2"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p1"}, {PlanID: "p2"}},
 		})
 		if err != nil {
 			t.Errorf("expected success for matching-interval items: %v", err)
@@ -2833,8 +2844,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_monthly_a"}, {PlanID: "p_monthly_b"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_monthly_a"}, {PlanID: "p_monthly_b"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2867,8 +2877,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_monthly"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_monthly"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2895,7 +2904,6 @@ func TestPeriodAnchoring(t *testing.T) {
 				{PlanID: "p_arrears"},
 				{PlanID: "p_advance"},
 			},
-			StartNow: true,
 		})
 		if err == nil {
 			t.Fatal("expected error for mixed in_arrears + in_advance items")
@@ -2915,8 +2923,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_arrears"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_arrears"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2945,8 +2952,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_arrears"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_arrears"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -2977,7 +2983,6 @@ func TestPeriodAnchoring(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_monthly"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3045,7 +3050,6 @@ func TestPeriodAnchoring(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_yearly_adv"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3096,8 +3100,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items:    []CreateItemInput{{PlanID: "p_arrears_a"}},
-			StartNow: true,
+			Items: []CreateItemInput{{PlanID: "p_arrears_a"}},
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3111,7 +3114,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}
 	})
 
-	t.Run("Create + start_now + yearly plan → first period is 1 year from now (no calendar stub)", func(t *testing.T) {
+	t.Run("Create (starts now) + yearly plan → first period is 1 year from now (no calendar stub)", func(t *testing.T) {
 		// Yearly billing ignores billing_time — Stripe doesn't ship
 		// calendar yearly either. Even with billing_time=calendar, a
 		// yearly plan anchors anniversary-style.
@@ -3121,7 +3124,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		}})
 		sub, _ := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true,
+			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeCalendar, // intentionally calendar
 		})
 		wantPeriodStart := time.Date(2025, 11, 29, 0, 0, 0, 0, time.UTC)
@@ -3184,7 +3187,6 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_yearly_adv"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create: %v", err)
@@ -3302,7 +3304,6 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p_m1"}, {PlanID: "p_m2"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("Create multi-item: %v", err)
@@ -3359,7 +3360,6 @@ func TestSetBillingThresholds(t *testing.T) {
 				{PlanID: "plan_base"},
 				{PlanID: "plan_addon"},
 			},
-			StartNow: true,
 		})
 		if err != nil {
 			t.Fatalf("create sub: %v", err)
@@ -3519,8 +3519,7 @@ func TestClearBillingThresholds(t *testing.T) {
 
 	sub, err := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-clear", DisplayName: "Test", CustomerID: "c",
-		Items:    []CreateItemInput{{PlanID: "plan_base"}},
-		StartNow: true,
+		Items: []CreateItemInput{{PlanID: "plan_base"}},
 	})
 	if err != nil {
 		t.Fatalf("create sub: %v", err)
@@ -3612,7 +3611,6 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 			DisplayName: "Pinned",
 			CustomerID:  "cus_pinned",
 			Items:       []CreateItemInput{{PlanID: "pln_1"}},
-			StartNow:    true,
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -3625,7 +3623,7 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 		if !sub.StartedAt.Equal(frozen) {
 			t.Errorf("started_at: got %v, want %v (frozen)", *sub.StartedAt, frozen)
 		}
-		// Calendar + StartNow: ps = beginningOfDayIn(now, UTC); pe =
+		// Calendar + start now: ps = beginningOfDayIn(now, UTC); pe =
 		// beginningOfMonthIn(now+1mo, UTC). Plus 1 month from 2024-04-15
 		// = 2024-05-15 → first of May 2024.
 		wantPeriodStart := time.Date(2024, 4, 15, 0, 0, 0, 0, time.UTC)
@@ -3655,7 +3653,6 @@ func TestClockResolver_NotWired(t *testing.T) {
 		DisplayName: "Fallback",
 		CustomerID:  "cus_fallback",
 		Items:       []CreateItemInput{{PlanID: "pln_1"}},
-		StartNow:    true,
 	})
 	after := time.Now().UTC()
 	if err != nil {
@@ -3835,8 +3832,7 @@ func TestProcessExpiredPauseCollections(t *testing.T) {
 		future := now.Add(24 * time.Hour)
 		ctx := context.Background()
 		mkSub := func(code string, pc *domain.PauseCollection) string {
-			s, _ := svc.Create(ctx, "t1", CreateInput{Code: code, DisplayName: code, CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true})
-			_, _ = svc.Activate(ctx, "t1", s.ID)
+			s, _ := svc.Create(ctx, "t1", CreateInput{Code: code, DisplayName: code, CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}})
 			if pc != nil {
 				row := mem.subs[s.ID]
 				row.PauseCollection = pc
@@ -3898,8 +3894,7 @@ func TestProcessExpiredPauseCollections(t *testing.T) {
 		svc.SetAuditLogger(audit)
 
 		ctx := context.Background()
-		s, _ := svc.Create(ctx, "t1", CreateInput{Code: "clkpause", DisplayName: "clkpause", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true})
-		_, _ = svc.Activate(ctx, "t1", s.ID)
+		s, _ := svc.Create(ctx, "t1", CreateInput{Code: "clkpause", DisplayName: "clkpause", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}})
 		contracted := time.Date(2028, 9, 3, 18, 30, 0, 0, time.UTC) // Sep 4 IST
 		row := mem.subs[s.ID]
 		row.TestClockID = "clk_1"

@@ -56,7 +56,7 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 	subID := flowStr(call("POST", "/v1/subscriptions", map[string]any{
 		"code": "removed-sub", "display_name": "Removed Routes Subscription", "customer_id": customerID,
 		"items":        []map[string]any{{"plan_id": planID, "quantity": 1}},
-		"billing_time": "anniversary", "start_now": true,
+		"billing_time": "anniversary",
 	}).want(t, 201, "create subscription").body, "id")
 
 	// An outbound event for the two webhook cases. Events reach the table

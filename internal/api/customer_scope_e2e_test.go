@@ -244,7 +244,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		r.sub, r.item = id(sub), id(sub["items"].([]any)[0].(map[string]any))
 		cus2 := id(create("POST", "/v1/customers", map[string]any{"external_id": tag + "_cus2", "display_name": tag}))
 		sub = create("POST", "/v1/subscriptions", map[string]any{
-			"code": tag + "-active", "display_name": "sub", "customer_id": cus2, "items": []map[string]any{{"plan_id": r.plan}}, "start_now": true,
+			"code": tag + "-active", "display_name": "sub", "customer_id": cus2, "items": []map[string]any{{"plan_id": r.plan}},
 		})
 		r.activeSub, r.activeItem = id(sub), id(sub["items"].([]any)[0].(map[string]any))
 		// The policy comes first: finalizing an unpaid invoice starts a

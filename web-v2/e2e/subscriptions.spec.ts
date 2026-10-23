@@ -334,7 +334,6 @@ test('extend a trial, end it now (the first period is invoiced), then pause coll
     customer_id: customer.id,
     items: [{ plan_id: plan.id, quantity: 1 }],
     trial_days: 14,
-    start_now: true,
   })
   expect(subscription.status).toBe('trialing')
   const zone = await workspaceZone()

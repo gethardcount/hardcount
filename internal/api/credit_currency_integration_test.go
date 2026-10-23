@@ -62,7 +62,7 @@ func (e ccyEnv) subscribe(t *testing.T, customerID, code, currency string) strin
 	}).want(t, 201, "create plan "+code).body, "id")
 	return flowStr(e.call(t, "POST", "/v1/subscriptions", map[string]any{
 		"code": "sub-" + code, "display_name": code, "customer_id": customerID,
-		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary", "start_now": true,
+		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary",
 	}).want(t, 201, "create subscription "+code).body, "id")
 }
 

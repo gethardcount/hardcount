@@ -454,13 +454,44 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
+// createBody is CreateInput as the API reads it. Its status hides the
+// embedded one so the handler can tell a field left out (start now) from one
+// sent empty or null (refused).
+type createBody struct {
+	CreateInput
+	Status sentStatus `json:"status"`
+}
+
+// sentStatus records whether "status" was in the body at all. encoding/json
+// calls UnmarshalJSON for a JSON null too, so null counts as sent.
+type sentStatus struct {
+	value domain.SubscriptionStatus
+	sent  bool
+}
+
+func (s *sentStatus) UnmarshalJSON(b []byte) error {
+	s.sent = true
+	if string(b) == "null" {
+		return nil
+	}
+	return json.Unmarshal(b, &s.value)
+}
+
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var input CreateInput
-	if !respond.DecodeStrict(w, r, &input) {
+	var body createBody
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
+	// "status": "" and "status": null are not "left out": a template whose
+	// value was unset must not start and bill the subscription.
+	if body.Status.sent && body.Status.value == "" {
+		respond.FromError(w, r, errs.Invalid("status", createStatusMessage), "subscription")
+		return
+	}
+	input := body.CreateInput
+	input.Status = body.Status.value
 
 	sub, err := h.svc.Create(r.Context(), tenantID, input)
 	if err != nil {

@@ -40,9 +40,6 @@ func (r *lagRig) newSub(code, planID string, at time.Time, extra map[string]any)
 		"code": code, "display_name": code, "customer_id": r.custID, "billing_time": "anniversary",
 		"items": []map[string]any{{"plan_id": planID, "quantity": 1}},
 	}
-	if _, ok := extra["trial_days"]; !ok {
-		body["start_now"] = true
-	}
 	for k, v := range extra {
 		body[k] = v
 	}

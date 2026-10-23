@@ -79,7 +79,8 @@ A subscription puts a customer on a plan.
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/v1/customers` | Create a customer |
-| `POST` | `/v1/subscriptions` | Create a subscription |
+| `POST` | `/v1/subscriptions` | Create a subscription. It starts now (or starts its trial now). Send `"status": "draft"` to create it without starting it. |
+| `POST` | `/v1/subscriptions/{id}/activate` | Start a draft subscription now |
 | `PATCH` | `/v1/subscriptions/{id}/items/{itemID}` | Change the plan or quantity. A change that takes effect now is prorated (charged or credited for the part of the period left). |
 | `PUT` | `/v1/subscriptions/{id}/pause-collection` | Keep the billing cycle, but leave new invoices as drafts |
 | `POST` | `/v1/subscriptions/{id}/extend-trial` | Move `trial_end_at` later |

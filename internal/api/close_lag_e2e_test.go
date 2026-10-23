@@ -85,7 +85,7 @@ func newLagRigGranted(t *testing.T, timing string, withAddOn bool, grantCents in
 		items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})
 	}
 	sub := r.must(http.MethodPost, "/v1/subscriptions", lagP0, map[string]any{
-		"code": "lag-sub", "display_name": "Lag Sub", "customer_id": r.custID, "items": items, "start_now": true,
+		"code": "lag-sub", "display_name": "Lag Sub", "customer_id": r.custID, "items": items,
 	}, http.StatusCreated)
 	r.subID = sub["id"].(string)
 	s := r.sub()

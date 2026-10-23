@@ -5,7 +5,7 @@ import { env, seedFile } from './fixtures/env'
 import { api, usd, usdBalance, uniq } from './fixtures/api'
 import {
   billedCustomer, createClock, createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
-  type Customer, type Invoice, type Seed, type Subscription,
+  type Customer, type Invoice, type Plan, type Seed, type Subscription,
 } from './fixtures/seed'
 
 // The few things an operator does most. Each test seeds what it needs through
@@ -156,6 +156,63 @@ test('create a subscription for a customer', async ({ page }) => {
   await expect(page.getByRole('link', { name: `UI Subscription ${id}` })).toBeVisible()
 })
 
+// A plan billed in advance: a subscription that starts bills its first month
+// at once, so "bills nothing" below is something the test can see.
+function createAdvancePlan(): Promise<Plan> {
+  const id = uniq()
+  return api<Plan>('POST', '/plans', {
+    code: `e2e-adv-${id}`, name: `E2E Advance ${id}`, currency: 'USD',
+    billing_interval: 'monthly', base_amount_cents: 4900, base_bill_timing: 'in_advance',
+  })
+}
+
+test('a new subscription starts now and bills its first month', async ({ page }) => {
+  const plan = await createAdvancePlan()
+  const customer = await createCustomer()
+  const id = uniq()
+  await page.goto(`/customers/${customer.id}`)
+  await page.getByRole('button', { name: 'Create subscription' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create subscription' })
+  await expect(dialog.getByRole('checkbox', { name: 'Create as draft' })).not.toBeChecked()
+  await dialog.getByLabel('Display name').fill(`UI Now ${id}`)
+  await dialog.getByLabel('Code').fill(`ui-now-${id}`)
+  await dialog.getByLabel('Plan', { exact: true }).selectOption({ label: plan.name })
+  await dialog.getByRole('button', { name: 'Create subscription' }).click()
+  await expect(dialog).toBeHidden()
+
+  const subs = await api<{ data: Subscription[] }>('GET', `/subscriptions?customer_id=${customer.id}`)
+  expect(subs.data.map(s => s.status)).toEqual(['active'])
+  expect(await invoicesFor(customer.id)).toHaveLength(1)
+})
+
+test('a subscription created as a draft bills nothing until it is activated', async ({ page }) => {
+  const plan = await createAdvancePlan()
+  const customer = await createCustomer()
+  const id = uniq()
+  await page.goto(`/customers/${customer.id}`)
+  await page.getByRole('button', { name: 'Create subscription' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create subscription' })
+  await dialog.getByLabel('Display name').fill(`UI Draft ${id}`)
+  await dialog.getByLabel('Code').fill(`ui-draft-${id}`)
+  await dialog.getByLabel('Plan', { exact: true }).selectOption({ label: plan.name })
+  await dialog.getByRole('checkbox', { name: 'Create as draft' }).click()
+  // A draft does not start, so it cannot start a trial.
+  await expect(dialog.getByLabel('Trial period')).toBeDisabled()
+  await dialog.getByRole('button', { name: 'Create subscription' }).click()
+  await expect(dialog).toBeHidden()
+
+  const subs = await api<{ data: Subscription[] }>('GET', `/subscriptions?customer_id=${customer.id}`)
+  expect(subs.data.map(s => s.status)).toEqual(['draft'])
+  expect(await invoicesFor(customer.id)).toHaveLength(0)
+
+  await page.goto(`/subscriptions/${subs.data[0].id}`)
+  await page.getByRole('button', { name: 'Activate' }).click()
+  await expect(page.getByRole('region', { name: /^Notifications/ }).getByText('Subscription activated', { exact: true })).toBeVisible()
+  const after = await api<Subscription>('GET', `/subscriptions/${subs.data[0].id}`)
+  expect(after.status).toBe('active')
+  expect(await invoicesFor(customer.id)).toHaveLength(1)
+})
+
 test('advance a test clock to the renewal and see the invoice', async ({ page }) => {
   const { clock, customer } = await subscribedCustomer()
   await page.goto(`/test-clocks/${clock.id}`)
@@ -249,7 +306,6 @@ test('Home counts trialing subscriptions and compares failed payments with the p
     customer_id: customer.id,
     items: [{ plan_id: plan.id, quantity: 1 }],
     trial_days: 14,
-    start_now: true,
   })
   expect(sub.status).toBe('trialing')
 
@@ -336,7 +392,6 @@ test('the next-invoice preview prorates a mid-month calendar start', async ({ pa
     customer_id: customer.id,
     items: [{ plan_id: plan.id, quantity: 1 }],
     billing_time: 'calendar',
-    start_now: true,
   })
   const preview = await api<{ lines: { description: string; amount_cents: number }[] }>('POST', '/invoices/create_preview', { customer_id: customer.id, subscription_id: sub.id })
   expect(preview.lines).toHaveLength(1)

@@ -54,14 +54,14 @@ func TestCurrencyPin(t *testing.T) {
 	svc.SetPlanReader(pricingStore)
 	svc.SetProfileReader(custStore)
 
-	create := func(code string, startNow bool, planIDs ...string) (domain.Subscription, error) {
+	create := func(code string, planIDs ...string) (domain.Subscription, error) {
 		items := make([]CreateItemInput, 0, len(planIDs))
 		for _, pid := range planIDs {
 			items = append(items, CreateItemInput{PlanID: pid, Quantity: 1})
 		}
 		return svc.Create(ctx, tenantID, CreateInput{
 			Code: code, DisplayName: code, CustomerID: cust.ID,
-			Items: items, BillingTime: domain.BillingTimeAnniversary, StartNow: startNow,
+			Items: items, BillingTime: domain.BillingTimeAnniversary,
 		})
 	}
 	wantRefusal := func(err error, needle, scenario string) {
@@ -75,7 +75,7 @@ func TestCurrencyPin(t *testing.T) {
 	}
 
 	// Mixed-currency item SET at create refuses.
-	_, err = create("pin-mixed", true, usdA.ID, eurC.ID)
+	_, err = create("pin-mixed", usdA.ID, eurC.ID)
 	wantRefusal(err, "one currency", "mixed item set")
 
 	// Ordering bypass closed: profile EUR set FIRST (store-level, simulating
@@ -85,11 +85,11 @@ func TestCurrencyPin(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed profile: %v", err)
 	}
-	_, err = create("pin-usd-vs-profile", true, usdA.ID)
+	_, err = create("pin-usd-vs-profile", usdA.ID)
 	wantRefusal(err, "billing profile", "profile-first ordering")
 
 	// Coherent twin: EUR plan under the EUR profile passes.
-	subEUR, err := create("pin-eur-ok", true, eurC.ID)
+	subEUR, err := create("pin-eur-ok", eurC.ID)
 	if err != nil {
 		t.Fatalf("EUR sub under EUR profile must pass: %v", err)
 	}
@@ -101,11 +101,11 @@ func TestCurrencyPin(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("clear profile: %v", err)
 	}
-	_, err = create("pin-usd-vs-sub", true, usdA.ID)
+	_, err = create("pin-usd-vs-sub", usdA.ID)
 	wantRefusal(err, "pin-eur-ok", "cross-sub pin")
 
 	// Same-currency second sub passes (different meter).
-	if _, err := create("pin-eur-second", true, eurD.ID); err != nil {
+	if _, err := create("pin-eur-second", eurD.ID); err != nil {
 		t.Fatalf("second EUR sub must pass: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestCurrencyPin(t *testing.T) {
 	draft, err := svc.Create(ctx, tenantID, CreateInput{
 		Code: "pin-draft", DisplayName: "pin-draft", CustomerID: cust2.ID,
 		Items:       []CreateItemInput{{PlanID: usdA.ID, Quantity: 1}},
-		BillingTime: domain.BillingTimeAnniversary, StartNow: false,
+		BillingTime: domain.BillingTimeAnniversary, Status: domain.SubscriptionDraft,
 	})
 	if err != nil {
 		t.Fatalf("draft create: %v", err)

@@ -1703,3 +1703,50 @@ func TestHandler_ExtendTrial_RejectsShorten(t *testing.T) {
 		t.Errorf("expected non-2xx when shrinking trial, got %d. body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestHandler_Create_RefusesEmptyOrNullStatus: status takes only "draft".
+// "status": "" and "status": null are not a way to say "start now"; a caller
+// whose template left the value unset is told (422 on status), not started
+// and billed. Leaving the field out still starts the subscription.
+func TestHandler_Create_RefusesEmptyOrNullStatus(t *testing.T) {
+	ctx := context.WithValue(context.Background(), auth.TestTenantIDKey(), "t1")
+	store := newMemStore()
+	h := NewHandler(NewService(store, nil))
+
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/subscriptions", bytes.NewBufferString(body)).WithContext(ctx)
+		rr := httptest.NewRecorder()
+		h.create(rr, req)
+		return rr
+	}
+	const base = `"code":"%s","display_name":"S","customer_id":"cus_1","items":[{"plan_id":"pln_1"}]`
+
+	for _, tc := range []struct{ name, status string }{
+		{"empty", `""`},
+		{"null", `null`},
+	} {
+		rr := post(fmt.Sprintf(`{`+base+`,"status":%s}`, "sub-"+tc.name, tc.status))
+		var body struct {
+			Error struct {
+				Param string `json:"param"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(rr.Body.Bytes(), &body)
+		if rr.Code != http.StatusUnprocessableEntity || body.Error.Param != "status" {
+			t.Errorf("status %s: got %d %s, want 422 naming status", tc.status, rr.Code, rr.Body.String())
+		}
+	}
+	if len(store.subs) != 0 {
+		t.Fatalf("refused creates wrote %d subscriptions, want none", len(store.subs))
+	}
+
+	rr := post(fmt.Sprintf(`{`+base+`}`, "sub-absent"))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status left out: got %d %s, want 201", rr.Code, rr.Body.String())
+	}
+	var sub domain.Subscription
+	_ = json.Unmarshal(rr.Body.Bytes(), &sub)
+	if sub.Status != domain.SubscriptionActive {
+		t.Fatalf("status left out: got %q, want active", sub.Status)
+	}
+}

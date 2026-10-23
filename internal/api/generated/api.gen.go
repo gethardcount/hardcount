@@ -2993,6 +2993,21 @@ func (e PostV1SubscriptionsJSONBodyBillingTime) Valid() bool {
 	}
 }
 
+// Defines values for PostV1SubscriptionsJSONBodyStatus.
+const (
+	Draft PostV1SubscriptionsJSONBodyStatus = "draft"
+)
+
+// Valid indicates whether the value is a known member of the PostV1SubscriptionsJSONBodyStatus enum.
+func (e PostV1SubscriptionsJSONBodyStatus) Valid() bool {
+	switch e {
+	case Draft:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PauseSubscriptionCollectionJSONBodyBehavior.
 const (
 	PauseSubscriptionCollectionJSONBodyBehaviorKeepAsDraft PauseSubscriptionCollectionJSONBodyBehavior = "keep_as_draft"
@@ -8211,8 +8226,23 @@ type PostV1SubscriptionsJSONBody struct {
 		PlanId   string `json:"plan_id"`
 		Quantity int    `json:"quantity,omitempty"`
 	} `json:"items"`
-	StartNow  bool `json:"start_now,omitempty"`
-	TrialDays int  `json:"trial_days,omitempty"`
+
+	// Status Leave it out and the subscription starts now. Without
+	// `trial_days` it is `active`, its first period starts
+	// today in the account's billing time zone (the clock's
+	// day for a customer on a test clock), and a non-zero base
+	// fee billed in advance is invoiced now. With `trial_days`
+	// above 0 it is `trialing` from now. Send `draft` to create it
+	// without starting it: it bills nothing until you activate
+	// it with `POST /v1/subscriptions/{id}/activate`. A draft
+	// cannot have a trial (`trial_days` above 0). An empty or
+	// null `status` is refused.
+	Status PostV1SubscriptionsJSONBodyStatus `json:"status,omitempty"`
+
+	// TrialDays Days of free trial; 0 means no trial. Above 0, the
+	// subscription is `trialing` from now and its first paid
+	// period starts on the day the trial ends.
+	TrialDays int `json:"trial_days,omitempty"`
 }
 
 // PostV1SubscriptionsParams defines parameters for PostV1Subscriptions.
@@ -8227,6 +8257,9 @@ type PostV1SubscriptionsParams struct {
 
 // PostV1SubscriptionsJSONBodyBillingTime defines parameters for PostV1Subscriptions.
 type PostV1SubscriptionsJSONBodyBillingTime string
+
+// PostV1SubscriptionsJSONBodyStatus defines parameters for PostV1Subscriptions.
+type PostV1SubscriptionsJSONBodyStatus string
 
 // PostV1SubscriptionsIdActivateParams defines parameters for PostV1SubscriptionsIdActivate.
 type PostV1SubscriptionsIdActivateParams struct {

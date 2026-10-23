@@ -28,7 +28,7 @@ func TestCreate_TimezoneUnreadableFailsWithNothingWritten(t *testing.T) {
 
 	if _, err := svc.Create(context.Background(), "t1", CreateInput{
 		Code: "s-tz-down", DisplayName: "n", CustomerID: "c",
-		Items: []CreateItemInput{{PlanID: "p"}}, StartNow: true,
+		Items: []CreateItemInput{{PlanID: "p"}},
 	}); err == nil {
 		t.Fatal("Create succeeded with unreadable settings; want an error")
 	}
