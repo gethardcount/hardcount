@@ -19,9 +19,9 @@ import (
 // the size and scale cases go red; drop the zero refusal → the zero cases go
 // red.
 
-func thresholdFixture(t *testing.T) (*Service, string, string) {
+func thresholdFixture(t *testing.T) (svc *Service, subID, firstItem, secondItem string) {
 	t.Helper()
-	svc := NewService(newMemStore(), nil)
+	svc = NewService(newMemStore(), nil)
 	sub, err := svc.Create(context.Background(), "t1", CreateInput{
 		Code: "sub-limits", DisplayName: "Test", CustomerID: "c",
 		Items: []CreateItemInput{{PlanID: "plan_base"}, {PlanID: "plan_addon"}},
@@ -33,18 +33,17 @@ func thresholdFixture(t *testing.T) (*Service, string, string) {
 	if err != nil {
 		t.Fatalf("get sub: %v", err)
 	}
-	return svc, sub.ID, fresh.Items[1].ID
+	return svc, sub.ID, fresh.Items[0].ID, fresh.Items[1].ID
 }
 
 // setUsageGTE sets usage_gte on the second item (index 1, after a valid
 // first one), so the 422 must name the index.
 func setUsageGTE(t *testing.T, raw string) (string, error) {
 	t.Helper()
-	svc, subID, itemID := thresholdFixture(t)
-	fresh, _ := svc.Get(context.Background(), "t1", subID)
+	svc, subID, firstItem, itemID := thresholdFixture(t)
 	updated, err := svc.SetBillingThresholds(context.Background(), "t1", subID, BillingThresholdsInput{
 		ItemThresholds: []ItemThresholdInput{
-			{SubscriptionItemID: fresh.Items[0].ID, UsageGTE: "10"},
+			{SubscriptionItemID: firstItem, UsageGTE: "10"},
 			{SubscriptionItemID: itemID, UsageGTE: raw},
 		},
 	})

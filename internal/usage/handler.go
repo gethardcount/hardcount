@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -122,41 +121,20 @@ func hasProperties(raw json.RawMessage) bool {
 	return json.Unmarshal(raw, &obj) != nil || len(obj) > 0
 }
 
-// quantityMessage is the 422 text for a quantity that is not a JSON number or
-// a string holding one.
-const quantityMessage = `quantity must be a JSON number (5) or a string holding one ("5.5")`
-
 // parseQuantity reads the event's quantity the way the spec states it: a JSON
-// number, or a string holding one, and present. The scale and size limits
-// are the service's (checkQuantity), so every ingest path shares them.
+// number, or a string holding one, and present (domain.ParseDecimal). The
+// scale and size limits are the service's (checkQuantity), so every ingest
+// path shares them.
 func parseQuantity(raw json.RawMessage) (decimal.Decimal, error) {
-	text := strings.TrimSpace(string(raw))
-	if text == "" || text == "null" {
-		return decimal.Decimal{}, errs.Required("quantity")
-	}
-	if text[0] == '"' {
-		var str string
-		if err := json.Unmarshal(raw, &str); err != nil {
-			return decimal.Decimal{}, errs.Invalid("quantity", quantityMessage)
-		}
-		text = str
-	} else if text[0] != '-' && (text[0] < '0' || text[0] > '9') {
-		return decimal.Decimal{}, errs.Invalid("quantity", quantityMessage)
-	}
-	q, err := decimal.NewFromString(text)
+	q, ok, err := domain.ParseDecimal("quantity", raw)
 	if err != nil {
-		// shopspring parses any digits; on a well-formed number it fails
-		// only when the exponent does not fit an int32.
-		if jsonNumber.MatchString(text) {
-			return decimal.Decimal{}, errs.Invalid("quantity", "quantity cannot be read: its exponent is out of range")
-		}
-		return decimal.Decimal{}, errs.Invalid("quantity", quantityMessage)
+		return decimal.Decimal{}, err
+	}
+	if !ok {
+		return decimal.Decimal{}, errs.Required("quantity")
 	}
 	return q, nil
 }
-
-// jsonNumber is the JSON number grammar (RFC 8259, section 6).
-var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 // resolveCache memoizes the customer and meter lookups for the lifetime of
 // ONE request. Each lookup opens its own RLS transaction (BEGIN + three

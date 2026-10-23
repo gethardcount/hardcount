@@ -115,13 +115,18 @@ var recipeKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // parseRate converts a recipe's string-form per-unit rate into a decimal.
 // Empty is treated as zero (a mode that doesn't use the field). A malformed
-// value fails recipe load loudly rather than silently pricing at zero.
+// value, or one outside the limits a rate sent to POST /v1/rating-rules takes
+// (domain.CheckRate), fails recipe load loudly rather than silently pricing
+// at zero or failing at install.
 func parseRate(recipeKey, ruleKey, field, raw string) (decimal.Decimal, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return decimal.Zero, nil
 	}
-	d, err := decimal.NewFromString(s)
+	d, err := domain.ParseDecimalString(field, s)
+	if err == nil {
+		d, err = domain.CheckRate(field, d)
+	}
 	if err != nil {
 		return decimal.Zero, fmt.Errorf("recipe %q: rating_rule %q: invalid %s %q: %w", recipeKey, ruleKey, field, raw, err)
 	}

@@ -11,6 +11,6 @@
 export type SetSubscriptionBillingThresholdsBodyItemThresholdsItem = {
   /** An item of this subscription. Each item can appear once. */
   subscription_item_id: string;
-  /** Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14"). */
+  /** Invoice early when the item's usage in the period reaches this quantity. A decimal string (e.g. "1000" or "3.14"): more than 0, under 10^26, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. */
   usage_gte: string;
 };

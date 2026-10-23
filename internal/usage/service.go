@@ -201,58 +201,13 @@ const MaxDimensionKeys = 16
 // letting events be parked in a future billing period.
 const usageFutureSkew = 5 * time.Minute
 
-// The quantity column is NUMERIC(38,12): 12 decimal places and 26 integer
-// digits. checkQuantity refuses what the column would round or reject.
-const maxQuantityScale = 12
-
-// checkQuantity refuses a quantity the column cannot store exactly, and
-// returns the value to store. A value with more than 12 decimal places
-// (trailing zeros do not count) was rounded by the column before B5: the
-// event billed a quantity the caller never sent. One too large made Postgres
-// reject the INSERT, a 500.
-//
-// The value is coefficient × 10^exponent. Both limits are decided from the
-// coefficient's digit count and the exponent first, because comparing or
-// rounding a value such as 1e999999999 or 1e-999999999 builds a number with a
-// billion digits. A zero passes both limits whatever its exponent, so it is
-// returned as plain 0: printing 0e99999999 (the INSERT bind and the answer
-// both do) builds 10^99999999, about 40 s of CPU.
+// checkQuantity refuses a quantity the NUMERIC(38,12) column cannot store
+// exactly (domain.QuantityLimits: under 10^26, at most 12 decimal places), and
+// returns the value to store. Before B5 the column rounded a 13th decimal
+// place away, so the event billed a quantity the caller never sent, and a
+// value too large made Postgres reject the INSERT, a 500.
 func checkQuantity(q decimal.Decimal) (decimal.Decimal, error) {
-	if q.IsZero() {
-		return decimal.New(0, 0), nil
-	}
-	digits, exp := coefficientDigits(q), int64(q.Exponent())
-	// 10^(digits+exp-1) <= |q| < 10^(digits+exp), so |q| < 10^26 exactly
-	// when digits+exp <= 26.
-	if digits+exp > 26 {
-		return decimal.Decimal{}, errs.Invalid("quantity", "quantity is too large: it must be under 10^26")
-	}
-	// At most digits-1 trailing zeros can come off, so below this the value
-	// has more than 12 decimal places whatever its digits are. Above it the
-	// rounding below works on at most `digits` more digits.
-	if digits-1+exp < -maxQuantityScale || !q.Equal(q.Round(maxQuantityScale)) {
-		return decimal.Decimal{}, errs.Invalid("quantity", "quantity has more than 12 decimal places")
-	}
-	return q, nil
-}
-
-// coefficientDigits counts the decimal digits of q's coefficient exactly.
-// shopspring's NumDigits takes a float log10 for a coefficient up to 2^53,
-// which counts 10^15, 10^15+1 and 10^15+2 as 15 digits. Its path for larger
-// coefficients checks its estimate against a power of ten, so it is exact.
-func coefficientDigits(q decimal.Decimal) int64 {
-	c := q.Coefficient()
-	if !c.IsInt64() || c.Int64() > 1<<53 || c.Int64() < -(1<<53) {
-		return int64(q.NumDigits())
-	}
-	v, n := c.Int64(), int64(1)
-	if v < 0 {
-		v = -v
-	}
-	for ; v >= 10; v /= 10 {
-		n++
-	}
-	return n
+	return domain.CheckDecimal("quantity", q, domain.QuantityLimits)
 }
 
 // validateDimensions enforces the v1 dimension contract: at most

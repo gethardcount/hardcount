@@ -301,3 +301,35 @@ func TestRates_LargeExponentsAnsweredAtOnce(t *testing.T) {
 		}
 	}
 }
+
+// The recipe installer saves rules through CreateRatingRuleTx, not the
+// public route, so that entrypoint takes the same limits.
+//
+// Mutation-verify: drop the checkRates call in CreateRatingRuleTx → red.
+func TestCreateRatingRuleTx_RatesTakeTheLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		rule domain.RatingRuleVersion
+	}{
+		{"flat 13 places", domain.RatingRuleVersion{Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0.0000000000001")}},
+		{"tier 10^18", domain.RatingRuleVersion{Mode: domain.PricingGraduated, GraduatedTiers: []domain.RatingTier{{UpTo: 0, UnitAmountCents: decimal.RequireFromString("1e18")}}}},
+		{"negative overage", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageSize: 10, OverageUnitAmountCents: decimal.NewFromInt(-1)}},
+	} {
+		store := newMemStore()
+		tc.rule.RuleKey, tc.rule.Name, tc.rule.Currency = "r", "r", "USD"
+		if _, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", tc.rule); err == nil {
+			t.Errorf("%s: accepted", tc.name)
+		}
+		if len(store.rules) != 0 {
+			t.Errorf("%s: %d rules stored, want 0", tc.name, len(store.rules))
+		}
+	}
+	// A zero is stored as plain 0 here too.
+	store := newMemStore()
+	got, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", domain.RatingRuleVersion{
+		RuleKey: "r", Name: "r", Currency: "USD", Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0e99999"),
+	})
+	if err != nil || got.FlatAmountCents.Exponent() != 0 {
+		t.Errorf("zero: got %s (exponent %d), err %v; want plain 0", got.FlatAmountCents, got.FlatAmountCents.Exponent(), err)
+	}
+}

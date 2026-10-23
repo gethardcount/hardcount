@@ -314,8 +314,8 @@ components:
           type: string
           description: >-
             Per-unit rate in cents, as a decimal string (e.g. "0.0003" =
-            $3.00 per 1,000,000 units). Arbitrary precision; invoice line
-            amounts and totals still round to whole cents.
+            $3.00 per 1,000,000 units). At most 12 decimal places; invoice
+            line amounts and totals still round to whole cents.
         graduated_tiers:
           type: array
           items:
@@ -7776,7 +7776,11 @@ paths:
                   type: string
                   description: >-
                     Per-unit rate in cents, as a decimal string (e.g.
-                    "0.0003" = $3.00 per 1,000,000 units).
+                    "0.0003" = $3.00 per 1,000,000 units). 0 or more, under 10^18, at most 12 decimal places (trailing zeros
+                    do not count), and at most 100 characters. A JSON number
+                    is also read. The limits hold in every mode, also for a
+                    rate the mode does not use. A value outside them is
+                    refused with 422 and `param` naming the field.
                 graduated_tiers:
                   type: array
                   items:
@@ -7786,7 +7790,11 @@ paths:
                         type: integer
                       unit_amount_cents:
                         type: string
-                        description: Per-unit rate in cents, as a decimal string.
+                        description: >-
+                          Per-unit rate in cents, as a decimal string, with
+                          the limits of `flat_amount_cents`. A refusal names
+                          `graduated_tiers[i].unit_amount_cents` (i counts
+                          from 0).
                 package_size:
                   type: integer
                 package_amount_cents:
@@ -7795,7 +7803,8 @@ paths:
                   type: string
                   description: >-
                     Package-mode per-unit overage rate in cents, as a decimal
-                    string. Fixed fees (package_amount_cents) stay integer cents.
+                    string, with the limits of `flat_amount_cents`. Fixed fees
+                    (package_amount_cents) stay integer cents.
       responses:
         "201":
           description: Rating rule created
@@ -8613,7 +8622,12 @@ paths:
                         description: An item of this subscription. Each item can appear once.
                       usage_gte:
                         type: string
-                        description: Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14").
+                        description: >-
+                          Invoice early when the item's usage in the period
+                          reaches this quantity. A decimal string (e.g. "1000"
+                          or "3.14"): more than 0, under 10^26, at most 12
+                          decimal places (trailing zeros do not count), and at
+                          most 100 characters.
       responses:
         "200":
           description: The subscription with `billing_thresholds` set.
@@ -8644,8 +8658,8 @@ paths:
             Neither `amount_gte` nor `item_thresholds` is set;
             `amount_gte` is negative; an item id is missing, repeated, or
             not on this subscription; a `usage_gte` is not a number or is
-            negative; or the subscription's plans use more than one
-            currency.
+            outside its limits (`param` is `item_thresholds[i].usage_gte`);
+            or the subscription's plans use more than one currency.
             Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
@@ -9033,7 +9047,8 @@ paths:
                   description: |
                     A JSON number (`5`) or a string holding one (`"5.5"`,
                     for exact decimals). At most 12 decimal places; trailing
-                    zeros do not count. Its size must be under 10^26. A
+                    zeros do not count. Its size must be under 10^26, and it
+                    is at most 100 characters. A
                     negative value is a correction. A missing quantity, or
                     any other value, is refused with 422 and `param:
                     quantity`.
@@ -9210,7 +9225,8 @@ paths:
                       A JSON number (`5`) or a string holding one (`"5.5"`,
                       for exact decimals). At most 12 decimal places;
                       trailing zeros do not count. Its size must be under
-                      10^26. A negative value is a correction. A missing
+                      10^26, and it is at most 100 characters. A negative
+                      value is a correction. A missing
                       quantity, or any other value, fails validation.
                   dimensions:
                     type: object
@@ -9315,7 +9331,8 @@ paths:
                   description: |
                     A JSON number (`5`) or a string holding one (`"5.5"`,
                     for exact decimals). At most 12 decimal places; trailing
-                    zeros do not count. Its size must be under 10^26. A
+                    zeros do not count. Its size must be under 10^26, and it
+                    is at most 100 characters. A
                     negative value is a correction. A missing quantity, or
                     any other value, is refused with 422 and `param:
                     quantity`.
@@ -9378,7 +9395,8 @@ paths:
             or `timestamp`; unknown customer or meter; a future or badly
             formatted `timestamp`; more than 16 dimensions or a non-scalar
             dimension value; a missing or malformed `quantity`, one with
-            more than 12 decimal places, or one of 10^26 or more; a
+            more than 12 decimal places, one of 10^26 or more, or one longer
+            than 100 characters; a
             `properties` field with a key (it was renamed `dimensions`).
           content:
             application/json:
@@ -11502,7 +11520,11 @@ paths:
                   description: ADR-044 role — input / output / cache_read.
                 cost_per_token:
                   type: string
-                  description: Decimal dollars per token (e.g. "0.000003").
+                  description: >-
+                    Dollars per token, as a decimal string (e.g. "0.000003").
+                    0 or more, under 10^8, at most 12 decimal places (trailing
+                    zeros do not count), and at most 100 characters. A JSON
+                    number is also read.
                 currency:
                   type: string
                   enum: [USD]
@@ -11518,7 +11540,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProviderCostRate"
         "422":
-          description: "`validation_error`: a required field is missing, `cost_per_token` is negative, or `currency` is not USD (param names the field)."
+          description: "`validation_error`: a required field is missing, `cost_per_token` is outside its limits, or `currency` is not USD (param names the field)."
           content:
             application/json:
               schema:
@@ -12967,7 +12989,13 @@ paths:
                   enum: [flat, graduated, package]
                 flat_amount_cents:
                   type: string
-                  description: Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more.
+                  description: >-
+                    Per-unit rate in cents, as a decimal string. Used when
+                    `mode` is `flat`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros
+                    do not count), and at most 100 characters. A JSON number
+                    is also read. The limits hold in every mode, also for a
+                    rate the mode does not use. A value outside them is
+                    refused with 422 and `param` naming the field.
                 graduated_tiers:
                   type: array
                   description: |
@@ -12982,7 +13010,11 @@ paths:
                         format: int64
                       unit_amount_cents:
                         type: string
-                        description: Per-unit rate in cents, as a decimal string.
+                        description: >-
+                          Per-unit rate in cents, as a decimal string, with
+                          the limits of `flat_amount_cents`. A refusal names
+                          `graduated_tiers[i].unit_amount_cents` (i counts
+                          from 0).
                 package_size:
                   type: integer
                   format: int64
@@ -12993,7 +13025,9 @@ paths:
                   description: Price of one package in cents. Used when `mode` is `package`.
                 overage_unit_amount_cents:
                   type: string
-                  description: Package-mode per-unit overage rate in cents, as a decimal string.
+                  description: >-
+                    Package-mode per-unit overage rate in cents, as a decimal
+                    string, with the limits of `flat_amount_cents`.
                 reason:
                   type: string
       responses:
@@ -13024,9 +13058,10 @@ paths:
         "422":
           description: |
             `validation_error`: a missing field, an unknown rating rule, a
-            price shape that cannot be billed (negative rate, bad tier table,
-            package size of 0), or an unknown field at any depth (`param`
-            names it; the body must use only the fields listed here).
+            rate outside its limits, a price shape that cannot be billed (bad
+            tier table, package size of 0), or an unknown field at any depth
+            (`param` names it; the body must use only the fields listed
+            here).
           content:
             application/json:
               schema:

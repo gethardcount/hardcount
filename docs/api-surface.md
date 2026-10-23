@@ -165,8 +165,9 @@ their only dedup key. A retried call runs again, and each event already
 stored is answered as a replay (`200`, or counted in `deduplicated`).
 
 **Send `quantity` on every event.** It is a JSON number (`5`) or a string
-holding one (`"5.5"`, for exact decimals), with at most 12 decimal places.
-A negative value is a correction. An event without one, or with any other
+holding one (`"5.5"`, for exact decimals), with at most 12 decimal places,
+a size under 10^26, and at most 100 characters. A negative value is a
+correction. An event without one, or with any other
 value, is refused with `422` and `param: quantity`. The event's
 `dimensions` pick its price; `properties`, the old name, is refused when
 it has a key (`null` or `{}` is ignored).

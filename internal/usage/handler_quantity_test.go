@@ -2,7 +2,6 @@ package usage
 
 import (
 	"encoding/json"
-	"math/big"
 	"net/http"
 	"strings"
 	"testing"
@@ -236,37 +235,6 @@ func TestUsageIngest_EmptyPropertiesIsAccepted(t *testing.T) {
 	}
 }
 
-// checkQuantity decides both limits from the coefficient's digit count and
-// the exponent. This sweeps every coefficient length up to 40 digits with the
-// coefficients at the edges of each length (10^(n-1), +1, +2, 10^n-1), where
-// a float digit count goes wrong.
-func TestValidateQuantity_ExactAtEveryDigitCount(t *testing.T) {
-	ten := big.NewInt(10)
-	for n := int64(1); n <= 40; n++ {
-		lo := new(big.Int).Exp(ten, big.NewInt(n-1), nil)
-		hi := new(big.Int).Sub(new(big.Int).Exp(ten, big.NewInt(n), nil), big.NewInt(1))
-		for _, c := range []*big.Int{lo, new(big.Int).Add(lo, big.NewInt(1)), new(big.Int).Add(lo, big.NewInt(2)), hi} {
-			for _, sign := range []int64{1, -1} {
-				c := new(big.Int).Mul(c, big.NewInt(sign))
-				// |c| × 10^(27-n) >= 10^26: refused. |c| × 10^(26-n) < 10^26:
-				// taken, while it has at most 12 places (n <= 38).
-				if _, err := checkQuantity(decimal.NewFromBigInt(c, int32(27-n))); err == nil {
-					t.Errorf("%s e%d (>= 10^26) accepted", c, 27-n)
-				}
-				if _, err := checkQuantity(decimal.NewFromBigInt(c, int32(26-n))); n <= 38 && err != nil {
-					t.Errorf("%s e%d (< 10^26) refused: %v", c, 26-n, err)
-				}
-				// c × 10^(-11-n) has 11+n written places; it fits 12 only when
-				// the trailing zeros bring it down, which they do for 10^(n-1).
-				_, err := checkQuantity(decimal.NewFromBigInt(c, int32(-11-n)))
-				if fits := new(big.Int).Abs(c).Cmp(lo) == 0 || n == 1; fits != (err == nil) {
-					t.Errorf("%s e%d: fits=%v, err=%v", c, -11-n, fits, err)
-				}
-			}
-		}
-	}
-}
-
 // Control: dimensions is the field, and it is stored.
 func TestUsageIngest_DimensionsStored(t *testing.T) {
 	store := newMemStore()
@@ -284,13 +252,12 @@ func TestUsageIngest_DimensionsStored(t *testing.T) {
 }
 
 // A zero is stored as plain 0 (exponent 0), whatever exponent it was written
-// with. shopspring keeps 0e9999999 as coefficient 0 and exponent 9999999, and
-// printing it (the INSERT bind and the response both do) builds 10^9999999:
-// about 1 s of CPU, and 40 s for 0e99999999. The size and scale checks pass a
-// zero, so before B5 review round 2 any zero was stored as written.
+// with. shopspring keeps 0e9999999 as coefficient 0 and exponent 9999999. The
+// size and scale checks pass a zero, so before B5 review round 2 any zero was
+// stored as written.
 //
-// Mutation-verify: drop the zero normalisation in checkQuantity → every case
-// here goes red.
+// Mutation-verify: drop the zero normalisation in domain.CheckDecimal → every
+// case here goes red.
 func TestUsageIngest_ZeroIsStoredAsPlainZero(t *testing.T) {
 	for _, raw := range []string{`0e9999999`, `"0e9999999"`, `-0e9999999`, `"0e-9999999"`, `0.000`} {
 		for _, door := range []string{"single", "batch", "backfill"} {

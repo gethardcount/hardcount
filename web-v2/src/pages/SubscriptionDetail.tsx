@@ -1849,8 +1849,8 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     for (const item of items) {
       const raw = (perItem[item.id] ?? '').trim()
       if (raw === '') continue
-      if (!/^\d+(\.\d+)?$/.test(raw)) {
-        toast.error(`The threshold for ${planById(item.plan_id)?.name || 'an item'} must be a number of 0 or more`)
+      if (!/^\d+(\.\d+)?$/.test(raw) || Number(raw) <= 0) {
+        toast.error(`The threshold for ${planById(item.plan_id)?.name || 'an item'} must be a number more than 0`)
         return
       }
       itemThresholds.push({ subscription_item_id: item.id, usage_gte: raw })
