@@ -35,7 +35,6 @@ func meters(ids ...string) map[string]bool {
 func TestClassify(t *testing.T) {
 	sum := MeterBuckets{Additive: true}
 	max := MeterBuckets{}
-	lastEver := MeterBuckets{LastEver: true}
 	// May is the open period; April was invoiced. Started Mar 1.
 	may := OpenPeriod{Start: opMay, End: opJun, Floor: opAt(opApr.AddDate(0, -1, 0)), Meters: meters("m"), NextMeters: meters("m")}
 	withTrial := may
@@ -77,11 +76,9 @@ func TestClassify(t *testing.T) {
 		{"in the trial", opApr.AddDate(0, 0, 3), "m", []OpenPeriod{withTrial}, sum, Outside},
 		{"after the trial, invoiced", opApr.AddDate(0, 0, 20), "m", []OpenPeriod{withTrial}, sum, AfterClose},
 		{"no floor known", opApr.AddDate(0, 0, 20), "m", []OpenPeriod{noFloor}, sum, Outside},
-		{"last_ever meter", opApr.AddDate(0, 0, 20), "m", []OpenPeriod{may}, lastEver, Outside},
 		{"max meter, invoiced period", opApr.AddDate(0, 0, 20), "m", []OpenPeriod{may}, max, AfterClose},
 		{"before the watermark, sum", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{watermark}, sum, AfterClose},
 		{"before the watermark, max (deferred)", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{watermark}, max, InOpen},
-		{"before the watermark, last_ever", opMay.AddDate(0, 0, 5), "m", []OpenPeriod{watermark}, MeterBuckets{Additive: true, LastEver: true}, InOpen},
 		{"after the watermark", opMay.AddDate(0, 0, 25), "m", []OpenPeriod{watermark}, sum, InOpen},
 		// Review finding 1 on #1350: an unpaid threshold invoice (open or
 		// written off) can still be voided, and then the close bills from
@@ -175,28 +172,15 @@ func TestOpenPeriodOf(t *testing.T) {
 	}
 }
 
-// TestBucketsOf: additive only when the meter and every rule are sum/count.
+// TestBucketsOf: a meter's buckets are additive when its one aggregation is
+// sum or count (ADR-130 §2); an empty aggregation reads as sum.
 func TestBucketsOf(t *testing.T) {
-	rule := func(m domain.AggregationMode) domain.MeterPricingRule {
-		return domain.MeterPricingRule{AggregationMode: m}
-	}
-	cases := []struct {
-		name  string
-		agg   string
-		rules []domain.MeterPricingRule
-		want  MeterBuckets
-	}{
-		{"sum meter", "sum", nil, MeterBuckets{Additive: true}},
-		{"count meter", "count", nil, MeterBuckets{Additive: true}},
-		{"max meter", "max", nil, MeterBuckets{}},
-		{"last meter", "last", nil, MeterBuckets{}},
-		{"sum meter, max rule", "sum", []domain.MeterPricingRule{rule(domain.AggSum), rule(domain.AggMax)}, MeterBuckets{}},
-		{"sum meter, last_ever rule", "sum", []domain.MeterPricingRule{rule(domain.AggLastEver)}, MeterBuckets{LastEver: true}},
-		{"sum meter, sum and count rules", "sum", []domain.MeterPricingRule{rule(domain.AggSum), rule(domain.AggCount)}, MeterBuckets{Additive: true}},
-	}
-	for _, c := range cases {
-		if got := BucketsOf(domain.Meter{Aggregation: c.agg}, c.rules); got != c.want {
-			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+	for agg, want := range map[string]MeterBuckets{
+		"sum": {Additive: true}, "count": {Additive: true}, "": {Additive: true},
+		"max": {}, "last": {},
+	} {
+		if got := BucketsOf(domain.Meter{Aggregation: agg}); got != want {
+			t.Errorf("%q meter: %+v, want %+v", agg, got, want)
 		}
 	}
 }

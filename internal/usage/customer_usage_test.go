@@ -120,13 +120,13 @@ func (f *fakePricingReader) ListMeterPricingRulesByMeter(_ context.Context, _, m
 	return f.pricingMap[meterID], nil
 }
 
-// aggStore wraps memStore with a programmable AggregateByPricingRules return.
+// aggStore wraps memStore with a programmable AggregateClaims return.
 type aggStore struct {
 	*memStore
 	aggs map[string][]domain.RuleAggregation // by meter id
 }
 
-func (a *aggStore) AggregateByPricingRules(_ context.Context, _, _, meterID string, _ domain.AggregationMode, _, _ time.Time) ([]domain.RuleAggregation, error) {
+func (a *aggStore) AggregateClaims(_ context.Context, _, _, meterID, _ string, _ []domain.UsageClaim, _, _ time.Time) ([]domain.RuleAggregation, error) {
 	return a.aggs[meterID], nil
 }
 
@@ -344,7 +344,7 @@ func TestCustomerUsageService_Get_SingleMeterFlat(t *testing.T) {
 		},
 		meters: map[string]domain.Meter{
 			"mtr_1": {
-				ID: "mtr_1", Key: "tokens", Name: "Tokens",
+				ID: "mtr_1", EventName: "tokens", Name: "Tokens",
 				Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1",
 			},
 		},
@@ -358,7 +358,7 @@ func TestCustomerUsageService_Get_SingleMeterFlat(t *testing.T) {
 	}
 	store := newAggStore()
 	store.aggs["mtr_1"] = []domain.RuleAggregation{
-		{RuleID: "", RatingRuleVersionID: "rrv_1", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(1000)},
+		{RuleID: "", RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(1000)},
 	}
 	usageSvc := NewService(store)
 
@@ -381,7 +381,7 @@ func TestCustomerUsageService_Get_SingleMeterFlat(t *testing.T) {
 		t.Fatalf("meters: got %d, want 1", len(res.Meters))
 	}
 	m := res.Meters[0]
-	if m.MeterKey != "tokens" || m.Currency != "USD" || m.TotalAmountCents != 1000 {
+	if m.EventName != "tokens" || m.Currency != "USD" || m.TotalAmountCents != 1000 {
 		t.Errorf("meter: got %+v", m)
 	}
 	if len(res.Totals) != 1 || res.Totals[0].Currency != "USD" || res.Totals[0].AmountCents != 1000 {
@@ -463,7 +463,7 @@ func TestCustomerUsageService_Get_RuleRowShowsNominalUnitRate(t *testing.T) {
 			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_1"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_1": {ID: "mtr_1", Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1"},
+			"mtr_1": {ID: "mtr_1", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_1": {
@@ -475,7 +475,7 @@ func TestCustomerUsageService_Get_RuleRowShowsNominalUnitRate(t *testing.T) {
 	}
 	store := newAggStore()
 	store.aggs["mtr_1"] = []domain.RuleAggregation{
-		{RuleID: "", RatingRuleVersionID: "rrv_1", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(1750)},
+		{RuleID: "", RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(1750)},
 	}
 
 	svc := NewCustomerUsageService(NewService(store), customers, subs, pricing)
@@ -525,8 +525,8 @@ func TestCustomerUsageService_Get_MultiCurrencyTotals(t *testing.T) {
 			"pln_eur": {ID: "pln_eur", Name: "EU Pro", Currency: "EUR", MeterIDs: []string{"mtr_eur"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_usd": {ID: "mtr_usd", Key: "tokens_usd", Aggregation: "sum", RatingRuleVersionID: "rrv_usd"},
-			"mtr_eur": {ID: "mtr_eur", Key: "tokens_eur", Aggregation: "sum", RatingRuleVersionID: "rrv_eur"},
+			"mtr_usd": {ID: "mtr_usd", EventName: "tokens_usd", Aggregation: "sum", RatingRuleVersionID: "rrv_usd"},
+			"mtr_eur": {ID: "mtr_eur", EventName: "tokens_eur", Aggregation: "sum", RatingRuleVersionID: "rrv_eur"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_usd": {ID: "rrv_usd", RuleKey: "u", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1)},
@@ -536,10 +536,10 @@ func TestCustomerUsageService_Get_MultiCurrencyTotals(t *testing.T) {
 	}
 	store := newAggStore()
 	store.aggs["mtr_usd"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_usd", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(100)},
+		{RatingRuleVersionID: "rrv_usd", Quantity: decimal.NewFromInt(100)},
 	}
 	store.aggs["mtr_eur"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_eur", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(50)},
+		{RatingRuleVersionID: "rrv_eur", Quantity: decimal.NewFromInt(50)},
 	}
 	usageSvc := NewService(store)
 
@@ -615,7 +615,7 @@ func TestCustomerUsageService_Get_MultiDimRulesEchoDimensionMatch(t *testing.T) 
 			"pln_1": {ID: "pln_1", Name: "AI Pro", Currency: "USD", MeterIDs: []string{"mtr_tokens"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_tokens": {ID: "mtr_tokens", Key: "tokens", Aggregation: "sum"},
+			"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Aggregation: "sum"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_in":  {ID: "rrv_in", RuleKey: "input", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(3)},
@@ -630,8 +630,8 @@ func TestCustomerUsageService_Get_MultiDimRulesEchoDimensionMatch(t *testing.T) 
 	}
 	store := newAggStore()
 	store.aggs["mtr_tokens"] = []domain.RuleAggregation{
-		{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(100)},
-		{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(50)},
+		{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", Quantity: decimal.NewFromInt(100)},
+		{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", Quantity: decimal.NewFromInt(50)},
 	}
 	usageSvc := NewService(store)
 
@@ -672,7 +672,7 @@ func TestCustomerUsageService_Get_FlatMeterOmitsDimensionMatch(t *testing.T) {
 	}}}
 	pricing := &fakePricingReader{
 		plans:  map[string]domain.Plan{"pln_1": {ID: "pln_1", Name: "Flat", Currency: "USD", MeterIDs: []string{"mtr_1"}}},
-		meters: map[string]domain.Meter{"mtr_1": {ID: "mtr_1", Key: "k", Aggregation: "sum", RatingRuleVersionID: "rrv_1"}},
+		meters: map[string]domain.Meter{"mtr_1": {ID: "mtr_1", EventName: "k", Aggregation: "sum", RatingRuleVersionID: "rrv_1"}},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_1": {ID: "rrv_1", RuleKey: "rk", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(7)},
 		},
@@ -691,24 +691,6 @@ func TestCustomerUsageService_Get_FlatMeterOmitsDimensionMatch(t *testing.T) {
 	}
 	if res.Meters[0].Rules[0].DimensionMatch != nil {
 		t.Errorf("dimension_match should be nil for flat rule, got %+v", res.Meters[0].Rules[0].DimensionMatch)
-	}
-}
-
-// ---------- mapMeterAggregation ---------
-
-func TestMapMeterAggregation(t *testing.T) {
-	cases := map[string]domain.AggregationMode{
-		"sum":     domain.AggSum,
-		"count":   domain.AggCount,
-		"max":     domain.AggMax,
-		"last":    domain.AggLastDuringPeriod, // UI's "last" maps to period-bounded
-		"":        domain.AggSum,              // default
-		"unknown": domain.AggSum,              // safe default for new / unknown
-	}
-	for in, want := range cases {
-		if got := mapMeterAggregation(in); got != want {
-			t.Errorf("mapMeterAggregation(%q): got %q, want %q", in, got, want)
-		}
 	}
 }
 
@@ -767,7 +749,7 @@ func TestCustomerUsageService_Get_HonorsOverridesAndPeriodPin(t *testing.T) {
 			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_1"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_1": {ID: "mtr_1", Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1"},
+			"mtr_1": {ID: "mtr_1", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			// v1 in force at period open (list 1c); v2 published MID-period
@@ -788,7 +770,7 @@ func TestCustomerUsageService_Get_HonorsOverridesAndPeriodPin(t *testing.T) {
 	}
 	store := newAggStore()
 	store.aggs["mtr_1"] = []domain.RuleAggregation{
-		{RuleID: "", RatingRuleVersionID: "rrv_1", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(1000)},
+		{RuleID: "", RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(1000)},
 	}
 	usageSvc := NewService(store)
 
@@ -836,8 +818,8 @@ func TestCustomerUsageService_Get_NetNegativeBucketCountsAsZero(t *testing.T) {
 			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_calls", "mtr_seats"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_calls": {ID: "mtr_calls", Key: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_calls"},
-			"mtr_seats": {ID: "mtr_seats", Key: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seats"},
+			"mtr_calls": {ID: "mtr_calls", EventName: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_calls"},
+			"mtr_seats": {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seats"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_calls": {ID: "rrv_calls", RuleKey: "calls_flat", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1)},
@@ -847,10 +829,10 @@ func TestCustomerUsageService_Get_NetNegativeBucketCountsAsZero(t *testing.T) {
 	}
 	store := newAggStore()
 	store.aggs["mtr_calls"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_calls", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(300)},
+		{RatingRuleVersionID: "rrv_calls", Quantity: decimal.NewFromInt(300)},
 	}
 	store.aggs["mtr_seats"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_seats", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(-7)},
+		{RatingRuleVersionID: "rrv_seats", Quantity: decimal.NewFromInt(-7)},
 	}
 	svc := NewCustomerUsageService(NewService(store), customers, subs, pricing)
 
@@ -862,7 +844,7 @@ func TestCustomerUsageService_Get_NetNegativeBucketCountsAsZero(t *testing.T) {
 		t.Errorf("totals = %+v, want 300¢ (calls; seats at 0, as the invoice bills it)", res.Totals)
 	}
 	for _, m := range res.Meters {
-		if m.MeterKey == "seats" && (m.TotalAmountCents != 0 || len(m.Rules) != 0) {
+		if m.EventName == "seats" && (m.TotalAmountCents != 0 || len(m.Rules) != 0) {
 			t.Errorf("seats meter = %+v, want no priced rows and 0¢", m)
 		}
 	}

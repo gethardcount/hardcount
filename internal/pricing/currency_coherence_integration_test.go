@@ -45,7 +45,7 @@ func (f coherenceFixture) usdGraph(t *testing.T, ruleKey, meterKey, planCode str
 		t.Fatalf("create rule: %v", err)
 	}
 	meter, err := f.svc.CreateMeter(f.ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: meterKey, Name: meterKey, Unit: "units", Aggregation: "sum",
+		EventName: meterKey, Name: meterKey, Unit: "units", Aggregation: "sum",
 		RatingRuleVersionID: rule.ID,
 	})
 	if err != nil {

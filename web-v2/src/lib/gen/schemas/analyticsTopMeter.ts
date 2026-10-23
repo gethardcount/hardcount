@@ -11,7 +11,7 @@
 export interface AnalyticsTopMeter {
   meter_id: string;
   meter_name: string;
-  key: string;
+  event_name: string;
   events: number;
   /** Summed quantity, as a decimal string. */
   quantity: string;

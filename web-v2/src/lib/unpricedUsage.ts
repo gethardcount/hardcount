@@ -1,7 +1,7 @@
 // Usage that matched no price on its meter. The server counts it in a
 // separate "unmatched" row per meter and bills nothing for it
 // (usage.CustomerUsageService.rateMeter). Its warning sentence names the
-// meter key and engine words ("matching no pricing rule"), so the dashboard
+// meter's event name and engine words ("matching no pricing rule"), so the dashboard
 // builds its own plain notice from the rows and keeps the server's words in
 // Details. Plain data so the unit tests can check it.
 
@@ -13,12 +13,12 @@ export interface UnpricedMeter {
 }
 
 export function unpricedMeters(
-  meters: { meter_id: string; meter_name: string; meter_key: string; unit: string; rules: { unmatched?: boolean; quantity: string }[] }[],
+  meters: { meter_id: string; meter_name: string; event_name: string; unit: string; rules: { unmatched?: boolean; quantity: string }[] }[],
 ): UnpricedMeter[] {
   const out: UnpricedMeter[] = []
   for (const m of meters) {
     const quantity = m.rules.filter(r => r.unmatched).reduce((sum, r) => sum + Number(r.quantity), 0)
-    if (quantity > 0) out.push({ meterId: m.meter_id, meterName: m.meter_name || m.meter_key, unit: m.unit, quantity })
+    if (quantity > 0) out.push({ meterId: m.meter_id, meterName: m.meter_name || m.event_name, unit: m.unit, quantity })
   }
   return out
 }

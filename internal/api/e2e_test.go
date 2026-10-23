@@ -82,7 +82,7 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 	var meterID string
 	t.Run("create meter", func(t *testing.T) {
 		resp := doPost(t, ts, "/v1/meters", auth, map[string]any{
-			"key":                    "api_calls",
+			"event_name":             "api_calls",
 			"name":                   "API Calls",
 			"unit":                   "calls",
 			"aggregation":            "sum",

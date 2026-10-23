@@ -50,16 +50,13 @@ type thresholdEval struct {
 	BelowZero []leftOutBucket
 }
 
-// nonAdditiveMode reports whether a rule bucket's aggregation cannot be split
-// across a threshold fire and a cycle close (max[0,t1) + max[t1,end) ≥
-// max[0,end); last is a point-in-time read). last_ever additionally ignores
-// window bounds entirely. ADR-066 §4.
-func nonAdditiveMode(m domain.AggregationMode) bool {
-	switch m {
-	case domain.AggMax, domain.AggLastDuringPeriod, domain.AggLastEver:
-		return true
-	}
-	return false
+// nonAdditive reports whether usage under a meter's aggregation cannot be
+// split across a threshold fire and a cycle close (max[0,t1) + max[t1,end) ≥
+// max[0,end); last is a point-in-time read). ADR-066 §4. A meter has one
+// aggregation (ADR-130 §2), so this is a property of the meter. An empty
+// aggregation reads as sum, as billing reads it.
+func nonAdditive(aggregation string) bool {
+	return aggregation != "" && !domain.AdditiveAggregation(aggregation)
 }
 
 // ScanThresholds finds every subscription with a billing threshold configured
@@ -333,7 +330,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	unpriced := unpricedUsage{}
 	for _, u := range eval.Unpriced {
 		slog.Warn("threshold: usage matched no rating rule and meter has no default binding — not billed",
-			"meter", u.MeterKey, "quantity", u.Quantity.String(),
+			"meter", u.EventName, "quantity", u.Quantity.String(),
 			"subscription_id", sub.ID)
 		unpriced.add(u.MeterID, u.Quantity)
 	}
@@ -341,7 +338,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// Usage below zero: its audit row committed with the fire (#1193).
 	for _, b := range eval.BelowZero {
 		slog.Warn("threshold: usage below zero after corrections — billed as 0",
-			"meter", b.MeterKey, "quantity", b.Quantity.String(),
+			"meter", b.EventName, "quantity", b.Quantity.String(),
 			"subscription_id", sub.ID)
 	}
 	return true, nil
@@ -457,8 +454,8 @@ func (w thresholdWatermark) bucketOnFire(meterID, ratingRuleVersionID string) bo
 // deferredBucket reports whether the fire deliberately DEFERRED this
 // non-additive bucket (dropped its line) — the close must
 // bill it over the FULL window, exactly once.
-func (w thresholdWatermark) deferredBucket(mode domain.AggregationMode, meterID, ratingRuleVersionID string) bool {
-	return w.exists() && nonAdditiveMode(mode) && !w.bucketOnFire(meterID, ratingRuleVersionID)
+func (w thresholdWatermark) deferredBucket(aggregation, meterID, ratingRuleVersionID string) bool {
+	return w.exists() && nonAdditive(aggregation) && !w.bucketOnFire(meterID, ratingRuleVersionID)
 }
 
 // noteThresholdDeferred emits the loudness floor for a crossed-but-deferred
@@ -552,7 +549,7 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 			}
 			continue
 		}
-		// Non-additive buckets (max / last_during_period / last_ever) cannot be
+		// Non-additive buckets (a max or last meter's) cannot be
 		// split across a threshold fire and a cycle close: max[0,t1) +
 		// max[t1,end) ≥ max[0,end). ADR-066 §4: DROP the line from the
 		// invoice — the cycle close bills the bucket full-period exactly once
@@ -561,11 +558,10 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		// concurrency it can be MOST of the spend; the fire-once probe bounds
 		// this to one fire per cycle, so counting it cannot loop).
 		//
-		// Classification is per RULE BUCKET (pl.AggregationMode rides from
-		// AggregateByPricingRules through the rater), never per meter — one
-		// meter can carry sum and max rules simultaneously.
+		// Every bucket of a meter bills under the meter's one aggregation
+		// (ADR-130 §2), which the rater puts on the line.
 		capRunning += pl.AmountCents
-		if pl.LineType == "usage" && nonAdditiveMode(pl.AggregationMode) {
+		if pl.LineType == "usage" && nonAdditive(pl.Aggregation) {
 			continue
 		}
 		billedSubtotal += pl.AmountCents
@@ -623,7 +619,7 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		InvoiceCurrency: currency,
 	}
 	for _, u := range preview.leftOut {
-		if nonAdditiveMode(u.Mode) {
+		if nonAdditive(u.Aggregation) {
 			continue
 		}
 		if u.BelowZero {
@@ -644,7 +640,7 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 	// meters during [floor, now), the window the fire bills each meter over
 	// (the preview's usage floors). The meter quantity is the same
 	// figure the natural cycle would bill — pulled from the priority+claim
-	// resolver via AggregateByPricingRules. Item-to-meter is via the plan
+	// resolver via AggregateClaims. Item-to-meter is via the plan
 	// (item.plan_id -> plan.meter_ids). Cross-currency items already
 	// rejected upstream, so summing across plans is safe.
 	if !eval.CrossedAny && len(bt.ItemThresholds) > 0 {
@@ -670,8 +666,11 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 				if !from.Before(now) {
 					continue
 				}
-				defaultMode := mapMeterAggregation(meter.Aggregation)
-				aggs, aErr := e.usage.AggregateByPricingRules(ctx, sub.TenantID, sub.CustomerID, meterID, defaultMode, from, now)
+				rules, rErr := e.pricing.ListMeterPricingRulesByMeter(ctx, sub.TenantID, meterID)
+				if rErr != nil {
+					return thresholdEval{}, fmt.Errorf("item threshold: list pricing rules for meter %s: %w", meterID, rErr)
+				}
+				aggs, aErr := e.usage.AggregateClaims(ctx, sub.TenantID, sub.CustomerID, meterID, meter.Aggregation, domain.ClaimsOfRules(rules), from, now)
 				if aErr != nil {
 					return thresholdEval{}, fmt.Errorf("item threshold: aggregate meter %s: %w", meterID, aErr)
 				}
@@ -829,7 +828,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	expected := subscription.SnapshotOf(sub)
 	belowZero := netNegativeUsage{}
 	for _, b := range eval.BelowZero {
-		belowZero.add(b.MeterID, b.MeterKey, b.MeterName, b.Quantity, periodStart, now) // the window the fire priced
+		belowZero.add(b.MeterID, b.EventName, b.MeterName, b.Quantity, periodStart, now) // the window the fire priced
 	}
 	var inv domain.Invoice
 	err = e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {

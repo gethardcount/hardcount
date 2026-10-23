@@ -42,7 +42,7 @@ type rawOverride struct {
 }
 
 type rawMeter struct {
-	Key         string `yaml:"key"`
+	EventName   string `yaml:"event_name"`
 	Name        string `yaml:"name"`
 	Unit        string `yaml:"unit"`
 	Aggregation string `yaml:"aggregation"`
@@ -69,12 +69,14 @@ type rawRatingRule struct {
 	OverageUnitAmountCents string          `yaml:"overage_unit_amount_cents"`
 }
 
+// rawPricingRule has no aggregation of its own: every rule of a meter bills
+// under the meter's (ADR-130 §2). Strict decoding refuses a recipe that
+// still carries aggregation_mode.
 type rawPricingRule struct {
-	Meter           string         `yaml:"meter"`
-	RatingRule      string         `yaml:"rating_rule"`
-	DimensionMatch  map[string]any `yaml:"dimension_match"`
-	AggregationMode string         `yaml:"aggregation_mode"`
-	Priority        int            `yaml:"priority"`
+	Meter          string         `yaml:"meter"`
+	RatingRule     string         `yaml:"rating_rule"`
+	DimensionMatch map[string]any `yaml:"dimension_match"`
+	Priority       int            `yaml:"priority"`
 }
 
 type rawPlan struct {
@@ -194,13 +196,16 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 
 	meterKeys := make(map[string]struct{}, len(raw.Meters))
 	for _, m := range raw.Meters {
-		if m.Key == "" || m.Name == "" {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: meter missing key or name", raw.Key)
+		if m.EventName == "" || m.Name == "" {
+			return domain.Recipe{}, fmt.Errorf("recipe %q: meter missing event_name or name", raw.Key)
 		}
-		if _, dup := meterKeys[m.Key]; dup {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: duplicate meter key %q", raw.Key, m.Key)
+		if _, dup := meterKeys[m.EventName]; dup {
+			return domain.Recipe{}, fmt.Errorf("recipe %q: duplicate meter event_name %q", raw.Key, m.EventName)
 		}
-		meterKeys[m.Key] = struct{}{}
+		if !domain.ValidAggregation(m.Aggregation) {
+			return domain.Recipe{}, fmt.Errorf("recipe %q: meter %q aggregation %q is not one of sum, count, max, last", raw.Key, m.EventName, m.Aggregation)
+		}
+		meterKeys[m.EventName] = struct{}{}
 		out.Meters = append(out.Meters, domain.RecipeMeter(m))
 	}
 
@@ -254,13 +259,6 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 		if _, ok := ratingRuleKeys[pr.RatingRule]; !ok {
 			return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] references unknown rating_rule %q", raw.Key, i, pr.RatingRule)
 		}
-		mode := domain.AggregationMode(pr.AggregationMode)
-		if pr.AggregationMode != "" && !mode.IsValid() {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] invalid aggregation_mode %q", raw.Key, i, pr.AggregationMode)
-		}
-		if pr.AggregationMode == "" {
-			mode = domain.AggSum
-		}
 		// dimension_match keys/values must be non-empty scalars: a rule
 		// carrying an empty key or a nested value can never match an event's
 		// flat dimension map, so it would install as a dead binding that
@@ -284,8 +282,8 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 			}
 		}
 		out.PricingRules = append(out.PricingRules, domain.RecipePricingRule{
-			MeterKey: pr.Meter, RatingRuleKey: pr.RatingRule,
-			DimensionMatch: pr.DimensionMatch, AggregationMode: mode, Priority: pr.Priority,
+			EventName: pr.Meter, RatingRuleKey: pr.RatingRule,
+			DimensionMatch: pr.DimensionMatch, Priority: pr.Priority,
 		})
 	}
 
@@ -312,7 +310,7 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 		}
 		out.Plans = append(out.Plans, domain.RecipePlan{
 			Code: p.Code, Name: p.Name, Currency: p.Currency, BillingInterval: interval,
-			BaseAmountCents: p.BaseAmountCents, BaseBillTiming: timing, MeterKeys: p.Meters,
+			BaseAmountCents: p.BaseAmountCents, BaseBillTiming: timing, EventNames: p.Meters,
 		})
 	}
 

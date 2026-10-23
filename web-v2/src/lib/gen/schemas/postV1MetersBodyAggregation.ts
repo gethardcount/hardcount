@@ -8,6 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * How the meter rolls its events into one quantity per billing period. Fixed once the meter has usage.
+ */
 export type PostV1MetersBodyAggregation = typeof PostV1MetersBodyAggregation[keyof typeof PostV1MetersBodyAggregation];
 
 

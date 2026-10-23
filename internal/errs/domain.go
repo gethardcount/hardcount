@@ -180,6 +180,11 @@ func EmailNotConfigured() *DomainError {
 // a billing period already open. A recipe apply returns it unwrapped too.
 const CodeMeterInUse = "meter_in_use"
 
+// CodeMeterHasUsage is the 409 code for a change to a meter's aggregation
+// once the meter has events (ADR-130 §2): its usage so far was counted
+// under the aggregation it has.
+const CodeMeterHasUsage = "meter_has_usage"
+
 // Sentinel errors for store and service layers.
 var (
 	ErrNotFound           = errors.New("not found")

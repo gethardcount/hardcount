@@ -97,9 +97,9 @@ func (f *writeFixture) customerAndMeter(externalID string) (string, string) {
 		f.t.Fatalf("customer: %v", err)
 	}
 	var meterID string
-	if err := tx.QueryRowContext(f.ctx, `SELECT id FROM meters WHERE key = 'tokens'`).Scan(&meterID); err != nil {
+	if err := tx.QueryRowContext(f.ctx, `SELECT id FROM meters WHERE event_name = 'tokens'`).Scan(&meterID); err != nil {
 		meterID = postgres.NewID("vlx_mtr")
-		if _, err := tx.ExecContext(f.ctx, `INSERT INTO meters (id, tenant_id, name, key, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, meterID, f.tenantID); err != nil {
+		if _, err := tx.ExecContext(f.ctx, `INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, meterID, f.tenantID); err != nil {
 			f.t.Fatalf("meter: %v", err)
 		}
 	}
@@ -175,7 +175,7 @@ func (f *writeFixture) holdLegacy(id, user string) {
 	f.t.Helper()
 	for tt, q := range legacyRows {
 		if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
-			ExternalCustomerID: user, MeterKey: MeterKeyTokens, Quantity: decimal.NewFromInt(q),
+			ExternalCustomerID: user, EventName: EventNameTokens, Quantity: decimal.NewFromInt(q),
 			Dimensions:     map[string]any{"model": "claude-sonnet-4.5", "provider": "anthropic", "token_type": tt},
 			IdempotencyKey: id + ":" + tt, Reason: domain.HeldReasonCustomerNotFound,
 		}); err != nil {
@@ -280,7 +280,7 @@ func TestSpend_PostFixHeldCall_RealStore(t *testing.T) {
 		f.mustSpend(f.probeCall("pf-2", "cus_pf2"))
 		cus, mtr := f.customerAndMeter("cus_pf2")
 		res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
-			ExternalCustomerID: "cus_pf2", CustomerID: cus, MeterIDs: map[string]string{MeterKeyTokens: mtr},
+			ExternalCustomerID: "cus_pf2", CustomerID: cus, MeterIDs: map[string]string{EventNameTokens: mtr},
 		})
 		if err != nil || res.Released != 4 {
 			t.Fatalf("release = %+v (%v), want 4 released", res, err)
@@ -462,7 +462,7 @@ func TestSpend_HeldSplitThenOldBinaryIngest_RealStore(t *testing.T) {
 	t.Run("operator release", func(t *testing.T) {
 		f, cus, mtr := setup(t, "LiteLLM split then old release", "mix-1", "cus_mix1")
 		res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
-			ExternalCustomerID: "cus_mix1", CustomerID: cus, MeterIDs: map[string]string{MeterKeyTokens: mtr},
+			ExternalCustomerID: "cus_mix1", CustomerID: cus, MeterIDs: map[string]string{EventNameTokens: mtr},
 		})
 		if err != nil {
 			t.Fatalf("release: %v", err)
@@ -506,7 +506,7 @@ func TestSpend_PreFixCallHeldOnLookupMiss_RealStore(t *testing.T) {
 
 	cus2, _ := f.customerAndMeter("cus_after")
 	res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
-		ExternalCustomerID: "cus_after", CustomerID: cus2, MeterIDs: map[string]string{MeterKeyTokens: mtr},
+		ExternalCustomerID: "cus_after", CustomerID: cus2, MeterIDs: map[string]string{EventNameTokens: mtr},
 	})
 	if err != nil {
 		t.Fatalf("release: %v", err)
@@ -656,7 +656,7 @@ func TestRelease_WaitsForInFlightOldInput_RealStore(t *testing.T) {
 		qty  int64
 	}{{TokenTypeCacheWrite5m, 40000}, {TokenTypeCacheWrite1h, 60000}, {TokenTypeOutput, 500}, {TokenTypeInput, 1000}} {
 		if _, err := hold.ExecContext(f.ctx, `
-			INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, meter_key,
+			INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, event_name,
 				quantity, properties, idempotency_key, event_at, reason)
 			VALUES ($1, $2, 'litellm', 'cus_cut', 'tokens', $3, jsonb_build_object('token_type', $4::text),
 				'cut-1:' || $4, '2026-10-01T00:00:00Z', 'customer_not_found')
@@ -696,7 +696,7 @@ func TestRelease_WaitsForInFlightOldInput_RealStore(t *testing.T) {
 	done := make(chan outcome, 1)
 	go func() {
 		res, err := store.ReleaseHeld(f.ctx, f.tenantID, usage.ReleaseHeldInput{
-			ExternalCustomerID: "cus_cut", CustomerID: cus, MeterIDs: map[string]string{MeterKeyTokens: mtr},
+			ExternalCustomerID: "cus_cut", CustomerID: cus, MeterIDs: map[string]string{EventNameTokens: mtr},
 			NotAfter: time.Now(), Limit: 3,
 		}, nil)
 		done <- outcome{res, err}

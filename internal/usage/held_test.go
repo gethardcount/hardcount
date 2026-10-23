@@ -152,7 +152,7 @@ func TestHold_Validation(t *testing.T) {
 	at := time.Now().UTC()
 	future := at.Add(time.Hour)
 	base := HoldInput{
-		ExternalCustomerID: "cus_x", MeterKey: "tokens", Quantity: decimal.NewFromInt(1),
+		ExternalCustomerID: "cus_x", EventName: "tokens", Quantity: decimal.NewFromInt(1),
 		IdempotencyKey: "k", EventAt: &at, Reason: domain.HeldReasonCustomerNotFound,
 	}
 	if _, err := NewService(newMemStore()).Hold(ctx, "t", base); !errors.Is(err, ErrHoldUnavailable) {

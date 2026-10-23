@@ -281,7 +281,7 @@ func TestUsageIngest_ZeroIsStoredAsPlainZero(t *testing.T) {
 	}
 	// A held row takes the same check, so it is stored as plain 0 too.
 	ev, err := heldEvent(HoldInput{
-		ExternalCustomerID: "acme", MeterKey: "api_call", IdempotencyKey: "evt_held_zero",
+		ExternalCustomerID: "acme", EventName: "api_call", IdempotencyKey: "evt_held_zero",
 		Quantity: decimal.RequireFromString("0e99999999"), Reason: domain.HeldReasonCustomerNotFound,
 	})
 	if err != nil {

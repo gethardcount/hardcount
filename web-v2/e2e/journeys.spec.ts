@@ -325,7 +325,7 @@ test('the Usage page shows a Maximum meter as its peak per customer, not the sum
   const id = uniq()
   const key = `e2e_storage_${id}`
   const meter = await api<{ id: string; name: string }>('POST', '/meters', {
-    key, name: `E2E Storage across every region and every storage tier ${id}`, unit: 'GB', aggregation: 'max',
+    event_name: key, name: `E2E Storage across every region and every storage tier ${id}`, unit: 'GB', aggregation: 'max',
   })
   const a = await createCustomer()
   const b = await createCustomer()
@@ -348,7 +348,7 @@ test('the Usage page shows a Maximum meter as its peak per customer, not the sum
 test('Usage: a half-typed dimension shows a hint, and Export CSV holds only the filtered rows', async ({ page }) => {
   const id = uniq()
   const key = `e2e_tokens_${id}`
-  const meter = await api<{ id: string }>('POST', '/meters', { key, name: `E2E Tokens ${id}`, unit: 'token', aggregation: 'sum' })
+  const meter = await api<{ id: string }>('POST', '/meters', { event_name: key, name: `E2E Tokens ${id}`, unit: 'token', aggregation: 'sum' })
   const customer = await createCustomer()
   for (const [model, quantity] of [['gpt-4o', '5'], ['gpt-4o', '7'], ['gpt-4o-mini', '11']] as const) {
     await api('POST', '/usage-events', {
@@ -865,13 +865,13 @@ test('list pages say what each one is for', async ({ page }) => {
 test('held LiteLLM usage is shown on the Usage page and released once', async ({ page }) => {
   // The LiteLLM mapper writes to the `tokens` meter. Create it if this
   // database has none; a parallel creator winning the race is fine.
-  const meters = await api<{ data: { key: string }[] }>('GET', '/meters')
-  if (!meters.data.some(m => m.key === 'tokens')) {
+  const meters = await api<{ data: { event_name: string }[] }>('GET', '/meters')
+  if (!meters.data.some(m => m.event_name === 'tokens')) {
     try {
-      await api('POST', '/meters', { key: 'tokens', name: 'Tokens', unit: 'token', aggregation: 'sum' })
+      await api('POST', '/meters', { event_name: 'tokens', name: 'Tokens', unit: 'token', aggregation: 'sum' })
     } catch (e) {
-      const again = await api<{ data: { key: string }[] }>('GET', '/meters')
-      if (!again.data.some(m => m.key === 'tokens')) throw e
+      const again = await api<{ data: { event_name: string }[] }>('GET', '/meters')
+      if (!again.data.some(m => m.event_name === 'tokens')) throw e
     }
   }
 

@@ -44,7 +44,7 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 		t.Fatalf("create rrv flat: %v", err)
 	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrvFlat.ID,
 	})
 	if err != nil {
@@ -52,8 +52,7 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	}
 	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: meter.ID, RatingRuleVersionID: rrvModel.ID,
-		DimensionMatch:  map[string]any{"model": "claude-3.5-sonnet"},
-		AggregationMode: domain.AggSum, Priority: 10,
+		DimensionMatch: map[string]any{"model": "claude-3.5-sonnet"}, Priority: 10,
 	}); err != nil {
 		t.Fatalf("upsert model rule: %v", err)
 	}
@@ -192,7 +191,7 @@ func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
 				t.Fatalf("rule: %v", err)
 			}
 			meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-				Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+				EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 			})
 			if err != nil {
 				t.Fatalf("meter: %v", err)
@@ -248,7 +247,7 @@ func TestMargin_NoProviderCostMeansNoMargin(t *testing.T) {
 		t.Fatalf("rule: %v", err)
 	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "api_calls", Name: "API calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "api_calls", Name: "API calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
 		t.Fatalf("meter: %v", err)

@@ -72,7 +72,7 @@ func (f meterEditFixture) rule(t *testing.T, key string, cents int64) domain.Rat
 func (f meterEditFixture) meter(t *testing.T, key, defaultRuleID string) domain.Meter {
 	t.Helper()
 	m, err := f.svc.CreateMeter(f.ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: key, Name: key, Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: defaultRuleID,
+		EventName: key, Name: key, Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: defaultRuleID,
 	})
 	if err != nil {
 		t.Fatalf("create meter %s: %v", key, err)
@@ -258,12 +258,13 @@ func TestMeterEditGuard_RefusesEachEditWhileInUse(t *testing.T) {
 			_, err = f.svc.UpdateMeter(f.ctx, f.tenantID, pm.meter.ID, pricing.UpdateMeterInput{RatingRuleVersionID: ptr("")})
 			wantInUse(t, "clear default", err, "1 subscription")
 
-			_, err = f.svc.UpdateMeter(f.ctx, f.tenantID, pm.meter.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")})
-			wantInUse(t, "change aggregation", err, "1 subscription")
+			// The aggregation is not this guard's: it is fixed by the meter's
+			// usage, not by its subscriptions (ADR-130 §2,
+			// meter_aggregation_lock_integration_test.go).
 
 			got := f.getMeter(t, pm.meter.ID)
-			if got.RatingRuleVersionID != pm.def.ID || got.Aggregation != "sum" {
-				t.Errorf("meter must be unchanged, got default=%q aggregation=%q", got.RatingRuleVersionID, got.Aggregation)
+			if got.RatingRuleVersionID != pm.def.ID {
+				t.Errorf("meter must be unchanged, got default=%q", got.RatingRuleVersionID)
 			}
 		})
 	}
@@ -524,7 +525,7 @@ func TestMeterEditGuard_WaitsForASubscriptionBeingCreated(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.svc.UpdateMeter(f.ctx, f.tenantID, pm.meter.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")})
+		_, err := f.svc.UpdateMeter(f.ctx, f.tenantID, pm.meter.ID, pricing.UpdateMeterInput{RatingRuleVersionID: ptr(pm.other.ID)})
 		done <- err
 	}()
 
@@ -542,8 +543,8 @@ func TestMeterEditGuard_WaitsForASubscriptionBeingCreated(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the edit never finished")
 	}
-	if got := f.getMeter(t, pm.meter.ID); got.Aggregation != "sum" {
-		t.Errorf("aggregation must be unchanged, got %q", got.Aggregation)
+	if got := f.getMeter(t, pm.meter.ID); got.RatingRuleVersionID != pm.def.ID {
+		t.Errorf("default price must be unchanged, got %q", got.RatingRuleVersionID)
 	}
 }
 
@@ -684,7 +685,6 @@ func TestMeterEditGuard_HTTP(t *testing.T) {
 	f.sub(t, pm.plan.ID, "active")
 	f.sub(t, pm.plan.ID, "active")
 
-	check(t, "PATCH aggregation", do(http.MethodPatch, "/v1/meters/"+pm.meter.ID, `{"aggregation":"max"}`))
 	check(t, "PATCH default", do(http.MethodPatch, "/v1/meters/"+pm.meter.ID, `{"rating_rule_version_id":"`+pm.other.ID+`"}`))
 	check(t, "POST rule", do(http.MethodPost, "/v1/meters/"+pm.meter.ID+"/pricing-rules",
 		`{"rating_rule_version_id":"`+pm.rule.RatingRuleVersionID+`","dimension_match":{"model":"z"},"priority":100}`))

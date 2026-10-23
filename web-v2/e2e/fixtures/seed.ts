@@ -30,7 +30,7 @@ export function createPlan(currency = 'USD'): Promise<Plan> {
 
 export function createMeter(): Promise<Meter> {
   const id = uniq()
-  return api<Meter>('POST', '/meters', { key: `e2e_calls_${id}`, name: `E2E Calls ${id}`, unit: 'call', aggregation: 'sum' })
+  return api<Meter>('POST', '/meters', { event_name: `e2e_calls_${id}`, name: `E2E Calls ${id}`, unit: 'call', aggregation: 'sum' })
 }
 
 // A test clock frozen at the current time, so billing periods line up with

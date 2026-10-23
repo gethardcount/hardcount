@@ -38,12 +38,12 @@ type PreviewLine struct {
 	UnitAmountCents     int64           `json:"unit_amount_cents"`
 	AmountCents         int64           `json:"amount_cents"`
 	PricingMode         string          `json:"pricing_mode,omitempty"`
-	// AggregationMode is the rule BUCKET's aggregation (sum/count/max/
-	// last_during_period/last_ever) — per pricing rule, not per meter, since
-	// one meter can carry mixed modes. Internal-only (json:"-"): the
-	// threshold scan classifies non-additive buckets with it (ADR-066 §4);
-	// the public create_preview wire is unchanged.
-	AggregationMode domain.AggregationMode `json:"-"`
+	// Aggregation is the line's meter's aggregation (sum, count, max,
+	// last), which every price of the meter bills under (ADR-130 §2).
+	// Internal-only (json:"-"): the threshold scan classifies non-additive
+	// buckets with it (ADR-066 §4); the public create_preview wire is
+	// unchanged.
+	Aggregation string `json:"-"`
 	// PlanID + BaseBillTiming identify the base_fee line's plan, internal-
 	// only (json:"-"): the threshold fire consumes them to skip prepaid
 	// in_advance bases and prorate reset-mode bases PER LINE — replacing a
@@ -226,7 +226,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	}
 
 	// Usage lines per (meter, rule), priced by the one rater (rate.go). The
-	// priority+claim LATERAL JOIN inside AggregateByPricingRules is the
+	// priority+claim LATERAL JOIN inside AggregateClaims is the
 	// canonical pricing identity — the cycle scan calls the same path, so a
 	// multi-dim tenant's preview matches what its actual invoice will be.
 	//
@@ -527,25 +527,4 @@ func computePreviewTotals(lines []PreviewLine) []PreviewTotal {
 		out = append(out, PreviewTotal{Currency: cur, AmountCents: bucket[cur]})
 	}
 	return out
-}
-
-// mapMeterAggregation translates the meter's stored aggregation string
-// ("sum"/"count"/"max"/"last") to the AggregationMode the priority+claim
-// resolver accepts. Duplicated from internal/usage/customer_usage.go
-// rather than imported to keep the billing package's dependency graph
-// flat (no cross-domain imports between peer packages — see CLAUDE.md
-// "Architecture").
-func mapMeterAggregation(agg string) domain.AggregationMode {
-	switch agg {
-	case "sum":
-		return domain.AggSum
-	case "count":
-		return domain.AggCount
-	case "max":
-		return domain.AggMax
-	case "last":
-		return domain.AggLastDuringPeriod
-	default:
-		return domain.AggSum
-	}
 }

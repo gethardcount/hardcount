@@ -46,7 +46,7 @@ func (f heldFixture) hold(t *testing.T, ext, key string, at time.Time) error {
 	_, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
 		Source:             domain.HeldUsageSourceLiteLLM,
 		ExternalCustomerID: ext,
-		MeterKey:           "tokens",
+		EventName:          "tokens",
 		Quantity:           decimal.NewFromInt(100),
 		Dimensions:         map[string]any{"model": "gpt-4o", "token_type": "input"},
 		IdempotencyKey:     key,
@@ -269,7 +269,7 @@ func TestHeld_TenantAndModeIsolation(t *testing.T) {
 	}
 	// The same key may be held in another tenant: keys are per tenant.
 	if _, err := f.svc.Hold(f.ctx, other, usage.HoldInput{
-		ExternalCustomerID: "cus_iso", MeterKey: "tokens", Quantity: decimal.NewFromInt(1),
+		ExternalCustomerID: "cus_iso", EventName: "tokens", Quantity: decimal.NewFromInt(1),
 		IdempotencyKey: "iso-1:input", EventAt: &at, Reason: domain.HeldReasonCustomerNotFound,
 	}); err != nil {
 		t.Fatalf("hold same key in another tenant: %v", err)
@@ -477,7 +477,7 @@ func TestHeld_ReleaseLimitIsReportedApart(t *testing.T) {
 	}
 	// One row whose meter does not exist: still held, for a real reason.
 	if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
-		ExternalCustomerID: "cus_many", MeterKey: "no_such_meter", Quantity: decimal.NewFromInt(1),
+		ExternalCustomerID: "cus_many", EventName: "no_such_meter", Quantity: decimal.NewFromInt(1),
 		IdempotencyKey: "many-x:input", EventAt: &at, Reason: domain.HeldReasonMeterNotFound,
 	}); err != nil {
 		t.Fatalf("hold missing meter: %v", err)
@@ -520,7 +520,7 @@ func TestHeld_ListTotalsCountPastTheCap(t *testing.T) {
 	}
 	// The newest id has two meters: both groups are listed.
 	if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
-		ExternalCustomerID: fmt.Sprintf("cus_cap_%03d", n-1), MeterKey: "other", Quantity: decimal.NewFromInt(1),
+		ExternalCustomerID: fmt.Sprintf("cus_cap_%03d", n-1), EventName: "other", Quantity: decimal.NewFromInt(1),
 		IdempotencyKey: "cap-extra:input", EventAt: &at, Reason: domain.HeldReasonCustomerNotFound,
 	}); err != nil {
 		t.Fatalf("hold extra: %v", err)

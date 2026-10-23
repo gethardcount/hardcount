@@ -29,7 +29,7 @@ type UsagePoint struct {
 type TopMeter struct {
 	MeterID   string          `json:"meter_id"`
 	MeterName string          `json:"meter_name"`
-	Key       string          `json:"key"`
+	EventName string          `json:"event_name"`
 	Events    int64           `json:"events"`
 	Quantity  decimal.Decimal `json:"quantity"`
 }
@@ -95,7 +95,7 @@ func (h *Handler) usageAnalytics(w http.ResponseWriter, r *http.Request) {
 
 	// Top meters by event volume (cap at 10)
 	rows, err = tx.QueryContext(ctx, `
-		SELECT m.id, m.name, m.key,
+		SELECT m.id, m.name, m.event_name,
 		       COUNT(ue.id) AS events,
 		       COALESCE(SUM(ue.quantity), 0) AS qty
 		FROM meters m
@@ -103,7 +103,7 @@ func (h *Handler) usageAnalytics(w http.ResponseWriter, r *http.Request) {
 		  ON ue.tenant_id = $3 AND ue.meter_id = m.id
 		 AND ue.timestamp >= $1 AND ue.timestamp < $2
 		 AND ue.customer_id IN (SELECT id FROM customers WHERE test_clock_id IS NULL)
-		GROUP BY m.id, m.name, m.key
+		GROUP BY m.id, m.name, m.event_name
 		HAVING COUNT(ue.id) > 0
 		ORDER BY events DESC
 		LIMIT 10
@@ -116,7 +116,7 @@ func (h *Handler) usageAnalytics(w http.ResponseWriter, r *http.Request) {
 	top := make([]TopMeter, 0)
 	for rows.Next() {
 		var t TopMeter
-		if err := rows.Scan(&t.MeterID, &t.MeterName, &t.Key, &t.Events, &t.Quantity); err != nil {
+		if err := rows.Scan(&t.MeterID, &t.MeterName, &t.EventName, &t.Events, &t.Quantity); err != nil {
 			_ = rows.Close()
 			slog.Error("analytics usage: top-meters scan", "error", err)
 			respond.InternalError(w, r)

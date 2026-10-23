@@ -12,7 +12,7 @@ import type { PostV1UsageEventsBodyDimensions } from './postV1UsageEventsBodyDim
 export type PostV1UsageEventsBody = {
   /** The customer's external_id (your identifier), not the internal vlx_cus_ id. */
   external_customer_id: string;
-  /** The meter key (e.g. "tokens"). */
+  /** The meter's `event_name` (e.g. "tokens"). */
   event_name: string;
   /**
      * A JSON number (`5`) or a string holding one (`"5.5"`,

@@ -45,14 +45,14 @@ func (u unpricedUsage) record(ctx context.Context, sub domain.Subscription) {
 
 // leftOutBucket is one meter's bucket that a preview's rating priced at
 // nothing: unpriced, or with BelowZero set, below zero after corrections
-// (net_negative.go). Mode is the bucket's aggregation mode: the threshold
-// fire needs it to decide whether the bucket is its to report or the period
-// close's (see evaluateThresholds).
+// (net_negative.go). Aggregation is the bucket's meter's aggregation: the
+// threshold fire needs it to decide whether the bucket is its to report or
+// the period close's (see evaluateThresholds).
 type leftOutBucket struct {
-	MeterID   string
-	MeterKey  string
-	MeterName string
-	Mode      domain.AggregationMode
-	Quantity  decimal.Decimal
-	BelowZero bool
+	MeterID     string
+	EventName   string
+	MeterName   string
+	Aggregation string
+	Quantity    decimal.Decimal
+	BelowZero   bool
 }

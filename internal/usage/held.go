@@ -31,7 +31,7 @@ import (
 type HoldInput struct {
 	Source             string
 	ExternalCustomerID string
-	MeterKey           string
+	EventName          string
 	Quantity           decimal.Decimal
 	Dimensions         map[string]any
 	IdempotencyKey     string
@@ -96,8 +96,8 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 	if strings.TrimSpace(in.ExternalCustomerID) == "" {
 		return domain.HeldUsageEvent{}, errs.Required("external_customer_id")
 	}
-	if strings.TrimSpace(in.MeterKey) == "" {
-		return domain.HeldUsageEvent{}, errs.Required("meter_key")
+	if strings.TrimSpace(in.EventName) == "" {
+		return domain.HeldUsageEvent{}, errs.Required("event_name")
 	}
 	switch in.Reason {
 	case domain.HeldReasonCustomerNotFound, domain.HeldReasonMeterNotFound:
@@ -129,7 +129,7 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 	return domain.HeldUsageEvent{
 		Source:             source,
 		ExternalCustomerID: in.ExternalCustomerID,
-		MeterKey:           in.MeterKey,
+		EventName:          in.EventName,
 		Quantity:           quantity,
 		Dimensions:         in.Dimensions,
 		IdempotencyKey:     in.IdempotencyKey,
@@ -174,7 +174,7 @@ func (s *Service) IngestResolvingHeld(ctx context.Context, tenantID string, inpu
 	return event, err
 }
 
-// HeldFor returns the meter keys and row count still held for one external
+// HeldFor returns the event names and row count still held for one external
 // customer id.
 func (s *Service) HeldFor(ctx context.Context, tenantID, externalCustomerID string) ([]string, int, error) {
 	if s.held == nil {
@@ -187,7 +187,7 @@ func (s *Service) HeldFor(ctx context.Context, tenantID, externalCustomerID stri
 type ReleaseInput struct {
 	ExternalCustomerID string
 	CustomerID         string
-	// MeterIDs maps meter key to meter id for every meter that exists.
+	// MeterIDs maps event name to meter id for every meter that exists.
 	MeterIDs map[string]string
 }
 
@@ -278,7 +278,7 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 			continue
 		}
 		out.Released++
-		written = append(written, ReleasedUsage{At: r.EventAt, MeterID: in.MeterIDs[r.MeterKey]})
+		written = append(written, ReleasedUsage{At: r.EventAt, MeterID: in.MeterIDs[r.EventName]})
 	}
 	if out.Released > 0 {
 		out.InOpenPeriod, out.NotOnPlan, out.PendingThresholdInvoice, out.OutsideOpenPeriod = countReleased(written, periods, buckets)
@@ -330,7 +330,7 @@ func (s *Service) releaseEmission(ctx context.Context, in ReleaseInput) func(tx 
 // Discard marks the held rows for one external customer id (and one meter
 // key, when given) discarded. They stay in the table as a record and are
 // never ingested.
-func (s *Service) Discard(ctx context.Context, tenantID, externalCustomerID, meterKey string) (int, error) {
+func (s *Service) Discard(ctx context.Context, tenantID, externalCustomerID, eventName string) (int, error) {
 	if s.held == nil {
 		return 0, ErrHoldUnavailable
 	}
@@ -347,13 +347,13 @@ func (s *Service) Discard(ctx context.Context, tenantID, externalCustomerID, met
 				Metadata: map[string]any{
 					"action":               "held_usage_discarded",
 					"external_customer_id": externalCustomerID,
-					"meter_key":            meterKey,
+					"event_name":           eventName,
 					"rows":                 n,
 				},
 			})
 		}
 	}
-	return s.held.DiscardHeld(ctx, tenantID, externalCustomerID, meterKey, emit)
+	return s.held.DiscardHeld(ctx, tenantID, externalCustomerID, eventName, emit)
 }
 
 // ReleasedUsage is one released row, for countReleased.
@@ -403,8 +403,8 @@ func (s *Service) releasePeriods(ctx context.Context, tenantID string, in Releas
 //     invoice, ADR-120), before a paid threshold invoice's end, and after
 //     the end of a subscription that ends there.
 //
-// buckets holds each row's meter; a meter missing from it is read as
-// neither additive nor last_ever.
+// buckets holds each row's meter; a meter missing from it is read as not
+// additive.
 func countReleased(rows []ReleasedUsage, periods []OpenPeriod, buckets map[string]MeterBuckets) (inOpen, notOnPlan, pending, outside int) {
 	for _, row := range rows {
 		c, _ := classify(row.At, row.MeterID, periods, func() (MeterBuckets, error) { return buckets[row.MeterID], nil })

@@ -53,7 +53,7 @@ func TestProviderCostStamp(t *testing.T) {
 		t.Fatalf("customer: %v", err)
 	}
 	meter, err := pricing.NewPostgresStore(db).CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
 	})
 	if err != nil {
 		t.Fatalf("meter: %v", err)
@@ -169,7 +169,7 @@ func TestProviderCostStamp_LivemodeIsolation(t *testing.T) {
 		t.Fatalf("customer: %v", err)
 	}
 	meter, err := pricing.NewPostgresStore(db).CreateMeter(testCtx, tenantID, domain.Meter{
-		Key: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Aggregation: "sum", Unit: "tokens",
 	})
 	if err != nil {
 		t.Fatalf("meter: %v", err)

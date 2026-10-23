@@ -185,10 +185,10 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	}
 
 	if _, err = tx.ExecContext(ctx, `
-		INSERT INTO meters (id, tenant_id, name, key, unit, aggregation, livemode)
+		INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation, livemode)
 		VALUES ($1, $2, 'Bench Tokens', $3, 'tokens', $4, $5)
 		ON CONFLICT (id) DO UPDATE SET livemode = $5
-	`, benchMeter, benchTenant, benchMeterKey, string(domain.AggSum), live); err != nil {
+	`, benchMeter, benchTenant, benchMeterKey, domain.AggregationSum, live); err != nil {
 		log.Fatalf("upsert meter: %v", err)
 	}
 

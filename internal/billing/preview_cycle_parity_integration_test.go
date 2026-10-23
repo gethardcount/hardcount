@@ -115,7 +115,7 @@ func previewParityScenarios() []previewParityScenario {
 					t.Fatalf("create rule: %v", err)
 				}
 				meter, err := f.pricing.CreateMeter(f.ctx, f.tenantID, domain.Meter{
-					Key: "pp_calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
+					EventName: "pp_calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
 				})
 				if err != nil {
 					t.Fatalf("create meter: %v", err)

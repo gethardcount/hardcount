@@ -23,7 +23,7 @@ export function meterValueCaption(aggregation: string, customers: number): strin
     case 'sum':
       return 'Sum of reported values'
     case 'mixed':
-      return "Sum of reported values. This meter is billed in parts, one per pricing rule, that count usage in different ways or each take their own peak or latest reading, so the billed amount may differ."
+      return "Sum of reported values. This meter is billed in parts, one per pricing rule, that each take their own peak or latest reading, so the billed amount may differ."
     default:
       return 'Sum of reported values (aggregation unknown)'
   }

@@ -33,7 +33,7 @@ type PricingWriter interface {
 	// never clobbers: an operator's edits to a rule/meter survive a re-apply
 	// untouched — and the plan is always generated fresh, never adopted.
 	GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error)
-	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
+	GetMeterByEventName(ctx context.Context, tenantID, key string) (domain.Meter, error)
 	ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error)
 
 	// AdoptedMeterCurrencyConflict is the ADR-100 probe run when adopting an
@@ -408,7 +408,7 @@ func (s *Service) Instantiate(
 		}
 	}
 
-	// Meters — adopt an existing key only if its AGGREGATION matches (the sole
+	// Meters — adopt an existing event name only if its AGGREGATION matches (the sole
 	// billing-consulted field; sum vs max/count/last silently mis-rolls-up
 	// usage), else refuse LOUD. Adoption never mutates the meter row, but the
 	// pricing rules below are added to it: on a meter that subscriptions use,
@@ -418,9 +418,9 @@ func (s *Service) Instantiate(
 	// ADR-044 `tokens` meter after go-live (ADR-085, amended).
 	meterIDByKey := make(map[string]string, len(rendered.Meters))
 	for _, m := range rendered.Meters {
-		if existing, err := s.pricing.GetMeterByKey(ctx, tenantID, m.Key); err == nil {
+		if existing, err := s.pricing.GetMeterByEventName(ctx, tenantID, m.EventName); err == nil {
 			if diffs := meterConformanceDiff(existing, m); len(diffs) > 0 {
-				return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterConflictMessage(m.Key, diffs))
+				return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterConflictMessage(m.EventName, diffs))
 			}
 			// ADR-100: adopting a shared meter must not stack this recipe's
 			// rules (in ruleCurrency) onto a meter whose EXISTING rules bill
@@ -429,42 +429,42 @@ func (s *Service) Instantiate(
 			if ruleCurrency != "" {
 				conflict, err := s.pricing.AdoptedMeterCurrencyConflict(ctx, tenantID, existing.ID, ruleCurrency)
 				if err != nil {
-					return domain.RecipeInstance{}, fmt.Errorf("meter %q: currency probe: %w", m.Key, err)
+					return domain.RecipeInstance{}, fmt.Errorf("meter %q: currency probe: %w", m.EventName, err)
 				}
 				if conflict != "" {
-					return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterCurrencyConflictMessage(m.Key, conflict, ruleCurrency))
+					return domain.RecipeInstance{}, errs.AlreadyExists("meter", meterCurrencyConflictMessage(m.EventName, conflict, ruleCurrency))
 				}
 			}
-			meterIDByKey[m.Key] = existing.ID
+			meterIDByKey[m.EventName] = existing.ID
 			objs.MeterIDs = append(objs.MeterIDs, existing.ID)
 			continue
 		} else if !errors.Is(err, errs.ErrNotFound) {
-			return domain.RecipeInstance{}, fmt.Errorf("meter %q: adoption check: %w", m.Key, err)
+			return domain.RecipeInstance{}, fmt.Errorf("meter %q: adoption check: %w", m.EventName, err)
 		}
 		created, err := s.pricing.CreateMeterTx(ctx, tx, tenantID, domain.Meter{
-			Key:         m.Key,
+			EventName:   m.EventName,
 			Name:        m.Name,
 			Unit:        m.Unit,
 			Aggregation: m.Aggregation,
 		})
 		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("meter %q: %w", m.Key, err)
+			return domain.RecipeInstance{}, fmt.Errorf("meter %q: %w", m.EventName, err)
 		}
-		meterIDByKey[m.Key] = created.ID
+		meterIDByKey[m.EventName] = created.ID
 		objs.MeterIDs = append(objs.MeterIDs, created.ID)
 	}
 
 	// Pricing rules — bind each (meter, dimension_match) tuple to a rating
-	// rule. The recipe parser already verified meter_key and rating_rule_key
-	// resolve, so the lookups here are safe.
+	// rule. The recipe parser already verified the event name and
+	// rating_rule_key resolve, so the lookups here are safe. A rule has no
+	// aggregation of its own: it bills under the meter's (ADR-130 §2).
 	for i, pr := range rendered.PricingRules {
-		meterID := meterIDByKey[pr.MeterKey]
+		meterID := meterIDByKey[pr.EventName]
 		ruleID := ratingRuleIDByKey[pr.RatingRuleKey]
 		created, err := s.pricing.UpsertMeterPricingRuleTx(ctx, tx, tenantID, domain.MeterPricingRule{
 			MeterID:             meterID,
 			RatingRuleVersionID: ruleID,
 			DimensionMatch:      pr.DimensionMatch,
-			AggregationMode:     pr.AggregationMode,
 			Priority:            pr.Priority,
 		})
 		if err != nil {
@@ -499,8 +499,8 @@ func (s *Service) Instantiate(
 		takenCodes[ep.Code] = true
 	}
 	for _, p := range rendered.Plans {
-		meterIDs := make([]string, 0, len(p.MeterKeys))
-		for _, mk := range p.MeterKeys {
+		meterIDs := make([]string, 0, len(p.EventNames))
+		for _, mk := range p.EventNames {
 			meterIDs = append(meterIDs, meterIDByKey[mk])
 		}
 		currency := p.Currency

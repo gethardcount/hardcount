@@ -227,8 +227,9 @@ components:
           type: string
         tenant_id:
           type: string
-        key:
+        event_name:
           type: string
+          description: The `event_name` usage events send for this meter.
         name:
           type: string
         unit:
@@ -236,6 +237,19 @@ components:
         aggregation:
           type: string
           enum: [sum, count, max, last]
+          description: |
+            How the meter rolls its events into one quantity per billing
+            period. Every pricing rule of the meter bills under it. `last`
+            is the latest event by timestamp, then by id. Fixed once the
+            meter has usage (see `has_usage`).
+        has_usage:
+          type: boolean
+          description: |
+            Whether the meter has events: usage events, or held usage rows
+            for its `event_name` that are still held. Once it has, its
+            `aggregation` cannot change. Returned when you create, get or
+            update one meter; the meter list leaves it out. A create or
+            update that succeeded leaves it out if it could not be read.
         rating_rule_version_id:
           type: string
         created_at:
@@ -1587,9 +1601,9 @@ components:
 
     RecipeMeter:
       type: object
-      required: [key, name, unit, aggregation]
+      required: [event_name, name, unit, aggregation]
       properties:
-        key:
+        event_name:
           type: string
         name:
           type: string
@@ -1636,24 +1650,22 @@ components:
 
     RecipePricingRule:
       type: object
-      required: [meter_key, rating_rule_key, dimension_match, aggregation_mode, priority]
+      required: [event_name, rating_rule_key, dimension_match, priority]
       properties:
-        meter_key:
+        event_name:
           type: string
+          description: The recipe meter the rule prices.
         rating_rule_key:
           type: string
         dimension_match:
           type: object
           additionalProperties: true
-        aggregation_mode:
-          type: string
-          enum: [sum, count, last_during_period, last_ever, max]
         priority:
           type: integer
 
     RecipePlan:
       type: object
-      required: [code, name, currency, billing_interval, base_amount_cents, meter_keys]
+      required: [code, name, currency, billing_interval, base_amount_cents, event_names]
       properties:
         code:
           type: string
@@ -1671,8 +1683,9 @@ components:
           type: string
           enum: [in_advance, in_arrears]
           description: Optional; empty defaults to in_arrears at plan creation (ADR-031).
-        meter_keys:
+        event_names:
           type: array
+          description: The recipe meters the plan bills.
           items:
             type: string
 
@@ -2106,11 +2119,11 @@ components:
 
     CustomerUsageMeter:
       type: object
-      required: [meter_id, meter_key, meter_name, unit, currency, total_quantity, total_amount_cents, rules]
+      required: [meter_id, event_name, meter_name, unit, currency, total_quantity, total_amount_cents, rules]
       properties:
         meter_id:
           type: string
-        meter_key:
+        event_name:
           type: string
         meter_name:
           type: string
@@ -2559,13 +2572,13 @@ components:
 
     AnalyticsTopMeter:
       type: object
-      required: [meter_id, meter_name, key, events, quantity]
+      required: [meter_id, meter_name, event_name, events, quantity]
       properties:
         meter_id:
           type: string
         meter_name:
           type: string
-        key:
+        event_name:
           type: string
         events:
           type: integer
@@ -3507,7 +3520,7 @@ components:
 
     MeterPricingRule:
       type: object
-      required: [id, meter_id, rating_rule_version_id, dimension_match, aggregation_mode, priority, created_at, updated_at]
+      required: [id, meter_id, rating_rule_version_id, dimension_match, priority, created_at, updated_at]
       properties:
         id:
           type: string
@@ -3520,10 +3533,7 @@ components:
         dimension_match:
           type: object
           additionalProperties: true
-          description: Dimensions an event must have for this rule to bill it. `{}` matches every event.
-        aggregation_mode:
-          type: string
-          enum: [sum, count, last_during_period, last_ever, max]
+          description: Dimensions an event must have for this rule to bill it. `{}` matches every event. The rule bills them under the meter's `aggregation`.
         priority:
           type: integer
           description: Rules are tried highest first.
@@ -3713,14 +3723,13 @@ components:
               aggregation:
                 type: string
                 description: |
-                  The aggregation billing uses for this meter's events (`sum`,
-                  `count`, `max`, `last`), read from its pricing rules and, for
-                  events no rule claims, the meter's own aggregation. `mixed`
-                  when those differ, or when a `max` or `last` meter is billed
-                  in more than one part (several rules, or a rule plus the
-                  events no rule claims), since peaks of the parts added up
-                  are not one peak: `value` is then the plain sum, which
-                  billing may not use. Empty when unknown.
+                  The meter's aggregation (`sum`, `count`, `max`, `last`),
+                  which every pricing rule of the meter bills under. `mixed`
+                  when a `max` or `last` meter is billed in more than one
+                  part (several rules, or a rule plus the events no rule
+                  claims), since peaks of the parts added up are not one
+                  peak: `value` is then the plain sum, which billing does not
+                  use. Empty when unknown.
               value:
                 type: string
                 description: |
@@ -3886,14 +3895,15 @@ components:
 
     HeldUsageGroup:
       type: object
-      description: The usage rows still held for one external customer ID, meter key and reason.
-      required: [external_customer_id, meter_key, reason, rows, total_quantity, first_event_at, last_event_at, last_received_at, customer_id, meter_exists]
+      description: The usage rows still held for one external customer ID, event name and reason.
+      required: [external_customer_id, event_name, reason, rows, total_quantity, first_event_at, last_event_at, last_received_at, customer_id, meter_exists]
       properties:
         external_customer_id:
           type: string
           description: The LiteLLM `user` value the rows carried.
-        meter_key:
+        event_name:
           type: string
+          description: The `event_name` the rows carried.
         reason:
           type: string
           enum: [customer_not_found, meter_not_found]
@@ -3918,7 +3928,7 @@ components:
           description: The customer whose external ID now matches, or empty when none does yet.
         meter_exists:
           type: boolean
-          description: Whether a meter with this key exists now.
+          description: Whether a meter with this `event_name` exists now.
 
     HeldUsageReleaseResult:
       type: object
@@ -5991,7 +6001,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        meter_key: { type: string }
+                        event_name: { type: string }
                         meter_name: { type: string }
                         unit: { type: string }
                         currency: { type: string }
@@ -6299,10 +6309,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [key, name]
+              required: [event_name, name]
               properties:
-                key:
+                event_name:
                   type: string
+                  description: The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters.
                 name:
                   type: string
                 unit:
@@ -6312,6 +6323,7 @@ paths:
                   type: string
                   enum: [sum, count, max, last]
                   default: sum
+                  description: How the meter rolls its events into one quantity per billing period. Fixed once the meter has usage.
                 rating_rule_version_id:
                   type: string
       responses:
@@ -6349,15 +6361,23 @@ paths:
         unmatched usage); pass an empty string to clear it. The rule must
         exist on the tenant.
 
+        `aggregation` can change until the meter has usage, then it is
+        fixed: a change is refused with 409 `meter_has_usage`. Usage is a
+        usage event of the meter, or a held usage row for its `event_name`
+        that is still held. Usage events are counted under the aggregation
+        the meter has; to count differently, make a new meter with another
+        event name. Held rows bill under it when released, and only to the
+        meter of their event name; only discarding them frees the
+        aggregation.
+
         While a draft, trialing or active subscription uses the meter,
-        changing `aggregation`, pointing the default at another rating
-        rule, or clearing it is refused with 409 `meter_in_use`: the
-        change would reprice the billing period already open. A first
-        default, or another version of the same rating rule, is allowed. To
-        change a rate, publish a new version of the rating rule; it applies
-        from each subscription's next period (on a test clock, it can apply
-        to the current simulated period). `name` and `unit` can always
-        change.
+        pointing the default at another rating rule, or clearing it, is
+        refused with 409 `meter_in_use`: the change would reprice the
+        billing period already open. A first default, or another version of
+        the same rating rule, is allowed. To change a rate, publish a new
+        version of the rating rule; it applies from each subscription's next
+        period (on a test clock, it can apply to the current simulated
+        period). `name` and `unit` can always change.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -6393,11 +6413,13 @@ paths:
           description: Meter not found
         "409":
           description: |
-            `meter_in_use`: subscriptions use the meter and the change would
-            reprice their current period. The message gives the number of
-            subscriptions. `invalid_state`: the new default's currency
-            conflicts with the meter's other prices or with a plan that uses
-            the meter, or another write changed the meter during this one.
+            `meter_has_usage`: the meter has usage, so its `aggregation`
+            cannot change. `meter_in_use`: subscriptions use the meter and
+            the change would reprice their current period. The message gives
+            the number of subscriptions. `invalid_state`: the new default's
+            currency conflicts with the meter's other prices or with a plan
+            that uses the meter, or another write changed the meter during
+            this one.
           content:
             application/json:
               schema:
@@ -6470,9 +6492,10 @@ paths:
         Binds a rating rule to the part of the meter's usage whose dimensions
         match `dimension_match`. The rule is identified by the meter and
         `rating_rule_version_id`: posting the same pair again updates
-        `dimension_match`, `aggregation_mode` and `priority` on the existing
-        rule and keeps its id. Both cases return 201. The meter id in the
-        path is used; a `meter_id` in the body is ignored.
+        `dimension_match` and `priority` on the existing rule and keeps its
+        id. Both cases return 201. The meter id in the path is used; a
+        `meter_id` in the body is ignored. A rule has no aggregation of its
+        own: it bills its events under the meter's `aggregation`.
 
         While a draft, trialing or active subscription uses the meter, the
         change must not reprice the billing period already open, or it is
@@ -6510,11 +6533,6 @@ paths:
                     Event dimensions this rule claims, for example
                     `{"model": "gpt-4o", "token_type": "input"}`. Values must be
                     strings, numbers or booleans. Omitted or `{}` matches every event.
-                aggregation_mode:
-                  type: string
-                  enum: [sum, count, last_during_period, last_ever, max]
-                  default: sum
-                  description: How the matched events become one quantity for the period.
                 priority:
                   type: integer
                   default: 0
@@ -6545,9 +6563,10 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `validation_error`: unknown meter or rating rule, unknown
-            `aggregation_mode`, more than 16 `dimension_match` keys, or a
-            non-scalar `dimension_match` value.
+            `validation_error`: unknown meter or rating rule, a field the
+            body does not define (such as `aggregation_mode`: a rule bills
+            under its meter's aggregation), more than 16 `dimension_match`
+            keys, or a non-scalar `dimension_match` value.
           content:
             application/json:
               schema:
@@ -9039,7 +9058,7 @@ paths:
                   description: The customer's external_id (your identifier), not the internal vlx_cus_ id.
                 event_name:
                   type: string
-                  description: The meter key (e.g. "tokens").
+                  description: The meter's `event_name` (e.g. "tokens").
                 quantity:
                   oneOf:
                     - type: number
@@ -9218,7 +9237,7 @@ paths:
                     description: The customer's external_id (your identifier), not the internal vlx_cus_ id.
                   event_name:
                     type: string
-                    description: The meter key (e.g. "tokens").
+                    description: The meter's `event_name` (e.g. "tokens").
                   quantity:
                     oneOf:
                       - type: number
@@ -9327,7 +9346,7 @@ paths:
                   description: The customer's external_id (your identifier), not the internal vlx_cus_ id.
                 event_name:
                   type: string
-                  description: The meter key (e.g. "tokens").
+                  description: The meter's `event_name` (e.g. "tokens").
                 quantity:
                   oneOf:
                     - type: number
@@ -9427,7 +9446,7 @@ paths:
         Usage rows the LiteLLM integration received for a customer or meter
         that did not exist yet. They are kept with their idempotency keys,
         not billed, until you release or discard them. Grouped by external
-        customer ID, meter key and reason, most recent arrival first. Lists
+        customer ID, event name and reason, most recent arrival first. Lists
         the 200 external customer IDs with the most recent arrivals, with
         every group for each; `total_customers` and `total_rows` count all
         held rows, listed or not. Requires usage read permission.
@@ -9507,8 +9526,8 @@ paths:
       tags: [Usage]
       summary: Discard held usage
       description: |
-        Marks the held rows for one external customer ID (and one meter
-        key, when given) as discarded. They are never billed. The rows stay
+        Marks the held rows for one external customer ID (and one event
+        name, when given) as discarded. They are never billed. The rows stay
         stored as a record. Writes an audit log entry. Requires usage write
         permission.
       operationId: discardHeldUsage
@@ -9522,9 +9541,9 @@ paths:
               properties:
                 external_customer_id:
                   type: string
-                meter_key:
+                event_name:
                   type: string
-                  description: Discard only this meter's rows. Omit for all.
+                  description: Discard only the rows with this `event_name`. Omit for all.
       responses:
         "200":
           description: Rows discarded
@@ -9537,7 +9556,7 @@ paths:
                   discarded:
                     type: integer
         "422":
-          description: "`validation_error`: `external_customer_id` is missing."
+          description: "`validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here)."
           content:
             application/json:
               schema:
@@ -12140,8 +12159,8 @@ paths:
           description: Unknown recipe key
         "409":
           description: >-
-            An existing meter with the same key diverges from the recipe
-            (aggregation mismatch) — reconcile the meter before
+            An existing meter with the same `event_name` diverges from the
+            recipe (aggregation mismatch) — reconcile the meter before
             instantiating. Or `meter_in_use`: subscriptions use that meter,
             and a recipe pricing rule would reprice their current period
             (the meter has a default rating rule, or the rule outranks one

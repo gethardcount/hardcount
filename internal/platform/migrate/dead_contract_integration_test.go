@@ -35,11 +35,12 @@ func deadContractExec(ctx context.Context, db *sql.DB, q string) error {
 
 // deadContractSeed is the parent rows every statement below hangs off, in
 // the schema before 00206 (a dunning policy's schedule is its three old
-// columns; one retry needs no retry_schedule entry). deadContractSeedNow is
-// the same rows in the schema after it.
+// columns; one retry needs no retry_schedule entry; a meter has a key).
+// deadContractSeedNow is the same rows in the schema after 00206 and 00208
+// (retry_days; a meter has an event_name).
 var (
-	deadContractSeed    = fmt.Sprintf(deadContractSeedRows, "max_retry_attempts", "1")
-	deadContractSeedNow = fmt.Sprintf(deadContractSeedRows, "retry_days", "'[3]'")
+	deadContractSeed    = fmt.Sprintf(deadContractSeedRows, "max_retry_attempts", "1", "key")
+	deadContractSeedNow = fmt.Sprintf(deadContractSeedRows, "retry_days", "'[3]'", "event_name")
 )
 
 const deadContractSeedRows = `
@@ -53,7 +54,7 @@ INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, paymen
 INSERT INTO dunning_policies (id, tenant_id, name, %s) VALUES ('dpol_dc', 'ten_dc', 'DC', %s);
 INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state)
 	VALUES ('drun_dc', 'ten_dc', 'inv_dc', 'cus_dc', 'dpol_dc', 'active');
-INSERT INTO meters (id, tenant_id, key, name) VALUES ('mtr_dc', 'ten_dc', 'dc', 'DC');
+INSERT INTO meters (id, tenant_id, %s, name) VALUES ('mtr_dc', 'ten_dc', 'dc', 'DC');
 `
 
 // TestDeadContract_RefusesRowsHoldingRemovedValues: 00201 removes values

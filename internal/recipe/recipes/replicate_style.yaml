@@ -1,5 +1,5 @@
 key: replicate_style
-version: 4.0.0
+version: 5.0.0
 name: GPU compute pricing (per-second)
 summary: |
   Ready-made pricing for reselling GPU compute. Bills each customer per
@@ -38,7 +38,7 @@ overridable:
     pattern: '^[a-z][a-z0-9_]*$'
 
 meters:
-  - key: gpu_seconds
+  - event_name: gpu_seconds
     name: GPU seconds
     unit: seconds
     aggregation: sum
@@ -78,27 +78,22 @@ pricing_rules:
   - meter: gpu_seconds
     rating_rule: gpu_h100
     dimension_match: { gpu_type: h100 }
-    aggregation_mode: sum
     priority: 100
   - meter: gpu_seconds
     rating_rule: gpu_a100
     dimension_match: { gpu_type: a100 }
-    aggregation_mode: sum
     priority: 100
   - meter: gpu_seconds
     rating_rule: gpu_a40
     dimension_match: { gpu_type: a40 }
-    aggregation_mode: sum
     priority: 100
   - meter: gpu_seconds
     rating_rule: gpu_t4
     dimension_match: { gpu_type: t4 }
-    aggregation_mode: sum
     priority: 100
   - meter: gpu_seconds
     rating_rule: cpu
     dimension_match: { gpu_type: cpu }
-    aggregation_mode: sum
     priority: 100
 
 plans:

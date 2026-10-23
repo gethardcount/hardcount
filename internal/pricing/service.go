@@ -300,7 +300,8 @@ func validatePricingShape(mode domain.PricingMode, tiers []domain.RatingTier, pk
 // ---------------------------------------------------------------------------
 
 type CreateMeterInput struct {
-	Key                 string `json:"key"`
+	// EventName is the event_name usage events send for this meter.
+	EventName           string `json:"event_name"`
 	Name                string `json:"name"`
 	Unit                string `json:"unit"`
 	Aggregation         string `json:"aggregation"`
@@ -308,16 +309,16 @@ type CreateMeterInput struct {
 }
 
 func (s *Service) CreateMeter(ctx context.Context, tenantID string, input CreateMeterInput) (domain.Meter, error) {
-	key := strings.TrimSpace(input.Key)
+	eventName := strings.TrimSpace(input.EventName)
 	name := strings.TrimSpace(input.Name)
-	if key == "" {
-		return domain.Meter{}, errs.Required("key")
+	if eventName == "" {
+		return domain.Meter{}, errs.Required("event_name")
 	}
-	if err := domain.MaxLen("key", key, 100); err != nil {
+	if err := domain.MaxLen("event_name", eventName, 100); err != nil {
 		return domain.Meter{}, err
 	}
-	if !slugPattern.MatchString(key) {
-		return domain.Meter{}, errs.Invalid("key", "must contain only alphanumeric characters, hyphens, and underscores")
+	if !slugPattern.MatchString(eventName) {
+		return domain.Meter{}, errs.Invalid("event_name", "must contain only alphanumeric characters, hyphens, and underscores")
 	}
 	if name == "" {
 		return domain.Meter{}, errs.Required("name")
@@ -332,9 +333,9 @@ func (s *Service) CreateMeter(ctx context.Context, tenantID string, input Create
 	}
 	agg := input.Aggregation
 	if agg == "" {
-		agg = "sum"
+		agg = domain.AggregationSum
 	}
-	if agg != "sum" && agg != "count" && agg != "max" && agg != "last" {
+	if !domain.ValidAggregation(agg) {
 		return domain.Meter{}, errs.Invalid("aggregation", "must be one of: sum, count, max, last")
 	}
 
@@ -352,7 +353,7 @@ func (s *Service) CreateMeter(ctx context.Context, tenantID string, input Create
 	}
 
 	return s.store.CreateMeter(ctx, tenantID, domain.Meter{
-		Key:                 key,
+		EventName:           eventName,
 		Name:                name,
 		Unit:                unit,
 		Aggregation:         agg,
@@ -378,10 +379,13 @@ type UpdateMeterInput struct {
 // prices every event no dimension rule claims (Orb's required
 // default_unit_amount is the peer shape).
 //
-// The aggregation and the default binding price the open period at billing
-// time, so changing them is refused while subscriptions use the meter, except
-// a first default and a re-point to another version of the same price (D05,
-// meter_edit_guard.go). A rename or unit change is never refused for that.
+// The aggregation is fixed once the meter has events (ADR-130 §2): every
+// event so far was counted under it. Before the first event it can change,
+// whether or not a subscription uses the meter. The default binding prices
+// the open period at billing time, so changing it is refused while
+// subscriptions use the meter, except a first default and a re-point to
+// another version of the same price (D05, meter_edit_guard.go). A rename or
+// unit change is never refused.
 //
 // The UPDATE writes every column from the read below, so the write locks the
 // meter and refuses if another write changed it since that read; otherwise a
@@ -411,7 +415,7 @@ func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input Up
 	}
 	if input.Aggregation != nil {
 		agg := *input.Aggregation
-		if agg != "sum" && agg != "count" && agg != "max" && agg != "last" {
+		if !domain.ValidAggregation(agg) {
 			return domain.Meter{}, errs.Invalid("aggregation", "must be one of: sum, count, max, last")
 		}
 		m.Aggregation = agg
@@ -435,18 +439,43 @@ func (s *Service) UpdateMeter(ctx context.Context, tenantID, id string, input Up
 		m.RatingRuleVersionID = rid
 	}
 	want := m
-	guard := s.meterEditGuard(ctx, m.ID, func(_ *sql.Tx, locked domain.Meter) (repricing, error) {
+	guard := s.meterEditGuard(ctx, m.ID, func(tx *sql.Tx, locked domain.Meter) (repricing, error) {
 		if locked.Name != before.Name || locked.Unit != before.Unit ||
 			locked.Aggregation != before.Aggregation || locked.RatingRuleVersionID != before.RatingRuleVersionID {
 			return repricing{}, errs.InvalidState("This meter changed while the request was running. Refresh the page and try again.")
 		}
 		if want.Aggregation != locked.Aggregation {
-			return repricing{reprices: true}, nil
+			if err := s.refuseAggregationChange(ctx, tx, locked); err != nil {
+				return repricing{}, err
+			}
 		}
 		reprices, err := s.defaultChangeReprices(ctx, tenantID, locked, want.RatingRuleVersionID)
 		return repricing{reprices: reprices}, err
 	})
 	return s.store.UpdateMeterAudited(ctx, tenantID, m, guard, s.meterUpdateEmission(ctx, input))
+}
+
+// refuseAggregationChange refuses to change the locked meter's aggregation
+// once it has events (ADR-130 §2). It runs after LockMeterTx, whose FOR
+// UPDATE waits for an ingest still writing an event of the meter (the
+// event's foreign key holds KEY SHARE on the meter row), so an event that
+// commits first is seen here.
+//
+// The message says what holds it. Held rows have not been counted yet, and
+// they release only to the meter of their event name, so a new meter is no
+// way out for them.
+func (s *Service) refuseAggregationChange(ctx context.Context, tx *sql.Tx, locked domain.Meter) error {
+	u, err := s.store.MeterUsageTx(ctx, tx, locked)
+	if err != nil {
+		return err
+	}
+	switch {
+	case u.Events:
+		return errs.InvalidState(fmt.Sprintf("Meter %q has usage events, so its aggregation stays %s: its events are counted under it. To count differently, make a new meter with another event name.", locked.EventName, locked.Aggregation)).WithCode(errs.CodeMeterHasUsage)
+	case u.Held:
+		return errs.InvalidState(fmt.Sprintf("Meter %q has held usage for its event name, so its aggregation stays %s: the held rows bill under it when released. Only discarding them frees the aggregation, and discarded rows are never billed.", locked.EventName, locked.Aggregation)).WithCode(errs.CodeMeterHasUsage)
+	}
+	return nil
 }
 
 // meterUpdateEmission builds the in-tx audit emission for a meter PATCH.
@@ -468,7 +497,7 @@ func (s *Service) meterUpdateEmission(ctx context.Context, input UpdateMeterInpu
 		return nil
 	}
 	return func(tx *sql.Tx, out domain.Meter) error {
-		meta := map[string]any{"key": out.Key}
+		meta := map[string]any{"event_name": out.EventName}
 		if input.Name != nil {
 			meta["name"] = out.Name
 		}
@@ -495,8 +524,15 @@ func (s *Service) GetMeter(ctx context.Context, tenantID, id string) (domain.Met
 	return s.store.GetMeter(ctx, tenantID, id)
 }
 
-func (s *Service) GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error) {
-	return s.store.GetMeterByKey(ctx, tenantID, key)
+// GetMeterByEventName returns the meter usage events name by eventName.
+func (s *Service) GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error) {
+	return s.store.GetMeterByEventName(ctx, tenantID, eventName)
+}
+
+// MeterHasUsage reports whether the meter has events, which fixes its
+// aggregation (ADR-130 §2).
+func (s *Service) MeterHasUsage(ctx context.Context, tenantID string, m domain.Meter) (bool, error) {
+	return s.store.MeterHasUsage(ctx, tenantID, m)
 }
 
 func (s *Service) ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error) {
@@ -784,7 +820,7 @@ func subscriptionsUse(n int) string {
 func unpricedMeterMessage(m domain.Meter) string {
 	name := m.Name
 	if name == "" {
-		name = m.Key
+		name = m.EventName
 	}
 	return fmt.Sprintf("Meter %q has no price, so its usage would bill nothing. "+
 		"Add a price on the meter's page, then add the meter to the plan.", name)
@@ -816,14 +852,13 @@ func sameStringSet(a, b []string) bool {
 
 // UpsertMeterPricingRuleInput is the public input shape. The combination
 // (meter_id, rating_rule_version_id) identifies the rule — re-issuing
-// the same point pair with new dimension_match / mode / priority
-// updates the existing rule (idempotent reconfigure).
+// the same point pair with a new dimension_match or priority updates the
+// existing rule (idempotent reconfigure).
 type UpsertMeterPricingRuleInput struct {
-	MeterID             string                 `json:"meter_id"`
-	RatingRuleVersionID string                 `json:"rating_rule_version_id"`
-	DimensionMatch      map[string]any         `json:"dimension_match"`
-	AggregationMode     domain.AggregationMode `json:"aggregation_mode"`
-	Priority            int                    `json:"priority"`
+	MeterID             string         `json:"meter_id"`
+	RatingRuleVersionID string         `json:"rating_rule_version_id"`
+	DimensionMatch      map[string]any `json:"dimension_match"`
+	Priority            int            `json:"priority"`
 }
 
 // maxDimensionKeys caps the size of the JSONB filter to keep aggregation
@@ -840,7 +875,8 @@ const maxDimensionKeys = 16
 //   - rating rule must exist for this tenant (404 surfaces as 400 to
 //     avoid leaking other tenants' IDs through the API surface)
 //   - meter must exist for this tenant (same reasoning)
-//   - aggregation_mode must be one of the five accepted values
+//   - there is no aggregation_mode: the meter's aggregation applies to
+//     every rule (ADR-130 §2), and the handler's strict decoding refuses it
 //   - dimension_match has ≤ maxDimensionKeys keys
 //   - dimension_match values are scalars (string / number / bool); object
 //     and array values are rejected — Postgres `@>` would still match
@@ -872,14 +908,6 @@ func (s *Service) UpsertMeterPricingRule(ctx context.Context, tenantID string, i
 		return domain.MeterPricingRule{}, err
 	}
 
-	mode := input.AggregationMode
-	if mode == "" {
-		mode = domain.AggSum
-	}
-	if !mode.IsValid() {
-		return domain.MeterPricingRule{}, errs.Invalid("aggregation_mode", fmt.Sprintf("must be one of sum, count, last_during_period, last_ever, max; got %q", mode))
-	}
-
 	match := input.DimensionMatch
 	if match == nil {
 		match = map[string]any{}
@@ -900,7 +928,6 @@ func (s *Service) UpsertMeterPricingRule(ctx context.Context, tenantID string, i
 		MeterID:             meterID,
 		RatingRuleVersionID: rrvID,
 		DimensionMatch:      match,
-		AggregationMode:     mode,
 		Priority:            input.Priority,
 	}
 	return s.store.UpsertMeterPricingRule(ctx, tenantID, rule, s.ruleUpsertGuard(ctx, rule))

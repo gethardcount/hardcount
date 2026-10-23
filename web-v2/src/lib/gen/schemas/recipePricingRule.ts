@@ -7,13 +7,12 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { RecipePricingRuleAggregationMode } from './recipePricingRuleAggregationMode';
 import type { RecipePricingRuleDimensionMatch } from './recipePricingRuleDimensionMatch';
 
 export interface RecipePricingRule {
-  meter_key: string;
+  /** The recipe meter the rule prices. */
+  event_name: string;
   rating_rule_key: string;
   dimension_match: RecipePricingRuleDimensionMatch;
-  aggregation_mode: RecipePricingRuleAggregationMode;
   priority: number;
 }
