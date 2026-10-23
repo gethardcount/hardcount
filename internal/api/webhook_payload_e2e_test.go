@@ -285,6 +285,38 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	if dup.Data["incoming_payment_intent_id"] != "pi_wp_b2" || dup.Data["captured_cents"] != float64(4500) {
 		t.Errorf("payment.duplicate_charge extras = %v / %v, want pi_wp_b2 / 4500", dup.Data["incoming_payment_intent_id"], dup.Data["captured_cents"])
 	}
+	// The invoice names the charge that paid it first (docs/webhooks.md).
+	if pi := flowStr(dup.Data["invoice"].(map[string]any), "stripe_payment_intent_id"); pi != "pi_wp_b" {
+		t.Errorf("payment.duplicate_charge invoice.stripe_payment_intent_id = %q, want pi_wp_b", pi)
+	}
+
+	// A charge for less than the invoice owed: the invoice is paid by it
+	// and names it.
+	idF := newInvoice("Short charge", 5000)
+	deliver(stripeEvent("evt_wp_f", "payment_intent.succeeded", piObject("pi_wp_f", idF, 4000, map[string]any{"status": "succeeded"})), "short payment_intent.succeeded")
+	got = events.next("short charge", domain.EventInvoicePaid, domain.EventPaymentSucceeded, domain.EventPaymentAmountMismatch, domain.EventDunningResolved)
+	mis := got[domain.EventPaymentAmountMismatch]
+	checkEventResource(t, "payment.amount_mismatch", mis, getInvoice(idF),
+		"payment_anomaly_kind", "payment_anomaly_payment_intent_id", "payment_anomaly_captured_cents",
+		"payment_card_brand", "payment_card_last4", "updated_at")
+	if mis.Data["incoming_payment_intent_id"] != "pi_wp_f" || mis.Data["captured_cents"] != float64(4000) {
+		t.Errorf("payment.amount_mismatch extras = %v / %v, want pi_wp_f / 4000", mis.Data["incoming_payment_intent_id"], mis.Data["captured_cents"])
+	}
+	if inv := mis.Data["invoice"].(map[string]any); flowStr(inv, "stripe_payment_intent_id") != "pi_wp_f" || inv["amount_paid_cents"] != float64(5000) {
+		t.Errorf("payment.amount_mismatch invoice = PI %v, paid %v; want pi_wp_f and 5000 booked", inv["stripe_payment_intent_id"], inv["amount_paid_cents"])
+	}
+
+	// A charge in another currency: the event shows the invoice as it was
+	// before Velox recorded the charge, then the payment settles as usual.
+	idG := newInvoice("Other currency", 6000)
+	before := getInvoice(idG)
+	deliver(stripeEvent("evt_wp_g", "payment_intent.succeeded", piObject("pi_wp_g", idG, 6000, map[string]any{"status": "succeeded", "currency": "eur"})), "payment_intent.succeeded in EUR")
+	got = events.next("other currency", domain.EventPaymentCurrencyMismatch, domain.EventInvoicePaid, domain.EventPaymentSucceeded, domain.EventDunningResolved)
+	cur := got[domain.EventPaymentCurrencyMismatch]
+	checkEventResource(t, "payment.currency_mismatch", cur, before)
+	if cur.Data["incoming_payment_intent_id"] != "pi_wp_g" || cur.Data["captured_cents"] != float64(6000) {
+		t.Errorf("payment.currency_mismatch extras = %v / %v, want pi_wp_g / 6000", cur.Data["incoming_payment_intent_id"], cur.Data["captured_cents"])
+	}
 
 	idC := newInvoice("Declined card", 7300)
 	deliver(stripeEvent("evt_wp_c", "payment_intent.payment_failed", piObject("pi_wp_c", idC, 7300, map[string]any{
@@ -307,6 +339,19 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	disputes := flowList(call("GET", "/v1/invoices/"+idB+"/disputes", flowReq{}).want(t, 200, "list disputes").body, "data")
 	if len(disputes) != 1 || !reflect.DeepEqual(opn.Data["dispute"], map[string]any(disputes[0])) {
 		t.Errorf("payment.dispute_opened dispute = %v, want the API's %v", opn.Data["dispute"], disputes)
+	}
+	deliver(stripeEvent("evt_wp_dispute_closed", "charge.dispute.closed", map[string]any{
+		"id": "du_wp", "object": "dispute", "amount": 4500, "currency": "usd", "charge": "ch_wp",
+		"payment_intent": "pi_wp_b", "reason": "fraudulent", "status": "lost", "created": opened.Unix(),
+		"livemode": false, "metadata": map[string]any{}, "is_charge_refundable": false, "balance_transactions": []any{},
+		"evidence_details": map[string]any{"due_by": opened.Add(7 * 24 * time.Hour).Unix(), "has_evidence": false, "past_due": false, "submission_count": 0},
+	}), "charge.dispute.closed")
+	got = events.next("dispute closed", domain.EventPaymentDisputeClosed)
+	cls := got[domain.EventPaymentDisputeClosed]
+	checkEventResource(t, "payment.dispute_closed", cls, getInvoice(idB))
+	disputes = flowList(call("GET", "/v1/invoices/"+idB+"/disputes", flowReq{}).want(t, 200, "list disputes").body, "data")
+	if len(disputes) != 1 || !reflect.DeepEqual(cls.Data["dispute"], map[string]any(disputes[0])) || disputes[0]["status"] != "lost" {
+		t.Errorf("payment.dispute_closed dispute = %v, want the API's lost dispute %v", cls.Data["dispute"], disputes)
 	}
 
 	// A Checkout that saved a card, then the same card saved through a
@@ -340,6 +385,26 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	if att.Data["stripe_payment_method_id"] != "pm_flow" {
 		t.Errorf("payment_method.attached stripe_payment_method_id = %v, want pm_flow", att.Data["stripe_payment_method_id"])
 	}
+
+	// The operator removes the card; then Stripe's events for it arrive late.
+	// The card stays removed and is not in the API's list, so no
+	// payment_method.* event names it.
+	call("DELETE", "/v1/customers/"+customerID+"/payment-methods/"+flowStr(pms[0], "id"), flowReq{}).want(t, 200, "remove card")
+	events.next("remove card")
+	deliver(stripeEvent("evt_wp_seti_late", "setup_intent.succeeded", map[string]any{
+		"id": "seti_wp_late", "object": "setup_intent", "status": "succeeded", "payment_method": "pm_flow",
+		"customer": "cus_webhook_payload", "metadata": map[string]any{"velox_customer_id": customerID},
+	}), "late setup_intent.succeeded")
+	deliver(stripeEvent("evt_wp_cs_late", "checkout.session.completed", map[string]any{
+		"id": "cs_wp_late", "object": "checkout.session", "mode": "setup", "status": "complete",
+		"customer": "cus_webhook_payload", "metadata": map[string]any{"velox_tenant_id": tenantID, "velox_customer_id": customerID},
+	}), "late checkout.session.completed")
+	if late := events.next("late card events"); len(late) != 0 {
+		t.Errorf("late events for a removed card queued %v, want none", late)
+	}
+	if pms = flowList(call("GET", "/v1/customers/"+customerID+"/payment-methods", flowReq{}).want(t, 200, "list payment methods").body, "data"); len(pms) != 0 {
+		t.Errorf("payment methods after the late events: %v, want none", pms)
+	}
 	// Money for the voided invoice D.
 	deliver(stripeEvent("evt_wp_d", "payment_intent.succeeded", piObject("pi_wp_d", idD, 3000, map[string]any{"status": "succeeded"})), "payment on a voided invoice")
 	got = events.next("payment on a voided invoice", domain.EventPaymentReceivedOnVoidedInvoice)
@@ -348,6 +413,11 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		"payment_anomaly_kind", "payment_anomaly_payment_intent_id", "payment_anomaly_captured_cents", "updated_at")
 	if rov.Data["incoming_payment_intent_id"] != "pi_wp_d" || rov.Data["captured_cents"] != float64(3000) {
 		t.Errorf("payment.received_on_voided_invoice extras = %v / %v, want pi_wp_d / 3000", rov.Data["incoming_payment_intent_id"], rov.Data["captured_cents"])
+	}
+	// D was never charged: no PaymentIntent, and not paid outside Velox
+	// either. docs/webhooks.md says so.
+	if inv := rov.Data["invoice"].(map[string]any); inv["stripe_payment_intent_id"] != nil || inv["paid_out_of_band"] != false {
+		t.Errorf("payment.received_on_voided_invoice invoice = PI %v, paid_out_of_band %v; want none and false", inv["stripe_payment_intent_id"], inv["paid_out_of_band"])
 	}
 }
 
@@ -596,6 +666,8 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	}
 
 	trial := newSub("wps-trial", map[string]any{"trial_days": 7})
+	trialCancel := newSub("wps-trial-cancel", map[string]any{"trial_days": 7})
+	call("POST", "/v1/subscriptions/"+flowStr(trialCancel, "id")+"/schedule-cancel", map[string]any{"at_period_end": true}).want(t, 200, "schedule cancel in trial")
 	changing := newSub("wps-change", nil)
 	changeItem := flowStr(changing["items"].([]any)[0].(map[string]any), "id")
 	call("PATCH", "/v1/subscriptions/"+flowStr(changing, "id")+"/items/"+changeItem,
@@ -609,11 +681,17 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 
 	// Past the trial end.
 	advanceTo(start.Add(8 * 24 * time.Hour))
-	got := events.next("trial end", domain.EventSubscriptionTrialEnded)
+	got := events.next("trial end", domain.EventSubscriptionTrialEnded, domain.EventSubscriptionCanceled)
 	ev := got[domain.EventSubscriptionTrialEnded]
 	checkEventResource(t, "subscription.trial_ended (schedule)", ev, getSub(flowStr(trial, "id")))
 	if ev.Data["triggered_by"] != "schedule" {
 		t.Errorf("subscription.trial_ended triggered_by = %v, want schedule", ev.Data["triggered_by"])
+	}
+	// The trial with a cancel scheduled ends canceled, with no trial_ended.
+	ev = got[domain.EventSubscriptionCanceled]
+	checkEventResource(t, "subscription.canceled (trial end)", ev, getSub(flowStr(trialCancel, "id")))
+	if ev.Data["canceled_by"] != "schedule" || ev.Data["reason"] != "trial_end_cancel" {
+		t.Errorf("subscription.canceled at trial end extras = %v / %v, want schedule / trial_end_cancel", ev.Data["canceled_by"], ev.Data["reason"])
 	}
 
 	// Past the first period end: the plan change applies, the pause's
@@ -640,4 +718,104 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	if ev.Data["canceled_by"] != "schedule" {
 		t.Errorf("subscription.canceled canceled_by = %v, want schedule", ev.Data["canceled_by"])
 	}
+}
+
+// TestE2E_WebhookPayloads_EngineAndDunning drives the engine's and dunning's
+// emitters on a test clock: the day-1 invoice of a subscription billed in
+// advance, its dunning run exhausting into a cancel and a write-off, and a
+// cycle close.
+func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	defer ts.Close()
+
+	tenantID := testutil.CreateTestTenant(t, db, "Webhook Payload Engine Co")
+	key := createAPIKeyWithMode(t, db, tenantID, false)
+	call := func(method, path string, body any) flowResp {
+		t.Helper()
+		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
+	}
+	events := &webhookCursor{t: t, db: db, tenantID: tenantID}
+
+	call("POST", "/v1/dunning/policies", map[string]any{
+		"name": "One retry", "enabled": true, "retry_days": []int{1},
+		"final_subscription_action": "cancel", "final_invoice_action": "mark_uncollectible",
+	}).want(t, 201, "create dunning policy")
+	plan := func(code, timing string) string {
+		return flowStr(call("POST", "/v1/plans", map[string]any{
+			"code": code, "name": code, "currency": "USD", "billing_interval": "monthly",
+			"base_amount_cents": 1000, "base_bill_timing": timing,
+		}).want(t, 201, "create plan "+code).body, "id")
+	}
+	advancePlan, arrearsPlan := plan("wpe-advance", "in_advance"), plan("wpe-arrears", "in_arrears")
+	start := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
+		"name": "webhook payload engine", "frozen_time": start.Format(time.RFC3339),
+	}).want(t, 201, "create test clock").body, "id")
+	newSub := func(code, planID string) string {
+		t.Helper()
+		customerID := flowStr(call("POST", "/v1/customers", map[string]any{
+			"external_id": code, "display_name": code, "email": code + "@payload.test", "test_clock_id": clockID,
+		}).want(t, 201, "create customer "+code).body, "id")
+		return flowStr(call("POST", "/v1/subscriptions", map[string]any{
+			"code": code, "display_name": code, "customer_id": customerID,
+			"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary",
+		}).want(t, 201, "create "+code).body, "id")
+	}
+	getSub := func(id string) map[string]any {
+		t.Helper()
+		return call("GET", "/v1/subscriptions/"+id, nil).want(t, 200, "get subscription").body
+	}
+	getInvoice := func(id string) map[string]any {
+		t.Helper()
+		return flowObj(call("GET", "/v1/invoices/"+id, nil).want(t, 200, "get invoice").body, "invoice")
+	}
+	getRun := func(invoiceID string) map[string]any {
+		t.Helper()
+		runs := flowList(call("GET", "/v1/dunning/runs?invoice_id="+invoiceID, nil).want(t, 200, "list dunning runs").body, "data")
+		if len(runs) != 1 {
+			t.Fatalf("invoice %s has %d dunning runs, want 1", invoiceID, len(runs))
+		}
+		return flowObj(call("GET", "/v1/dunning/runs/"+flowStr(runs[0], "id"), nil).want(t, 200, "get dunning run").body, "run")
+	}
+	advanceTo := func(target time.Time) {
+		t.Helper()
+		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
+		deadline := time.Now().Add(60 * time.Second)
+		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
+			if time.Now().After(deadline) {
+				t.Fatal("clock advance did not settle")
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	events.next("setup")
+
+	// The day-1 invoice of a subscription billed in advance.
+	advanceSub := newSub("wpe-advance", advancePlan)
+	got := events.next("day-1 invoice", domain.EventSubscriptionCreated, domain.EventInvoiceFinalized, domain.EventDunningStarted)
+	dayOne := got[domain.EventInvoiceFinalized]
+	dayOneID := flowStr(dayOne.Data["invoice"].(map[string]any), "id")
+	checkEventResource(t, "invoice.finalized (day 1)", dayOne, getInvoice(dayOneID))
+	checkEventResource(t, "dunning.started (day 1)", got[domain.EventDunningStarted], getRun(dayOneID))
+
+	// Its one retry fails: dunning cancels the subscription and writes the
+	// invoice off.
+	advanceTo(start.Add(2 * 24 * time.Hour))
+	got = events.next("dunning exhausted", domain.EventDunningEscalated, domain.EventSubscriptionCanceled, domain.EventInvoiceMarkedUncollectible)
+	esc := got[domain.EventDunningEscalated]
+	checkEventResource(t, "dunning.escalated", esc, getRun(dayOneID))
+	if esc.Data["final_subscription_action"] != "cancel" || esc.Data["final_invoice_action"] != "mark_uncollectible" {
+		t.Errorf("dunning.escalated actions = %v / %v, want cancel / mark_uncollectible", esc.Data["final_subscription_action"], esc.Data["final_invoice_action"])
+	}
+	checkEventResource(t, "subscription.canceled (dunning)", got[domain.EventSubscriptionCanceled], getSub(advanceSub))
+	checkEventResource(t, "invoice.marked_uncollectible (dunning)", got[domain.EventInvoiceMarkedUncollectible], getInvoice(dayOneID))
+
+	// A cycle close bills a subscription in arrears.
+	newSub("wpe-arrears", arrearsPlan)
+	events.next("create arrears subscription", domain.EventSubscriptionCreated)
+	advanceTo(start.AddDate(0, 1, 0).Add(2 * 24 * time.Hour))
+	got = events.next("cycle close", domain.EventInvoiceFinalized)
+	cycle := got[domain.EventInvoiceFinalized]
+	checkEventResource(t, "invoice.finalized (cycle)", cycle, getInvoice(flowStr(cycle.Data["invoice"].(map[string]any), "id")))
 }

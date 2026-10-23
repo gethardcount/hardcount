@@ -71,4 +71,40 @@ func TestThresholdFire_WebhookCarriesTheSubscription(t *testing.T) {
 		t.Errorf("threshold facts = invoice_id %v running_subtotal %v crossed_amount %v, want %s 1000 true",
 			data["invoice_id"], data["running_subtotal"], data["crossed_amount"], invs[0].ID)
 	}
+
+	// The threshold invoice's invoice.finalized carries the invoice as the
+	// store holds it after the fire, without the fields read per request.
+	var finRaw []byte
+	if err := testutil.AdminPool(t).QueryRow(
+		`SELECT payload FROM webhook_outbox WHERE tenant_id = $1 AND event_type = $2`,
+		f.tenantID, domain.EventInvoiceFinalized).Scan(&finRaw); err != nil {
+		t.Fatalf("read the invoice.finalized outbox row: %v", err)
+	}
+	var fin map[string]any
+	if err := json.Unmarshal(finRaw, &fin); err != nil {
+		t.Fatal(err)
+	}
+	if err := domain.CheckWebhookData(domain.EventInvoiceFinalized, fin); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := f.invStore.Get(ctx, f.tenantID, invs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, _ = json.Marshal(domain.InvoiceWebhookData(inv, nil))
+	var wantInv map[string]any
+	if err := json.Unmarshal(enc, &wantInv); err != nil {
+		t.Fatal(err)
+	}
+	// The no-card notice the collection sends after the event stamps
+	// no_pm_notified_at: the event comes before it.
+	gotInv, _ := fin[domain.WebhookResourceInvoice].(map[string]any)
+	stored, _ := wantInv[domain.WebhookResourceInvoice].(map[string]any)
+	if _, inEvent := gotInv["no_pm_notified_at"]; inEvent || stored["no_pm_notified_at"] == nil {
+		t.Errorf("no_pm_notified_at: event %v, stored %v; want it stamped only after the event", gotInv["no_pm_notified_at"], stored["no_pm_notified_at"])
+	}
+	delete(stored, "no_pm_notified_at")
+	if got, want := any(gotInv), any(stored); !reflect.DeepEqual(got, want) {
+		t.Errorf("invoice.finalized data.invoice differs from the stored invoice:\n got %v\nwant %v", got, want)
+	}
 }
