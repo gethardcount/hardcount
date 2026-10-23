@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -245,6 +247,13 @@ func (r rater) rateUsageWindows(ctx context.Context, windows []rateWindow, pin r
 				return out, r.site.fail(w, err)
 			}
 		}
+		// A meter without pricing rules has one bucket, whose mode and
+		// binding are the meter's own: it is routed before it is read, so a
+		// closer's full pass reads the whole period only for a bucket the
+		// threshold invoice deferred (ADR-066 §4).
+		if w.pass != passEvery && len(mp.list) == 0 && !routedHere(w, ladder, mapMeterAggregation(mp.meter.Aggregation), mp.meter.RatingRuleVersionID) {
+			continue
+		}
 		aggs, err := r.reads.windowBuckets(ctx, w.meterID, mp.meter, mp.list, w.iv)
 		if err != nil {
 			if r.site.cancel {
@@ -307,7 +316,7 @@ func (r rater) rateBucket(ctx context.Context, w rateWindow, mp meterPricing, ag
 	// pass, over the unclamped window; every other bucket only on the clamped
 	// pass. It runs before the checks below so a bucket left out is reported
 	// on one pass only (#981). With no watermark nothing is deferred.
-	if w.pass != passEvery && ladder.wm.deferredBucket(agg.AggregationMode, w.meterID, pinned) != (w.pass == passFull) {
+	if w.pass != passEvery && !routedHere(w, ladder, agg.AggregationMode, pinned) {
 		return ratedBucket{}, false, nil
 	}
 	// Corrections larger than the bucket's usage in this window: it counts as
@@ -356,6 +365,13 @@ func (r rater) rateBucket(ctx context.Context, w rateWindow, mp meterPricing, ag
 	}
 	b.priced, b.price, b.amount = true, price, amount
 	return b, true, nil
+}
+
+// routedHere reports whether a closer's pass w prices a bucket of mode bound
+// to pinned: a bucket the threshold invoice deferred only on the full pass,
+// every other bucket only on the clamped pass.
+func routedHere(w rateWindow, ladder *usageLadder, mode domain.AggregationMode, pinned string) bool {
+	return ladder.wm.deferredBucket(mode, w.meterID, pinned) == (w.pass == passFull)
 }
 
 // unitAmount is the line's amount over its quantity, rounded to a whole
@@ -472,8 +488,10 @@ func (e *Engine) rateCloseUsage(ctx context.Context, sub domain.Subscription, re
 	for mid := range full {
 		meterIDs[mid] = struct{}{}
 	}
+	// Meters in id order, so a failure names the same meter on every run
+	// and every retry.
 	var windows []rateWindow
-	for meterID := range meterIDs {
+	for _, meterID := range slices.Sorted(maps.Keys(meterIDs)) {
 		for _, iv := range mergeUsageIntervals(clamped[meterID]) {
 			windows = append(windows, rateWindow{meterID: meterID, iv: iv, pass: passClamped})
 		}

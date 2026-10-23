@@ -13,19 +13,24 @@ package billing
 // subtotals, the threshold watermark, the unpriced and below-zero records,
 // warnings and the live total. Any difference fails the test binary.
 //
-// A difference counts only when the new code gives the same answer twice: a
-// concurrent test can change the database between the two runs, which is not
-// a rating difference.
+// A call whose new result moves between two runs is a difference too: the
+// rater must give one answer for one input. The only exceptions are the tests
+// in movesBetweenRuns, whose fakes change their answer after the first call
+// on purpose.
 //
 // Set VELOX_RATE_DIFF_REPORT=<file> to write which entry points and pricing
 // shapes the run compared, and in which tests.
 //
 // Everything below the "Old rating loops" line is the code that origin/main
 // 672eb6d5 ran, cut verbatim from engine.go, preview.go, live_balance.go and
-// usage_ladder.go, with only the names changed. Shared helpers this PR does
-// not change (the window builders, the base-fee lines, the usage reads, the
-// watermark, line descriptions) are not copied. PR-4 deletes this file with
-// the rating-rule tables.
+// usage_ladder.go, with only the names changed and one edit: the three loops
+// over a map of meters (the period close, the cancel, the live balance) walk
+// the meters in id order, as the new code does. The old code walked them in
+// map order, which is random, so id order is one order it could take; it
+// makes the error text of a call that fails on every meter the same in both.
+// Shared helpers this PR does not change (the window builders, the base-fee
+// lines, the usage reads, the watermark, line descriptions) are not copied.
+// PR-4 deletes this file with the rating-rule tables.
 
 import (
 	"context"
@@ -33,9 +38,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -71,7 +78,7 @@ type rateDifferential struct {
 	calls    map[string]int
 	feats    map[string]map[string]*featTally
 	diffs    []string
-	unstable []string // entry and test of each call whose new result moved between two runs
+	unstable []string // entry and test of each call of a movesBetweenRuns test whose new result moved
 	memo     []string // entry and test of each call skipped under an aggregation memo
 }
 
@@ -259,17 +266,25 @@ func (d *rateDifferential) compare(entry string, sub domain.Subscription, got, w
 	if got == want {
 		return
 	}
-	if again() != got {
-		// The database moved between the runs (a concurrent test): not a
-		// rating difference.
+	if second := again(); second != got {
 		d.mu.Lock()
-		d.unstable = append(d.unstable, entry+" in "+test)
-		d.mu.Unlock()
+		defer d.mu.Unlock()
+		if _, ok := movesBetweenRuns[test]; ok {
+			d.unstable = append(d.unstable, entry+" in "+test)
+			return
+		}
+		d.diffs = append(d.diffs, fmt.Sprintf("%s in %s (subscription %s): the new result moved between two runs:\n%s", entry, test, sub.ID, lineDiff(got, second)))
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.diffs = append(d.diffs, fmt.Sprintf("%s in %s (subscription %s):\n%s", entry, test, sub.ID, lineDiff(want, got)))
+}
+
+// movesBetweenRuns names the tests whose fakes answer the first call
+// differently from the next ones, and why. Their calls are not compared.
+var movesBetweenRuns = map[string]string{
+	"TestRunCycle_MeterReadBlipFailsTheClose": "its pricing fake fails the first read of one meter only",
 }
 
 func (d *rateDifferential) tally(entry string, sub domain.Subscription, feats []string) {
@@ -346,7 +361,7 @@ func (d *rateDifferential) writeCoverage(w io.Writer) {
 		}
 	}
 	_, _ = fmt.Fprintf(w, "\nCalls compared: %v. Differences: %d.\n", d.calls, len(d.diffs))
-	_, _ = fmt.Fprintf(w, "Unstable (the new result moved between two runs, not compared): %d %v\n", len(d.unstable), d.unstable)
+	_, _ = fmt.Fprintf(w, "Not compared (a movesBetweenRuns test; the new result moved between two runs): %d %v\n", len(d.unstable), d.unstable)
 	_, _ = fmt.Fprintf(w, "Skipped under the cost dashboard's aggregation memo: %d %v\n", len(d.memo), d.memo)
 }
 
@@ -885,7 +900,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 	// One tier ladder per usage bucket for the whole close, continuing from
 	// what a threshold fire already billed (P21, ADR-066 amendment).
 	ladder := newLegacyUsageLadder(wm)
-	for meterID := range meterIDSet {
+	for _, meterID := range slices.Sorted(maps.Keys(meterIDSet)) {
 		meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 		if err != nil {
 			return nil, 0, nil, fmt.Errorf("get meter %s: %w", meterID, err)
@@ -1238,7 +1253,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 	}
 	// Same per-bucket tier ladder as the cycle close (P21, ADR-066 amendment).
 	ladder := newLegacyUsageLadder(wm)
-	for meterID := range cancelMeterIDSet {
+	for _, meterID := range slices.Sorted(maps.Keys(cancelMeterIDSet)) {
 		// Does this meter price via dimension-match pricing rules (the
 		// multi-dim shape: e.g. the AI `tokens` meter, one rule per
 		// {model, token_type})? Same fork billOnePeriod / preview / the
@@ -1891,7 +1906,7 @@ func (e *Engine) legacyUnbilledUsageCents(ctx context.Context, sub domain.Subscr
 
 	ladder := newLegacyUsageLadder(wm)
 	var total int64
-	for meterID := range meterIDs {
+	for _, meterID := range slices.Sorted(maps.Keys(meterIDs)) {
 		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
 			return ladder.price(rule, meterID, bucketKey, mode, qty)
 		}

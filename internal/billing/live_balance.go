@@ -3,6 +3,8 @@ package billing
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -287,7 +289,8 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 	}
 	pin := pinFor(sub, periodStart)
 	var total int64
-	for meterID := range meterIDs {
+	// Meters in id order, so a failure names the same meter on every run.
+	for _, meterID := range slices.Sorted(maps.Keys(meterIDs)) {
 		// sum adds the priced buckets of one pass over the given windows: the
 		// clamped pass takes every bucket except those the fire deferred, the
 		// full pass only those. Rules are pinned at the period start
