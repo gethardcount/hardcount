@@ -147,7 +147,7 @@ func cancelFixture(settings SettingsReader) (*Engine, domain.Subscription, *mock
 				MeterIDs: []string{"mtr_api"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "api", Name: "API Calls",
+			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
 				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
 		},
 		rules: map[string]domain.RatingRuleVersion{

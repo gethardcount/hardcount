@@ -22,7 +22,7 @@ func (h *Handler) SetHeldDeps(customers CustomerLookup) {
 }
 
 // listHeld serves GET /v1/usage-events/held: the rows still held, grouped
-// by (external customer id, meter key, reason), with whether a matching
+// by (external customer id, event name, reason), with whether a matching
 // customer and meter exist now so the dashboard can offer Release.
 func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
@@ -49,16 +49,16 @@ func (h *Handler) listHeld(w http.ResponseWriter, r *http.Request) {
 			custIDs[g.ExternalCustomerID] = id
 		}
 		g.CustomerID = id
-		exists, ok := meterOK[g.MeterKey]
+		exists, ok := meterOK[g.EventName]
 		if !ok {
-			if _, err := h.meters.GetMeterByKey(r.Context(), tenantID, g.MeterKey); err == nil {
+			if _, err := h.meters.GetMeterByEventName(r.Context(), tenantID, g.EventName); err == nil {
 				exists = true
 			} else if !errors.Is(err, errs.ErrNotFound) {
 				respond.InternalError(w, r)
 				slog.ErrorContext(r.Context(), "list held usage: meter lookup", "error", err)
 				return
 			}
-			meterOK[g.MeterKey] = exists
+			meterOK[g.EventName] = exists
 		}
 		g.MeterExists = exists
 	}
@@ -131,7 +131,7 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 	}
 	meterIDs := map[string]string{}
 	for _, k := range keys {
-		m, err := h.meters.GetMeterByKey(r.Context(), tenantID, k)
+		m, err := h.meters.GetMeterByEventName(r.Context(), tenantID, k)
 		if errors.Is(err, errs.ErrNotFound) {
 			continue // its rows stay held until the meter exists
 		}
@@ -166,20 +166,22 @@ func (h *Handler) releaseHeld(w http.ResponseWriter, r *http.Request) {
 
 type DiscardHeldRequest struct {
 	ExternalCustomerID string `json:"external_customer_id"`
-	// MeterKey limits the discard to one meter. Empty discards every held
+	// EventName limits the discard to one meter. Empty discards every held
 	// row for the external id.
-	MeterKey string `json:"meter_key"`
+	EventName string `json:"event_name"`
 }
 
-// discardHeld serves POST /v1/usage-events/held/discard.
+// discardHeld serves POST /v1/usage-events/held/discard. The body decodes
+// strictly: an unknown field such as the old `meter_key` would otherwise
+// leave EventName empty and discard every held row of the customer, and a
+// discarded row is never billed.
 func (h *Handler) discardHeld(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	var req DiscardHeldRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond.BadRequest(w, r, "invalid JSON body")
+	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
-	n, err := h.svc.Discard(r.Context(), tenantID, strings.TrimSpace(req.ExternalCustomerID), strings.TrimSpace(req.MeterKey))
+	n, err := h.svc.Discard(r.Context(), tenantID, strings.TrimSpace(req.ExternalCustomerID), strings.TrimSpace(req.EventName))
 	if err != nil {
 		respond.FromError(w, r, err, "usage_event")
 		return

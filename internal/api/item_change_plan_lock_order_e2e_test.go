@@ -150,14 +150,15 @@ func TestE2E_ItemChange_ReachesItsPlanBeforeTheNumberRow(t *testing.T) {
 				t.Fatal("the activation never reached its number")
 			}
 
-			// 2. The meter edit locks lo and waits for hi.
+			// 2. The meter edit locks lo and waits for hi. Clearing the
+			// default price is an edit the D05 guard checks.
 			type resp struct {
 				code int
 				body []byte
 			}
 			editDone := make(chan resp, 1)
 			go func() {
-				code, body := r.do(http.MethodPatch, "/v1/meters/"+r.meterID, changeAt, map[string]any{"aggregation": "max"})
+				code, body := r.do(http.MethodPatch, "/v1/meters/"+r.meterID, changeAt, map[string]any{"rating_rule_version_id": ""})
 				editDone <- resp{code, body}
 			}()
 			testutil.WaitForLockWaiter(t, ctx, admin, "meter_ids @>")

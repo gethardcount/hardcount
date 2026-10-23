@@ -73,15 +73,48 @@ type RatingRuleVersion struct {
 }
 
 type Meter struct {
-	ID                  string    `json:"id"`
-	TenantID            string    `json:"tenant_id,omitempty"`
-	Key                 string    `json:"key"`
-	Name                string    `json:"name"`
+	ID       string `json:"id"`
+	TenantID string `json:"tenant_id,omitempty"`
+	// EventName is the event_name a usage event names this meter by.
+	EventName string `json:"event_name"`
+	Name      string `json:"name"`
+	// Aggregation is how the meter rolls up its events into a period's
+	// quantity, one of the Aggregation* values. Every price of the meter
+	// bills under it. It cannot change once the meter has events (ADR-130
+	// §2).
 	Unit                string    `json:"unit"`
 	Aggregation         string    `json:"aggregation"`
 	RatingRuleVersionID string    `json:"rating_rule_version_id"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// The meter aggregations (ADR-130 §2). A meter has one, and every price of
+// the meter bills its events under it: sum adds the quantities, count counts
+// the events, max takes the highest quantity, and last takes the latest
+// event's quantity, by timestamp and then by id.
+const (
+	AggregationSum   = "sum"
+	AggregationCount = "count"
+	AggregationMax   = "max"
+	AggregationLast  = "last"
+)
+
+// ValidAggregation reports whether agg is one of the meter aggregations.
+func ValidAggregation(agg string) bool {
+	switch agg {
+	case AggregationSum, AggregationCount, AggregationMax, AggregationLast:
+		return true
+	}
+	return false
+}
+
+// AdditiveAggregation reports whether usage under agg can be split into
+// windows whose quantities add up to the whole: sum and count can, max and
+// last cannot (max[0,t) + max[t,end) is not max[0,end)). A spend-threshold
+// invoice defers a non-additive bucket to the period close (ADR-066 §4).
+func AdditiveAggregation(agg string) bool {
+	return agg == AggregationSum || agg == AggregationCount
 }
 
 // MeterUnitDisplayScale is the display-scale convention for a meter unit:
@@ -156,33 +189,6 @@ type Plan struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// AggregationMode is how a meter pricing rule rolls up the events it
-// claims into a single quantity for the period. The set is fixed at the
-// schema layer (CHECK constraint on meter_pricing_rules.aggregation_mode).
-//
-// Stripe Tier 1 parity: count, last_during_period, last_ever, max are
-// modes Stripe's Meter API supports that the prior single-mode meter
-// could not express. Hoisted into v1 of multi-dim meters.
-type AggregationMode string
-
-const (
-	AggSum              AggregationMode = "sum"
-	AggCount            AggregationMode = "count"
-	AggLastDuringPeriod AggregationMode = "last_during_period"
-	AggLastEver         AggregationMode = "last_ever"
-	AggMax              AggregationMode = "max"
-)
-
-// IsValid returns true if m is a recognised aggregation mode.
-func (m AggregationMode) IsValid() bool {
-	switch m {
-	case AggSum, AggCount, AggLastDuringPeriod, AggLastEver, AggMax:
-		return true
-	default:
-		return false
-	}
-}
-
 // MeterPricingRule binds a rating rule version to a subset of a meter's
 // events via a JSONB dimension match. At billing time, rules are walked
 // in priority-DESC order and each event is claimed by the highest-
@@ -192,29 +198,54 @@ func (m AggregationMode) IsValid() bool {
 //
 // See docs/dev/design/multi-dim-meters.md for the resolution algorithm.
 type MeterPricingRule struct {
-	ID                  string          `json:"id"`
-	TenantID            string          `json:"tenant_id,omitempty"`
-	MeterID             string          `json:"meter_id"`
-	RatingRuleVersionID string          `json:"rating_rule_version_id"`
-	DimensionMatch      map[string]any  `json:"dimension_match"`
-	AggregationMode     AggregationMode `json:"aggregation_mode"`
-	Priority            int             `json:"priority"`
-	CreatedAt           time.Time       `json:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at"`
+	ID                  string         `json:"id"`
+	TenantID            string         `json:"tenant_id,omitempty"`
+	MeterID             string         `json:"meter_id"`
+	RatingRuleVersionID string         `json:"rating_rule_version_id"`
+	DimensionMatch      map[string]any `json:"dimension_match"`
+	Priority            int            `json:"priority"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
 }
 
 // RuleAggregation is one row of the priority+claim resolution result: events
 // in a billing period that were claimed by a single pricing rule, rolled up
-// per the rule's aggregation_mode into a final billable quantity.
+// under the meter's aggregation into a final billable quantity.
 //
 // RuleID == "" indicates the unclaimed bucket — events that matched no rule.
-// The caller falls back to meters.rating_rule_version_id with the meter's
-// own aggregation, preserving back-compat for tenants without any rules.
+// The caller falls back to meters.rating_rule_version_id, preserving
+// back-compat for tenants without any rules.
 type RuleAggregation struct {
 	RuleID              string          `json:"rule_id,omitempty"`
 	RatingRuleVersionID string          `json:"rating_rule_version_id,omitempty"`
-	AggregationMode     AggregationMode `json:"aggregation_mode"`
 	Quantity            decimal.Decimal `json:"quantity"`
+}
+
+// UsageClaim is one price's claim on a meter's events, for the usage
+// aggregation (usage.Store.AggregateClaims). An event belongs to the first
+// claim in the list whose Match its dimensions contain; an event no claim
+// takes is the unclaimed bucket. Today a claim is a pricing rule, listed in
+// the order the rules rank (priority, then age, then id: ClaimsOfRules);
+// ADR-130 PR-4 makes it a plan price.
+type UsageClaim struct {
+	RuleID              string         `json:"rule_id"`
+	RatingRuleVersionID string         `json:"rating_rule_version_id"`
+	Match               map[string]any `json:"match"`
+}
+
+// ClaimsOfRules is a meter's pricing rules as claims, in the order given.
+// The pricing store lists a meter's rules in rank order (priority DESC,
+// created_at ASC, id ASC), which is the claim order.
+func ClaimsOfRules(rules []MeterPricingRule) []UsageClaim {
+	out := make([]UsageClaim, 0, len(rules))
+	for _, r := range rules {
+		match := r.DimensionMatch
+		if match == nil {
+			match = map[string]any{}
+		}
+		out = append(out, UsageClaim{RuleID: r.ID, RatingRuleVersionID: r.RatingRuleVersionID, Match: match})
+	}
+	return out
 }
 
 var ErrInvalidPricingConfig = errors.New("invalid pricing config")

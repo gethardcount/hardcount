@@ -354,7 +354,7 @@ export default function PlanDetailPage() {
                   <div key={meter.id} className="flex items-center justify-between px-6 py-3.5 hover:bg-accent/50 transition-colors group">
                     <Link to={`/meters/${meter.id}`} className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{meter.name}</p>
-                      <p className="text-xs text-muted-foreground font-mono mt-0.5">{meter.key}</p>
+                      <p className="text-xs text-muted-foreground font-mono mt-0.5">{meter.event_name}</p>
                     </Link>
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">{meterAggregationLabel(meter.aggregation)}</Badge>
@@ -483,10 +483,10 @@ export default function PlanDetailPage() {
                 >
                   <div>
                     <p className="text-sm font-medium text-foreground">{meter.name}</p>
-                    <p className="text-xs text-muted-foreground font-mono mt-0.5">{meter.key}</p>
+                    <p className="text-xs text-muted-foreground font-mono mt-0.5">{meter.event_name}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary">{meter.aggregation}</Badge>
+                    <Badge variant="secondary">{meterAggregationLabel(meter.aggregation)}</Badge>
                     <span className="text-xs text-muted-foreground">{meter.unit}</span>
                   </div>
                 </button>

@@ -15,11 +15,11 @@ func TestMeterInUseMessage(t *testing.T) {
 		want     string
 	}{
 		{"one subscription", 1, false, false,
-			`1 subscription uses meter "tokens", so the prices and aggregation that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period.`},
+			`1 subscription uses meter "tokens", so the prices that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period.`},
 		{"test mode", 1, false, true,
-			`1 subscription uses meter "tokens", so the prices and aggregation that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period. For a subscription on a test clock, it can apply to the current simulated period.`},
+			`1 subscription uses meter "tokens", so the prices that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period. For a subscription on a test clock, it can apply to the current simulated period.`},
 		{"new rule", 3, true, false,
-			`3 subscriptions use meter "tokens", so the prices and aggregation that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period. A new price can be added only when the meter has no default price and no price with the same or a lower priority matches the same events.`},
+			`3 subscriptions use meter "tokens", so the prices that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period. A new price can be added only when the meter has no default price and no price with the same or a lower priority matches the same events.`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -85,7 +85,7 @@ func TestSpend_NewCallTypes_RealStore(t *testing.T) {
 	}
 
 	meterID := postgres.NewID("vlx_mtr")
-	exec(t, `INSERT INTO meters (id, tenant_id, name, key, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, meterID, tenantID)
+	exec(t, `INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation) VALUES ($1, $2, 'Tokens', 'tokens', 'tokens', 'sum')`, meterID, tenantID)
 
 	t.Run("a /v1/messages call bills once", func(t *testing.T) {
 		rec := proxyRecord(t, "messages-split")
@@ -158,7 +158,7 @@ func TestSpend_NewCallTypes_RealStore(t *testing.T) {
 		cus := newCustomer(t, rec.EndUser)
 		res, err := svc.Release(ctx, tenantID, usage.ReleaseInput{
 			ExternalCustomerID: rec.EndUser, CustomerID: cus,
-			MeterIDs: map[string]string{MeterKeyTokens: meterID},
+			MeterIDs: map[string]string{EventNameTokens: meterID},
 		})
 		if err != nil || res.Released != 3 {
 			t.Fatalf("release %+v err %v, want 3 released", res, err)

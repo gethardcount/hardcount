@@ -40,7 +40,7 @@ func unmatchedFixtures() (*CustomerUsageService, *fakeSubLister) {
 		meters: map[string]domain.Meter{
 			// NO RatingRuleVersionID: matrix-priced meters carry no
 			// default binding, so unclaimed events price nowhere.
-			"mtr_1": {ID: "mtr_1", Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"},
+			"mtr_1": {ID: "mtr_1", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_1": {
@@ -57,9 +57,9 @@ func unmatchedFixtures() (*CustomerUsageService, *fakeSubLister) {
 	}
 	store := newAggStore()
 	store.aggs["mtr_1"] = []domain.RuleAggregation{
-		{RuleID: "mpr_1", RatingRuleVersionID: "rrv_1", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(1000)},
+		{RuleID: "mpr_1", RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(1000)},
 		// The unclaimed bucket — events whose properties matched no rule.
-		{RuleID: "", RatingRuleVersionID: "", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(500)},
+		{RuleID: "", RatingRuleVersionID: "", Quantity: decimal.NewFromInt(500)},
 	}
 	return NewCustomerUsageService(NewService(store), customers, subs, pricing), subs
 }

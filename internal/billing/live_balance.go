@@ -305,7 +305,7 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 				return err
 			}
 			for _, b := range buckets {
-				if b.priced && wm.deferredBucket(b.agg.AggregationMode, meterID, b.price.ID) == deferred {
+				if b.priced && wm.deferredBucket(b.meter.Aggregation, meterID, b.price.ID) == deferred {
 					total += b.amount
 				}
 			}
@@ -340,25 +340,13 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 	return total, planCurrency, nil
 }
 
-// meterHasNonAdditiveBucket reports whether any bucket of the meter (its
-// default aggregation or a pricing rule's) is max / last, read from the
-// meter's configuration rather than from which buckets have usage.
+// meterHasNonAdditiveBucket reports whether the meter's buckets are max or
+// last, read from the meter's aggregation, which every bucket of it bills
+// under (ADR-130 §2), rather than from which buckets have usage.
 func (e *Engine) meterHasNonAdditiveBucket(ctx context.Context, tenantID, meterID string) (bool, error) {
 	meter, err := e.pricing.GetMeter(ctx, tenantID, meterID)
 	if err != nil {
 		return false, fmt.Errorf("get meter %s: %w", meterID, err)
 	}
-	if nonAdditiveMode(mapMeterAggregation(meter.Aggregation)) {
-		return true, nil
-	}
-	rules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return false, fmt.Errorf("list pricing rules for meter %s: %w", meterID, err)
-	}
-	for _, r := range rules {
-		if nonAdditiveMode(r.AggregationMode) {
-			return true, nil
-		}
-	}
-	return false, nil
+	return nonAdditive(meter.Aggregation), nil
 }

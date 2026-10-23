@@ -105,7 +105,7 @@ events it prices.
 
    ```bash
    METER_ID=$(curl -s "$VELOX/v1/meters" -H "Authorization: Bearer $VELOX_KEY" \
-     | jq -r '.data[] | select(.key == "tokens") | .id')
+     | jq -r '.data[] | select(.event_name == "tokens") | .id')
    echo "$METER_ID"
    ```
 
@@ -117,7 +117,7 @@ events it prices.
    ```bash
    jq -n --arg rate "$RATE_ID" \
        '{dimension_match: {model: "my-model", token_type: "input"},
-         rating_rule_version_id: $rate, aggregation_mode: "sum", priority: 100}' \
+         rating_rule_version_id: $rate, priority: 100}' \
      | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
        -H "Authorization: Bearer $VELOX_KEY" \
        -H "Content-Type: application/json" \
@@ -189,8 +189,11 @@ while a draft, trialing or active subscription uses the meter, Velox refuses
 
 - editing or deleting a pricing rule;
 - a new rule that could take usage from a price that bills it now;
-- pointing the default price at another price, or removing it;
-- changing the meter's aggregation.
+- pointing the default price at another price, or removing it.
+
+The meter's aggregation has its own rule: it can change until the meter has
+usage, then it is fixed (409 `meter_has_usage`). Every price on the meter
+bills under it.
 
 The message says how many subscriptions use the meter. To change a rate,
 publish a new version of the rating rule (`POST /v1/rating-rules` with the
@@ -214,7 +217,7 @@ pricing rule:
 ```bash
 jq -n --arg rate "$RATE_ID" \
     '{dimension_match: {model_raw: "claude-opus-4-9", token_type: "input"},
-      rating_rule_version_id: $rate, aggregation_mode: "sum", priority: 101}' \
+      rating_rule_version_id: $rate, priority: 101}' \
   | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
     -H "Authorization: Bearer $VELOX_KEY" \
     -H "Content-Type: application/json" \
@@ -266,7 +269,7 @@ names and prices:
 ```bash
 CURRENCY=USD   # the currency you installed the recipe in
 METER_ID=$(curl -s "$VELOX/v1/meters" -H "Authorization: Bearer $VELOX_KEY" \
-  | jq -r '.data[] | select(.key == "tokens") | .id')
+  | jq -r '.data[] | select(.event_name == "tokens") | .id')
 
 # add_price <rule key> <name> <cents per token> <model> <token type> [context tier]
 add_price() {
@@ -278,7 +281,7 @@ add_price() {
   jq -n --arg rate "$rate_id" --arg model "$4" --arg type "$5" --arg tier "${6:-}" \
       '{dimension_match: ({model: $model, token_type: $type}
           + (if $tier == "" then {} else {context_tier: $tier} end)),
-        rating_rule_version_id: $rate, aggregation_mode: "sum", priority: 100}' \
+        rating_rule_version_id: $rate, priority: 100}' \
     | curl -s -X POST "$VELOX/v1/meters/$METER_ID/pricing-rules" \
       -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
       -d @- | jq -c .dimension_match

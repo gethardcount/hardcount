@@ -10,9 +10,11 @@
 import type { PostV1MetersBodyAggregation } from './postV1MetersBodyAggregation';
 
 export type PostV1MetersBody = {
-  key: string;
+  /** The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters. */
+  event_name: string;
   name: string;
   unit?: string;
+  /** How the meter rolls its events into one quantity per billing period. Fixed once the meter has usage. */
   aggregation?: PostV1MetersBodyAggregation;
   rating_rule_version_id?: string;
 };

@@ -17,7 +17,7 @@ import (
 // RatingRuleVersionID empty) was silently skipped by BillFinalOnImmediateCancel's
 // single-rule-only usage loop, so a mid-period immediate cancel emitted NO
 // invoice for all token usage. The cycle path, preview, and the threshold
-// scan all carry the AggregateByPricingRules fork; this asserts the cancel
+// scan all carry the AggregateClaims fork; this asserts the cancel
 // path now does too.
 //
 // Numbers: 1,000,000 input tokens @ $3.00/M + 500,000 output tokens @
@@ -50,7 +50,7 @@ func TestBillFinalOnImmediateCancel_MultiDimMeterBilled(t *testing.T) {
 			// Multi-dim shape: NO meter-linked default rule. Pre-fix the
 			// cancel loop's `RatingRuleVersionID == "" → continue` guard
 			// skipped this meter entirely.
-			"mtr_tokens": {ID: "mtr_tokens", Key: "tokens", Name: "Tokens",
+			"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Name: "Tokens",
 				Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: ""},
 		},
 		rules: map[string]domain.RatingRuleVersion{
@@ -151,7 +151,7 @@ func TestBillFinalOnImmediateCancel_SingleRuleMeterStillBilled(t *testing.T) {
 				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "api", Name: "API Calls",
+			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
 				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
@@ -211,7 +211,7 @@ func TestBillFinalOnImmediateCancel_HonorsDueOnReceipt(t *testing.T) {
 				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "api", Name: "API Calls",
+			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
 				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
 		},
 		rules: map[string]domain.RatingRuleVersion{

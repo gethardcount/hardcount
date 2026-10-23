@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -74,12 +76,35 @@ func newLockOrderRig(t *testing.T) *lockOrderRig {
 	}
 }
 
+// defaultPrice creates a rating rule to be a meter's default price, so that
+// clearing it is an edit the D05 guard checks (d05Edit).
+func (r *lockOrderRig) defaultPrice(t *testing.T, key string) string {
+	t.Helper()
+	rule, err := r.pricing.CreateRatingRule(r.ctx, r.tenantID, pricing.CreateRatingRuleInput{
+		RuleKey: key + "_default", Name: key, Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+	})
+	if err != nil {
+		t.Fatalf("create default price %s: %v", key, err)
+	}
+	return rule.ID
+}
+
+// d05Edit clears the meter's default price: an edit that reprices the open
+// period, so the D05 guard locks the meter, then every plan that lists it,
+// and counts their subscriptions. (Changing the aggregation was such an edit
+// until ADR-130 §2 gave it its own rule, which locks only the meter.)
+func (r *lockOrderRig) d05Edit(meterID string) error {
+	none := ""
+	_, err := r.pricing.UpdateMeter(r.ctx, r.tenantID, meterID, pricing.UpdateMeterInput{RatingRuleVersionID: &none})
+	return err
+}
+
 // meterPlans creates a meter and two monthly plans that both list it. lo is
 // the plan with the lower id in the database's order, hi the other.
 func (r *lockOrderRig) meterPlans(t *testing.T, key string) (meterID string, lo, hi domain.Plan) {
 	t.Helper()
 	m, err := r.pricing.CreateMeter(r.ctx, r.tenantID, pricing.CreateMeterInput{
-		Key: key, Name: key, Unit: "tokens", Aggregation: "sum",
+		EventName: key, Name: key, Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: r.defaultPrice(t, key),
 	})
 	if err != nil {
 		t.Fatalf("create meter %s: %v", key, err)
@@ -313,11 +338,7 @@ func TestPlanLockOrder_NoDeadlockWithMeterEdit(t *testing.T) {
 			defer postgres.Rollback(hold)
 
 			editDone := make(chan error, 1)
-			go func() {
-				agg := "max"
-				_, err := r.pricing.UpdateMeter(r.ctx, r.tenantID, meterID, pricing.UpdateMeterInput{Aggregation: &agg})
-				editDone <- err
-			}()
+			go func() { editDone <- r.d05Edit(meterID) }()
 			// The guard has locked lo and waits for hi.
 			testutil.WaitForLockWaiter(t, r.ctx, r.admin, d05Statement)
 
@@ -360,7 +381,7 @@ func (r *lockOrderRig) twoMeterPlans(t *testing.T, key string) (m1, m2 string, p
 	var meters []string
 	for _, k := range []string{key + "-m1", key + "-m2"} {
 		m, err := r.pricing.CreateMeter(r.ctx, r.tenantID, pricing.CreateMeterInput{
-			Key: k, Name: k, Unit: "tokens", Aggregation: "sum",
+			EventName: k, Name: k, Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: r.defaultPrice(t, k),
 		})
 		if err != nil {
 			t.Fatalf("create meter %s: %v", k, err)
@@ -436,11 +457,7 @@ func TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits(t *testing.T) {
 			hold := r.holdPlan(t, q.ID)
 			defer postgres.Rollback(hold)
 
-			edit := func(meterID string, done chan<- error) {
-				agg := "max"
-				_, err := r.pricing.UpdateMeter(r.ctx, r.tenantID, meterID, pricing.UpdateMeterInput{Aggregation: &agg})
-				done <- err
-			}
+			edit := func(meterID string, done chan<- error) { done <- r.d05Edit(meterID) }
 			// The m2 edit holds mid and waits for q.
 			edit2Done := make(chan error, 1)
 			go edit(m2, edit2Done)

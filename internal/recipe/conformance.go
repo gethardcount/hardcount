@@ -96,15 +96,13 @@ func priceConflictMessage(priceKey string, diffs []fieldDiff) string {
 
 // meterConflictMessage is the refusal when a meter the recipe would create
 // already exists and adds up usage another way. Aggregation is the only
-// field compared (meterConformanceDiff). The dashboard can't change a
-// meter's aggregation (the meter page shows it read-only); only the API can
-// (pricing.Service.UpdateMeter), and it refuses that with 409 meter_in_use
-// while a draft, trialing or active subscription uses the meter (D05). So
-// the message names that condition instead of offering a step the operator
-// can't take.
-func meterConflictMessage(meterKey string, diffs []fieldDiff) string {
+// field compared (meterConformanceDiff). A meter's aggregation can change
+// (the meter page or PATCH /v1/meters/{id}) until the meter has usage; then
+// it is fixed, 409 meter_has_usage (ADR-130 §2). So the message names that
+// condition instead of offering a step the operator can't take.
+func meterConflictMessage(eventName string, diffs []fieldDiff) string {
 	return fmt.Sprintf("Meter %q already exists and adds up usage another way (%s), so the recipe can't use it. "+
-		"Only the API can change that, and only while no draft, trialing or active subscription uses the meter.", meterKey, formatDiffs(diffs))
+		"Its aggregation can change only until the meter has usage; after that it is fixed.", eventName, formatDiffs(diffs))
 }
 
 // meterCurrencyConflictMessage is the refusal when an existing meter's

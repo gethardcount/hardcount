@@ -215,7 +215,6 @@ func TestPriceChange_OverrideSurvivesPublish_MultiDim(t *testing.T) {
 	seedPricingRule(t, f.db, ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID:             f.meterID,
 		RatingRuleVersionID: v1.ID,
-		AggregationMode:     domain.AggSum,
 	})
 	createBackdatedOverride(t, f, ctx, v1.ID, 5)
 

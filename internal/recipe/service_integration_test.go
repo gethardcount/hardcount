@@ -171,8 +171,8 @@ func (f *failingPricingWriter) UpsertMeterPricingRuleTx(ctx context.Context, tx 
 func (f *failingPricingWriter) GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
 	return f.inner.GetRuleByKeyAsOf(ctx, tenantID, ruleKey, asOf)
 }
-func (f *failingPricingWriter) GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error) {
-	return f.inner.GetMeterByKey(ctx, tenantID, key)
+func (f *failingPricingWriter) GetMeterByEventName(ctx context.Context, tenantID, key string) (domain.Meter, error) {
+	return f.inner.GetMeterByEventName(ctx, tenantID, key)
 }
 func (f *failingPricingWriter) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error) {
 	return f.inner.ListPlans(ctx, tenantID)
@@ -389,7 +389,7 @@ func TestService_Instantiate_RefusesDivergentMeter(t *testing.T) {
 	// Operator already has a `tokens` meter — but counting max, not the
 	// recipe's sum.
 	if _, err := f.pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "max",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "max",
 	}); err != nil {
 		t.Fatalf("pre-create meter: %v", err)
 	}
@@ -593,7 +593,7 @@ func TestService_Instantiate_RefusesCrossCurrencyMeterAdoption(t *testing.T) {
 		t.Fatalf("pre-create rule: %v", err)
 	}
 	if _, err := f.pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum",
 		RatingRuleVersionID: rule.ID,
 	}); err != nil {
 		t.Fatalf("pre-create meter: %v", err)

@@ -309,7 +309,7 @@ func TestLiveBalance_NonAdditiveBucketDeferredByFire_CountedFullWindow(t *testin
 		t.Fatalf("create max rule: %v", err)
 	}
 	maxMeter, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
-		Key: "gpu", Name: "GPU Concurrency", Unit: "gpus",
+		EventName: "gpu", Name: "GPU Concurrency", Unit: "gpus",
 		Aggregation: "max", RatingRuleVersionID: rrvMax.ID,
 	})
 	if err != nil {
@@ -530,7 +530,7 @@ func TestLiveBalance_PlanSwapMidPeriod_OutgoingMeterStillCounted(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 	tok, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
-		Key: "tok", Name: "Tok", Unit: "tok", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "tok", Name: "Tok", Unit: "tok", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -628,7 +628,7 @@ func TestLiveBalance_TwoSubscriptionsDifferentCycles_EachOwnWindow(t *testing.T)
 		t.Fatalf("create rule: %v", err)
 	}
 	tokens, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)

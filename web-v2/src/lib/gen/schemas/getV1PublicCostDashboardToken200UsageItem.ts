@@ -10,7 +10,7 @@
 import type { GetV1PublicCostDashboardToken200UsageItemRulesItem } from './getV1PublicCostDashboardToken200UsageItemRulesItem';
 
 export type GetV1PublicCostDashboardToken200UsageItem = {
-  meter_key?: string;
+  event_name?: string;
   meter_name?: string;
   unit?: string;
   currency?: string;

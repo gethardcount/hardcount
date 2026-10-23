@@ -159,7 +159,7 @@ func TestLadderSeedCheck_OnlyTheClosersRefuse(t *testing.T) {
 	engine, subs, _, pricing, invoices := setupEngine()
 	pricing.meterPricingRules = map[string][]domain.MeterPricingRule{
 		"mtr_api": {{ID: "mpr_gpt", MeterID: "mtr_api", RatingRuleVersionID: "rrv_api",
-			DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum}},
+			DimensionMatch: map[string]any{"model": "gpt"}}},
 	}
 	seedFireAt10(invoices)
 	ctx := context.Background()

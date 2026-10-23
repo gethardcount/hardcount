@@ -52,7 +52,7 @@ type CallInput struct {
 type HoldCallInput struct {
 	Source             string
 	ExternalCustomerID string
-	MeterKey           string
+	EventName          string
 	Reason             domain.HeldUsageReason
 	Events             []CallEvent
 	Legacy             []CallEvent
@@ -201,7 +201,7 @@ func (s *Service) HoldCall(ctx context.Context, tenantID string, in HoldCallInpu
 			ev, err := heldEvent(HoldInput{
 				Source:             in.Source,
 				ExternalCustomerID: in.ExternalCustomerID,
-				MeterKey:           in.MeterKey,
+				EventName:          in.EventName,
 				Quantity:           e.Quantity,
 				Dimensions:         e.Dimensions,
 				IdempotencyKey:     e.IdempotencyKey,

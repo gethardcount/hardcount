@@ -55,9 +55,9 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   fee is billed as it would be with no threshold. One issued by a
   Velox build from before 2026-10-23 also carries the base fee of a plan billed in arrears; the
   period-end invoice does not bill that base again, and what follows
-  applies to it as to the usage. A threshold invoice leaves out
-  usage priced with `max`, `last_during_period` or `last_ever`: the
-  period-end invoice bills that for the whole period. What happens to the
+  applies to it as to the usage. A threshold invoice leaves out the
+  usage of a `max` or `last` meter: the period-end invoice bills that for
+  the whole period. What happens to the
   charges on the threshold invoice depends on what you do with it, and
   when:
   - **Write it off** (mark uncollectible): they stay billed on it. The

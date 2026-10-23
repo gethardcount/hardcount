@@ -9,7 +9,7 @@
  */
 
 export interface RecipeMeter {
-  key: string;
+  event_name: string;
   name: string;
   unit: string;
   aggregation: string;

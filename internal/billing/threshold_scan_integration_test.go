@@ -112,7 +112,7 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 	}
 
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "calls", Name: "Calls", Unit: "calls",
+		EventName: "calls", Name: "Calls", Unit: "calls",
 		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
@@ -387,7 +387,7 @@ func seqOf(t *testing.T, invoiceNumber string) int {
 }
 
 // TestThresholdScan_ItemUsageCross verifies the per-item path against real
-// Postgres — the per-meter aggregator wraps AggregateByPricingRules, so this
+// Postgres — the per-meter aggregator wraps AggregateClaims, so this
 // proves the scan respects the same priority+claim resolution as the cycle.
 func TestThresholdScan_ItemUsageCross(t *testing.T) {
 	if testing.Short() {
@@ -1020,7 +1020,7 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 		t.Fatalf("create max rrv: %v", err)
 	}
 	maxMeter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "gpu", Name: "GPU Concurrency", Unit: "gpus",
+		EventName: "gpu", Name: "GPU Concurrency", Unit: "gpus",
 		Aggregation: "max", RatingRuleVersionID: rrvMax.ID,
 	})
 	if err != nil {
@@ -1215,7 +1215,7 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 		t.Fatalf("create max rrv: %v", err)
 	}
 	maxMeter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "gpu_c", Name: "GPU C", Unit: "gpus",
+		EventName: "gpu_c", Name: "GPU C", Unit: "gpus",
 		Aggregation: "max", RatingRuleVersionID: rrvMax.ID,
 	})
 	if err != nil {

@@ -10,6 +10,6 @@
 
 export type DiscardHeldUsageBody = {
   external_customer_id: string;
-  /** Discard only this meter's rows. Omit for all. */
-  meter_key?: string;
+  /** Discard only the rows with this `event_name`. Omit for all. */
+  event_name?: string;
 };

@@ -115,7 +115,7 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 		"rule_key": "calls", "name": "Calls", "mode": "flat", "currency": "USD", "flat_amount_cents": 1,
 	}, http.StatusCreated)
 	meter := r.must(http.MethodPost, "/v1/meters", lagP0, map[string]any{
-		"key": "calls", "name": "Calls", "unit": "calls", "aggregation": "sum", "rating_rule_version_id": rule["id"],
+		"event_name": "calls", "name": "Calls", "unit": "calls", "aggregation": "sum", "rating_rule_version_id": rule["id"],
 	}, http.StatusCreated)
 	r.meterID = meter["id"].(string)
 	plan := func(code, interval string, base int64, meters []string) string {

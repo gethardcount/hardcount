@@ -40,8 +40,9 @@ export function deleteMatchedPriceSentence(match: string, hasDefaultPrice: boole
 export const METER_IN_USE_TITLE = 'Meter in use'
 
 // The meter lock (D05): while subscriptions use a meter, the server refuses a
-// change to its prices or aggregation that would reprice the period already
-// open, with code meter_in_use. Its message names the count and what to do
+// change to its prices that would reprice the period already open, with code
+// meter_in_use. (The aggregation has its own rule: fixed once the meter has
+// usage, meterLabels.ts.) Its message names the count and what to do
 // instead, so the dialog shows it as it is. null for any other error.
 export function meterInUseMessage(err: unknown): string | null {
   if (typeof err !== 'object' || err === null) return null

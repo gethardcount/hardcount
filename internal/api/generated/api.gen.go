@@ -1244,33 +1244,6 @@ func (e MeterAggregation) Valid() bool {
 	}
 }
 
-// Defines values for MeterPricingRuleAggregationMode.
-const (
-	MeterPricingRuleAggregationModeCount            MeterPricingRuleAggregationMode = "count"
-	MeterPricingRuleAggregationModeLastDuringPeriod MeterPricingRuleAggregationMode = "last_during_period"
-	MeterPricingRuleAggregationModeLastEver         MeterPricingRuleAggregationMode = "last_ever"
-	MeterPricingRuleAggregationModeMax              MeterPricingRuleAggregationMode = "max"
-	MeterPricingRuleAggregationModeSum              MeterPricingRuleAggregationMode = "sum"
-)
-
-// Valid indicates whether the value is a known member of the MeterPricingRuleAggregationMode enum.
-func (e MeterPricingRuleAggregationMode) Valid() bool {
-	switch e {
-	case MeterPricingRuleAggregationModeCount:
-		return true
-	case MeterPricingRuleAggregationModeLastDuringPeriod:
-		return true
-	case MeterPricingRuleAggregationModeLastEver:
-		return true
-	case MeterPricingRuleAggregationModeMax:
-		return true
-	case MeterPricingRuleAggregationModeSum:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for PlanBaseBillTiming.
 const (
 	PlanBaseBillTimingInAdvance PlanBaseBillTiming = "in_advance"
@@ -1490,33 +1463,6 @@ func (e RecipePlanBillingInterval) Valid() bool {
 	case RecipePlanBillingIntervalMonthly:
 		return true
 	case RecipePlanBillingIntervalYearly:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipePricingRuleAggregationMode.
-const (
-	RecipePricingRuleAggregationModeCount            RecipePricingRuleAggregationMode = "count"
-	RecipePricingRuleAggregationModeLastDuringPeriod RecipePricingRuleAggregationMode = "last_during_period"
-	RecipePricingRuleAggregationModeLastEver         RecipePricingRuleAggregationMode = "last_ever"
-	RecipePricingRuleAggregationModeMax              RecipePricingRuleAggregationMode = "max"
-	RecipePricingRuleAggregationModeSum              RecipePricingRuleAggregationMode = "sum"
-)
-
-// Valid indicates whether the value is a known member of the RecipePricingRuleAggregationMode enum.
-func (e RecipePricingRuleAggregationMode) Valid() bool {
-	switch e {
-	case RecipePricingRuleAggregationModeCount:
-		return true
-	case RecipePricingRuleAggregationModeLastDuringPeriod:
-		return true
-	case RecipePricingRuleAggregationModeLastEver:
-		return true
-	case RecipePricingRuleAggregationModeMax:
-		return true
-	case RecipePricingRuleAggregationModeSum:
 		return true
 	default:
 		return false
@@ -2524,49 +2470,22 @@ func (e PostV1MetersJSONBodyAggregation) Valid() bool {
 
 // Defines values for PatchV1MetersIdJSONBodyAggregation.
 const (
-	PatchV1MetersIdJSONBodyAggregationCount PatchV1MetersIdJSONBodyAggregation = "count"
-	PatchV1MetersIdJSONBodyAggregationLast  PatchV1MetersIdJSONBodyAggregation = "last"
-	PatchV1MetersIdJSONBodyAggregationMax   PatchV1MetersIdJSONBodyAggregation = "max"
-	PatchV1MetersIdJSONBodyAggregationSum   PatchV1MetersIdJSONBodyAggregation = "sum"
+	Count PatchV1MetersIdJSONBodyAggregation = "count"
+	Last  PatchV1MetersIdJSONBodyAggregation = "last"
+	Max   PatchV1MetersIdJSONBodyAggregation = "max"
+	Sum   PatchV1MetersIdJSONBodyAggregation = "sum"
 )
 
 // Valid indicates whether the value is a known member of the PatchV1MetersIdJSONBodyAggregation enum.
 func (e PatchV1MetersIdJSONBodyAggregation) Valid() bool {
 	switch e {
-	case PatchV1MetersIdJSONBodyAggregationCount:
+	case Count:
 		return true
-	case PatchV1MetersIdJSONBodyAggregationLast:
+	case Last:
 		return true
-	case PatchV1MetersIdJSONBodyAggregationMax:
+	case Max:
 		return true
-	case PatchV1MetersIdJSONBodyAggregationSum:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for UpsertMeterPricingRuleJSONBodyAggregationMode.
-const (
-	UpsertMeterPricingRuleJSONBodyAggregationModeCount            UpsertMeterPricingRuleJSONBodyAggregationMode = "count"
-	UpsertMeterPricingRuleJSONBodyAggregationModeLastDuringPeriod UpsertMeterPricingRuleJSONBodyAggregationMode = "last_during_period"
-	UpsertMeterPricingRuleJSONBodyAggregationModeLastEver         UpsertMeterPricingRuleJSONBodyAggregationMode = "last_ever"
-	UpsertMeterPricingRuleJSONBodyAggregationModeMax              UpsertMeterPricingRuleJSONBodyAggregationMode = "max"
-	UpsertMeterPricingRuleJSONBodyAggregationModeSum              UpsertMeterPricingRuleJSONBodyAggregationMode = "sum"
-)
-
-// Valid indicates whether the value is a known member of the UpsertMeterPricingRuleJSONBodyAggregationMode enum.
-func (e UpsertMeterPricingRuleJSONBodyAggregationMode) Valid() bool {
-	switch e {
-	case UpsertMeterPricingRuleJSONBodyAggregationModeCount:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeLastDuringPeriod:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeLastEver:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeMax:
-		return true
-	case UpsertMeterPricingRuleJSONBodyAggregationModeSum:
+	case Sum:
 		return true
 	default:
 		return false
@@ -3405,8 +3324,8 @@ type AnalyticsRevenuePoint struct {
 
 // AnalyticsTopMeter defines model for AnalyticsTopMeter.
 type AnalyticsTopMeter struct {
+	EventName string `json:"event_name"`
 	Events    int64  `json:"events"`
-	Key       string `json:"key"`
 	MeterId   string `json:"meter_id"`
 	MeterName string `json:"meter_name"`
 
@@ -4253,8 +4172,8 @@ type CustomerUsagePeriodSource string
 // CustomerUsageMeter defines model for CustomerUsageMeter.
 type CustomerUsageMeter struct {
 	Currency  string `json:"currency"`
+	EventName string `json:"event_name"`
 	MeterId   string `json:"meter_id"`
-	MeterKey  string `json:"meter_key"`
 	MeterName string `json:"meter_name"`
 
 	// Rules One row per pricing rule that claimed events.
@@ -4600,10 +4519,13 @@ type Error struct {
 	} `json:"error,omitempty"`
 }
 
-// HeldUsageGroup The usage rows still held for one external customer ID, meter key and reason.
+// HeldUsageGroup The usage rows still held for one external customer ID, event name and reason.
 type HeldUsageGroup struct {
 	// CustomerId The customer whose external ID now matches, or empty when none does yet.
 	CustomerId string `json:"customer_id"`
+
+	// EventName The `event_name` the rows carried.
+	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The LiteLLM `user` value the rows carried.
 	ExternalCustomerId string    `json:"external_customer_id"`
@@ -4613,9 +4535,8 @@ type HeldUsageGroup struct {
 	// LastReceivedAt When Velox last received a row for this group.
 	LastReceivedAt time.Time `json:"last_received_at"`
 
-	// MeterExists Whether a meter with this key exists now.
-	MeterExists bool   `json:"meter_exists"`
-	MeterKey    string `json:"meter_key"`
+	// MeterExists Whether a meter with this `event_name` exists now.
+	MeterExists bool `json:"meter_exists"`
 
 	// Reason What was missing when the rows arrived.
 	Reason HeldUsageGroupReason `json:"reason"`
@@ -5535,26 +5456,41 @@ type MemberInvitationStatus string
 
 // Meter defines model for Meter.
 type Meter struct {
-	Aggregation         MeterAggregation `json:"aggregation,omitempty"`
-	CreatedAt           time.Time        `json:"created_at,omitempty"`
-	Id                  string           `json:"id,omitempty"`
-	Key                 string           `json:"key,omitempty"`
-	Name                string           `json:"name,omitempty"`
-	RatingRuleVersionId string           `json:"rating_rule_version_id,omitempty"`
-	TenantId            string           `json:"tenant_id,omitempty"`
-	Unit                string           `json:"unit,omitempty"`
-	UpdatedAt           time.Time        `json:"updated_at,omitempty"`
+	// Aggregation How the meter rolls its events into one quantity per billing
+	// period. Every pricing rule of the meter bills under it. `last`
+	// is the latest event by timestamp, then by id. Fixed once the
+	// meter has usage (see `has_usage`).
+	Aggregation MeterAggregation `json:"aggregation,omitempty"`
+	CreatedAt   time.Time        `json:"created_at,omitempty"`
+
+	// EventName The `event_name` usage events send for this meter.
+	EventName string `json:"event_name,omitempty"`
+
+	// HasUsage Whether the meter has events: usage events, or held usage rows
+	// for its `event_name` that are still held. Once it has, its
+	// `aggregation` cannot change. Returned when you create, get or
+	// update one meter; the meter list leaves it out. A create or
+	// update that succeeded leaves it out if it could not be read.
+	HasUsage            bool      `json:"has_usage,omitempty"`
+	Id                  string    `json:"id,omitempty"`
+	Name                string    `json:"name,omitempty"`
+	RatingRuleVersionId string    `json:"rating_rule_version_id,omitempty"`
+	TenantId            string    `json:"tenant_id,omitempty"`
+	Unit                string    `json:"unit,omitempty"`
+	UpdatedAt           time.Time `json:"updated_at,omitempty"`
 }
 
-// MeterAggregation defines model for Meter.Aggregation.
+// MeterAggregation How the meter rolls its events into one quantity per billing
+// period. Every pricing rule of the meter bills under it. `last`
+// is the latest event by timestamp, then by id. Fixed once the
+// meter has usage (see `has_usage`).
 type MeterAggregation string
 
 // MeterPricingRule defines model for MeterPricingRule.
 type MeterPricingRule struct {
-	AggregationMode MeterPricingRuleAggregationMode `json:"aggregation_mode"`
-	CreatedAt       time.Time                       `json:"created_at"`
+	CreatedAt time.Time `json:"created_at"`
 
-	// DimensionMatch Dimensions an event must have for this rule to bill it. `{}` matches every event.
+	// DimensionMatch Dimensions an event must have for this rule to bill it. `{}` matches every event. The rule bills them under the meter's `aggregation`.
 	DimensionMatch map[string]interface{} `json:"dimension_match"`
 	Id             string                 `json:"id"`
 	MeterId        string                 `json:"meter_id"`
@@ -5565,9 +5501,6 @@ type MeterPricingRule struct {
 	TenantId            string    `json:"tenant_id,omitempty"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
-
-// MeterPricingRuleAggregationMode defines model for MeterPricingRule.AggregationMode.
-type MeterPricingRuleAggregationMode string
 
 // PaymentMethod defines model for PaymentMethod.
 type PaymentMethod struct {
@@ -5823,7 +5756,7 @@ type RecipeListItem struct {
 // RecipeMeter defines model for RecipeMeter.
 type RecipeMeter struct {
 	Aggregation string `json:"aggregation"`
-	Key         string `json:"key"`
+	EventName   string `json:"event_name"`
 	Name        string `json:"name"`
 	Unit        string `json:"unit"`
 }
@@ -5851,8 +5784,10 @@ type RecipePlan struct {
 	BillingInterval RecipePlanBillingInterval `json:"billing_interval"`
 	Code            string                    `json:"code"`
 	Currency        string                    `json:"currency"`
-	MeterKeys       []string                  `json:"meter_keys"`
-	Name            string                    `json:"name"`
+
+	// EventNames The recipe meters the plan bills.
+	EventNames []string `json:"event_names"`
+	Name       string   `json:"name"`
 }
 
 // RecipePlanBaseBillTiming Optional; empty defaults to in_arrears at plan creation (ADR-031).
@@ -5883,15 +5818,13 @@ type RecipePreviewResult struct {
 
 // RecipePricingRule defines model for RecipePricingRule.
 type RecipePricingRule struct {
-	AggregationMode RecipePricingRuleAggregationMode `json:"aggregation_mode"`
-	DimensionMatch  map[string]interface{}           `json:"dimension_match"`
-	MeterKey        string                           `json:"meter_key"`
-	Priority        int                              `json:"priority"`
-	RatingRuleKey   string                           `json:"rating_rule_key"`
-}
+	DimensionMatch map[string]interface{} `json:"dimension_match"`
 
-// RecipePricingRuleAggregationMode defines model for RecipePricingRule.AggregationMode.
-type RecipePricingRuleAggregationMode string
+	// EventName The recipe meter the rule prices.
+	EventName     string `json:"event_name"`
+	Priority      int    `json:"priority"`
+	RatingRuleKey string `json:"rating_rule_key"`
+}
 
 // RecipeRatingRule defines model for RecipeRatingRule.
 type RecipeRatingRule struct {
@@ -6526,14 +6459,13 @@ type UsageAggregate struct {
 
 	// ByMeter One row per meter, largest total first.
 	ByMeter []struct {
-		// Aggregation The aggregation billing uses for this meter's events (`sum`,
-		// `count`, `max`, `last`), read from its pricing rules and, for
-		// events no rule claims, the meter's own aggregation. `mixed`
-		// when those differ, or when a `max` or `last` meter is billed
-		// in more than one part (several rules, or a rule plus the
-		// events no rule claims), since peaks of the parts added up
-		// are not one peak: `value` is then the plain sum, which
-		// billing may not use. Empty when unknown.
+		// Aggregation The meter's aggregation (`sum`, `count`, `max`, `last`),
+		// which every pricing rule of the meter bills under. `mixed`
+		// when a `max` or `last` meter is billed in more than one
+		// part (several rules, or a rule plus the events no rule
+		// claims), since peaks of the parts added up are not one
+		// peak: `value` is then the plain sum, which billing does not
+		// use. Empty when unknown.
 		Aggregation string `json:"aggregation"`
 
 		// Customers Distinct customers with events on this meter.
@@ -7793,11 +7725,14 @@ type InviteMemberParams struct {
 
 // PostV1MetersJSONBody defines parameters for PostV1Meters.
 type PostV1MetersJSONBody struct {
-	Aggregation         PostV1MetersJSONBodyAggregation `json:"aggregation,omitempty"`
-	Key                 string                          `json:"key"`
-	Name                string                          `json:"name"`
-	RatingRuleVersionId string                          `json:"rating_rule_version_id,omitempty"`
-	Unit                string                          `json:"unit,omitempty"`
+	// Aggregation How the meter rolls its events into one quantity per billing period. Fixed once the meter has usage.
+	Aggregation PostV1MetersJSONBodyAggregation `json:"aggregation,omitempty"`
+
+	// EventName The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters.
+	EventName           string `json:"event_name"`
+	Name                string `json:"name"`
+	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
+	Unit                string `json:"unit,omitempty"`
 }
 
 // PostV1MetersParams defines parameters for PostV1Meters.
@@ -7840,9 +7775,6 @@ type PatchV1MetersIdJSONBodyAggregation string
 
 // UpsertMeterPricingRuleJSONBody defines parameters for UpsertMeterPricingRule.
 type UpsertMeterPricingRuleJSONBody struct {
-	// AggregationMode How the matched events become one quantity for the period.
-	AggregationMode UpsertMeterPricingRuleJSONBodyAggregationMode `json:"aggregation_mode,omitempty"`
-
 	// DimensionMatch Event dimensions this rule claims, for example
 	// `{"model": "gpt-4o", "token_type": "input"}`. Values must be
 	// strings, numbers or booleans. Omitted or `{}` matches every event.
@@ -7865,9 +7797,6 @@ type UpsertMeterPricingRuleParams struct {
 	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
-
-// UpsertMeterPricingRuleJSONBodyAggregationMode defines parameters for UpsertMeterPricingRule.
-type UpsertMeterPricingRuleJSONBodyAggregationMode string
 
 // PostV1PlansJSONBody defines parameters for PostV1Plans.
 type PostV1PlansJSONBody struct {
@@ -8554,7 +8483,7 @@ type PostV1UsageEventsJSONBody struct {
 	// Dimensions Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}).
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
-	// EventName The meter key (e.g. "tokens").
+	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
@@ -8620,7 +8549,7 @@ type BackfillUsageEventJSONBody struct {
 	// Dimensions Scalar dimension values used to pick the pricing rule.
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
-	// EventName The meter key (e.g. "tokens").
+	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
@@ -8666,7 +8595,7 @@ type BackfillUsageEventJSONBody_Quantity struct {
 type PostV1UsageEventsBatchJSONBody = []struct {
 	Dimensions map[string]interface{} `json:"dimensions,omitempty"`
 
-	// EventName The meter key (e.g. "tokens").
+	// EventName The meter's `event_name` (e.g. "tokens").
 	EventName string `json:"event_name"`
 
 	// ExternalCustomerId The customer's external_id (your identifier), not the internal vlx_cus_ id.
@@ -8707,10 +8636,9 @@ type PostV1UsageEventsBatchJSONBody_Quantity struct {
 
 // DiscardHeldUsageJSONBody defines parameters for DiscardHeldUsage.
 type DiscardHeldUsageJSONBody struct {
+	// EventName Discard only the rows with this `event_name`. Omit for all.
+	EventName          string `json:"event_name,omitempty"`
 	ExternalCustomerId string `json:"external_customer_id"`
-
-	// MeterKey Discard only this meter's rows. Omit for all.
-	MeterKey string `json:"meter_key,omitempty"`
 }
 
 // ReleaseHeldUsageJSONBody defines parameters for ReleaseHeldUsage.

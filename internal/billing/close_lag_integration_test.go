@@ -26,18 +26,29 @@ import (
 // call with clock.WithEffectiveNow, which is how the wall-clock billing run
 // sees it; no test clock is involved.
 
-// addLastEverRule makes every event of the rig's meter belong to one last_ever
-// pricing rule: the billed quantity is the latest event's quantity.
-func (r *cancelRig) addLastEverRule(t *testing.T) {
+// makeLastMeter makes the rig's meter a last meter with one pricing rule
+// that claims every event: the billed quantity is the latest event's in the
+// period. Written past the API, which refuses an aggregation change once the
+// meter has events (ADR-130 §2): it stands for configuration made before the
+// period.
+func (r *cancelRig) makeLastMeter(t *testing.T) {
 	t.Helper()
+	tx, err := r.f.db.BeginTx(r.base, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin bypass: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.Exec(`UPDATE meters SET aggregation = 'last' WHERE id = $1`, r.f.meterID); err != nil {
+		t.Fatalf("make the meter a last meter: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 	rule := r.f.seededRule(t, r.base)
-	// Seeded past the meter-in-use guard: the rig's subscription already
-	// exists, and the rule stands for configuration made before the period.
 	seedPricingRule(t, r.f.db, r.base, r.f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID:             r.f.meterID,
 		RatingRuleVersionID: rule.ID,
 		DimensionMatch:      map[string]any{},
-		AggregationMode:     domain.AggLastEver,
 		Priority:            10,
 	})
 }
@@ -52,17 +63,16 @@ func (r *cancelRig) ingestOne(t *testing.T, at time.Time, qty int64) {
 	}
 }
 
-// TestLateClose_LastEver_BillsValueAsOfPeriodEnd (D2): a last_ever rule bills
-// the latest value as of the period end. The value changes to 100 five hours
-// after the boundary, and the billing run closes the period an hour after
-// that. The ended period's invoice must bill 10 (the value at the boundary),
-// not 100.
+// TestLateClose_Last_BillsValueAsOfPeriodEnd (D2): a last meter bills the
+// latest value in the period. The value changes to 100 five hours after the
+// boundary, and the billing run closes the period an hour after that. The
+// ended period's invoice must bill 10 (the value at the boundary), not 100.
 //
-// Mutation seam: drop the `e.timestamp < $4` bound from the last_ever claims
-// in usage/postgres.go → the invoice bills 100.
-func TestLateClose_LastEver_BillsValueAsOfPeriodEnd(t *testing.T) {
-	r := newCancelRig(t, "close lag last_ever")
-	r.addLastEverRule(t)
+// Mutation seam: drop the `e.timestamp < $5` bound from the claims in
+// usage/postgres.go (AggregateClaims) → the invoice bills 100.
+func TestLateClose_Last_BillsValueAsOfPeriodEnd(t *testing.T) {
+	r := newCancelRig(t, "close lag last")
+	r.makeLastMeter(t)
 	p0, p1 := r.f.cycleStart, r.f.cycleEnd
 	r.ingestOne(t, p1.Add(5*time.Hour), 100)
 
@@ -73,17 +83,17 @@ func TestLateClose_LastEver_BillsValueAsOfPeriodEnd(t *testing.T) {
 	inv := invoiceFor(t, invs, p0, p1)
 	usageCents, _ := sumLines(lines[inv.ID])
 	if usageCents != 10 {
-		t.Errorf("ended period [P0, P1) bills last_ever usage %dc, want 10c: the value at the period end, not the value set 5h after it", usageCents)
+		t.Errorf("ended period [P0, P1) bills last usage %dc, want 10c: the value at the period end, not the value set 5h after it", usageCents)
 	}
 }
 
-// TestLateClose_LastEver_CatchUp_EachPeriodBillsItsOwnValue (D2, catch-up):
-// the billing run is two periods behind. Each period's invoice bills the
-// latest value as of its own end: 10 for [P0, P1) and 40 for [P1, P2), even
-// though the run reads both after the value became 70.
-func TestLateClose_LastEver_CatchUp_EachPeriodBillsItsOwnValue(t *testing.T) {
-	r := newCancelRig(t, "close lag last_ever catch-up")
-	r.addLastEverRule(t)
+// TestLateClose_Last_CatchUp_EachPeriodBillsItsOwnValue (D2, catch-up): the
+// billing run is two periods behind. Each period's invoice bills the latest
+// value in its own period: 10 for [P0, P1) and 40 for [P1, P2), even though
+// the run reads both after the value became 70.
+func TestLateClose_Last_CatchUp_EachPeriodBillsItsOwnValue(t *testing.T) {
+	r := newCancelRig(t, "close lag last catch-up")
+	r.makeLastMeter(t)
 	p0, p1 := r.f.cycleStart, r.f.cycleEnd
 	r.ingestOne(t, p1.AddDate(0, 0, 3), 40)
 	p2 := p1.AddDate(0, 1, 0)
@@ -98,10 +108,10 @@ func TestLateClose_LastEver_CatchUp_EachPeriodBillsItsOwnValue(t *testing.T) {
 	sub := r.sub(t)
 	second := invoiceFor(t, invs, p1, *sub.CurrentBillingPeriodStart)
 	if u, _ := sumLines(lines[first.ID]); u != 10 {
-		t.Errorf("[P0, P1) bills last_ever usage %dc, want 10c", u)
+		t.Errorf("[P0, P1) bills last usage %dc, want 10c", u)
 	}
 	if u, _ := sumLines(lines[second.ID]); u != 40 {
-		t.Errorf("[P1, P2) bills last_ever usage %dc, want 40c", u)
+		t.Errorf("[P1, P2) bills last usage %dc, want 40c", u)
 	}
 }
 

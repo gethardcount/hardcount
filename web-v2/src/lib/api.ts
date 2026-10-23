@@ -178,10 +178,11 @@ export const api = {
     apiRequest<{ data: Meter[] }>('GET', '/meters'),
   getMeter: (id: string) =>
     apiRequest<Meter>('GET', `/meters/${id}`),
-  createMeter: (data: { key: string; name: string; unit?: string; aggregation?: string; rating_rule_version_id?: string }) =>
+  createMeter: (data: { event_name: string; name: string; unit?: string; aggregation?: string; rating_rule_version_id?: string }) =>
     apiRequest<Meter>('POST', '/meters', data),
   // "" clears the default binding; unmatched-dimension usage goes unbilled again.
-  updateMeter: (id: string, data: { rating_rule_version_id: string }) =>
+  // aggregation is refused (409 meter_has_usage) once the meter has usage.
+  updateMeter: (id: string, data: { rating_rule_version_id?: string; aggregation?: string; name?: string; unit?: string }) =>
     apiRequest<Meter>('PATCH', `/meters/${id}`, data),
   listAllMeterPricingRules: () =>
     apiRequest<{ data: MeterPricingRule[] }>('GET', '/meter-pricing-rules'),
@@ -192,7 +193,6 @@ export const api = {
     data: {
       rating_rule_version_id: string
       dimension_match: Record<string, string | number | boolean>
-      aggregation_mode: MeterAggregationMode
       priority: number
     },
   ) =>
@@ -1180,12 +1180,17 @@ export interface CustomerOverview {
 
 export interface Meter {
   id: string
-  key: string
+  // The event_name usage events send for this meter.
+  event_name: string
   name: string
   unit: string
+  // One aggregation for the meter; every pricing rule bills under it.
   aggregation: string
   rating_rule_version_id: string
   created_at: string
+  // Set when one meter is created, fetched or updated (not on the list):
+  // once the meter has usage, its aggregation is fixed.
+  has_usage?: boolean
 }
 
 export type BillTiming = 'in_advance' | 'in_arrears'
@@ -1292,19 +1297,12 @@ export interface UsageMeterTotal {
   daily: { date: string; value: string }[]
 }
 
-export type MeterAggregationMode =
-  | 'sum'
-  | 'count'
-  | 'last_during_period'
-  | 'last_ever'
-  | 'max'
-
+// A pricing rule has no aggregation of its own: it bills under its meter's.
 export interface MeterPricingRule {
   id: string
   meter_id: string
   rating_rule_version_id: string
   dimension_match: Record<string, string | number | boolean>
-  aggregation_mode: MeterAggregationMode
   priority: number
   created_at: string
 }
@@ -1347,7 +1345,7 @@ export interface CustomerUsageSubscription {
 
 export interface CustomerUsageMeter {
   meter_id: string
-  meter_key: string
+  event_name: string
   meter_name: string
   unit: string
   currency: string
@@ -1840,7 +1838,7 @@ export interface UsagePoint {
 export interface TopMeterUsage {
   meter_id: string
   meter_name: string
-  key: string
+  event_name: string
   events: number
   quantity: number
 }
