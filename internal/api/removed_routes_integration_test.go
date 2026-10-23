@@ -13,8 +13,8 @@ import (
 	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
-// TestRemovedRoutes_AnswerNotFound pins the operations removed before the
-// first tag (simplification audit B2). Each one had a kept operation that does
+// TestRemovedRoutes_AnswerNotFound pins the operations removed after v0.8.2
+// (simplification audit B2). Each one had a kept operation that does
 // the same job, so it was removed rather than kept as a second way in.
 //
 // Each case calls the removed operation with ids that exist, so a handler

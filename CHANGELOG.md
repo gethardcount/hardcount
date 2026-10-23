@@ -126,7 +126,7 @@ original text.
 
 ### Removed
 
-- **Breaking for API callers: 8 operations that another operation already does (2026-10-23, [#1368](https://github.com/getvelox/velox/pull/1368)).** They now answer 404. Use the replacement; some response shapes differ, so check the [API reference](api/openapi.yaml):
+- **Breaking for API callers: 8 operations that another operation already does (2026-10-23, [#1368](https://github.com/getvelox/velox/pull/1368)).** They now answer 404. Use the replacement; some response shapes differ, so check the [API reference](api/openapi.yaml). Two answers differ too: the kept invoice, subscription and usage reads answer 200 with no rows for an unknown customer id, where the removed routes answered 404; and a replay answers `status` `queued` or `no_matching_endpoints`, not `replayed`. The replacements:
   - `POST /v1/checkout/setup` → `POST /v1/customers/{id}/payment-methods/setup-session`, which takes the name, email and address from the customer's record;
   - `GET /v1/checkout/status/{customerID}` → `GET /v1/customers/{id}/payment-methods`;
   - `GET /v1/webhook-endpoints/events/{id}/deliveries` → `GET /v1/webhook_events/{id}/deliveries`;

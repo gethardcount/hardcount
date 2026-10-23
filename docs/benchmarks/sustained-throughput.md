@@ -332,7 +332,7 @@ ev/s ingest held and the summary missed its budget, and both are true.
   did: see footnote ¹ in [the run journal](../dev/records/sustained-throughput-runs-2026-08.md#the-headline-2026-08-16-measured-under-the-protocol-below), and the third run). It is not long enough for
   multi-hour effects.
 - **The read probe is one budget over three endpoints**, reported per endpoint.
-  Its `usage-summary` result scales with events-per-customer, so the budget it
+  Its `usage-aggregate` result scales with events-per-customer, so the budget it
   meets depends on how big your customers are.
 - **No nginx** in front (deploy/compose puts one there). **Single-AZ**, no
   pooler, no replica, and on-demand pricing. Storage and the load generator

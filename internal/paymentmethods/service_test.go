@@ -235,7 +235,6 @@ func orDefault(s, d string) string {
 // fakeStripe — only what Service touches.
 // ---------------------------------------------------------------------------
 type fakeStripe struct {
-	setupCalls      int
 	detachCalls     int
 	detachErr       error
 	setDefaultCalls int
@@ -243,10 +242,6 @@ type fakeStripe struct {
 	setDefaultPMID  string
 }
 
-func (f *fakeStripe) CreateSetupIntent(_ context.Context, _ string, _ map[string]string) (string, string, error) {
-	f.setupCalls++
-	return "seti_secret_fake", "seti_fake", nil
-}
 func (f *fakeStripe) CreateSetupCheckoutSession(_ context.Context, _, _, _ string, _ map[string]string) (string, string, error) {
 	return "https://checkout.stripe.com/fake", "cs_fake", nil
 }

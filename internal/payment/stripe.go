@@ -1690,12 +1690,12 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 	// Attribute the attach to the CUSTOMER when this SetupIntent came from the
 	// customer-driven payment-update token link (velox_purpose set on the
 	// public flow's setup_intent_data.metadata). Operator-driven attaches
-	// (portal "Add payment method" → "portal_add_payment_method", or the
-	// inline-Elements flow → empty purpose) are left as-is so ResolveActor
-	// keeps them as system/operator. Without the gate every webhook-attach
-	// row — operator and customer alike — resolved to "System", so a
-	// customer self-serving a card was indistinguishable from an operator
-	// adding one in the audit log.
+	// (portal "Add payment method" → "portal_add_payment_method", or a
+	// session from the removed POST /v1/checkout/setup → empty purpose) are
+	// left as-is so ResolveActor keeps them as system/operator. Without the
+	// gate every webhook-attach row — operator and customer alike — resolved
+	// to "System", so a customer self-serving a card was indistinguishable
+	// from an operator adding one in the audit log.
 	if parsed.Data.Object.Metadata["velox_purpose"] == purposePaymentUpdateToken {
 		ctx = veloxauth.WithCustomerActor(ctx, customerID)
 	}

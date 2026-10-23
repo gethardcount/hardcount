@@ -17,11 +17,6 @@ import (
 // tested with a fake and so internal/payment doesn't gain a reverse
 // dependency.
 type StripeAPI interface {
-	// CreateSetupIntent makes a SetupIntent for the Stripe customer and
-	// returns the client_secret the frontend needs for confirmCardSetup().
-	// Used by integrations that build an inline Stripe Elements UI.
-	CreateSetupIntent(ctx context.Context, stripeCustomerID string, metadata map[string]string) (clientSecret, setupIntentID string, err error)
-
 	// CreateSetupCheckoutSession creates a Stripe Checkout Session in
 	// setup mode and returns a hosted URL the customer can redirect to.
 	// successURL and cancelURL are separate so the SPA can render
@@ -139,26 +134,6 @@ func (s *Service) List(ctx context.Context, tenantID, customerID string) ([]Paym
 // payment method, in one read (see Store.CustomersWithDefault).
 func (s *Service) CustomersWithDefault(ctx context.Context, tenantID string, customerIDs []string) (map[string]bool, error) {
 	return s.store.CustomersWithDefault(ctx, tenantID, customerIDs)
-}
-
-// CreateSetupIntent returns the client_secret a browser needs to run
-// stripe.confirmCardSetup(). The actual payment_methods row is written by
-// the webhook handler once Stripe confirms the setup — we don't trust
-// the browser's "success" callback.
-func (s *Service) CreateSetupIntent(ctx context.Context, tenantID, customerID string) (clientSecret, setupIntentID string, err error) {
-	if tenantID == "" || customerID == "" {
-		return "", "", errs.Required("tenant_id, customer_id")
-	}
-	stripeCustomerID, err := s.stripe.EnsureStripeCustomer(ctx, tenantID, customerID)
-	if err != nil {
-		return "", "", fmt.Errorf("ensure stripe customer: %w", err)
-	}
-	metadata := map[string]string{
-		"velox_tenant_id":   tenantID,
-		"velox_customer_id": customerID,
-		"velox_livemode":    livemodeLabel(ctx),
-	}
-	return s.stripe.CreateSetupIntent(ctx, stripeCustomerID, metadata)
 }
 
 // CreateSetupSession returns a hosted Stripe Checkout URL the customer can

@@ -171,23 +171,6 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 	return stripeCust.ID, nil
 }
 
-func (a *StripeAdapter) CreateSetupIntent(ctx context.Context, stripeCustomerID string, metadata map[string]string) (string, string, error) {
-	sc, err := a.client(ctx)
-	if err != nil {
-		return "", "", err
-	}
-	si, err := sc.V1SetupIntents.Create(ctx, &stripe.SetupIntentCreateParams{
-		Customer:           stripe.String(stripeCustomerID),
-		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
-		Usage:              stripe.String("off_session"),
-		Params:             stripe.Params{Metadata: metadata},
-	})
-	if err != nil {
-		return "", "", fmt.Errorf("stripe create setup intent: %w", err)
-	}
-	return si.ClientSecret, si.ID, nil
-}
-
 // CreateSetupCheckoutSession creates a Checkout Session in setup mode so
 // the customer can be redirected to Stripe's hosted UI to enter card
 // details without being charged. Mirrors payment.PortalHandler but for
