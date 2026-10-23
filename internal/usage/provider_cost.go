@@ -476,24 +476,60 @@ func (h *ProviderCostHandler) list(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]any{"data": rates})
 }
 
+// providerCostRequest is the PUT /v1/provider-costs body. cost_per_token is
+// kept raw so every bad value is a 422 naming it (domain.ParseDecimal), not a
+// 400 for the whole body.
+type providerCostRequest struct {
+	Provider     string          `json:"provider"`
+	Model        string          `json:"model"`
+	TokenType    string          `json:"token_type"`
+	CostPerToken json.RawMessage `json:"cost_per_token"`
+	Currency     string          `json:"currency"`
+}
+
+// parseCostPerToken reads cost_per_token: required, 0 or more, inside
+// domain.ProviderCostLimits (the column is NUMERIC(20,12), which rounded a
+// 13th decimal place away and refused 10^8 or more with an error).
+func parseCostPerToken(raw json.RawMessage) (decimal.Decimal, error) {
+	cost, ok, err := domain.ParseDecimal("cost_per_token", raw)
+	if err != nil {
+		return decimal.Decimal{}, err
+	}
+	if !ok {
+		return decimal.Decimal{}, errs.Required("cost_per_token")
+	}
+	if cost, err = domain.CheckDecimal("cost_per_token", cost, domain.ProviderCostLimits); err != nil {
+		return decimal.Decimal{}, err
+	}
+	if cost.IsNegative() {
+		return decimal.Decimal{}, errs.Invalid("cost_per_token", "must be zero or positive")
+	}
+	return cost, nil
+}
+
 func (h *ProviderCostHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
-	var in domain.ProviderCostRate
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+	var req providerCostRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond.BadRequest(w, r, "invalid JSON")
 		return
 	}
-	in.Provider = strings.TrimSpace(strings.ToLower(in.Provider))
-	in.Model = strings.TrimSpace(in.Model)
-	in.TokenType = strings.TrimSpace(strings.ToLower(in.TokenType))
+	in := domain.ProviderCostRate{
+		Provider:  strings.TrimSpace(strings.ToLower(req.Provider)),
+		Model:     strings.TrimSpace(req.Model),
+		TokenType: strings.TrimSpace(strings.ToLower(req.TokenType)),
+		Currency:  req.Currency,
+	}
 	if in.Provider == "" || in.Model == "" || in.TokenType == "" {
 		respond.FromError(w, r, errs.Required("provider, model, token_type"), "provider_cost_rate")
 		return
 	}
-	if in.CostPerToken.IsNegative() {
-		respond.FromError(w, r, errs.Invalid("cost_per_token", "must be zero or positive"), "provider_cost_rate")
+	cost, err := parseCostPerToken(req.CostPerToken)
+	if err != nil {
+		respond.FromError(w, r, err, "provider_cost_rate")
 		return
 	}
+	in.CostPerToken = cost
 	// Rates are dollars only. The cost stamp, the margin report and LiteLLM's
 	// own cost all count in USD, so a rate in another currency was stored and
 	// then read as dollars, putting margin off by the exchange rate.

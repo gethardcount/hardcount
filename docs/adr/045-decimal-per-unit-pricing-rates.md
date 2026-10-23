@@ -1,6 +1,6 @@
 # ADR-045: Decimal per-unit pricing rates + multi-dim cycle billing
 
-**Status:** Accepted; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decimal package rates, at most 12 decimal places, `flat` becomes `per_unit`, overage goes), not built yet
+**Status:** Accepted; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decimal package rates, `flat` becomes `per_unit`, overage goes; not built yet) and by the 2026-10-24 amendment below (rate limits; built)
 **Date:** 2026-06-01
 **Relates to:** ADR-044 (canonical AI token metering model). Follows the
 precedent of ADR-042 (tax rate `bigint` bp → `NUMERIC`).
@@ -8,11 +8,11 @@ precedent of ADR-042 (tax rate `bigint` bp → `NUMERIC`).
 migration 0001, and the single-rule-only usage-billing path in
 `billing.billOnePeriod`.
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. `package_amount_cents` becomes a decimal like the per-unit rates, every rate takes at most 12 decimal places, `flat_amount_cents` becomes `unit_amount_cents` (mode `per_unit`) and `overage_unit_amount_cents` goes (PR-3). Invoice amounts stay whole cents.
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR, with the 2026-10-24 amendment below, describes the code. `package_amount_cents` becomes a decimal like the per-unit rates, `flat_amount_cents` becomes `unit_amount_cents` (mode `per_unit`) and `overage_unit_amount_cents` goes (PR-3). Invoice amounts stay whole cents. ADR-130's limit of 12 decimal places is built already (the 2026-10-24 amendment).
 
 ## Summary
 
-Per-unit price rates (`flat_amount_cents`, graduated-tier `unit_amount_cents`, `overage_unit_amount_cents`, and the same fields on customer price overrides) are arbitrary-precision decimals. They are stored as `NUMERIC` and sent as JSON strings such as `"0.0003"`, so sub-cent prices such as $3 per million tokens can be expressed. Fixed fees and every invoice amount stay whole `int64` cents, and the charge is rounded to a whole cent once. The cycle close also prices multi-dimension meters through their pricing rules, the same path the preview uses. Status: active; showing a sub-cent unit price on invoice lines came later ([ADR-054](054-effective-unit-price-decimal-display.md)).
+Per-unit price rates (`flat_amount_cents`, graduated-tier `unit_amount_cents`, `overage_unit_amount_cents`, and the same fields on customer price overrides) are decimals. A rate written since 2026-10-24 is 0 or more, under 10^18 cents and at most 12 decimal places (see the amendment of that date). They are stored as `NUMERIC` and sent as JSON strings such as `"0.0003"`, so sub-cent prices such as $3 per million tokens can be expressed. Fixed fees and every invoice amount stay whole `int64` cents, and the charge is rounded to a whole cent once. The cycle close also prices multi-dimension meters through their pricing rules, the same path the preview uses. Status: active; showing a sub-cent unit price on invoice lines came later ([ADR-054](054-effective-unit-price-decimal-display.md)).
 
 ## Context
 
@@ -57,7 +57,8 @@ threshold scan used the pricing-rules path — `preview.go` even *claimed*
 
 ## Decision
 
-1. **Per-unit rate fields become arbitrary-precision decimals.**
+1. **Per-unit rate fields become arbitrary-precision decimals.** (Limited
+   since 2026-10-24: see the amendment of that date.)
    `RatingTier.UnitAmountCents`, `RatingRuleVersion.FlatAmountCents`, and
    `RatingRuleVersion.OverageUnitAmountCents` (and their mirrors on
    `CustomerPriceOverride`, `RecipeRatingRule`, and the create-inputs)
@@ -116,3 +117,7 @@ threshold scan used the pricing-rules path — `preview.go` even *claimed*
 ## Amendment 2026-10-22
 
 The block usage cap is cut (#973), so decision 3's cap-scaling of rule buckets, and the preview's warning about it, no longer exist.
+
+## Amendment 2026-10-24
+
+Rates are no longer arbitrary precision ([#1378](https://github.com/getvelox/velox/pull/1378)). Every rate field above, on rating rules, price overrides and recipes, is checked when it is written: 0 or more, under 10^18 cents, and at most 12 decimal places (Stripe's `unit_amount_decimal` precision). Through the API, a rate outside these limits is a 422 naming the field. The check is on write only, with no migration: a rate stored before it is kept, returned and billed as stored. Publishing a new version of such a rule needs rates inside the limits. A rate under 10^18 cents prices one unit inside int64 cents. What a rate bills is checked separately: a line (rate × quantity), an invoice's sum of lines, or its total with tax that does not fit int64 cents fails the invoice with an overflow error instead of wrapping.

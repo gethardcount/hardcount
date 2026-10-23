@@ -15,7 +15,7 @@ export type CreatePriceOverrideBody = {
   /** Any version of the rule to override. */
   rating_rule_version_id: string;
   mode: CreatePriceOverrideBodyMode;
-  /** Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more. */
+  /** Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
   flat_amount_cents?: string;
   /**
      * Used when `mode` is `graduated`. Each `up_to` must be larger
@@ -27,7 +27,7 @@ export type CreatePriceOverrideBody = {
   package_size?: number;
   /** Price of one package in cents. Used when `mode` is `package`. */
   package_amount_cents?: number;
-  /** Package-mode per-unit overage rate in cents, as a decimal string. */
+  /** Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`. */
   overage_unit_amount_cents?: string;
   reason?: string;
 };

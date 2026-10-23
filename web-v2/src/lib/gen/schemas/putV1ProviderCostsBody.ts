@@ -15,7 +15,7 @@ export type PutV1ProviderCostsBody = {
   model: string;
   /** ADR-044 role — input / output / cache_read. */
   token_type: string;
-  /** Decimal dollars per token (e.g. "0.000003"). */
+  /** Dollars per token, as a decimal string (e.g. "0.000003"). 0 or more, under 10^8, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. */
   cost_per_token: string;
   /**
      * Rates are in USD only, the currency LiteLLM reports cost

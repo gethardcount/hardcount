@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/money"
 )
 
@@ -87,51 +88,88 @@ func (m *ManualProvider) Calculate(_ context.Context, req Request) (*Result, err
 		return &Result{Provider: "manual", Lines: lines}, nil
 	}
 
+	// Amounts are int64 cents. Every product below (amount × rate in ppm,
+	// discount × amount) is worked out in 128 bits by money.MulDiv*, so a
+	// tax is exact for any line amount. The rate is 0 to 100% (tenant
+	// settings), so a tax or net never exceeds its base; only the lines' sum
+	// can be too large, and that is an error, never a wrapped number.
+	if m.ratePPM > 1_000_000 {
+		return nil, fmt.Errorf("tax: manual rate %g%% is over 100%%", m.rate)
+	}
 	subtotal := int64(0)
 	for _, li := range req.LineItems {
-		subtotal += li.AmountCents
+		var err error
+		if subtotal, err = domain.AddCents(subtotal, li.AmountCents); err != nil {
+			return nil, fmt.Errorf("tax: the line amounts sum past int64 cents: %w", err)
+		}
 	}
 
 	if req.TaxInclusive {
-		return m.calculateInclusive(req, lines, subtotal), nil
+		return m.calculateInclusive(req, lines, subtotal)
 	}
-	return m.calculateExclusive(req, lines, subtotal), nil
+	return m.calculateExclusive(req, lines, subtotal)
+}
+
+// errTaxOverflow is a product the 128-bit math cannot fit back into int64.
+// The checks above make it unreachable; it is returned, not ignored, so a
+// change that breaks them fails loudly.
+var errTaxOverflow = fmt.Errorf("tax: an amount does not fit int64 cents: %w", domain.ErrAmountOverflow)
+
+// discountShares spreads discount over the lines in proportion to their
+// amounts (the last line takes the remainder) and returns each line's base
+// after its share.
+func discountShares(lineItems []RequestLine, discount, subtotal int64) ([]int64, error) {
+	bases := make([]int64, len(lineItems))
+	var discountApplied int64
+	for i, li := range lineItems {
+		var linePortion int64
+		if i == len(lineItems)-1 {
+			linePortion = discount - discountApplied
+		} else {
+			// discount <= subtotal, so the share is at most the line amount.
+			p, ok := money.MulDivRoundHalfToEven(discount, li.AmountCents, subtotal)
+			if !ok {
+				return nil, errTaxOverflow
+			}
+			linePortion = p
+			discountApplied += linePortion
+		}
+		bases[i] = max(li.AmountCents-linePortion, 0)
+	}
+	return bases, nil
 }
 
 // calculateExclusive: line amounts are net; tax is added on top.
 // Discount is distributed proportionally across lines before rate is applied.
-func (m *ManualProvider) calculateExclusive(req Request, lines []ResultLine, subtotal int64) *Result {
+func (m *ManualProvider) calculateExclusive(req Request, lines []ResultLine, subtotal int64) (*Result, error) {
 	discount := min(max(req.DiscountCents, 0), subtotal)
 	taxableBase := subtotal - discount
 	if taxableBase <= 0 {
 		for i, li := range req.LineItems {
 			lines[i] = ResultLine{Ref: li.Ref, NetAmountCents: li.AmountCents}
 		}
-		return &Result{Provider: "manual", Lines: lines}
+		return &Result{Provider: "manual", Lines: lines}, nil
 	}
 
 	// Integer math via parts-per-million (1 ppm = 0.0001%). 8.875%
 	// = 88750 ppm; tax = base × ppm / 1_000_000. Preserves 4-decimal
 	// precision without float drift.
-	totalTax := money.RoundHalfToEven(taxableBase*m.ratePPM, 1_000_000)
+	totalTax, ok := money.MulDivRoundHalfToEven(taxableBase, m.ratePPM, 1_000_000)
+	if !ok {
+		return nil, errTaxOverflow
+	}
 
 	// Per-line taxable base after proportional discount. The exact (unrounded)
 	// per-line tax is base × ppm / 1_000_000; we hand those exact shares to
 	// largest-remainder apportionment so the rounded line taxes sum to totalTax.
-	nums := make([]int64, len(req.LineItems))
-	var discountApplied int64
-	for i, li := range req.LineItems {
-		var linePortion int64
-		if i == len(req.LineItems)-1 {
-			linePortion = discount - discountApplied
-		} else {
-			linePortion = money.RoundHalfToEven(discount*li.AmountCents, subtotal)
-			discountApplied += linePortion
-		}
-		lineBase := max(li.AmountCents-linePortion, 0)
-		nums[i] = lineBase * m.ratePPM
+	bases, err := discountShares(req.LineItems, discount, subtotal)
+	if err != nil {
+		return nil, err
 	}
-	lineTaxes := distributeLargestRemainder(totalTax, nums, 1_000_000)
+	lineTaxes, ok := distributeLargestRemainder(totalTax, bases, m.ratePPM, 1_000_000)
+	if !ok {
+		return nil, errTaxOverflow
+	}
 
 	for i, li := range req.LineItems {
 		lines[i] = ResultLine{
@@ -143,7 +181,7 @@ func (m *ManualProvider) calculateExclusive(req Request, lines []ResultLine, sub
 		}
 	}
 
-	return m.wrap(totalTax, lines)
+	return m.wrap(totalTax, lines), nil
 }
 
 // calculateInclusive: line amounts are gross (tax-inclusive). Net and tax
@@ -153,44 +191,45 @@ func (m *ManualProvider) calculateExclusive(req Request, lines []ResultLine, sub
 // Discount is applied in GROSS terms (matches the semantics tenants expect
 // from inclusive pricing: "10% off sticker"). Net and tax are derived from
 // the post-discount gross base.
-func (m *ManualProvider) calculateInclusive(req Request, lines []ResultLine, subtotal int64) *Result {
+func (m *ManualProvider) calculateInclusive(req Request, lines []ResultLine, subtotal int64) (*Result, error) {
 	discount := min(max(req.DiscountCents, 0), subtotal)
 	taxableGross := subtotal - discount
 	if taxableGross <= 0 {
 		for i, li := range req.LineItems {
 			lines[i] = ResultLine{Ref: li.Ref, NetAmountCents: li.AmountCents}
 		}
-		return &Result{Provider: "manual", Lines: lines}
+		return &Result{Provider: "manual", Lines: lines}, nil
 	}
 
 	// Inclusive math: gross = net × (1 + rate). With rate in ppm
 	// scaled to 1_000_000-base, denom = 1_000_000 + ratePPM.
 	denom := int64(1_000_000 + m.ratePPM)
-	totalTax := taxableGross - money.RoundHalfToEven(taxableGross*1_000_000, denom)
+	taxableNet, ok := money.MulDivRoundHalfToEven(taxableGross, 1_000_000, denom)
+	if !ok {
+		return nil, errTaxOverflow
+	}
+	totalTax := taxableGross - taxableNet
 
 	// Exact per-line inclusive tax is grossBase × ratePPM / denom; feed those
 	// exact shares to largest-remainder apportionment so rounded line taxes sum
 	// to totalTax.
-	nums := make([]int64, len(req.LineItems))
-	var discountApplied int64
-	for i, li := range req.LineItems {
-		var linePortion int64
-		if i == len(req.LineItems)-1 {
-			linePortion = discount - discountApplied
-		} else {
-			linePortion = money.RoundHalfToEven(discount*li.AmountCents, subtotal)
-			discountApplied += linePortion
-		}
-		lineGrossBase := max(li.AmountCents-linePortion, 0)
-		nums[i] = lineGrossBase * m.ratePPM
+	bases, err := discountShares(req.LineItems, discount, subtotal)
+	if err != nil {
+		return nil, err
 	}
-	lineTaxes := distributeLargestRemainder(totalTax, nums, denom)
+	lineTaxes, ok := distributeLargestRemainder(totalTax, bases, m.ratePPM, denom)
+	if !ok {
+		return nil, errTaxOverflow
+	}
 
 	for i, li := range req.LineItems {
 		// Full-line (undiscounted) net for NetAmountCents so the engine's
 		// stored subtotal is undiscounted-net and DiscountCents is net-units,
 		// matching what the invoice shows.
-		lineNetUndisc := money.RoundHalfToEven(li.AmountCents*1_000_000, denom)
+		lineNetUndisc, ok := money.MulDivRoundHalfToEven(li.AmountCents, 1_000_000, denom)
+		if !ok {
+			return nil, errTaxOverflow
+		}
 
 		lines[i] = ResultLine{
 			Ref:            li.Ref,
@@ -201,7 +240,7 @@ func (m *ManualProvider) calculateInclusive(req Request, lines []ResultLine, sub
 		}
 	}
 
-	return m.wrap(totalTax, lines)
+	return m.wrap(totalTax, lines), nil
 }
 
 func (m *ManualProvider) wrap(totalTax int64, lines []ResultLine) *Result {
@@ -219,11 +258,12 @@ func (m *ManualProvider) wrap(totalTax int64, lines []ResultLine) *Result {
 	}
 }
 
-// distributeLargestRemainder allocates total across len(nums) lines using the
+// distributeLargestRemainder allocates total across len(bases) lines using the
 // largest-remainder (a.k.a. minimum-distortion) method. Each line's exact share
-// is nums[i]/den; it receives floor(nums[i]/den), then the leftover cents
-// (total − Σfloor) are handed out one at a time to the lines with the largest
-// fractional remainders, ties broken by lowest index.
+// is bases[i]×mul/den (worked out in 128 bits); it receives the share's floor,
+// then the leftover cents (total − Σfloor) are handed out one at a time to the
+// lines with the largest fractional remainders, ties broken by lowest index.
+// ok is false when a share does not fit int64.
 //
 // This is the residual-distribution rule every reference indirect-tax engine
 // converges on (Sovos: "split among the lines that have the highest remainder…
@@ -232,28 +272,29 @@ func (m *ManualProvider) wrap(totalTax int64, lines []ResultLine) *Result {
 // while never docking a larger-base line below a smaller-base one — the
 // inversion the previous "dump the residual on the positionally-last line"
 // shortcut produced when the residual was negative.
-func distributeLargestRemainder(total int64, nums []int64, den int64) []int64 {
-	out := make([]int64, len(nums))
-	if len(nums) == 0 || den <= 0 {
-		return out
+func distributeLargestRemainder(total int64, bases []int64, mul, den int64) ([]int64, bool) {
+	out := make([]int64, len(bases))
+	if len(bases) == 0 || den <= 0 {
+		return out, true
 	}
 
 	type rem struct {
 		idx       int
 		remainder int64
 	}
-	rems := make([]rem, len(nums))
+	rems := make([]rem, len(bases))
 	var allocated int64
-	for i, n := range nums {
-		if n < 0 {
-			n = 0
+	for i, b := range bases {
+		q, r, ok := money.MulDivRem(max(b, 0), max(mul, 0), den)
+		if !ok {
+			return nil, false
 		}
-		out[i] = n / den
-		rems[i] = rem{idx: i, remainder: n % den}
+		out[i] = q
+		rems[i] = rem{idx: i, remainder: r}
 		allocated += out[i]
 	}
 
-	// leftover is mathematically in [0, len(nums)] (Σfloor ≤ floor(Σ) ≤ total);
+	// leftover is mathematically in [0, len(bases)] (Σfloor ≤ floor(Σ) ≤ total);
 	// the clawback branch is defensive against an upstream total that doesn't
 	// match the supplied shares.
 	leftover := total - allocated
@@ -279,7 +320,7 @@ func distributeLargestRemainder(total int64, nums []int64, den int64) []int64 {
 		}
 	}
 
-	return out
+	return out, true
 }
 
 func (*ManualProvider) Commit(_ context.Context, _, _ string) (string, error) { return "", nil }

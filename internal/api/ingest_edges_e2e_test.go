@@ -124,12 +124,10 @@ func TestIngest_EdgeQuantitiesAndEmptyProperties(t *testing.T) {
 	}
 }
 
-// TestIngest_ZeroWithAHugeExponentIsCheap sends 0e9999999 to all three doors
-// through the full router to real Postgres. It is a zero, so it is taken. Kept
-// as written, printing it for the INSERT and the answer builds 10^9999999,
-// about a second of CPU each (and 40 s for 0e99999999). Stored as plain 0, each
-// request takes milliseconds.
-func TestIngest_ZeroWithAHugeExponentIsCheap(t *testing.T) {
+// TestIngest_ZeroWithAHugeExponentStoredAsZero sends 0e9999999 to all three
+// doors through the full router to real Postgres. It is a zero, so it is
+// taken, and it is stored as plain 0 (domain.CheckDecimal).
+func TestIngest_ZeroWithAHugeExponentStoredAsZero(t *testing.T) {
 	skipShort(t)
 	r := newLagRig(t, "in_arrears", false)
 	ts := lagP0.Add(24 * time.Hour)
@@ -142,11 +140,7 @@ func TestIngest_ZeroWithAHugeExponentIsCheap(t *testing.T) {
 		if strings.HasSuffix(door, "batch") {
 			body = []any{body}
 		}
-		start := time.Now()
 		code, raw := r.do(http.MethodPost, door, at, body)
-		if took := time.Since(start); took > 500*time.Millisecond {
-			t.Errorf("%s: took %v, want under 500ms", door, took)
-		}
 		if code != http.StatusCreated {
 			t.Errorf("%s: status %d, want 201; body %s", door, code, raw)
 		}

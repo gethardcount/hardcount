@@ -52,7 +52,9 @@ ledger, and report per-customer margin in-app:
    Operator-auth only; COGS never renders on the customer-facing cost
    dashboard. `unresolved_events` counts costable-but-unmatched events
    only ('not_applicable' rows are excluded so non-token meters can't
-   drown the signal); cache-write exclusion disclosed.
+   drown the signal); cache-write exclusion disclosed. *[Amended
+   2026-10-24, #1378] An event whose cost does not fit BIGINT micros is
+   stored and billed with no cost, and counts as unresolved too.*
 6. **Sourcing: operator CRUD only** (`/v1/provider-costs` + dashboard
    page). No import in phase 1 (trigger: first >10-model operator; file
    upload only, never live-URL fetch). Deleting a rate never rewrites

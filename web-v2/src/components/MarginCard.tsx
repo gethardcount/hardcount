@@ -249,8 +249,8 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                 {rep.unresolved_events === 1
                   ? '1 usage event has no provider cost'
                   : `${rep.unresolved_events.toLocaleString()} usage events have no provider cost`}
-                : no rate in Provider costs matched it when it arrived. Events that arrive
-                after you add a matching rate are costed.
+                : no rate in Provider costs matched it when it arrived, or its cost was too
+                large to record. Events that arrive after you add a matching rate are costed.
               </p>
             )}
             {empty && latestAt ? (

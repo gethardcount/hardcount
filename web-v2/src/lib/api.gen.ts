@@ -2079,16 +2079,16 @@ export interface paths {
                         /** @enum {string} */
                         mode: "flat" | "graduated" | "package";
                         currency: string;
-                        /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). */
+                        /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
                         flat_amount_cents?: string;
                         graduated_tiers?: {
                             up_to?: number;
-                            /** @description Per-unit rate in cents, as a decimal string. */
+                            /** @description Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0). */
                             unit_amount_cents?: string;
                         }[];
                         package_size?: number;
                         package_amount_cents?: number;
-                        /** @description Package-mode per-unit overage rate in cents, as a decimal string. Fixed fees (package_amount_cents) stay integer cents. */
+                        /** @description Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`. Fixed fees (package_amount_cents) stay integer cents. */
                         overage_unit_amount_cents?: string;
                     };
                 };
@@ -2948,10 +2948,10 @@ export interface paths {
                         /**
                          * @description A JSON number (`5`) or a string holding one (`"5.5"`,
                          *     for exact decimals). At most 12 decimal places; trailing
-                         *     zeros do not count. Its size must be under 10^26. A
-                         *     negative value is a correction. A missing quantity, or
-                         *     any other value, is refused with 422 and `param:
-                         *     quantity`.
+                         *     zeros do not count. Its size must be under 10^26, and it
+                         *     is at most 100 characters. A negative value is a
+                         *     correction. A missing quantity, or any other value, is
+                         *     refused with 422 and `param: quantity`.
                          */
                         quantity: number | string;
                         /** @description Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */
@@ -3080,8 +3080,9 @@ export interface paths {
                          * @description A JSON number (`5`) or a string holding one (`"5.5"`,
                          *     for exact decimals). At most 12 decimal places;
                          *     trailing zeros do not count. Its size must be under
-                         *     10^26. A negative value is a correction. A missing
-                         *     quantity, or any other value, fails validation.
+                         *     10^26, and it is at most 100 characters. A negative
+                         *     value is a correction. A missing quantity, or any
+                         *     other value, fails validation.
                          */
                         quantity: number | string;
                         dimensions?: {
@@ -5124,7 +5125,7 @@ export interface paths {
                         model: string;
                         /** @description ADR-044 role — input / output / cache_read. */
                         token_type: string;
-                        /** @description Decimal dollars per token (e.g. "0.000003"). */
+                        /** @description Dollars per token, as a decimal string (e.g. "0.000003"). 0 or more, under 10^8, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. */
                         cost_per_token: string;
                         /**
                          * @description Rates are in USD only, the currency LiteLLM reports cost
@@ -5146,7 +5147,7 @@ export interface paths {
                         "application/json": components["schemas"]["ProviderCostRate"];
                     };
                 };
-                /** @description `validation_error`: a required field is missing, `cost_per_token` is negative, or `currency` is not USD (param names the field). */
+                /** @description `validation_error`: a required field is missing, `cost_per_token` is not a number or is outside its limits, or `currency` is not USD (param names the field). */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -7080,7 +7081,7 @@ export interface components {
             /** @enum {string} */
             mode?: "flat" | "graduated" | "package";
             currency?: string;
-            /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Arbitrary precision; invoice line amounts and totals still round to whole cents. */
+            /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents. */
             flat_amount_cents?: string;
             graduated_tiers?: {
                 up_to?: number;
@@ -7906,7 +7907,7 @@ export interface components {
             unattributed_revenue_cents: number;
             /**
              * Format: int64
-             * @description Token events with costable dims but no matching rate — add a rate to cost new events.
+             * @description Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `cost_per_token`, was too large to record (about $9.2 trillion or more, either sign).
              */
             unresolved_events: number;
             /**
@@ -12774,7 +12775,7 @@ export interface operations {
                     item_thresholds?: {
                         /** @description An item of this subscription. Each item can appear once. */
                         subscription_item_id: string;
-                        /** @description Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14"). */
+                        /** @description Invoice early when the item's usage in the period reaches this quantity. A decimal string (e.g. "1000" or "3.14"): more than 0, under 10^26, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. */
                         usage_gte: string;
                     }[];
                 };
@@ -12821,8 +12822,8 @@ export interface operations {
              * @description Neither `amount_gte` nor `item_thresholds` is set;
              *     `amount_gte` is negative; an item id is missing, repeated, or
              *     not on this subscription; a `usage_gte` is not a number or is
-             *     negative; or the subscription's plans use more than one
-             *     currency.
+             *     outside its limits (`param` is `item_thresholds[i].usage_gte`);
+             *     or the subscription's plans use more than one currency.
              *     Also: the body has an unknown field (`param` names it; the body must use only the fields listed here).
              */
             422: {
@@ -13206,10 +13207,10 @@ export interface operations {
                     /**
                      * @description A JSON number (`5`) or a string holding one (`"5.5"`,
                      *     for exact decimals). At most 12 decimal places; trailing
-                     *     zeros do not count. Its size must be under 10^26. A
-                     *     negative value is a correction. A missing quantity, or
-                     *     any other value, is refused with 422 and `param:
-                     *     quantity`.
+                     *     zeros do not count. Its size must be under 10^26, and it
+                     *     is at most 100 characters. A negative value is a
+                     *     correction. A missing quantity, or any other value, is
+                     *     refused with 422 and `param: quantity`.
                      */
                     quantity: number | string;
                     /** @description Scalar dimension values used to pick the pricing rule. */
@@ -13278,7 +13279,8 @@ export interface operations {
              *     or `timestamp`; unknown customer or meter; a future or badly
              *     formatted `timestamp`; more than 16 dimensions or a non-scalar
              *     dimension value; a missing or malformed `quantity`, one with
-             *     more than 12 decimal places, or one of 10^26 or more; a
+             *     more than 12 decimal places, one of 10^26 or more, or one
+             *     longer than 100 characters; a
              *     `properties` field with a key (it was renamed `dimensions`).
              */
             422: {
@@ -15694,7 +15696,7 @@ export interface operations {
                     rating_rule_version_id: string;
                     /** @enum {string} */
                     mode: "flat" | "graduated" | "package";
-                    /** @description Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more. */
+                    /** @description Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
                     flat_amount_cents?: string;
                     /**
                      * @description Used when `mode` is `graduated`. Each `up_to` must be larger
@@ -15704,7 +15706,7 @@ export interface operations {
                     graduated_tiers?: {
                         /** Format: int64 */
                         up_to?: number;
-                        /** @description Per-unit rate in cents, as a decimal string. */
+                        /** @description Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0). */
                         unit_amount_cents?: string;
                     }[];
                     /**
@@ -15717,7 +15719,7 @@ export interface operations {
                      * @description Price of one package in cents. Used when `mode` is `package`.
                      */
                     package_amount_cents?: number;
-                    /** @description Package-mode per-unit overage rate in cents, as a decimal string. */
+                    /** @description Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`. */
                     overage_unit_amount_cents?: string;
                     reason?: string;
                 };
@@ -15762,9 +15764,11 @@ export interface operations {
             };
             /**
              * @description `validation_error`: a missing field, an unknown rating rule, a
-             *     price shape that cannot be billed (negative rate, bad tier table,
-             *     package size of 0), or an unknown field at any depth (`param`
-             *     names it; the body must use only the fields listed here).
+             *     rate that is not a number or is outside its limits, a price
+             *     shape that cannot be billed (bad
+             *     tier table, package size of 0), or an unknown field at any depth
+             *     (`param` names it; the body must use only the fields listed
+             *     here).
              */
             422: {
                 headers: {
