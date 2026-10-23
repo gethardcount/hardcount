@@ -17,6 +17,9 @@ func (r *recordingStopper) StopCollection(_ context.Context, _ string, inv domai
 	r.stopped = append(r.stopped, inv.ID)
 }
 
+// ExpireCheckoutSessions is a write-off's leg; these tests void.
+func (*recordingStopper) ExpireCheckoutSessions(context.Context, string, domain.Invoice) {}
+
 // recordingDunningResolver is the dunning leg of a void, recorded.
 type recordingDunningResolver struct {
 	invoices    []string

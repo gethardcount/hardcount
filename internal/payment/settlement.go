@@ -532,7 +532,7 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 // reuse path, ExpiresAt bounds the Stripe-side window, and the ADR-068
 // payment-received-on-voided-invoice anomaly remains the last backstop.
 func (s *Stripe) StopCollection(ctx context.Context, tenantID string, inv domain.Invoice) {
-	s.expireCheckoutSessionsBestEffort(ctx, tenantID, inv)
+	s.ExpireCheckoutSessions(ctx, tenantID, inv)
 	if inv.StripePaymentIntentID == "" {
 		return
 	}
@@ -544,6 +544,19 @@ func (s *Stripe) StopCollection(ctx context.Context, tenantID string, inv domain
 		return
 	}
 	slog.InfoContext(ctx, "stop collection: payment intent canceled", "invoice_id", inv.ID)
+}
+
+// ExpireCheckoutSessions is StopCollection's first leg on its own, for a
+// write-off: a written-off invoice must not stay payable on a Checkout page
+// the customer still has open (ADR-110 closes self-service payment on one).
+// The write-off's transaction already closed Velox's claims; this expires the
+// sessions at Stripe. Best-effort, as for a void: ExpiresAt (at most an hour)
+// bounds a session whose expire call fails, and a payment that still lands
+// settles the written-off invoice once (uncollectible -> paid). It does not
+// cancel the PaymentIntent: a write-off records that collection failed, and
+// money that still arrives is recorded (ADR-113).
+func (s *Stripe) ExpireCheckoutSessions(ctx context.Context, tenantID string, inv domain.Invoice) {
+	s.expireCheckoutSessionsBestEffort(ctx, tenantID, inv)
 }
 
 // expireCheckoutSessionsBestEffort expires, at Stripe, every session for the

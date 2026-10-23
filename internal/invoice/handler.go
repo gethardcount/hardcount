@@ -111,13 +111,19 @@ type Collector interface {
 	CollectInvoice(ctx context.Context, tenantID, invoiceID string, at *time.Time)
 }
 
-// PaymentCanceler stops an invoice from being payable at Stripe when it is
-// voided: expire any live Checkout session, then cancel the PaymentIntent if
-// Stripe allows it (it refuses for Checkout-owned PIs — the session expiry is
-// what stops those). Every void runs it from Service.AfterVoid. Satisfied by
+// PaymentCanceler stops an invoice from being payable at Stripe. Satisfied by
 // *payment.Stripe.
+//
+// StopCollection is a void's: expire any live Checkout session, then cancel
+// the PaymentIntent if Stripe allows it (it refuses for Checkout-owned PIs —
+// the session expiry is what stops those). Every void runs it from
+// Service.AfterVoid.
+//
+// ExpireCheckoutSessions is a write-off's: the same session expiry, without
+// the PaymentIntent cancel. Service.MarkUncollectible runs it.
 type PaymentCanceler interface {
 	StopCollection(ctx context.Context, tenantID string, inv domain.Invoice)
+	ExpireCheckoutSessions(ctx context.Context, tenantID string, inv domain.Invoice)
 }
 
 // BillingProfileGetter reads customer billing profile for PDF.

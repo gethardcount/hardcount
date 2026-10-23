@@ -3874,6 +3874,14 @@ export interface paths {
          *     A written-off spend-threshold invoice keeps its charges billed: no
          *     later invoice bills them again unless the invoice is then voided.
          *     `POST /v1/invoices/{id}/void` says when a void gives them back.
+         *
+         *     Closes any Stripe Checkout page still open for the invoice.
+         *
+         *     A written-off invoice still counts as unpaid for its subscription.
+         *     A change that would charge more for the current period is refused
+         *     with `unpaid_invoice_blocks_change` until the invoice is paid or
+         *     voided. A cancel, downgrade, removed item or plan swap lowers what
+         *     it asks for by the unused time.
          */
         post: operations["markInvoiceUncollectible"];
         delete?: never;
@@ -13298,7 +13306,8 @@ export interface operations {
              *     another live subscription of the customer; or the plan's
              *     currency differs from the subscription's. Code
              *     `unpaid_invoice_blocks_change`: the invoice for the current
-             *     period is unpaid; settle or void it first. Code
+             *     period is unpaid (a written-off invoice is unpaid); settle or
+             *     void it first. Code
              *     `unbilled_period`: a billing period ended and could not be
              *     invoiced; retry billing first.
              */
@@ -13439,8 +13448,8 @@ export interface operations {
              *     plan is archived, its meters overlap another live subscription
              *     of the customer, or its currency differs. Code
              *     `unpaid_invoice_blocks_change`: an increase would charge against
-             *     an unpaid invoice for the current period; settle or void it
-             *     first. Code `subscription_period_moved`: the billing period
+             *     an unpaid invoice for the current period (a written-off invoice
+             *     is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
              *     changed while the request ran; read the subscription again and
              *     retry. Code `item_changed`: a plan change found the
              *     subscription's items changed by another request that finished

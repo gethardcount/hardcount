@@ -648,10 +648,10 @@ type InvoiceWriter interface {
 	// caller right after the insert), so it commits atomically with the swap.
 	CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
 	GetInvoice(ctx context.Context, tenantID, id string) (domain.Invoice, error)
-	// FindFundingInvoicesForPeriod returns EVERY non-voided/non-uncollectible
-	// invoice that prepaid the period — the day-1 base invoice AND any
-	// mid-period upgrade / quantity-increase proration invoice issued against
-	// the same cycle. A period-wide unused credit (cancel / cross-interval
+	// FindFundingInvoicesForPeriod returns EVERY non-voided invoice that
+	// prepaid the period (a written-off one counts: billed but unpaid) — the
+	// day-1 base invoice AND any mid-period upgrade / quantity-increase
+	// proration invoice issued against the same cycle. A period-wide unused credit (cancel / cross-interval
 	// plan-swap / downgrade clawback) is sized off the post-change base, which
 	// can exceed the single base invoice's total; fanning the credit across the
 	// full funding set lets each piece stay within its own invoice's

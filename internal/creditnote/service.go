@@ -399,14 +399,20 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	if inv.Status == domain.InvoiceVoided {
 		return domain.CreditNote{}, errs.InvalidState("cannot create credit notes for voided invoices")
 	}
-	// A DRAFT source is allowed for one case only: the engine's issue_pending
-	// relief note for a cancel or plan swap whose funding invoice is still a
-	// draft (pause_collection keep_as_draft). Issue holds such a note until the
-	// invoice is finalized, and voids it if the draft is voided instead
-	// (ADR-118). An operator credit note still needs an issued invoice — a
-	// draft is edited, not credited.
+	// Two more sources are allowed, for the engine's issue_pending relief
+	// note only (a cancel, plan swap or decrease crediting unused time):
+	//   - a DRAFT funding invoice (pause_collection keep_as_draft). Issue
+	//     holds the note until the invoice is finalized, and voids it if the
+	//     draft is voided instead (ADR-118). An operator credit note still
+	//     needs an issued invoice — a draft is edited, not credited.
+	//   - a WRITTEN-OFF (uncollectible) funding invoice. It is billed but
+	//     unpaid, so the note lowers what it asks for, as on an unpaid one, and
+	//     a later payment pays only the time used (ADR-050 amendment
+	//     2026-10-23). An operator credit note on a written-off invoice is
+	//     still refused here.
 	reliefOnDraft := input.IssuePending && inv.Status == domain.InvoiceDraft
-	if inv.Status != domain.InvoiceFinalized && inv.Status != domain.InvoicePaid && !reliefOnDraft {
+	reliefOnWrittenOff := input.IssuePending && inv.Status == domain.InvoiceUncollectible
+	if inv.Status != domain.InvoiceFinalized && inv.Status != domain.InvoicePaid && !reliefOnDraft && !reliefOnWrittenOff {
 		return domain.CreditNote{}, errs.InvalidState("can only create credit notes for finalized or paid invoices")
 	}
 	// ADR-078 D4: commit funding invoices are cash instruments — no credit
@@ -517,13 +523,14 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 			}
 			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("credit note amount exceeds remaining creditable amount (%.2f)", float64(remaining)/100))
 		}
-		// For unpaid invoices, a credit note cannot exceed what the invoice
-		// can still be relieved of: the amount due plus the customer credits
-		// applied to it (Issue returns the credits a note displaces).
+		// For unpaid invoices (a written-off one is unpaid), a credit note
+		// cannot exceed what the invoice can still be relieved of: the amount
+		// due plus the customer credits applied to it (Issue returns the
+		// credits a note displaces).
 		// This is an early refusal, not a guarantee: a draft reserves nothing,
 		// and both figures can move before the draft is issued. Issue() is
 		// where the note is fitted to the invoice as it then stands.
-		if inv.Status == domain.InvoiceFinalized && subtotal > inv.UnpaidRelievableCents() {
+		if (inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible) && subtotal > inv.UnpaidRelievableCents() {
 			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf(
 				"credit note amount (%.2f) exceeds what this invoice can still be credited (%.2f due plus %.2f of applied credits)",
 				float64(subtotal)/100, float64(inv.AmountDueCents)/100, float64(inv.CreditsAppliedCents)/100))
@@ -1479,6 +1486,10 @@ func (s *Service) Stats(ctx context.Context, tenantID string) (Stats, error) {
 // auto-issue clawback drafts (issue_pending) that ended up voided, so their
 // Issue() never ran and never reduced amount_due.
 //
+// Since 2026-10-23 a write-off no longer voids such a draft (it issues on the
+// written-off invoice, ADR-050 amendment), so on a written-off invoice this is
+// a draft an operator voided before it issued.
+//
 // Consumed by the bad-debt recovery gate. A written-off invoice carrying one of
 // these has an amount_due that is stale-HIGH — charging it would over-collect
 // by exactly this sum. Relief that was properly issued has already moved
@@ -1763,10 +1774,17 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 }
 
 // issueHeld reports whether a draft credit note cannot issue against its
-// source invoice as it stands: the source was annulled, its charge is still in
+// source invoice as it stands: the source was voided, its charge is still in
 // flight, or it is still a draft. holdIssue carries out the matching outcome.
+//
+// A written-off (uncollectible) source is not held: it is billed but unpaid,
+// so the note issues on the unpaid branch and lowers what it asks for (ADR-050
+// amendment 2026-10-23). A write-off reverses no tax (ADR-111), so the note's
+// own tax reversal is the first for its slice. Until 2026-10-23 the note was
+// voided here as an orphan, and a customer who later paid the written-off
+// invoice paid for the time the note was for.
 func issueHeld(inv domain.Invoice) bool {
-	return inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible ||
+	return inv.Status == domain.InvoiceVoided ||
 		inv.PaymentInFlight() || inv.Status == domain.InvoiceDraft
 }
 
@@ -1774,14 +1792,14 @@ func issueHeld(inv domain.Invoice) bool {
 // an orphaned draft, or leave the draft for the reconciler to re-drive. It runs
 // outside the coordinator tx.
 func (s *Service) holdIssue(ctx context.Context, tenantID string, cn domain.CreditNote, inv domain.Invoice) (domain.CreditNote, error) {
-	// Orphan guard. The source was annulled (voided) or written off
-	// (uncollectible) after this draft was created — Void already reversed the
-	// invoice's tax and zeroed its receivable, so there is nothing left to
-	// relieve. Issuing now would (unpaid branch) re-reverse the same tax
-	// transaction (double under-remit) against a terminal invoice. Void the
-	// draft so it leaves the reconciler scan and never applies. Pure status
-	// flip on a never-applied draft — no money movement, no tax call.
-	if inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible {
+	// Orphan guard. The source was voided after this draft was created — Void
+	// already reversed the invoice's tax and zeroed its receivable, so there
+	// is nothing left to relieve. Issuing now would (unpaid branch) re-reverse
+	// the same tax transaction (double under-remit) against a terminal
+	// invoice. Void the draft so it leaves the reconciler scan and never
+	// applies. Pure status flip on a never-applied draft — no money movement,
+	// no tax call.
+	if inv.Status == domain.InvoiceVoided {
 		// The draft→voided flip is a REAL committed mutation on a money
 		// document — it carries its evidence in the same tx (ADR-090;
 		// previously this path had zero audit rows once the handler's

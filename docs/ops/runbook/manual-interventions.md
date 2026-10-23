@@ -49,6 +49,19 @@ Do not mark an invoice paid with SQL. It is refused while a charge on the
 invoice is still being confirmed with Stripe: see
 [A charge's result is unclear](unclear-charge.md).
 
+## A subscription change is refused with `unpaid_invoice_blocks_change`
+
+An upgrade, added item or seat increase would charge more for a period
+whose invoice is unpaid. A written-off invoice counts as unpaid. Do one of:
+
+- record the payment, if the customer paid outside Stripe (above);
+- void the invoice, if it should not be owed. A void hands back the credits
+  applied to it and reverses its tax.
+
+Then make the change again. A cancel, downgrade or removed item is never
+refused for this: it lowers what the unpaid or written-off invoice asks
+for by the unused time.
+
 ## A customer has no usable payment method on file
 
 Saved cards live in the
