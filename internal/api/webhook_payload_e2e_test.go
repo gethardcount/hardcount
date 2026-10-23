@@ -285,7 +285,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	if dup.Data["incoming_payment_intent_id"] != "pi_wp_b2" || dup.Data["captured_cents"] != float64(4500) {
 		t.Errorf("payment.duplicate_charge extras = %v / %v, want pi_wp_b2 / 4500", dup.Data["incoming_payment_intent_id"], dup.Data["captured_cents"])
 	}
-	// The invoice names the charge that paid it first (docs/webhooks.md).
+	// The invoice names the other charge, the one it recorded (docs/webhooks.md).
 	if pi := flowStr(dup.Data["invoice"].(map[string]any), "stripe_payment_intent_id"); pi != "pi_wp_b" {
 		t.Errorf("payment.duplicate_charge invoice.stripe_payment_intent_id = %q, want pi_wp_b", pi)
 	}

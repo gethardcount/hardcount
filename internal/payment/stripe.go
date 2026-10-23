@@ -416,9 +416,10 @@ func (s *Stripe) SetBreaker(b *breaker.Breaker) {
 // paymentmethods.Service can keep its richer AttachFromSetupIntent
 // method — returning (PaymentMethod, error) — for tests and direct
 // callers, while this package imports nothing from paymentmethods. It
-// returns the card as the API shows it, which payment_method.* carries.
+// returns the card as the API shows it, which payment_method.* carries, or
+// nil when the card was already removed and stays removed (a late event).
 type PaymentMethodAttacher interface {
-	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (domain.PaymentMethodView, error)
+	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (*domain.PaymentMethodView, error)
 }
 
 // SetPaymentMethodAttacher configures the handler that processes
@@ -1707,13 +1708,21 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		return fmt.Errorf("attach payment method: %w", err)
 	}
 
+	if pm == nil {
+		// The operator removed this card before the event arrived. It stays
+		// removed, so nothing was attached and no event names it.
+		slog.InfoContext(ctx, "setup_intent.succeeded for a removed card: left removed, no payment_method.attached",
+			"stripe_event_id", event.StripeEventID, "customer_id", customerID, "stripe_pm_id", pmID)
+		return nil
+	}
+
 	slog.Info("payment method attached via setup_intent",
 		"stripe_event_id", event.StripeEventID,
 		"customer_id", customerID,
 		"stripe_pm_id", pmID,
 	)
 
-	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodAttached, domain.PaymentMethodWebhookData(pm, map[string]any{
+	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodAttached, domain.PaymentMethodWebhookData(*pm, map[string]any{
 		"stripe_payment_method_id": pmID,
 	}))
 
@@ -2215,12 +2224,13 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	// itself: for a setup-mode session, setup_intent.succeeded carries the
 	// exact card and is the one writer that makes it the default.
 	var recorded *domain.PaymentMethodView
+	cardRemoved := false
 	if s.pmAttacher != nil && card.PaymentMethodID != "" {
 		pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID, false)
 		if err != nil {
 			return fmt.Errorf("record the checkout's card: %w", err)
 		}
-		recorded = &pm
+		recorded, cardRemoved = pm, pm == nil
 	}
 
 	now := time.Now().UTC()
@@ -2297,7 +2307,14 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	// payment_method.updated carries the card as recorded above (ADR-131).
 	// Every production wiring records one: the attacher is always wired, and
 	// Stripe names the card it lists. Without a recorded card there is no
-	// resource to send, so the event is left out, loudly.
+	// resource to send, so the event is left out, loudly. A card the
+	// operator removed before this event arrived stays removed: the API does
+	// not list it, so no event names it either.
+	if cardRemoved {
+		slog.InfoContext(ctx, "payment_method.updated not sent: the checkout's card was removed and stays removed",
+			"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "stripe_pm_id", card.PaymentMethodID)
+		return nil
+	}
 	if recorded == nil {
 		slog.ErrorContext(ctx, "payment_method.updated not sent: the checkout's card was not recorded as a payment method",
 			"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "attacher_wired", s.pmAttacher != nil)

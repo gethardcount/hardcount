@@ -343,13 +343,18 @@ func (s *Service) Detach(ctx context.Context, tenantID, customerID, pmID string)
 // AttachForWebhook is AttachFromSetupIntent for payment.Stripe.HandleWebhook:
 // it returns the card as the API shows it (domain.PaymentMethodView), which
 // the payment_method.* webhooks carry, so payment/ does not have to know
-// about PaymentMethod.
-func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (domain.PaymentMethodView, error) {
+// about PaymentMethod. It returns nil for a card already removed, which
+// stays removed: the API does not list it, so no event may carry it.
+func (s *Service) AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (*domain.PaymentMethodView, error) {
 	pm, err := s.AttachFromSetupIntent(ctx, tenantID, customerID, stripePaymentMethodID, makeDefault)
 	if err != nil {
-		return domain.PaymentMethodView{}, err
+		return nil, err
 	}
-	return pm.View(), nil
+	if !pm.IsActive() {
+		return nil, nil
+	}
+	view := pm.View()
+	return &view, nil
 }
 
 // AttachFromSetupIntent is the entry point the P5 webhook handler uses:

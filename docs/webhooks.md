@@ -284,7 +284,7 @@ returns them.
 | `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment, or a credit note left nothing due. Its `amount_paid_cents` is what was paid at that moment, 0 when credit or a credit note covered the rest *(always sent)* | — |
 | `invoice.payment_recorded` | Someone recorded a payment made outside Velox, such as a bank transfer or cheque. `recovered_from` is the status it was paid from: `finalized` or `uncollectible` | `recovered_from` |
 | `invoice.marked_uncollectible` | An invoice was written off as bad debt | — |
-| `invoice.voided` | An invoice was voided | — |
+| `invoice.voided` | An invoice was voided. Under Stripe Tax, Velox reverses the invoice's tax after it sends this event; `GET /v1/invoices/{id}` shows `tax_reversed_at` once that is done. | — |
 
 ### `invoice.finalized` shows the amount before credit
 
@@ -324,10 +324,19 @@ the charge's Stripe PaymentIntent (`stripe_payment_intent_id`), its error
 | `payment.dispute_closed` | A recorded dispute closed. Sent again if Stripe turns a loss into a win. *(always sent)* | `dispute` |
 
 For the four anomaly events, `incoming_payment_intent_id` is the charge that
-raised the event and `captured_cents` is what it took. The PaymentIntent the
-invoice already held is the invoice's `stripe_payment_intent_id`, left out
-when it has none. Such an invoice was paid by credit, or outside Velox when
-its `paid_out_of_band` is true.
+raised the event and `captured_cents` is what it took. Match the charge by
+`incoming_payment_intent_id`, not by the invoice's `stripe_payment_intent_id`:
+
+- `payment.duplicate_charge`: the invoice's `stripe_payment_intent_id` is
+  the other charge, the one Velox recorded on the paid invoice. It is left
+  out when Velox recorded none, such as when credit paid the invoice or it
+  was paid outside Velox (`paid_out_of_band` is true).
+- `payment.amount_mismatch`: the invoice was just paid by this charge, so
+  its `stripe_payment_intent_id` is this charge and `amount_paid_cents` is
+  what Velox booked.
+- `payment.currency_mismatch` and `payment.received_on_voided_invoice`: the
+  invoice is as it was when the charge arrived. Its
+  `stripe_payment_intent_id` may be this charge, an earlier one, or none.
 
 `dispute` is the dispute as `GET /v1/invoices/{id}/disputes` lists it, with
 `stripe_dispute_id`, `status`, `reason`, `amount_cents`, `currency`,
@@ -343,7 +352,8 @@ dispute does and how to turn on Stripe's dispute events:
 
 `data.payment_method` is the saved card as
 `GET /v1/customers/{id}/payment-methods` lists it: its brand, last 4 digits,
-expiry and whether it is the default.
+expiry and whether it is the default. A Stripe event that arrives after the
+card was removed in Velox leaves it removed and sends neither event.
 
 | Event | Sent when | Also in `data` |
 |---|---|---|

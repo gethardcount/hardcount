@@ -966,15 +966,15 @@ type recordingAttacher struct {
 	makeDefault bool
 }
 
-func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool) (domain.PaymentMethodView, error) {
+func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool) (*domain.PaymentMethodView, error) {
 	r.called++
 	r.tenantID, r.customerID, r.pmID = tenantID, customerID, pmID
 	r.makeDefault = makeDefault
 	r.actorType, r.actorID = audit.ResolveActor(ctx)
 	if r.err != nil {
-		return domain.PaymentMethodView{}, r.err
+		return nil, r.err
 	}
-	return domain.PaymentMethodView{ID: "vlx_pm_" + pmID, CustomerID: customerID, Type: "card", IsDefault: makeDefault}, nil
+	return &domain.PaymentMethodView{ID: "vlx_pm_" + pmID, CustomerID: customerID, Type: "card", IsDefault: makeDefault}, nil
 }
 
 // TestHandleWebhook_SetupIntentSucceeded — a setup_intent.succeeded event

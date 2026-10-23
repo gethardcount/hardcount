@@ -1924,8 +1924,10 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 // In order:
 //  1. Stop collection at Stripe: expire the invoice's live Checkout
 //     sessions, then cancel its PaymentIntent. Money first.
-//  2. Reverse the upstream tax.
-//  3. Send invoice.voided.
+//  2. Send invoice.voided, with the row the void committed. It goes before
+//     the tax leg, which stamps tax_reversed_at, so the event shows the
+//     row as it was when Velox created the event (ADR-131).
+//  3. Reverse the upstream tax.
 //  4. Resolve the invoice's active dunning run as invoice_voided. A caller
 //     that resolves the run itself afterwards (the dunning handler) loses
 //     the resolve CAS and gets the resolved row back.
@@ -1944,6 +1946,12 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 	if s.collectionStopper != nil {
 		s.collectionStopper.StopCollection(ctx, tenantID, voided)
 	}
+	// invoice.voided webhook — single-writer at the service layer (same
+	// pattern as finalized/marked_uncollectible/payment_recorded), so
+	// engine-triggered voids notify integrators too.
+	if s.events != nil {
+		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceVoided, domain.InvoiceWebhookData(voided, nil))
+	}
 	// Invoice-stable reversal reference (inv_taxrev_<id>). Void permits an
 	// `uncollectible` source (annulling a bad debt is a legitimate operator
 	// action), and MarkUncollectible already reversed the tax under THIS same
@@ -1954,12 +1962,6 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 	// Best-effort post-commit: a failure here is logged ERROR and recovered by
 	// RetryPendingTaxReversal, so the return is deliberately ignored.
 	_ = s.reverseInvoiceTax(ctx, tenantID, voided, "inv_taxrev_"+voided.ID)
-	// invoice.voided webhook — single-writer at the service layer (same
-	// pattern as finalized/marked_uncollectible/payment_recorded), so
-	// engine-triggered voids notify integrators too.
-	if s.events != nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceVoided, domain.InvoiceWebhookData(voided, nil))
-	}
 	if s.dunningResolver != nil {
 		if err := s.dunningResolver.ResolveByInvoice(ctx, tenantID, voided.ID, domain.ResolutionInvoiceVoided); err != nil {
 			slog.WarnContext(ctx, "resolve the voided invoice's dunning run failed; its next dunning tick resolves it",

@@ -509,10 +509,12 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 		"amount_paid_cents", inv.AmountPaidCents,
 	)
 	if s.events != nil {
-		// The invoice holds the charge it already recorded
-		// (stripe_payment_intent_id, empty for one paid by credits or
-		// outside Velox, which paid_out_of_band tells apart). The charge
-		// that raised the anomaly rides beside it.
+		// The charge that raised the anomaly rides beside the invoice. The
+		// invoice is the row the caller passed: on duplicate_charge its
+		// stripe_payment_intent_id is the other charge it recorded; on
+		// amount_mismatch it is this charge (the settle just recorded it);
+		// on currency_mismatch and received_on_voided_invoice it is whatever
+		// the invoice held when the charge arrived (docs/webhooks.md).
 		if err := s.events.Dispatch(ctx, tenantID, eventType, domain.InvoiceWebhookData(inv, map[string]any{
 			"incoming_payment_intent_id": incomingPI,
 			"captured_cents":             capturedCents,

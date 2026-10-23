@@ -73,8 +73,9 @@ var WebhookEventExtras = map[string][]string{
 
 	EventPaymentSucceeded: {},
 	EventPaymentFailed:    {},
-	// The charge that raised the anomaly. The invoice holds the charge it
-	// already recorded (stripe_payment_intent_id), not this one.
+	// The charge that raised the anomaly. The invoice's
+	// stripe_payment_intent_id is not always another charge: on
+	// amount_mismatch it is this one (docs/webhooks.md, per event).
 	EventPaymentDuplicateCharge:         {"incoming_payment_intent_id", "captured_cents"},
 	EventPaymentAmountMismatch:          {"incoming_payment_intent_id", "captured_cents"},
 	EventPaymentCurrencyMismatch:        {"incoming_payment_intent_id", "captured_cents"},
