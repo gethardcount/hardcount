@@ -187,7 +187,11 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}
 
 	// 3b. Verify the events landed with the canonical family + token roles.
-	events, err := usageStore.AggregateByPricingRules(ctx, tenantID, cust.ID, plan.MeterIDs[0], domain.AggSum, periodStart, periodEnd)
+	rules, err := pricing.NewPostgresStore(db).ListMeterPricingRulesByMeter(ctx, tenantID, plan.MeterIDs[0])
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	events, err := usageStore.AggregateClaims(ctx, tenantID, cust.ID, plan.MeterIDs[0], domain.AggregationSum, domain.ClaimsOfRules(rules), periodStart, periodEnd)
 	if err != nil {
 		t.Fatalf("aggregate by rules: %v", err)
 	}

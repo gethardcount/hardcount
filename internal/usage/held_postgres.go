@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -24,13 +25,13 @@ type HeldStore interface {
 	// ListHeldSummary groups the rows still held, for the most recent
 	// HeldListCustomers external customer ids, with totals over all of them.
 	ListHeldSummary(ctx context.Context, tenantID string) (HeldSummary, error)
-	// HeldFor returns the distinct meter keys and the row count still held
+	// HeldFor returns the distinct event names and the row count still held
 	// for one external customer id.
-	HeldFor(ctx context.Context, tenantID, externalCustomerID string) (meterKeys []string, rows int, err error)
+	HeldFor(ctx context.Context, tenantID, externalCustomerID string) (eventNames []string, rows int, err error)
 	// ReleaseHeld moves held rows into usage_events in one transaction.
 	ReleaseHeld(ctx context.Context, tenantID string, in ReleaseHeldInput, emit func(tx *sql.Tx, res ReleaseHeldResult) error) (ReleaseHeldResult, error)
 	// DiscardHeld marks held rows discarded (kept, never ingested).
-	DiscardHeld(ctx context.Context, tenantID, externalCustomerID, meterKey string, emit func(tx *sql.Tx, n int) error) (int, error)
+	DiscardHeld(ctx context.Context, tenantID, externalCustomerID, eventName string, emit func(tx *sql.Tx, n int) error) (int, error)
 	// IngestResolvingHeld is the live LiteLLM ingest: it writes the event
 	// unless a held row with the same key was discarded, and resolves a
 	// held row with the same key as released.
@@ -61,10 +62,10 @@ type HeldSummary struct {
 }
 
 // HeldUsageGroup is one line of GET /v1/usage-events/held: the rows still
-// held for one (external customer id, meter key, reason).
+// held for one (external customer id, event name, reason).
 type HeldUsageGroup struct {
 	ExternalCustomerID string                 `json:"external_customer_id"`
-	MeterKey           string                 `json:"meter_key"`
+	EventName          string                 `json:"event_name"`
 	Reason             domain.HeldUsageReason `json:"reason"`
 	Rows               int                    `json:"rows"`
 	TotalQuantity      decimal.Decimal        `json:"total_quantity"`
@@ -74,7 +75,7 @@ type HeldUsageGroup struct {
 	// CustomerID is the customer whose external_id now matches, or ""
 	// when none does yet. Filled by the handler, not the store.
 	CustomerID string `json:"customer_id"`
-	// MeterExists says whether a meter with MeterKey exists now. Filled by
+	// MeterExists says whether a meter with EventName exists now. Filled by
 	// the handler, not the store.
 	MeterExists bool `json:"meter_exists"`
 }
@@ -84,7 +85,7 @@ type ReleaseHeldInput struct {
 	ExternalCustomerID string
 	// CustomerID is the customer the rows are ingested for.
 	CustomerID string
-	// MeterIDs maps meter key to meter id. Rows whose meter key is absent
+	// MeterIDs maps event name to meter id. Rows whose event name is absent
 	// stay held.
 	MeterIDs map[string]string
 	// NotAfter is the customer's current time. Rows stamped after it stay
@@ -98,7 +99,7 @@ type ReleaseHeldInput struct {
 type ReleasedRow struct {
 	HeldID       string    `json:"-"`
 	EventID      string    `json:"-"`
-	MeterKey     string    `json:"-"`
+	EventName    string    `json:"-"`
 	EventAt      time.Time `json:"-"`
 	Deduplicated bool      `json:"-"`
 }
@@ -129,16 +130,19 @@ func (s *PostgresStore) Hold(ctx context.Context, tenantID string, ev domain.Hel
 		return domain.HeldUsageEvent{}, err
 	}
 	defer postgres.Rollback(tx)
+	if err := lockHeldMeters(ctx, tx, tenantID, []domain.HeldUsageEvent{ev}); err != nil {
+		return domain.HeldUsageEvent{}, err
+	}
 
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id,
-			meter_key, quantity, properties, idempotency_key, event_at,
+			event_name, quantity, properties, idempotency_key, event_at,
 			observed_cost_micros, reason)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
 		RETURNING id, received_at, status
 	`, postgres.NewID("vlx_hue"), tenantID, ev.Source, ev.ExternalCustomerID,
-		ev.MeterKey, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
+		ev.EventName, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
 		ev.ObservedCostMicros, string(ev.Reason),
 	).Scan(&ev.ID, &ev.ReceivedAt, &ev.Status)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -153,7 +157,7 @@ func (s *PostgresStore) Hold(ctx context.Context, tenantID string, ev domain.Hel
 	return ev, nil
 }
 
-// ListHeldSummary returns one group per (external customer id, meter key,
+// ListHeldSummary returns one group per (external customer id, event name,
 // reason) over the rows still held, newest arrival first.
 func (s *PostgresStore) ListHeldSummary(ctx context.Context, tenantID string) (HeldSummary, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -182,13 +186,13 @@ func (s *PostgresStore) ListHeldSummary(ctx context.Context, tenantID string) (H
 			ORDER BY MAX(received_at) DESC, external_customer_id
 			LIMIT $2
 		)
-		SELECT external_customer_id, meter_key, reason, COUNT(*), SUM(quantity),
+		SELECT external_customer_id, event_name, reason, COUNT(*), SUM(quantity),
 			MIN(event_at), MAX(event_at), MAX(received_at)
 		FROM usage_held_events
 		WHERE tenant_id = $1 AND status = 'held'
 		  AND external_customer_id IN (SELECT external_customer_id FROM listed)
-		GROUP BY external_customer_id, meter_key, reason
-		ORDER BY MAX(received_at) DESC, external_customer_id, meter_key
+		GROUP BY external_customer_id, event_name, reason
+		ORDER BY MAX(received_at) DESC, external_customer_id, event_name
 	`, tenantID, HeldListCustomers)
 	if err != nil {
 		return HeldSummary{}, err
@@ -197,7 +201,7 @@ func (s *PostgresStore) ListHeldSummary(ctx context.Context, tenantID string) (H
 
 	for rows.Next() {
 		var g HeldUsageGroup
-		if err := rows.Scan(&g.ExternalCustomerID, &g.MeterKey, &g.Reason, &g.Rows, &g.TotalQuantity,
+		if err := rows.Scan(&g.ExternalCustomerID, &g.EventName, &g.Reason, &g.Rows, &g.TotalQuantity,
 			&g.FirstEventAt, &g.LastEventAt, &g.LastReceivedAt); err != nil {
 			return HeldSummary{}, err
 		}
@@ -206,7 +210,7 @@ func (s *PostgresStore) ListHeldSummary(ctx context.Context, tenantID string) (H
 	return out, rows.Err()
 }
 
-// HeldFor returns the meter keys and row count still held for one external
+// HeldFor returns the event names and row count still held for one external
 // customer id.
 func (s *PostgresStore) HeldFor(ctx context.Context, tenantID, externalCustomerID string) ([]string, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -216,9 +220,9 @@ func (s *PostgresStore) HeldFor(ctx context.Context, tenantID, externalCustomerI
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT meter_key, COUNT(*) FROM usage_held_events
+		SELECT event_name, COUNT(*) FROM usage_held_events
 		WHERE tenant_id = $1 AND status = 'held' AND external_customer_id = $2
-		GROUP BY meter_key ORDER BY meter_key
+		GROUP BY event_name ORDER BY event_name
 	`, tenantID, externalCustomerID)
 	if err != nil {
 		return nil, 0, err
@@ -277,13 +281,13 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 			SELECT id FROM usage_held_events
 			WHERE tenant_id = $1 AND status = 'held'
 			  AND external_customer_id = $2
-			  AND meter_key = ANY($3::text[])
+			  AND event_name = ANY($3::text[])
 			  AND event_at <= $4
 			ORDER BY event_at, id
 			LIMIT $6
 		)
 		AND status = 'held'
-		RETURNING id, meter_key, quantity, properties, idempotency_key, event_at, observed_cost_micros
+		RETURNING id, event_name, quantity, properties, idempotency_key, event_at, observed_cost_micros
 	`, tenantID, in.ExternalCustomerID, postgres.StringArray(keys), in.NotAfter, in.CustomerID, limit)
 	if err != nil {
 		return ReleaseHeldResult{}, err
@@ -291,7 +295,7 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 	var claimed []domain.HeldUsageEvent
 	for rows.Next() {
 		var h domain.HeldUsageEvent
-		if err := rows.Scan(&h.ID, &h.MeterKey, &h.Quantity, propertiesScanner{&h.Dimensions},
+		if err := rows.Scan(&h.ID, &h.EventName, &h.Quantity, propertiesScanner{&h.Dimensions},
 			&h.IdempotencyKey, &h.EventAt, &h.ObservedCostMicros); err != nil {
 			_ = rows.Close()
 			return ReleaseHeldResult{}, err
@@ -307,7 +311,7 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 
 	res := ReleaseHeldResult{Rows: make([]ReleasedRow, 0, len(claimed))}
 	for _, h := range claimed {
-		row := ReleasedRow{HeldID: h.ID, MeterKey: h.MeterKey, EventAt: h.EventAt}
+		row := ReleasedRow{HeldID: h.ID, EventName: h.EventName, EventAt: h.EventAt}
 		if inputKey, isWrite := CallInputKey(h.IdempotencyKey); isWrite {
 			// A LiteLLM cache-write row whose call usage_events already
 			// bills the pre-split way (a copy of the previous release
@@ -325,7 +329,7 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 		}
 		out, err := ingestOneTx(ctx, tx, tenantID, domain.UsageEvent{
 			CustomerID:         in.CustomerID,
-			MeterID:            in.MeterIDs[h.MeterKey],
+			MeterID:            in.MeterIDs[h.EventName],
 			Quantity:           h.Quantity,
 			Dimensions:         h.Dimensions,
 			IdempotencyKey:     h.IdempotencyKey,
@@ -352,8 +356,8 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 	// Limit (another release takes them) and rows it could not take.
 	if err := tx.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE meter_key = ANY($3::text[]) AND event_at <= $4),
-			COUNT(*) FILTER (WHERE NOT (meter_key = ANY($3::text[]) AND event_at <= $4))
+			COUNT(*) FILTER (WHERE event_name = ANY($3::text[]) AND event_at <= $4),
+			COUNT(*) FILTER (WHERE NOT (event_name = ANY($3::text[]) AND event_at <= $4))
 		FROM usage_held_events
 		WHERE tenant_id = $1 AND status = 'held' AND external_customer_id = $2
 	`, tenantID, in.ExternalCustomerID, postgres.StringArray(keys), in.NotAfter).Scan(&res.MoreToRelease, &res.StillHeld); err != nil {
@@ -372,9 +376,9 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 }
 
 // DiscardHeld marks the held rows for one external customer id (and one
-// meter key, when given) discarded. The rows are kept as a record; they are
+// event name, when given) discarded. The rows are kept as a record; they are
 // never ingested.
-func (s *PostgresStore) DiscardHeld(ctx context.Context, tenantID, externalCustomerID, meterKey string, emit func(tx *sql.Tx, n int) error) (int, error) {
+func (s *PostgresStore) DiscardHeld(ctx context.Context, tenantID, externalCustomerID, eventName string, emit func(tx *sql.Tx, n int) error) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return 0, err
@@ -384,8 +388,8 @@ func (s *PostgresStore) DiscardHeld(ctx context.Context, tenantID, externalCusto
 	res, err := tx.ExecContext(ctx, `
 		UPDATE usage_held_events SET status = 'discarded', resolved_at = now()
 		WHERE tenant_id = $1 AND status = 'held' AND external_customer_id = $2
-		  AND ($3::text = '' OR meter_key = $3::text)
-	`, tenantID, externalCustomerID, meterKey)
+		  AND ($3::text = '' OR event_name = $3::text)
+	`, tenantID, externalCustomerID, eventName)
 	if err != nil {
 		return 0, err
 	}
@@ -774,9 +778,11 @@ func writesBilledInInput(ctx context.Context, tx *sql.Tx, tenantID, inputKey str
 // code would; the CHANGELOG says not to release held LiteLLM usage while
 // copies of the previous release serve.
 //
-// HoldCall takes no row locks (its inserts wait only on an uncommitted
-// insert of the same key, and every hold of a call inserts :input first),
-// so unlike IngestCallResolvingHeld it cannot deadlock and is not retried.
+// HoldCall's only row lock is lockHeldMeters' KEY SHARE on the meter, which
+// waits only for an aggregation PATCH that locks nothing else this call
+// holds. Its inserts wait only on an uncommitted insert of the same key, and
+// every hold of a call inserts :input first. So unlike
+// IngestCallResolvingHeld it cannot deadlock and is not retried.
 func (s *PostgresStore) HoldCall(ctx context.Context, tenantID string, call HeldCall) (CallResult, error) {
 	heldKey := func(e domain.HeldUsageEvent) string { return e.IdempotencyKey }
 
@@ -785,6 +791,9 @@ func (s *PostgresStore) HoldCall(ctx context.Context, tenantID string, call Held
 		return CallResult{}, err
 	}
 	defer postgres.Rollback(tx)
+	if err := lockHeldMeters(ctx, tx, tenantID, append(slices.Clone(call.Events), call.Legacy...)); err != nil {
+		return CallResult{}, err
+	}
 
 	var res CallResult
 	events := call.Events
@@ -854,6 +863,35 @@ func firstWithKey[E any](events []E, key string, keyOf func(E) string) (E, bool)
 	return zero, false
 }
 
+// lockHeldMeters takes KEY SHARE on the meter of each event name, when that
+// meter exists, before a hold inserts its rows. A held row fixes its meter's
+// aggregation (ADR-130 §2), but it has no foreign key to the meter, so
+// unlike an ingest it took no lock that an aggregation PATCH's FOR UPDATE
+// (LockMeterTx) waits for: a hold could commit after the PATCH read "no
+// usage", and the PATCH then changed the aggregation of a meter with a held
+// row. With the lock, a hold that locks first makes the PATCH wait and see
+// its rows, and a PATCH that locks first commits before the rows exist.
+// Meters lock in id order. A meter created after this read is not locked;
+// that meter's aggregation could change only if it is created and changed
+// while this one transaction runs.
+func lockHeldMeters(ctx context.Context, tx *sql.Tx, tenantID string, events []domain.HeldUsageEvent) error {
+	names := make([]string, 0, len(events))
+	for _, ev := range events {
+		if !slices.Contains(names, ev.EventName) {
+			names = append(names, ev.EventName)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		SELECT id FROM meters
+		WHERE tenant_id = $1 AND event_name = ANY($2::text[])
+		ORDER BY id
+		FOR KEY SHARE
+	`, tenantID, postgres.StringArray(names)); err != nil {
+		return fmt.Errorf("lock the meters of held usage: %w", err)
+	}
+	return nil
+}
+
 // insertHeldTx inserts one held row, ON CONFLICT DO NOTHING on the
 // idempotency key. It reports whether the row was new.
 func insertHeldTx(ctx context.Context, tx *sql.Tx, tenantID string, ev domain.HeldUsageEvent) (bool, error) {
@@ -864,13 +902,13 @@ func insertHeldTx(ctx context.Context, tx *sql.Tx, tenantID string, ev domain.He
 	var id string
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id,
-			meter_key, quantity, properties, idempotency_key, event_at,
+			event_name, quantity, properties, idempotency_key, event_at,
 			observed_cost_micros, reason)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
 		RETURNING id
 	`, postgres.NewID("vlx_hue"), tenantID, ev.Source, ev.ExternalCustomerID,
-		ev.MeterKey, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
+		ev.EventName, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
 		ev.ObservedCostMicros, string(ev.Reason),
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {

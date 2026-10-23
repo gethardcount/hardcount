@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { UNPRICED_SENTENCE, UNPRICED_TITLE, meterQuantityLine, unpricedLine, unpricedMeters } from '../src/lib/unpricedUsage.ts'
 
 const meter = (id: string, rules: { unmatched?: boolean; quantity: string }[]) => ({
-  meter_id: id, meter_name: `Meter ${id}`, meter_key: id, unit: 'tokens', rules,
+  meter_id: id, meter_name: `Meter ${id}`, event_name: id, unit: 'tokens', rules,
 })
 
 test('only meters with unmatched usage are listed, with the exact unbilled quantity', () => {

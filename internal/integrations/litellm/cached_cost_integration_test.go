@@ -33,7 +33,7 @@ func TestSpend_CachedCallCostOnRealStore(t *testing.T) {
 	}
 	prices := pricing.NewPostgresStore(db)
 	if _, err := prices.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: MeterKeyTokens, Name: "Tokens", Aggregation: "sum", Unit: "tokens",
+		EventName: EventNameTokens, Name: "Tokens", Aggregation: "sum", Unit: "tokens",
 	}); err != nil {
 		t.Fatalf("meter: %v", err)
 	}

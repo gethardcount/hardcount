@@ -129,7 +129,7 @@ variable into the JSON for you.
    token. Do **5a** to send them yourself, or **5b** if you use a LiteLLM
    proxy. You need only one of them.
 
-   **5a. Send the events yourself.** `event_name` is the meter's key.
+   **5a. Send the events yourself.** `event_name` names the meter (the meter's `event_name`).
    `dimensions` are labels: the recipe's prices pick events by `model` and
    `token_type`. Give each event its own idempotency key, and send the same
    key again when you retry that event.

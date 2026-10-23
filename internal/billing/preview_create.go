@@ -31,7 +31,7 @@ type SubscriptionLister interface {
 // POST /v1/invoices/create_preview. See docs/dev/design/create-preview.md.
 //
 // The hard work — dimension-match-aware aggregation in
-// usage.AggregateByPricingRules and per-rule pricing via
+// usage.AggregateClaims and per-rule pricing via
 // domain.ComputeAmountCents — already exists in the engine's one rater
 // (rateUsageWindows, rate.go). This
 // service is a thin composition: customer existence → subscription

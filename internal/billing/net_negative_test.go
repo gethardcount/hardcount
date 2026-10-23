@@ -85,7 +85,7 @@ func TestRunCycle_NetNegativeMeter_BillsZeroAndRecordsIt(t *testing.T) {
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
 	api := pricing.meters["mtr_api"]
-	api.Key = "api_calls"
+	api.EventName = "api_calls"
 	pricing.meters["mtr_api"] = api
 	usage.totals["mtr_api"] = -50
 
@@ -131,7 +131,7 @@ func TestRunCycle_NetNegativeBucket_MultiRuleMeter(t *testing.T) {
 	engine, _, usage, pricing, invoices := setupEngine()
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
-	pricing.meters["mtr_api"] = domain.Meter{ID: "mtr_api", Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"}
+	pricing.meters["mtr_api"] = domain.Meter{ID: "mtr_api", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"}
 	pricing.rules["rrv_in"] = domain.RatingRuleVersion{ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)}
 	pricing.rules["rrv_out"] = domain.RatingRuleVersion{ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)}
 	pricing.meterPricingRules = map[string][]domain.MeterPricingRule{
@@ -142,8 +142,8 @@ func TestRunCycle_NetNegativeBucket_MultiRuleMeter(t *testing.T) {
 	}
 	usage.ruleAggs = map[string][]domain.RuleAggregation{
 		"mtr_api": {
-			{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(1000)},
-			{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(-300)},
+			{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", Quantity: decimal.NewFromInt(1000)},
+			{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", Quantity: decimal.NewFromInt(-300)},
 		},
 	}
 	usage.totals["mtr_api"] = 700
@@ -225,8 +225,8 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 				MeterIDs: []string{"mtr_tokens", "mtr_seats"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_tokens": {ID: "mtr_tokens", Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"},
-			"mtr_seats":  {ID: "mtr_seats", Key: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seat"},
+			"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"},
+			"mtr_seats":  {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seat"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_in":   {ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},
@@ -244,8 +244,8 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 		totals: map[string]int64{"mtr_tokens": 300, "mtr_seats": -7},
 		ruleAggs: map[string][]domain.RuleAggregation{
 			"mtr_tokens": {
-				{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(400)},
-				{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(-100)},
+				{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", Quantity: decimal.NewFromInt(400)},
+				{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", Quantity: decimal.NewFromInt(-100)},
 			},
 		},
 	}
@@ -327,8 +327,8 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api", "mtr_storage"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api":     {ID: "mtr_api", Key: "api_calls", Name: "API", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
-			"mtr_storage": {ID: "mtr_storage", Key: "storage", Name: "Storage", Unit: "GB", Aggregation: "sum", RatingRuleVersionID: "rrv_storage"},
+			"mtr_api":     {ID: "mtr_api", EventName: "api_calls", Name: "API", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+			"mtr_storage": {ID: "mtr_storage", EventName: "storage", Name: "Storage", Unit: "GB", Aggregation: "sum", RatingRuleVersionID: "rrv_storage"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_api":     {ID: "rrv_api", RuleKey: "api", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},

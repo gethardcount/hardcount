@@ -194,7 +194,7 @@ func TestP9Indexes(t *testing.T) {
 		t.Fatalf("create rrv: %v", err)
 	}
 	meter, err := pricing.NewPostgresStore(db).CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "idx_calls", Name: "Idx", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "idx_calls", Name: "Idx", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)

@@ -16,15 +16,10 @@ import (
 // internal/pricing through pricing.Service.
 func seedPricingRule(t *testing.T, db *postgres.DB, ctx context.Context, tenantID string, in pricing.UpsertMeterPricingRuleInput) domain.MeterPricingRule {
 	t.Helper()
-	mode := in.AggregationMode
-	if mode == "" {
-		mode = domain.AggSum
-	}
 	rule, err := pricing.NewPostgresStore(db).UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
 		MeterID:             in.MeterID,
 		RatingRuleVersionID: in.RatingRuleVersionID,
 		DimensionMatch:      in.DimensionMatch,
-		AggregationMode:     mode,
 		Priority:            in.Priority,
 	}, nil)
 	if err != nil {

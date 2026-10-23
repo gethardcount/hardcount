@@ -85,7 +85,7 @@ func TestRunCycle_FirstPeriod_CreationAddRow_BillsFullBase(t *testing.T) {
 				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "i1_api", Name: "I1 API Calls",
+			"mtr_api": {ID: "mtr_api", EventName: "i1_api", Name: "I1 API Calls",
 				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
 		},
 		rules: map[string]domain.RatingRuleVersion{

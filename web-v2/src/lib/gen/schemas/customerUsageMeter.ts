@@ -11,7 +11,7 @@ import type { CustomerUsageMeterRulesItem } from './customerUsageMeterRulesItem'
 
 export interface CustomerUsageMeter {
   meter_id: string;
-  meter_key: string;
+  event_name: string;
   meter_name: string;
   unit: string;
   currency: string;

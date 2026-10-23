@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -24,6 +25,9 @@ type memStore struct {
 	// meter-in-use guard, D05). The real count is pinned against Postgres in
 	// meter_edit_guard_integration_test.go.
 	subsUsing map[string]int
+	// hasUsage is what MeterUsageTx answers per meter id (as events). The real read
+	// is pinned against Postgres in meter_aggregation_lock_integration_test.go.
+	hasUsage map[string]bool
 }
 
 func newMemStore() *memStore {
@@ -42,7 +46,7 @@ func newMemStore() *memStore {
 // reassignment so the meter is reachable by the id the test uses.
 func seedPricedMeter(m *memStore, tenantID, id string) {
 	m.meters[id] = domain.Meter{
-		ID: id, TenantID: tenantID, Key: id, Aggregation: "sum",
+		ID: id, TenantID: tenantID, EventName: id, Aggregation: "sum",
 		RatingRuleVersionID: "vlx_rrv_seed_" + id,
 	}
 }
@@ -121,8 +125,8 @@ func (m *memStore) ListRatingRules(_ context.Context, filter RatingRuleFilter) (
 
 func (m *memStore) CreateMeter(_ context.Context, tenantID string, meter domain.Meter) (domain.Meter, error) {
 	for _, existing := range m.meters {
-		if existing.TenantID == tenantID && existing.Key == meter.Key {
-			return domain.Meter{}, fmt.Errorf("%w: meter key %q", errs.ErrAlreadyExists, meter.Key)
+		if existing.TenantID == tenantID && existing.EventName == meter.EventName {
+			return domain.Meter{}, fmt.Errorf("%w: meter event_name %q", errs.ErrAlreadyExists, meter.EventName)
 		}
 	}
 	meter.ID = fmt.Sprintf("vlx_mtr_%d", len(m.meters)+1)
@@ -139,9 +143,9 @@ func (m *memStore) GetMeter(_ context.Context, tenantID, id string) (domain.Mete
 	return meter, nil
 }
 
-func (m *memStore) GetMeterByKey(_ context.Context, tenantID, key string) (domain.Meter, error) {
+func (m *memStore) GetMeterByEventName(_ context.Context, tenantID, eventName string) (domain.Meter, error) {
 	for _, meter := range m.meters {
-		if meter.TenantID == tenantID && meter.Key == key {
+		if meter.TenantID == tenantID && meter.EventName == eventName {
 			return meter, nil
 		}
 	}
@@ -551,14 +555,14 @@ func TestCreateMeter(t *testing.T) {
 
 	t.Run("valid", func(t *testing.T) {
 		m, err := svc.CreateMeter(ctx, "tenant1", CreateMeterInput{
-			Key:  "api_calls",
-			Name: "API Calls",
+			EventName: "api_calls",
+			Name:      "API Calls",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if m.Key != "api_calls" {
-			t.Errorf("got key %q, want %q", m.Key, "api_calls")
+		if m.EventName != "api_calls" {
+			t.Errorf("got event_name %q, want %q", m.EventName, "api_calls")
 		}
 		if m.Aggregation != "sum" {
 			t.Errorf("got aggregation %q, want sum", m.Aggregation)
@@ -573,7 +577,7 @@ func TestCreateMeter(t *testing.T) {
 	})
 
 	t.Run("invalid aggregation", func(t *testing.T) {
-		_, err := svc.CreateMeter(ctx, "tenant1", CreateMeterInput{Key: "x", Name: "x", Aggregation: "invalid"})
+		_, err := svc.CreateMeter(ctx, "tenant1", CreateMeterInput{EventName: "x", Name: "x", Aggregation: "invalid"})
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -706,7 +710,7 @@ func TestPlanAttachGuard_UnpricedMeter_ADR096(t *testing.T) {
 
 	t.Run("CreatePlan rejects an unpriced meter", func(t *testing.T) {
 		store := newMemStore()
-		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", Key: "api_calls", Name: "API calls", Aggregation: "sum"}
+		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", EventName: "api_calls", Name: "API calls", Aggregation: "sum"}
 		_, err := NewService(store).CreatePlan(ctx, "t", plan("p", []string{"m1"}))
 		if err == nil {
 			t.Fatal("expected rejection: unpriced meter attached to plan")
@@ -721,7 +725,7 @@ func TestPlanAttachGuard_UnpricedMeter_ADR096(t *testing.T) {
 
 	t.Run("CreatePlan accepts a meter with a default rule binding", func(t *testing.T) {
 		store := newMemStore()
-		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", Key: "api_calls", Aggregation: "sum", RatingRuleVersionID: "vlx_rrv_1"}
+		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", EventName: "api_calls", Aggregation: "sum", RatingRuleVersionID: "vlx_rrv_1"}
 		if _, err := NewService(store).CreatePlan(ctx, "t", plan("p", []string{"m1"})); err != nil {
 			t.Fatalf("default-bound meter should be accepted: %v", err)
 		}
@@ -729,7 +733,7 @@ func TestPlanAttachGuard_UnpricedMeter_ADR096(t *testing.T) {
 
 	t.Run("CreatePlan accepts a meter priced via a meter_pricing_rules row", func(t *testing.T) {
 		store := newMemStore()
-		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", Key: "api_calls", Aggregation: "sum"}
+		store.meters["m1"] = domain.Meter{ID: "m1", TenantID: "t", EventName: "api_calls", Aggregation: "sum"}
 		store.meterRules["mpr1"] = domain.MeterPricingRule{ID: "mpr1", TenantID: "t", MeterID: "m1", RatingRuleVersionID: "vlx_rrv_1"}
 		if _, err := NewService(store).CreatePlan(ctx, "t", plan("p", []string{"m1"})); err != nil {
 			t.Fatalf("meter with a pricing rule should be accepted: %v", err)
@@ -739,7 +743,7 @@ func TestPlanAttachGuard_UnpricedMeter_ADR096(t *testing.T) {
 	t.Run("UpdatePlan rejects adding an unpriced meter (no live subs)", func(t *testing.T) {
 		store := newMemStore()
 		seedPricedMeter(store, "t", "m1")
-		store.meters["m2"] = domain.Meter{ID: "m2", TenantID: "t", Key: "unpriced", Aggregation: "sum"}
+		store.meters["m2"] = domain.Meter{ID: "m2", TenantID: "t", EventName: "unpriced", Aggregation: "sum"}
 		svc := NewService(store)
 		p, err := svc.CreatePlan(ctx, "t", plan("p", []string{"m1"}))
 		if err != nil {
@@ -925,7 +929,7 @@ func seedMeterAndRule(t *testing.T, svc *Service, tenantID string) (meterID, rrv
 		t.Fatalf("seed rating rule: %v", err)
 	}
 	meter, err := svc.CreateMeter(context.Background(), tenantID, CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum",
 		RatingRuleVersionID: rule.ID,
 	})
 	if err != nil {
@@ -943,14 +947,10 @@ func TestUpsertMeterPricingRule_Valid(t *testing.T) {
 		MeterID:             meterID,
 		RatingRuleVersionID: rrvID,
 		DimensionMatch:      map[string]any{"model": "gpt-4", "cached": false},
-		AggregationMode:     domain.AggSum,
 		Priority:            100,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if rule.AggregationMode != domain.AggSum {
-		t.Errorf("agg mode: got %q, want sum", rule.AggregationMode)
 	}
 	if rule.Priority != 100 {
 		t.Errorf("priority: got %d, want 100", rule.Priority)
@@ -960,32 +960,37 @@ func TestUpsertMeterPricingRule_Valid(t *testing.T) {
 	}
 }
 
-func TestUpsertMeterPricingRule_DefaultModeIsSum(t *testing.T) {
-	svc := NewService(newMemStore())
+// A meter's aggregation changes until the meter has events, then it is
+// fixed (ADR-130 §2). The real has-usage read is pinned against Postgres in
+// meter_aggregation_lock_integration_test.go.
+func TestUpdateMeter_AggregationFixedOnceTheMeterHasUsage(t *testing.T) {
+	store := newMemStore()
+	store.hasUsage = map[string]bool{}
+	svc := NewService(store)
 	ctx := context.Background()
-	meterID, rrvID := seedMeterAndRule(t, svc, "t1")
-
-	rule, err := svc.UpsertMeterPricingRule(ctx, "t1", UpsertMeterPricingRuleInput{
-		MeterID: meterID, RatingRuleVersionID: rrvID,
-	})
+	m, err := svc.CreateMeter(ctx, "t1", CreateMeterInput{EventName: "gpu", Name: "GPU"})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("create meter: %v", err)
 	}
-	if rule.AggregationMode != domain.AggSum {
-		t.Errorf("default agg mode: got %q, want sum", rule.AggregationMode)
+	max := "max"
+	if got, err := svc.UpdateMeter(ctx, "t1", m.ID, UpdateMeterInput{Aggregation: &max}); err != nil || got.Aggregation != "max" {
+		t.Fatalf("before any event: got %q, err %v; want max", got.Aggregation, err)
 	}
-}
-
-func TestUpsertMeterPricingRule_RejectsBadMode(t *testing.T) {
-	svc := NewService(newMemStore())
-	ctx := context.Background()
-	meterID, rrvID := seedMeterAndRule(t, svc, "t1")
-
-	_, err := svc.UpsertMeterPricingRule(ctx, "t1", UpsertMeterPricingRuleInput{
-		MeterID: meterID, RatingRuleVersionID: rrvID, AggregationMode: "average",
-	})
-	if err == nil {
-		t.Fatal("expected error for unknown aggregation mode")
+	store.hasUsage[m.ID] = true
+	sum := "sum"
+	_, err = svc.UpdateMeter(ctx, "t1", m.ID, UpdateMeterInput{Aggregation: &sum})
+	if !errors.Is(err, errs.ErrInvalidState) || errs.Code(err) != errs.CodeMeterHasUsage {
+		t.Fatalf("with usage: want 409 %s, got %v", errs.CodeMeterHasUsage, err)
+	}
+	if !strings.Contains(err.Error(), `"gpu"`) || !strings.Contains(err.Error(), "max") {
+		t.Errorf("the refusal must name the meter and its aggregation, got %q", err.Error())
+	}
+	if store.meters[m.ID].Aggregation != "max" {
+		t.Errorf("aggregation = %q, want max", store.meters[m.ID].Aggregation)
+	}
+	name := "GPU seconds"
+	if _, err := svc.UpdateMeter(ctx, "t1", m.ID, UpdateMeterInput{Name: &name, Aggregation: &max}); err != nil {
+		t.Errorf("a rename that keeps the aggregation: %v", err)
 	}
 }
 
@@ -1287,7 +1292,7 @@ func TestUpdateMeter_DefaultBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
 	}
-	meter, err := svc.CreateMeter(ctx, "t1", CreateMeterInput{Key: "tokens_um", Name: "Tokens"})
+	meter, err := svc.CreateMeter(ctx, "t1", CreateMeterInput{EventName: "tokens_um", Name: "Tokens"})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
@@ -1400,6 +1405,15 @@ func (m *memStore) LockMeterTx(_ context.Context, _ *sql.Tx, meterID string) (do
 		return domain.Meter{}, errs.ErrNotFound
 	}
 	return mt, nil
+}
+
+// MeterUsageTx reads the meters the test marked as having events.
+func (m *memStore) MeterUsageTx(_ context.Context, _ *sql.Tx, mt domain.Meter) (MeterUsage, error) {
+	return MeterUsage{Events: m.hasUsage[mt.ID]}, nil
+}
+
+func (m *memStore) MeterHasUsage(_ context.Context, _ string, mt domain.Meter) (bool, error) {
+	return m.hasUsage[mt.ID], nil
 }
 
 func (m *memStore) CountSubsUsingMeterTx(_ context.Context, _ *sql.Tx, meterID string) (int, error) {

@@ -36,12 +36,11 @@ func (r *recordingAudit) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) er
 	return nil
 }
 
-// setupMaxLastEngine wires the threshold fixture with a mixed-mode meter: one
-// sum bucket (rrv_api, 1000 calls @ $1 = 100000c) and one max bucket
-// (rrv_max, peak 50 @ $1 = 5000c), plus the plan's 4900c in_arrears base,
-// which a threshold neither counts nor bills.
-// Bucket modes ride RuleAggregation.AggregationMode exactly as the real
-// store's COALESCE(rule_mode, default) emits them.
+// setupMaxLastEngine wires the threshold fixture with two meters on the
+// plan: the sum meter mtr_api (rrv_api, 1000 calls @ $1 = 100000c) and the
+// max meter mtr_gpu (rrv_max, peak 50 @ $1 = 5000c), plus the plan's 4900c
+// in_arrears base, which a threshold neither counts nor bills. A meter has
+// one aggregation (ADR-130 §2), so a max bucket is a max meter's.
 func setupMaxLastEngine(thresholds *domain.BillingThresholds) (*Engine, *thresholdMockSubs, *mockInvoices) {
 	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
@@ -50,13 +49,12 @@ func setupMaxLastEngine(thresholds *domain.BillingThresholds) (*Engine, *thresho
 		ID: "rrv_max", RuleKey: "gpu_peak", Version: 1, Mode: domain.PricingFlat,
 		FlatAmountCents: decimal.NewFromInt(100), Currency: "USD",
 	}
+	mp.meters["mtr_gpu"] = domain.Meter{ID: "mtr_gpu", Name: "GPU Peak", Unit: "gpus", Aggregation: domain.AggregationMax, RatingRuleVersionID: "rrv_max"}
+	pln := mp.plans["pln_1"]
+	pln.MeterIDs = []string{"mtr_api", "mtr_gpu"}
+	mp.plans["pln_1"] = pln
 	mu := engine.usage.(*mockUsage)
-	mu.ruleAggs = map[string][]domain.RuleAggregation{
-		"mtr_api": {
-			{RatingRuleVersionID: "rrv_api", AggregationMode: domain.AggSum, Quantity: decimal.NewFromInt(1000)},
-			{RatingRuleVersionID: "rrv_max", AggregationMode: domain.AggMax, Quantity: decimal.NewFromInt(50)},
-		},
-	}
+	mu.totals["mtr_gpu"] = 50
 	return engine, subs, invoices
 }
 
@@ -64,9 +62,9 @@ func setupMaxLastEngine(thresholds *domain.BillingThresholds) (*Engine, *thresho
 // the max bucket's line is DROPPED from the threshold
 // invoice (the cycle close bills it full-period exactly once), its amount
 // still counts toward the cap, and the invoice header charges ONLY the
-// rendered lines — no phantom money. Mutation seams: classify per meter
-// instead of per bucket → the max line rides; feed RunningSubtotal to the
-// invoice → subtotal 105000.
+// rendered lines — no phantom money. Mutation seams: treat the max meter as
+// additive → the max line rides; feed RunningSubtotal to the invoice →
+// subtotal 105000.
 func TestFireThreshold_ResetFalse_DropsMaxBucket_SubtotalSplit(t *testing.T) {
 	// capRunning = 100000 sum + 5000 max = 105000 ≥ 102000: the cap
 	// crosses ONLY because the max bucket counts (sum-only is 100000). The
@@ -106,11 +104,9 @@ func TestFireThreshold_ResetFalse_DropsMaxBucket_SubtotalSplit(t *testing.T) {
 func TestScanThresholds_PureMaxCrossing_SkipsWithOneArtifact(t *testing.T) {
 	thresholds := &domain.BillingThresholds{AmountGTE: 1000}
 	engine, _, invoices := setupMaxLastEngine(thresholds)
-	// Pure max: strip the sum bucket and the base fee.
+	// Pure max: strip the sum meter's usage and the base fee.
 	mu := engine.usage.(*mockUsage)
-	mu.ruleAggs["mtr_api"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_max", AggregationMode: domain.AggMax, Quantity: decimal.NewFromInt(50)},
-	}
+	delete(mu.totals, "mtr_api")
 	mp := engine.pricing.(*mockPricing)
 	pln := mp.plans["pln_1"]
 	pln.BaseAmountCents = 0
@@ -146,20 +142,19 @@ func TestScanThresholds_PureMaxCrossing_SkipsWithOneArtifact(t *testing.T) {
 	}
 }
 
-// TestNonAdditiveMode_Classification pins the non-additive set (ADR-066 §4):
-// max + BOTH last variants (the original plan forgot last_ever, which
-// ignores window bounds entirely). sum/count stay additive.
-func TestNonAdditiveMode_Classification(t *testing.T) {
-	for mode, want := range map[domain.AggregationMode]bool{
-		domain.AggMax:              true,
-		domain.AggLastDuringPeriod: true,
-		domain.AggLastEver:         true,
-		domain.AggSum:              false,
-		domain.AggCount:            false,
-		domain.AggregationMode(""): false,
+// TestNonAdditive_Classification pins the non-additive set (ADR-066 §4): a
+// max or last meter. sum and count stay additive, and so does an empty
+// aggregation, which billing reads as sum.
+func TestNonAdditive_Classification(t *testing.T) {
+	for agg, want := range map[string]bool{
+		domain.AggregationMax:   true,
+		domain.AggregationLast:  true,
+		domain.AggregationSum:   false,
+		domain.AggregationCount: false,
+		"":                      false,
 	} {
-		if got := nonAdditiveMode(mode); got != want {
-			t.Errorf("nonAdditiveMode(%q) = %v, want %v", mode, got, want)
+		if got := nonAdditive(agg); got != want {
+			t.Errorf("nonAdditive(%q) = %v, want %v", agg, got, want)
 		}
 	}
 }
@@ -178,17 +173,9 @@ func TestBillOnePeriod_DeferredMaxBucket_BilledExactlyOnceAtClose(t *testing.T) 
 	// watermark invoice alone.
 	engine, _, invoices := setupMaxLastEngine(nil)
 	engine.clock = clock.NewFake(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)) // due
-	// billOnePeriod's multi-dim branch requires meter pricing rules.
-	mp := engine.pricing.(*mockPricing)
-	mp.meterPricingRules = map[string][]domain.MeterPricingRule{
-		"mtr_api": {
-			{ID: "mpr_sum", MeterID: "mtr_api", RatingRuleVersionID: "rrv_api", AggregationMode: domain.AggSum},
-			{ID: "mpr_max", MeterID: "mtr_api", RatingRuleVersionID: "rrv_max", AggregationMode: domain.AggMax},
-		},
-	}
 
-	// Watermark: a reset=false threshold fire billed the sum bucket through
-	// Apr 10; the max bucket was deferred (no line).
+	// Watermark: a threshold fire billed the sum meter through Apr 10; the
+	// max meter's bucket was deferred (no line).
 	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	fireAt := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
 	invoices.invoices = append(invoices.invoices, domain.Invoice{

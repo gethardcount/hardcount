@@ -36,7 +36,7 @@ func cancelFailLoudFixture() (domain.Subscription, *mockPricing, *mockUsage, *mo
 				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Key: "api", Name: "API Calls",
+			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
 				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
 		},
 		rules: map[string]domain.RatingRuleVersion{

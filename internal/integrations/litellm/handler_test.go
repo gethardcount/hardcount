@@ -29,7 +29,7 @@ func (f fakeCustomers) GetByExternalID(_ context.Context, _, ext string) (domain
 
 type fakeMeters struct{ err error }
 
-func (f fakeMeters) GetMeterByKey(_ context.Context, _, key string) (domain.Meter, error) {
+func (f fakeMeters) GetMeterByEventName(_ context.Context, _, key string) (domain.Meter, error) {
 	if f.err != nil {
 		return domain.Meter{}, f.err
 	}
@@ -199,7 +199,7 @@ func TestSpend_UnknownCustomerIsHeldWithItsKey(t *testing.T) {
 		t.Fatalf("holder called %d times, want 1 (one call, held whole)", hold.calls)
 	}
 	in := hold.got[0]
-	if in.Reason != domain.HeldReasonCustomerNotFound || in.ExternalCustomerID != "cus_acme" || in.MeterKey != MeterKeyTokens {
+	if in.Reason != domain.HeldReasonCustomerNotFound || in.ExternalCustomerID != "cus_acme" || in.EventName != EventNameTokens {
 		t.Errorf("held call = %+v", in)
 	}
 	keys := map[string]bool{}

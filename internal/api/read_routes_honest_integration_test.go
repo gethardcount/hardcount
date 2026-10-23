@@ -31,7 +31,7 @@ func TestReadRoutesHonest(t *testing.T) {
 		"currency": "USD", "flat_amount_cents": 10,
 	}).want(t, 201, "create rating rule").body, "id")
 	meterID := flowStr(call("POST", "/v1/meters", map[string]any{
-		"key": "honest_calls", "name": "Honest calls", "unit": "call",
+		"event_name": "honest_calls", "name": "Honest calls", "unit": "call",
 		"aggregation": "sum", "rating_rule_version_id": ruleID,
 	}).want(t, 201, "create meter").body, "id")
 	planID := flowStr(call("POST", "/v1/plans", map[string]any{

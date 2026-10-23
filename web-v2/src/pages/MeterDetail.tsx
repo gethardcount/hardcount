@@ -4,11 +4,15 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, formatCents, formatDateTime } from '@/lib/api'
-import type { MeterPricingRule, MeterAggregationMode, RatingRule } from '@/lib/api'
+import type { Meter, MeterPricingRule, RatingRule } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
 import { money, priceRate, unitScale } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
 import { deleteMatchedPriceSentence, METER_IN_USE_TITLE, meterInUseMessage } from '@/lib/pricingCopy'
+import {
+  METER_AGGREGATIONS, METER_HAS_USAGE_SENTENCE, METER_NAME_UNIT_SENTENCE, METER_NO_USAGE_SENTENCE,
+  meterAggregationHelp, meterAggregationLabel, meterHasUsageMessage,
+} from '@/lib/meterLabels'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
@@ -41,25 +45,12 @@ import {
 import { Combobox } from '@/components/Combobox'
 import { TypedConfirmDialog } from '@/components/TypedConfirmDialog'
 
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Lock, Pencil, Plus, Trash2 } from 'lucide-react'
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 
 const statusVariant = statusBadgeVariant
-
-const AGGREGATION_MODES: { value: MeterAggregationMode; label: string; help: string }[] = [
-  { value: 'sum', label: 'Sum', help: 'Add all event values in the period.' },
-  { value: 'count', label: 'Count', help: 'Count matching events; ignore values.' },
-  { value: 'last_during_period', label: 'Last value in period', help: 'Take the latest event in the period.' },
-  { value: 'last_ever', label: 'Last value ever', help: 'Take the latest value as of the end of the period, however old (state-style billing).' },
-  { value: 'max', label: 'Maximum', help: 'Take the largest value in the period.' },
-]
-
-// Human label for an aggregation mode — operator copy never shows the raw
-// snake_case enum.
-const aggregationLabel = (mode: string): string =>
-  AGGREGATION_MODES.find(m => m.value === mode)?.label ?? mode
 
 export default function MeterDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -67,6 +58,7 @@ export default function MeterDetailPage() {
   const queryClient = useQueryClient()
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
   const [defaultRuleOpen, setDefaultRuleOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<MeterPricingRule | null>(null)
   const [deleteInUse, setDeleteInUse] = useState<string | null>(null)
@@ -189,27 +181,41 @@ export default function MeterDetailPage() {
             <CopyButton text={meter.id} />
           </div>
         </div>
-        <Badge variant="secondary">{aggregationLabel(meter.aggregation)}</Badge>
+        <Badge variant="secondary">{meterAggregationLabel(meter.aggregation)}</Badge>
       </div>
 
       {/* Properties */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Properties</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-sm">Properties</CardTitle>
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+              <Pencil size={14} className="mr-1.5" /> Edit
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="divide-y divide-border">
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Key</span>
-              <span className="text-sm text-foreground font-mono">{meter.key}</span>
+            <div className="flex items-center justify-between gap-3 px-6 py-3">
+              <span className="text-sm text-muted-foreground">Event name</span>
+              <span className="text-sm text-foreground font-mono break-all text-right">{meter.event_name}</span>
             </div>
             <div className="flex items-center justify-between px-6 py-3">
               <span className="text-sm text-muted-foreground">Unit</span>
               <span className="text-sm text-foreground">{meter.unit}</span>
             </div>
-            <div className="flex items-center justify-between px-6 py-3">
-              <span className="text-sm text-muted-foreground">Default aggregation</span>
-              <Badge variant="secondary">{aggregationLabel(meter.aggregation)}</Badge>
+            <div className="px-6 py-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Aggregation</span>
+                <Badge variant="secondary">{meterAggregationLabel(meter.aggregation)}</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1.5 flex items-start gap-1.5" data-testid="meter-aggregation-lock">
+                {meter.has_usage && <Lock size={12} className="mt-0.5 shrink-0" aria-hidden />}
+                <span>
+                  {meterAggregationHelp(meter.aggregation)}{' '}
+                  {meter.has_usage ? METER_HAS_USAGE_SENTENCE : METER_NO_USAGE_SENTENCE}
+                </span>
+              </p>
             </div>
             <div className="flex items-center justify-between px-6 py-3">
               <span className="text-sm text-muted-foreground">Created</span>
@@ -315,7 +321,7 @@ export default function MeterDetailPage() {
             <div>
               <CardTitle className="text-sm">Prices for specific values</CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Each prices the events whose values match, such as model = gpt-4. When an event matches more than one, the higher priority prices it.
+                Each prices the events whose values match, such as model = gpt-4, under the meter's aggregation. When an event matches more than one, the higher priority prices it.
               </p>
             </div>
             <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -336,7 +342,6 @@ export default function MeterDetailPage() {
                 <TableRow>
                   <TableHead className="text-xs font-medium w-20">Priority</TableHead>
                   <TableHead className="text-xs font-medium">Only for events with these values</TableHead>
-                  <TableHead className="text-xs font-medium w-40">Aggregation</TableHead>
                   <TableHead className="text-xs font-medium">Price</TableHead>
                   <TableHead className="text-xs font-medium w-12 text-right" />
                 </TableRow>
@@ -360,9 +365,6 @@ export default function MeterDetailPage() {
                             ))
                           )}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary" className="text-xs">{aggregationLabel(rule.aggregation_mode)}</Badge>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {ratingRuleName ? (
@@ -453,6 +455,19 @@ export default function MeterDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {editOpen && (
+        <EditMeterDialog
+          meter={meter}
+          onClose={() => setEditOpen(false)}
+          onSaved={() => {
+            setEditOpen(false)
+            queryClient.invalidateQueries({ queryKey: ['meter', id] })
+            queryClient.invalidateQueries({ queryKey: ['meters'] })
+          }}
+          onStale={() => queryClient.invalidateQueries({ queryKey: ['meter', id] })}
+        />
+      )}
 
       {createOpen && (
         <CreatePricingRuleDialog
@@ -613,7 +628,6 @@ function CreatePricingRuleDialog({
   onCreated: () => void
 }) {
   const [dimensions, setDimensions] = useState<DimensionRow[]>([{ key: '', value: '' }])
-  const [aggregation, setAggregation] = useState<MeterAggregationMode>('sum')
   const [ratingRuleId, setRatingRuleId] = useState<string>('')
   const [priority, setPriority] = useState<number>(100)
   const [inUse, setInUse] = useState<string | null>(null)
@@ -629,7 +643,6 @@ function CreatePricingRuleDialog({
       return api.createMeterPricingRule(meterId, {
         rating_rule_version_id: ratingRuleId,
         dimension_match: dimMap,
-        aggregation_mode: aggregation,
         priority,
       })
     },
@@ -722,39 +735,15 @@ function CreatePricingRuleDialog({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Aggregation</Label>
-              <Select
-                items={AGGREGATION_MODES.map(m => ({ value: m.value, label: m.label }))}
-                value={aggregation}
-                onValueChange={(v) => setAggregation(v as MeterAggregationMode)}
-              >
-                <SelectTrigger className="mt-2 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {AGGREGATION_MODES.map(m => (
-                    <SelectItem key={m.value} value={m.value}>
-                      <span className="font-mono">{m.label}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                {AGGREGATION_MODES.find(m => m.value === aggregation)?.help}
-              </p>
-            </div>
-            <div>
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">Priority</Label>
-              <Input
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(parseInt(e.target.value || '0', 10) || 0)}
-                className="mt-2 font-mono"
-              />
-              <p className="text-xs text-muted-foreground mt-1">When an event matches more than one price, the higher number prices it.</p>
-            </div>
+          <div>
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">Priority</Label>
+            <Input
+              type="number"
+              value={priority}
+              onChange={(e) => setPriority(parseInt(e.target.value || '0', 10) || 0)}
+              className="mt-2 font-mono sm:max-w-40"
+            />
+            <p className="text-xs text-muted-foreground mt-1">When an event matches more than one price, the higher number prices it.</p>
           </div>
 
           <div>
@@ -780,6 +769,110 @@ function CreatePricingRuleDialog({
           <Button onClick={() => createMutation.mutate()} disabled={!canSubmit}>
             {createMutation.isPending ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
             Add price
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// EditMeterDialog changes the meter's name, unit and aggregation. The
+// aggregation is fixed once the meter has usage (ADR-130 §2): the select is
+// then read-only and the dialog says why before any edit. A refusal the
+// page did not foresee (the first event arrived while the dialog was open)
+// shows the server's sentence and reloads the meter.
+function EditMeterDialog({
+  meter,
+  onClose,
+  onSaved,
+  onStale,
+}: {
+  meter: Meter
+  onClose: () => void
+  onSaved: () => void
+  onStale: () => void
+}) {
+  const [name, setName] = useState(meter.name)
+  const [unit, setUnit] = useState(meter.unit)
+  const [aggregation, setAggregation] = useState(meter.aggregation)
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const locked = !!meter.has_usage
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.updateMeter(meter.id, {
+      name: name.trim(),
+      unit: unit.trim(),
+      ...(aggregation !== meter.aggregation ? { aggregation } : {}),
+    }),
+    onMutate: () => setRefusal(null),
+    onSuccess: () => {
+      toast.success('Meter saved')
+      onSaved()
+    },
+    onError: (err) => {
+      const msg = meterHasUsageMessage(err)
+      if (msg) {
+        setRefusal(msg)
+        setAggregation(meter.aggregation)
+        onStale()
+      } else showApiError(err, 'Failed to save meter')
+    },
+  })
+
+  const changed = name.trim() !== meter.name || unit.trim() !== meter.unit || aggregation !== meter.aggregation
+  const canSave = !!name.trim() && changed && !saveMutation.isPending
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit meter</DialogTitle>
+          <DialogDescription>{METER_NAME_UNIT_SENTENCE}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="meter-name">Name</Label>
+            <Input id="meter-name" value={name} onChange={e => setName(e.target.value)} maxLength={255} className="mt-1" />
+          </div>
+          <div>
+            <Label htmlFor="meter-unit">Unit</Label>
+            <Input id="meter-unit" value={unit} onChange={e => setUnit(e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <Label>Aggregation</Label>
+            <Select
+              items={METER_AGGREGATIONS.map(a => ({ value: a.value, label: a.label }))}
+              value={aggregation}
+              onValueChange={(v) => setAggregation(v ?? meter.aggregation)}
+              disabled={locked}
+            >
+              <SelectTrigger className="mt-1 w-full" aria-label="Aggregation">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {METER_AGGREGATIONS.map(a => (
+                  <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground mt-1">{meterAggregationHelp(aggregation)}</p>
+            <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1.5">
+              {locked && <Lock size={12} className="mt-0.5 shrink-0" aria-hidden />}
+              <span>{locked ? METER_HAS_USAGE_SENTENCE : METER_NO_USAGE_SENTENCE}</span>
+            </p>
+          </div>
+        </div>
+
+        {refusal && (
+          <Callout tone="amber" role="alert" title="Aggregation fixed">{refusal}</Callout>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => saveMutation.mutate()} disabled={!canSave}>
+            {saveMutation.isPending ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
+            Save
           </Button>
         </DialogFooter>
       </DialogContent>

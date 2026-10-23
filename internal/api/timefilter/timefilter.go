@@ -26,7 +26,7 @@
 //   - exclusive (`< to`): the usage event list and aggregate
 //     (/v1/usage-events, /v1/usage-events/aggregate),
 //     all via usage.buildUsageWhere, and customer usage
-//     (/v1/customers/{id}/usage, via usage.AggregateByPricingRules).
+//     (/v1/customers/{id}/usage, via usage.AggregateClaims).
 //
 // For a date-only `to` both read the same in practice: the exclusive
 // consumers miss only a row stamped at exactly 23:59:59.999999.

@@ -7,7 +7,6 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { UpsertMeterPricingRuleBodyAggregationMode } from './upsertMeterPricingRuleBodyAggregationMode';
 import type { UpsertMeterPricingRuleBodyDimensionMatch } from './upsertMeterPricingRuleBodyDimensionMatch';
 
 export type UpsertMeterPricingRuleBody = {
@@ -19,8 +18,6 @@ export type UpsertMeterPricingRuleBody = {
      * strings, numbers or booleans. Omitted or `{}` matches every event.
      */
   dimension_match?: UpsertMeterPricingRuleBodyDimensionMatch;
-  /** How the matched events become one quantity for the period. */
-  aggregation_mode?: UpsertMeterPricingRuleBodyAggregationMode;
   /** Higher wins when an event matches more than one rule. */
   priority?: number;
 };

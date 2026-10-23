@@ -10,12 +10,13 @@
 import type { HeldUsageGroupReason } from './heldUsageGroupReason';
 
 /**
- * The usage rows still held for one external customer ID, meter key and reason.
+ * The usage rows still held for one external customer ID, event name and reason.
  */
 export interface HeldUsageGroup {
   /** The LiteLLM `user` value the rows carried. */
   external_customer_id: string;
-  meter_key: string;
+  /** The `event_name` the rows carried. */
+  event_name: string;
   /** What was missing when the rows arrived. */
   reason: HeldUsageGroupReason;
   rows: number;
@@ -27,6 +28,6 @@ export interface HeldUsageGroup {
   last_received_at: string;
   /** The customer whose external ID now matches, or empty when none does yet. */
   customer_id: string;
-  /** Whether a meter with this key exists now. */
+  /** Whether a meter with this `event_name` exists now. */
   meter_exists: boolean;
 }

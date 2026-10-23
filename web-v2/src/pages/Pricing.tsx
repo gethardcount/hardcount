@@ -18,7 +18,7 @@ import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
 import { priceRate, shiftDecimal } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
-import { meterAggregationLabel } from '@/lib/meterLabels'
+import { METER_AGGREGATIONS, meterAggregationHelp, meterAggregationLabel } from '@/lib/meterLabels'
 import { showApiError } from '@/lib/formErrors'
 import { statusBadgeVariant } from '@/lib/status'
 
@@ -67,12 +67,6 @@ const PRICING_MODE_OPTIONS = [
   { value: 'flat', label: 'Flat Rate' },
   { value: 'graduated', label: 'Graduated Tiers' },
   { value: 'package', label: 'Package' },
-]
-const AGGREGATION_OPTIONS = [
-  { value: 'sum', label: 'Sum' },
-  { value: 'count', label: 'Count' },
-  { value: 'max', label: 'Maximum' },
-  { value: 'last', label: 'Latest Value' },
 ]
 const INTERVAL_OPTIONS = [
   { value: 'monthly', label: 'Monthly' },
@@ -297,7 +291,7 @@ export default function PricingPage() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Name</TableHead>
-                          <TableHead>Key</TableHead>
+                          <TableHead>Event name</TableHead>
                           <TableHead>Unit</TableHead>
                           <TableHead>Pricing</TableHead>
                           <TableHead>Aggregation</TableHead>
@@ -320,7 +314,7 @@ export default function PricingPage() {
                                 {m.name}
                               </Link>
                             </TableCell>
-                            <TableCell className="font-mono text-muted-foreground">{m.key}</TableCell>
+                            <TableCell className="font-mono text-muted-foreground">{m.event_name}</TableCell>
                             <TableCell className="text-muted-foreground">{m.unit}</TableCell>
                             {(() => {
                               const def = rules.find(r => r.id === m.rating_rule_version_id)
@@ -740,15 +734,8 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
 /* ─── Create Meter Dialog ─── */
 
 function CreateMeterDialog({ onClose, onCreated, rules }: { onClose: () => void; onCreated: (meterId?: string) => void; rules: RatingRule[] }) {
-  const [form, setForm] = useState({ key: '', name: '', unit: 'unit', aggregation: 'sum', rating_rule_version_id: '' })
+  const [form, setForm] = useState({ event_name: '', name: '', unit: 'unit', aggregation: 'sum', rating_rule_version_id: '' })
   const [saving, setSaving] = useState(false)
-
-  const aggregationDescriptions: Record<string, string> = {
-    sum: 'Add up all values in the billing period',
-    count: 'Count the number of events',
-    max: 'Use the highest value seen',
-    last: 'Use the most recent value',
-  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -777,8 +764,8 @@ function CreateMeterDialog({ onClose, onCreated, rules }: { onClose: () => void;
               placeholder="API Calls" maxLength={255} className="mt-1" />
           </div>
           <div>
-            <Label>Key</Label>
-            <Input value={form.key} onChange={e => setForm(f => ({ ...f, key: e.target.value }))}
+            <Label>Event name</Label>
+            <Input value={form.event_name} onChange={e => setForm(f => ({ ...f, event_name: e.target.value }))}
               placeholder="api_calls" maxLength={100} className="mt-1 font-mono" />
             <p className="text-xs text-muted-foreground mt-1">
               The name your app sends with each usage event, e.g. api_calls.
@@ -793,17 +780,17 @@ function CreateMeterDialog({ onClose, onCreated, rules }: { onClose: () => void;
             </div>
             <div>
               <Label>Aggregation</Label>
-              <Select items={AGGREGATION_OPTIONS} value={form.aggregation} onValueChange={v => setForm(f => ({ ...f, aggregation: v ?? '' }))}>
+              <Select items={METER_AGGREGATIONS.map(a => ({ value: a.value, label: a.label }))} value={form.aggregation} onValueChange={v => setForm(f => ({ ...f, aggregation: v ?? '' }))}>
                 <SelectTrigger className="w-full mt-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {AGGREGATION_OPTIONS.map(o => (
+                  {METER_AGGREGATIONS.map(o => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground mt-1">{aggregationDescriptions[form.aggregation]}</p>
+              <p className="text-xs text-muted-foreground mt-1">{meterAggregationHelp(form.aggregation)} Fixed once the meter has usage.</p>
             </div>
           </div>
           {rules.length === 0 ? (
@@ -961,9 +948,9 @@ function CreatePlanDialog({ onClose, onCreated, meters, rules }: { onClose: () =
                     />
                     <div className="flex-1 min-w-0">
                       <span className="text-foreground">{m.name}</span>
-                      <span className="text-muted-foreground font-mono text-xs ml-2">{m.key}</span>
+                      <span className="text-muted-foreground font-mono text-xs ml-2">{m.event_name}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{m.aggregation} &middot; {m.unit}</span>
+                    <span className="text-xs text-muted-foreground">{meterAggregationLabel(m.aggregation)} &middot; {m.unit}</span>
                   </label>
                 ))}
               </div>

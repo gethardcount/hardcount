@@ -86,7 +86,7 @@ func TestSimAxis_ClockDrivenLifecycle_EveryAuditRowIsStamped(t *testing.T) {
 		t.Fatalf("create rating rule: %v", err)
 	}
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "sim_calls", Name: "Sim Calls", Unit: "calls",
+		EventName: "sim_calls", Name: "Sim Calls", Unit: "calls",
 		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {

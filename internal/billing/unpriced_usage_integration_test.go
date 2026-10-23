@@ -68,7 +68,7 @@ func tokensMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key str
 		t.Fatalf("create rule: %v", err)
 	}
 	m, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: key, Name: key, Unit: "tokens", Aggregation: "sum",
+		EventName: key, Name: key, Unit: "tokens", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -252,7 +252,7 @@ func TestUnpricedUsage_CycleClose_CountsBothPaths(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 	single, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "seats_cyc", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: rr.ID,
+		EventName: "seats_cyc", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: rr.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -367,14 +367,13 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 		t.Fatalf("create rule: %v", err)
 	}
 	gpu, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "gpu_max", Name: "GPU", Unit: "gpus", Aggregation: "max",
+		EventName: "gpu_max", Name: "GPU", Unit: "gpus", Aggregation: "max",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
 	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: gpu.ID, RatingRuleVersionID: rr.ID, DimensionMatch: map[string]any{"model": "a"},
-		AggregationMode: domain.AggMax,
 	}); err != nil {
 		t.Fatalf("bind rule: %v", err)
 	}
@@ -491,11 +490,11 @@ func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
 	}
 	cases := []struct {
 		name string
-		mode domain.AggregationMode
+		mode string // the tokens meter's aggregation
 		want int64
 	}{
-		{"sum price bills only the usage after the threshold invoice", domain.AggSum, 30},
-		{"max price bills the whole period", domain.AggMax, 70},
+		{"sum price bills only the usage after the threshold invoice", domain.AggregationSum, 30},
+		{"max price bills the whole period", domain.AggregationMax, 70},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -505,6 +504,10 @@ func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
 
 			key := "tok_paf_" + string(tc.mode)
 			tok := tokensMeter(t, ctx, f, key)
+			// The meter has no events yet, so its aggregation can change.
+			if _, err := f.pricingSvc.UpdateMeter(ctx, f.tenantID, tok.ID, pricing.UpdateMeterInput{Aggregation: &tc.mode}); err != nil {
+				t.Fatalf("set the tokens meter's aggregation: %v", err)
+			}
 			plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 				Code: "pln_paf_" + string(tc.mode), Name: "Priced After Fire", Currency: "USD",
 				BillingInterval: domain.BillingMonthly, MeterIDs: []string{f.meterID, tok.ID},
@@ -550,7 +553,7 @@ func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
 			// A rule for model b, which no rule prices, is allowed.
 			if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 				MeterID: tok.ID, RatingRuleVersionID: rrB.ID,
-				DimensionMatch: map[string]any{"model": "b"}, AggregationMode: tc.mode,
+				DimensionMatch: map[string]any{"model": "b"},
 			}); err != nil {
 				t.Fatalf("pricing model b on a meter in use must be allowed: %v", err)
 			}

@@ -102,7 +102,7 @@ func (f pricingFixture) seedRatingRule(t *testing.T, key string) domain.RatingRu
 func (f pricingFixture) seedMeter(t *testing.T, key string) domain.Meter {
 	t.Helper()
 	m, err := pricing.NewService(f.store).CreateMeter(f.ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: key, Name: "Before Rename", Unit: "unit", Aggregation: "sum",
+		EventName: key, Name: "Before Rename", Unit: "unit", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("seed meter: %v", err)
@@ -158,8 +158,8 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 		if row.Metadata["rating_rule_version_id"] != rule.ID {
 			t.Errorf("metadata rating_rule_version_id = %v, want %s", row.Metadata["rating_rule_version_id"], rule.ID)
 		}
-		if row.Metadata["key"] != "tokens_ok" {
-			t.Errorf("metadata key = %v, want tokens_ok", row.Metadata["key"])
+		if row.Metadata["event_name"] != "tokens_ok" {
+			t.Errorf("metadata event_name = %v, want tokens_ok", row.Metadata["event_name"])
 		}
 		// Untouched field must NOT be claimed as changed.
 		if _, ok := row.Metadata["unit"]; ok {
@@ -274,7 +274,6 @@ func TestMeterPricingRuleDeleteAudit_SharedFate(t *testing.T) {
 			MeterID:             m.ID,
 			RatingRuleVersionID: rule.ID,
 			DimensionMatch:      map[string]any{"model": meterKey},
-			AggregationMode:     domain.AggSum,
 			Priority:            priority,
 		})
 		if err != nil {
@@ -385,8 +384,7 @@ func TestMeterRoutes_AreAccountedFor(t *testing.T) {
 
 	pr, err := f.auditedSvc().UpsertMeterPricingRule(f.ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: m.ID, RatingRuleVersionID: rule.ID,
-		DimensionMatch:  map[string]any{"model": "x"},
-		AggregationMode: domain.AggSum, Priority: 5,
+		DimensionMatch: map[string]any{"model": "x"}, Priority: 5,
 	})
 	if err != nil {
 		t.Fatalf("seed pricing rule: %v", err)

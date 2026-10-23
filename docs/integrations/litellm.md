@@ -53,7 +53,7 @@ model and kind of token
 curl -s -X POST "$VELOX/v1/meters" \
   -H "Authorization: Bearer $VELOX_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"key":"tokens","name":"Tokens","unit":"tokens","aggregation":"sum"}'
+  -d '{"event_name":"tokens","name":"Tokens","unit":"tokens","aggregation":"sum"}'
 ```
 
 ## 2. Add Velox to the proxy config

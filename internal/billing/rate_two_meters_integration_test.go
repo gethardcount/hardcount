@@ -35,7 +35,7 @@ func TestTwoGraduatedMeters_EachContinuesItsOwnTiersAcrossFire_RealStore(t *test
 		{UpTo: 0, UnitAmountCents: decimal.NewFromInt(1)},
 	}))
 	tokens, err := lf.pricingSvc.CreateMeter(ctx, lf.tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: tokensRule.ID,
+		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: tokensRule.ID,
 	})
 	if err != nil {
 		t.Fatalf("create tokens meter: %v", err)

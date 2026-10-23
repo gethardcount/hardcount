@@ -9,6 +9,6 @@
  */
 
 /**
- * Dimensions an event must have for this rule to bill it. `{}` matches every event.
+ * Dimensions an event must have for this rule to bill it. `{}` matches every event. The rule bills them under the meter's `aggregation`.
  */
 export type MeterPricingRuleDimensionMatch = { [key: string]: unknown };

@@ -18,5 +18,6 @@ export interface RecipePlan {
   base_amount_cents: number;
   /** Optional; empty defaults to in_arrears at plan creation (ADR-031). */
   base_bill_timing?: RecipePlanBaseBillTiming;
-  meter_keys: string[];
+  /** The recipe meters the plan bills. */
+  event_names: string[];
 }

@@ -8,7 +8,7 @@ import type { HeldUsageGroup } from '../src/lib/gen/schemas/heldUsageGroup.ts'
 
 const g = (over: Partial<HeldUsageGroup>): HeldUsageGroup => ({
   external_customer_id: 'acme',
-  meter_key: 'tokens',
+  event_name: 'tokens',
   reason: 'customer_not_found',
   rows: 3,
   total_quantity: '300',
@@ -23,7 +23,7 @@ const g = (over: Partial<HeldUsageGroup>): HeldUsageGroup => ({
 test('groups merge per external ID and keep the widest time range', () => {
   const out = groupHeldByCustomer([
     g({}),
-    g({ meter_key: 'calls', rows: 2, meter_exists: false, first_event_at: '2026-10-01T00:00:00Z' }),
+    g({ event_name: 'calls', rows: 2, meter_exists: false, first_event_at: '2026-10-01T00:00:00Z' }),
     g({ external_customer_id: 'beta', rows: 1 }),
   ])
   assert.equal(out.length, 2)

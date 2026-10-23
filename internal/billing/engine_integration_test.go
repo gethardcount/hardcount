@@ -126,8 +126,8 @@ func (a *usageStoreAdapter) AggregateForBillingPeriodByAgg(ctx context.Context, 
 	return a.store.AggregateForBillingPeriodByAgg(ctx, tenantID, customerID, meters, from, to)
 }
 
-func (a *usageStoreAdapter) AggregateByPricingRules(ctx context.Context, tenantID, customerID, meterID string, defaultMode domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error) {
-	return a.store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+func (a *usageStoreAdapter) AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.RuleAggregation, error) {
+	return a.store.AggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 }
 
 // invoiceStoreAdapter wraps invoice.PostgresStore to implement billing.InvoiceWriter
@@ -264,7 +264,7 @@ func TestFullBillingCycle_E2E(t *testing.T) {
 
 	// 4. Create meters
 	apiMeter, err := pricingStore.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "api_calls", Name: "API Calls", Unit: "calls",
+		EventName: "api_calls", Name: "API Calls", Unit: "calls",
 		Aggregation: "sum", RatingRuleVersionID: apiRule.ID,
 	})
 	if err != nil {
@@ -272,7 +272,7 @@ func TestFullBillingCycle_E2E(t *testing.T) {
 	}
 
 	storageMeter, err := pricingStore.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "storage_gb", Name: "Storage", Unit: "GB",
+		EventName: "storage_gb", Name: "Storage", Unit: "GB",
 		Aggregation: "sum", RatingRuleVersionID: storageRule.ID,
 	})
 	if err != nil {

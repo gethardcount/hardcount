@@ -245,17 +245,17 @@ func (s *PostgresStore) createMeterTx(ctx context.Context, tx *sql.Tx, tenantID 
 	now := time.Now().UTC()
 
 	err := tx.QueryRowContext(ctx, `
-		INSERT INTO meters (id, tenant_id, key, name, unit, aggregation, rating_rule_version_id, created_at, updated_at)
+		INSERT INTO meters (id, tenant_id, event_name, name, unit, aggregation, rating_rule_version_id, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
-		RETURNING id, tenant_id, key, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
-	`, id, tenantID, m.Key, m.Name, m.Unit, m.Aggregation,
+		RETURNING id, tenant_id, event_name, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
+	`, id, tenantID, m.EventName, m.Name, m.Unit, m.Aggregation,
 		postgres.NullableString(m.RatingRuleVersionID), now,
-	).Scan(&m.ID, &m.TenantID, &m.Key, &m.Name, &m.Unit, &m.Aggregation,
+	).Scan(&m.ID, &m.TenantID, &m.EventName, &m.Name, &m.Unit, &m.Aggregation,
 		&m.RatingRuleVersionID, &m.CreatedAt, &m.UpdatedAt)
 
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
-			return domain.Meter{}, errs.AlreadyExists("key", fmt.Sprintf("meter key %q already exists", m.Key))
+			return domain.Meter{}, errs.AlreadyExists("event_name", fmt.Sprintf("a meter with event_name %q already exists", m.EventName))
 		}
 		return domain.Meter{}, err
 	}
@@ -271,9 +271,9 @@ func (s *PostgresStore) GetMeter(ctx context.Context, tenantID, id string) (doma
 
 	var m domain.Meter
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, key, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
+		SELECT id, tenant_id, event_name, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
 		FROM meters WHERE id = $1
-	`, id).Scan(&m.ID, &m.TenantID, &m.Key, &m.Name, &m.Unit, &m.Aggregation,
+	`, id).Scan(&m.ID, &m.TenantID, &m.EventName, &m.Name, &m.Unit, &m.Aggregation,
 		&m.RatingRuleVersionID, &m.CreatedAt, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.Meter{}, errs.ErrNotFound
@@ -281,7 +281,7 @@ func (s *PostgresStore) GetMeter(ctx context.Context, tenantID, id string) (doma
 	return m, err
 }
 
-func (s *PostgresStore) GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error) {
+func (s *PostgresStore) GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Meter{}, err
@@ -290,9 +290,9 @@ func (s *PostgresStore) GetMeterByKey(ctx context.Context, tenantID, key string)
 
 	var m domain.Meter
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, key, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
-		FROM meters WHERE key = $1
-	`, key).Scan(&m.ID, &m.TenantID, &m.Key, &m.Name, &m.Unit, &m.Aggregation,
+		SELECT id, tenant_id, event_name, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
+		FROM meters WHERE event_name = $1
+	`, eventName).Scan(&m.ID, &m.TenantID, &m.EventName, &m.Name, &m.Unit, &m.Aggregation,
 		&m.RatingRuleVersionID, &m.CreatedAt, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.Meter{}, errs.ErrNotFound
@@ -308,7 +308,7 @@ func (s *PostgresStore) ListMeters(ctx context.Context, tenantID string) ([]doma
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, tenant_id, key, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
+		SELECT id, tenant_id, event_name, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
 		FROM meters ORDER BY created_at DESC LIMIT 500
 	`)
 	if err != nil {
@@ -319,7 +319,7 @@ func (s *PostgresStore) ListMeters(ctx context.Context, tenantID string) ([]doma
 	var meters []domain.Meter
 	for rows.Next() {
 		var m domain.Meter
-		if err := rows.Scan(&m.ID, &m.TenantID, &m.Key, &m.Name, &m.Unit, &m.Aggregation,
+		if err := rows.Scan(&m.ID, &m.TenantID, &m.EventName, &m.Name, &m.Unit, &m.Aggregation,
 			&m.RatingRuleVersionID, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -357,9 +357,9 @@ func (s *PostgresStore) UpdateMeterAudited(ctx context.Context, tenantID string,
 	err = tx.QueryRowContext(ctx, `
 		UPDATE meters SET name = $1, unit = $2, aggregation = $3, rating_rule_version_id = $4, updated_at = $5
 		WHERE id = $6
-		RETURNING id, tenant_id, key, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
+		RETURNING id, tenant_id, event_name, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
 	`, m.Name, m.Unit, m.Aggregation, postgres.NullableString(m.RatingRuleVersionID), now, m.ID,
-	).Scan(&m.ID, &m.TenantID, &m.Key, &m.Name, &m.Unit, &m.Aggregation,
+	).Scan(&m.ID, &m.TenantID, &m.EventName, &m.Name, &m.Unit, &m.Aggregation,
 		&m.RatingRuleVersionID, &m.CreatedAt, &m.UpdatedAt)
 
 	if err == sql.ErrNoRows {
@@ -660,21 +660,20 @@ func (s *PostgresStore) upsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO meter_pricing_rules
 			(id, tenant_id, meter_id, rating_rule_version_id, dimension_match,
-			 aggregation_mode, priority, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
+			 priority, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
 		ON CONFLICT (tenant_id, meter_id, rating_rule_version_id) DO UPDATE
 		   SET dimension_match  = EXCLUDED.dimension_match,
-		       aggregation_mode = EXCLUDED.aggregation_mode,
 		       priority         = EXCLUDED.priority,
 		       updated_at       = EXCLUDED.updated_at
 		RETURNING id, tenant_id, meter_id, rating_rule_version_id,
-		          dimension_match, aggregation_mode, priority,
+		          dimension_match, priority,
 		          created_at, updated_at
 	`, id, tenantID, rule.MeterID, rule.RatingRuleVersionID, matchJSON,
-		string(rule.AggregationMode), rule.Priority, now,
+		rule.Priority, now,
 	).Scan(
 		&stored.ID, &stored.TenantID, &stored.MeterID, &stored.RatingRuleVersionID,
-		&storedMatch, &stored.AggregationMode, &stored.Priority,
+		&storedMatch, &stored.Priority,
 		&stored.CreatedAt, &stored.UpdatedAt,
 	)
 	if err != nil {
@@ -701,7 +700,7 @@ func (s *PostgresStore) GetMeterPricingRule(ctx context.Context, tenantID, id st
 
 	rule, err := scanMeterPricingRule(tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, meter_id, rating_rule_version_id,
-		       dimension_match, aggregation_mode, priority,
+		       dimension_match, priority,
 		       created_at, updated_at
 		  FROM meter_pricing_rules
 		 WHERE id = $1
@@ -726,7 +725,7 @@ func (s *PostgresStore) ListMeterPricingRules(ctx context.Context, tenantID stri
 	defer postgres.Rollback(tx)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, meter_id, rating_rule_version_id,
-		       dimension_match, aggregation_mode, priority,
+		       dimension_match, priority,
 		       created_at, updated_at
 		  FROM meter_pricing_rules
 		 ORDER BY priority DESC, created_at ASC, id ASC
@@ -764,7 +763,7 @@ func (s *PostgresStore) ListMeterPricingRulesByMeter(ctx context.Context, tenant
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, meter_id, rating_rule_version_id,
-		       dimension_match, aggregation_mode, priority,
+		       dimension_match, priority,
 		       created_at, updated_at
 		  FROM meter_pricing_rules
 		 WHERE meter_id = $1
@@ -828,7 +827,7 @@ func (s *PostgresStore) DeleteMeterPricingRuleAudited(ctx context.Context, tenan
 		DELETE FROM meter_pricing_rules
 		 WHERE id = $1
 		RETURNING id, tenant_id, meter_id, rating_rule_version_id,
-		          dimension_match, aggregation_mode, priority,
+		          dimension_match, priority,
 		          created_at, updated_at
 	`, id))
 	if err != nil {
@@ -848,7 +847,7 @@ func scanMeterPricingRule(row rowScanner) (domain.MeterPricingRule, error) {
 	var r domain.MeterPricingRule
 	var matchJSON []byte
 	err := row.Scan(&r.ID, &r.TenantID, &r.MeterID, &r.RatingRuleVersionID,
-		&matchJSON, &r.AggregationMode, &r.Priority,
+		&matchJSON, &r.Priority,
 		&r.CreatedAt, &r.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.MeterPricingRule{}, errs.ErrNotFound
@@ -966,10 +965,10 @@ func (s *PostgresStore) PlanCurrenciesWiringMeters(ctx context.Context, tenantID
 func (s *PostgresStore) LockMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (domain.Meter, error) {
 	var m domain.Meter
 	err := tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, key, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
+		SELECT id, tenant_id, event_name, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
 		FROM meters WHERE id = $1
 		FOR UPDATE
-	`, meterID).Scan(&m.ID, &m.TenantID, &m.Key, &m.Name, &m.Unit, &m.Aggregation,
+	`, meterID).Scan(&m.ID, &m.TenantID, &m.EventName, &m.Name, &m.Unit, &m.Aggregation,
 		&m.RatingRuleVersionID, &m.CreatedAt, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return domain.Meter{}, errs.ErrNotFound
@@ -978,6 +977,41 @@ func (s *PostgresStore) LockMeterTx(ctx context.Context, tx *sql.Tx, meterID str
 		return domain.Meter{}, fmt.Errorf("lock meter %s: %w", meterID, err)
 	}
 	return m, nil
+}
+
+// meterHasUsageSQL reports which events the meter has: rows in
+// usage_events for the meter, and held rows (usage_held_events, status held)
+// for its event name, which are billed under the meter's aggregation when
+// they are released (ADR-130 §2). Row-level security scopes both reads to
+// the tenant and the mode; tenant_id leads each table's indexes. No index
+// leads with (tenant_id, meter_id), so proving a meter has no events scans
+// the tenant's events (ADR-130 §18).
+const meterHasUsageSQL = `
+	SELECT EXISTS (SELECT 1 FROM usage_events WHERE tenant_id = $1 AND meter_id = $2),
+	       EXISTS (SELECT 1 FROM usage_held_events WHERE tenant_id = $1 AND event_name = $3 AND status = 'held')`
+
+// MeterUsageTx reads meterHasUsageSQL on the caller's transaction. After
+// LockMeterTx it sees every event whose insert the lock waited for.
+func (s *PostgresStore) MeterUsageTx(ctx context.Context, tx *sql.Tx, m domain.Meter) (MeterUsage, error) {
+	var u MeterUsage
+	if err := tx.QueryRowContext(ctx, meterHasUsageSQL, m.TenantID, m.ID, m.EventName).Scan(&u.Events, &u.Held); err != nil {
+		return MeterUsage{}, fmt.Errorf("read whether meter %s has usage: %w", m.ID, err)
+	}
+	return u, nil
+}
+
+// MeterHasUsage reports whether the meter has events (meterHasUsageSQL).
+func (s *PostgresStore) MeterHasUsage(ctx context.Context, tenantID string, m domain.Meter) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+	var u MeterUsage
+	if err := tx.QueryRowContext(ctx, meterHasUsageSQL, tenantID, m.ID, m.EventName).Scan(&u.Events, &u.Held); err != nil {
+		return false, fmt.Errorf("read whether meter %s has usage: %w", m.ID, err)
+	}
+	return u.Any(), nil
 }
 
 // CountSubsUsingMeterTx locks the plans wiring the meter, in id order so two
@@ -1052,7 +1086,7 @@ func (s *PostgresStore) CountSubsUsingMeterTx(ctx context.Context, tx *sql.Tx, m
 func (s *PostgresStore) GetMeterPricingRuleByPairTx(ctx context.Context, tx *sql.Tx, meterID, ratingRuleVersionID string) (domain.MeterPricingRule, error) {
 	return scanMeterPricingRule(tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, meter_id, rating_rule_version_id,
-		       dimension_match, aggregation_mode, priority,
+		       dimension_match, priority,
 		       created_at, updated_at
 		  FROM meter_pricing_rules
 		 WHERE meter_id = $1 AND rating_rule_version_id = $2

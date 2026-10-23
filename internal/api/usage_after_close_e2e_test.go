@@ -26,7 +26,7 @@ import (
 //
 // The flag must never be false: a flagged event must really be billed on no
 // invoice. Each test that flags an event checks the invoices too, and each
-// case Velox does still bill (the grace, a trial, a last_ever meter, a max
+// case Velox does still bill (the grace, a trial, a max
 // meter a threshold fire deferred) checks the event is not flagged.
 //
 // The rig is the close-lag rig: the real server over HTTP. April is
@@ -118,7 +118,7 @@ func (r *lagRig) newMeter(key, agg string) string {
 		"rule_key": key, "name": key, "mode": "flat", "currency": "USD", "flat_amount_cents": 1,
 	}, http.StatusCreated)
 	m := r.must(http.MethodPost, "/v1/meters", lagP0, map[string]any{
-		"key": key, "name": key, "unit": key, "aggregation": agg, "rating_rule_version_id": rule["id"],
+		"event_name": key, "name": key, "unit": key, "aggregation": agg, "rating_rule_version_id": rule["id"],
 	}, http.StatusCreated)
 	return m["id"].(string)
 }
@@ -350,37 +350,33 @@ func TestUsageAfterClose_TrialUsageIsNotFlagged(t *testing.T) {
 	wantStatus(t, "trial event after the first paid invoice", out, "")
 }
 
-// TestUsageAfterClose_LastEverMeterIsNotFlagged: a last_ever meter has no
-// lower bound, so an April reading that arrives after April's invoice is
-// still the latest reading at May's close and is billed there. It is not
-// flagged. The control: a sum-meter event of the same subscription, same
-// instant, is.
+// TestUsageAfterClose_LastMeterIsFlagged: a last meter bills the latest
+// event of each period, as every meter bills its own period (ADR-130 §2).
+// So an April reading that arrives after April's invoice is billed on no
+// invoice, and the answer says after_close. A last_ever pricing rule, which
+// read the latest value however old, was the one exception; it is gone.
+// The control: a sum-meter event of the same subscription, same instant.
 //
-// Mutation check: drop the last_ever skip → the seats reading is flagged.
-func TestUsageAfterClose_LastEverMeterIsNotFlagged(t *testing.T) {
+// Mutation check: classify a last meter as never after_close → the seats
+// reading is not flagged.
+func TestUsageAfterClose_LastMeterIsFlagged(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
-	seats := r.newMeter("seats", "max")
-	seatsRule := r.must(http.MethodPost, "/v1/rating-rules", lagP0, map[string]any{
-		"rule_key": "seats_last", "name": "Seats", "mode": "flat", "currency": "USD", "flat_amount_cents": 1,
-	}, http.StatusCreated)
-	r.must(http.MethodPost, "/v1/meters/"+seats+"/pricing-rules", lagP0, map[string]any{
-		"rating_rule_version_id": seatsRule["id"], "dimension_match": map[string]any{}, "aggregation_mode": "last_ever", "priority": 1,
-	}, http.StatusCreated)
+	seats := r.newMeter("seats", "last")
 	r.newSub("gauge", r.planWith("plan_g", 3000, r.meterID, seats), lagP0, nil)
 	r.postEvent("/v1/usage-events", "seats", "seats-apr10", lagP0.AddDate(0, 0, 9), lagP0.AddDate(0, 0, 9), 5, http.StatusCreated)
 	r.run(lagB.Add(2 * time.Hour))
 
 	out := r.postEvent("/v1/usage-events", "seats", "seats-apr30", lagB.Add(-time.Hour), lagB.Add(3*time.Hour), 7, http.StatusCreated)
-	wantStatus(t, "last_ever reading stamped in April after April's invoice", out, "")
+	wantStatus(t, "last reading stamped in April after April's invoice", out, "after_close")
 	out = r.postEvent("/v1/usage-events", "calls", "calls-apr30", lagB.Add(-time.Hour), lagB.Add(3*time.Hour), 2, http.StatusCreated)
 	wantStatus(t, "sum event stamped in April after April's invoice", out, "after_close")
 
 	r.run(lagP2.Add(2 * time.Hour))
 	invs := r.invoices()
-	if got := r.cycleInvoice(invs, lagB).sum("usage"); got != 7 {
+	if got := r.cycleInvoice(invs, lagB).sum("usage"); got != 0 {
 		r.logInvoices(invs)
-		t.Errorf("May usage = %dc, want 7c: the late April seats reading is the latest at May's close", got)
+		t.Errorf("May usage = %dc, want 0c: the late April reading belongs to April, whose invoice was built", got)
 	}
 }
 

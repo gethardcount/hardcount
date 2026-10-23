@@ -77,7 +77,7 @@ type RecipeOverride struct {
 }
 
 type RecipeMeter struct {
-	Key         string `json:"key"`
+	EventName   string `json:"event_name"`
 	Name        string `json:"name"`
 	Unit        string `json:"unit"`
 	Aggregation string `json:"aggregation"`
@@ -96,11 +96,11 @@ type RecipeRatingRule struct {
 }
 
 type RecipePricingRule struct {
-	MeterKey        string          `json:"meter_key"`
-	RatingRuleKey   string          `json:"rating_rule_key"`
-	DimensionMatch  map[string]any  `json:"dimension_match"`
-	AggregationMode AggregationMode `json:"aggregation_mode"`
-	Priority        int             `json:"priority"`
+	// EventName names the recipe meter the rule prices.
+	EventName      string         `json:"event_name"`
+	RatingRuleKey  string         `json:"rating_rule_key"`
+	DimensionMatch map[string]any `json:"dimension_match"`
+	Priority       int            `json:"priority"`
 }
 
 type RecipePlan struct {
@@ -113,7 +113,8 @@ type RecipePlan struct {
 	// in_arrears). Empty → CreatePlanTx defaults to in_arrears. Honored
 	// verbatim on the generated plan; the recipe never second-guesses it.
 	BaseBillTiming BillTiming `json:"base_bill_timing,omitempty"`
-	MeterKeys      []string   `json:"meter_keys"`
+	// EventNames names the recipe meters the plan bills.
+	EventNames []string `json:"event_names"`
 }
 
 type RecipeDunningPolicy struct {

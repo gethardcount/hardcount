@@ -16,7 +16,8 @@
 > 6. A plan is never adopted by code, so ADR-083's plan conformance gate no longer exists. Rating rules and the shared `tokens` meter are still adopted by natural key. Apply is refused with a 409 when an existing rule's money fields differ (ADR-085, 2026-07-26 amendment), when the meter's aggregation differs, or when it would mix currencies on the meter (ADR-100). Adopted rules are never republished (ADR-070).
 > 7. Re-applying a recipe already installed in the same mode (test or live) is always a no-op that returns the existing instance (`201`, same `id`, same `created_objects`). The install record is per mode (ADR-085, 2026-07-26 amendment), so a test-mode install does not count as a live-mode one.
 > 8. The dunning policy's `final_action` was removed from the recipe format (ADR-112).
-> 9. The dunning policy's schedule is one list of days, `retry_days` (2026-10-23, ADR-036 amendment). It replaced `max_retries` and `intervals_hours`, which the parser now refuses. The built-ins are now at 7.0.0 (anthropic), 6.0.0 (openai) and 4.0.0 (replicate), not the `1.0.0` shown.
+> 9. The dunning policy's schedule is one list of days, `retry_days` (2026-10-23, ADR-036 amendment). It replaced `max_retries` and `intervals_hours`, which the parser now refuses.
+> 10. A recipe meter is named by `event_name`, not `key`, and a pricing rule has no `aggregation_mode`: it bills under its meter's aggregation ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §2). In the preview, a pricing rule names its meter by `event_name` and a plan lists `event_names`. The built-ins are now at 8.0.0 (anthropic), 7.0.0 (openai) and 5.0.0 (replicate), not the `1.0.0` shown.
 
 ## Motivation
 

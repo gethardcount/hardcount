@@ -75,7 +75,7 @@ func TestUsageIngest_IdempotencyKeyRequired_E2E(t *testing.T) {
 	}
 
 	mustCreate("/v1/customers", map[string]any{"external_id": "cus_key", "display_name": "Key Customer"})
-	mustCreate("/v1/meters", map[string]any{"key": "api_calls", "name": "API Calls", "unit": "calls", "aggregation": "sum"})
+	mustCreate("/v1/meters", map[string]any{"event_name": "api_calls", "name": "API Calls", "unit": "calls", "aggregation": "sum"})
 
 	event := func(key any) map[string]any {
 		e := map[string]any{"external_customer_id": "cus_key", "event_name": "api_calls", "quantity": 1}
@@ -135,7 +135,7 @@ func TestUsageIngest_IdempotencyKeyRequired_E2E(t *testing.T) {
 	}
 
 	// The LiteLLM door builds its own keys and is not affected.
-	mustCreate("/v1/meters", map[string]any{"key": litellm.MeterKeyTokens, "name": "Tokens", "unit": "tokens", "aggregation": "sum"})
+	mustCreate("/v1/meters", map[string]any{"event_name": litellm.EventNameTokens, "name": "Tokens", "unit": "tokens", "aggregation": "sum"})
 	spend := map[string]any{"events": []litellm.StandardLoggingPayload{{
 		ID: "chatcmpl-key-1", CallType: "completion", Model: "claude-3-5-sonnet-20241022",
 		CustomLLMProvider: "anthropic", User: "cus_key",

@@ -186,7 +186,7 @@ func TestThresholdCycle_AmbiguousSeedFailsLoud_RealStore(t *testing.T) {
 				// stands before the period, added after the fixture's sub.
 				seedPricingRule(t, p.f.db, p.ctx, p.f.tenantID, pricing.UpsertMeterPricingRuleInput{
 					MeterID: p.f.meterID, RatingRuleVersionID: id,
-					DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum,
+					DimensionMatch: map[string]any{"model": "gpt"},
 				})
 			})
 			newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
@@ -226,7 +226,7 @@ func TestThresholdCycle_MultiDimBucketContinuesAcrossFire_RealStore(t *testing.T
 		backdateRuleVersion(t, p.f, p.ctx, other.ID, p.f.cycleStart.Add(-2*time.Hour))
 		seedPricingRule(t, p.f.db, p.ctx, p.f.tenantID, pricing.UpsertMeterPricingRuleInput{
 			MeterID: p.f.meterID, RatingRuleVersionID: other.ID,
-			DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum,
+			DimensionMatch: map[string]any{"model": "gpt"},
 		})
 	})
 	if p.fireTotal != 7000 {

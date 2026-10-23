@@ -151,7 +151,7 @@ type CostDashboardSubscription struct {
 }
 
 type CostDashboardMeter struct {
-	MeterKey         string              `json:"meter_key"`
+	EventName        string              `json:"event_name"`
 	MeterName        string              `json:"meter_name"`
 	Unit             string              `json:"unit"`
 	Currency         string              `json:"currency"`
@@ -331,7 +331,7 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 			})
 		}
 		proj.Usage = append(proj.Usage, CostDashboardMeter{
-			MeterKey:         m.MeterKey,
+			EventName:        m.EventName,
 			MeterName:        m.MeterName,
 			Unit:             m.Unit,
 			Currency:         m.Currency,

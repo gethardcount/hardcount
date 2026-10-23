@@ -145,7 +145,7 @@ func (m *memStore) AggregateForBillingPeriodByAgg(_ context.Context, _, _ string
 	return map[string]decimal.Decimal{}, nil
 }
 
-func (m *memStore) AggregateByPricingRules(_ context.Context, _, _, _ string, _ domain.AggregationMode, _, _ time.Time) ([]domain.RuleAggregation, error) {
+func (m *memStore) AggregateClaims(_ context.Context, _, _, _, _ string, _ []domain.UsageClaim, _, _ time.Time) ([]domain.RuleAggregation, error) {
 	return nil, nil
 }
 
@@ -302,37 +302,26 @@ func TestIngest(t *testing.T) {
 	})
 }
 
-// TestAggregateByPricingRules_DefaultModeValidation guards the service-
-// level rule that the unclaimed-bucket fallback mode must be one of the
-// four period-bounded modes. last_ever as a default would silently break
-// "current state" semantics for events that match no rule, so the
-// service rejects it before the SQL ever runs.
-func TestAggregateByPricingRules_DefaultModeValidation(t *testing.T) {
+// TestAggregateClaims_RefusesAnUnknownAggregation: a meter's events bill
+// under the meter's own aggregation, never one it does not have, so the
+// service refuses anything but sum, count, max and last before the SQL
+// runs. last_ever and last_during_period, a pricing rule's modes before
+// ADR-130, are refused too.
+func TestAggregateClaims_RefusesAnUnknownAggregation(t *testing.T) {
 	svc := NewService(newMemStore())
 	ctx := context.Background()
 	from := time.Now().Add(-1 * time.Hour)
 	to := time.Now().Add(1 * time.Hour)
-
-	t.Run("rejects last_ever as default mode", func(t *testing.T) {
-		_, err := svc.AggregateByPricingRules(ctx, "t1", "c1", "m1", domain.AggLastEver, from, to)
-		if err == nil {
-			t.Fatal("expected default_mode=last_ever to be rejected")
+	for _, agg := range []string{"last_ever", "last_during_period", "bogus", ""} {
+		if _, err := svc.AggregateClaims(ctx, "t1", "c1", "m1", agg, nil, from, to); err == nil {
+			t.Errorf("aggregation %q: want a refusal", agg)
 		}
-	})
-
-	t.Run("rejects unknown mode", func(t *testing.T) {
-		_, err := svc.AggregateByPricingRules(ctx, "t1", "c1", "m1", domain.AggregationMode("bogus"), from, to)
-		if err == nil {
-			t.Fatal("expected unknown mode to be rejected")
+	}
+	for _, agg := range []string{"sum", "count", "max", "last"} {
+		if _, err := svc.AggregateClaims(ctx, "t1", "c1", "m1", agg, nil, from, to); err != nil {
+			t.Errorf("aggregation %q: %v", agg, err)
 		}
-	})
-
-	t.Run("empty mode defaults to sum", func(t *testing.T) {
-		_, err := svc.AggregateByPricingRules(ctx, "t1", "c1", "m1", "", from, to)
-		if err != nil {
-			t.Fatalf("empty mode should default to sum: %v", err)
-		}
-	})
+	}
 }
 
 // TestAggregateServerSide is the regression guard for an under-count bug

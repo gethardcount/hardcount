@@ -35,9 +35,9 @@ rules for the older models only.
 
 ```bash
 # Which meter is it, and which customers have it this period?
-curl -sS "$API/v1/meters/$METER" -H "Authorization: Bearer $KEY" | jq '{key, rating_rule_version_id}'
+curl -sS "$API/v1/meters/$METER" -H "Authorization: Bearer $KEY" | jq '{event_name, rating_rule_version_id}'
 curl -sS "$API/v1/customers/$CUSTOMER/usage" -H "Authorization: Bearer $KEY" \
-  | jq '.meters[] | {meter_key, unmatched: [.rules[] | select(.unmatched == true) | .quantity]}'
+  | jq '.meters[] | {event_name, unmatched: [.rules[] | select(.unmatched == true) | .quantity]}'
 # Which dimension values are unpriced (e.g. the model name):
 curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER" -H "Authorization: Bearer $KEY"
 ```

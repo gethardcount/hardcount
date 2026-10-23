@@ -30,10 +30,14 @@ import (
 // and intervals_hours became one list, retry_days, and parseRecipe refuses
 // the old keys. The policy a recipe makes retries on the same days.
 // Re-pinned under the same versions, unreleased, when only a comment changed.
+// MAJOR bumps on 2026-10-24 (anthropic 8.0.0, openai 7.0.0, replicate
+// 5.0.0): a meter is named by `event_name`, not `key`, and a pricing rule has
+// no `aggregation_mode` (ADR-130 §2). parseRecipe refuses both old keys, so
+// a recipe at the previous version no longer parses. Prices are unchanged.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@7.0.0": "1f615d44fefe324558c26598c3627f47dcca50a14858591a49fa081ebc943b9d",
-	"openai_style@6.0.0":    "1e4eddc63a70f01126bb8dac32d106245798f8a9120d98b0238187d931938001",
-	"replicate_style@4.0.0": "7506c6ef22d7e92a84b0f8f80f89843fc1103e70936cc3fd1ebc3a9cbfd7a0d9",
+	"anthropic_style@8.0.0": "2870d246a3a3adcb4613f726680ea8bca5f299d2bec257d4a8966deb536e6d3b",
+	"openai_style@7.0.0":    "94889be8d143599f7d97c5c7ca898bc583a50665235e0002723f722ec5b9e098",
+	"replicate_style@5.0.0": "6911b1938cd95239fe4a208c8db30221251d7519e307b2fbda7f9d980909ae2c",
 }
 
 // TestRecipeCatalog_VersionMovesWithContent asserts every embedded recipe's

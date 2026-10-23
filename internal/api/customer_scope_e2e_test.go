@@ -232,7 +232,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			"rule_key": tag + "_rule", "name": "rule", "mode": "flat", "currency": "USD", "flat_amount_cents": 100,
 		}))
 		r.meter = id(create("POST", "/v1/meters", map[string]any{
-			"key": r.meterKey, "name": "meter", "unit": "unit", "aggregation": "sum", "rating_rule_version_id": r.rule,
+			"event_name": r.meterKey, "name": "meter", "unit": "unit", "aggregation": "sum", "rating_rule_version_id": r.rule,
 		}))
 		r.plan = plan(tag+"-plan", 1000, []string{r.meter})
 		r.plan2 = plan(tag+"-plan2", 2000, nil)
@@ -417,7 +417,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"name": "renamed"}
 		}, 404, "", 200},
 		{"fixed: meter create [rating_rule_version_id]", "POST", fixed("/v1/meters"), func(_, f scopeRefs) any {
-			return map[string]any{"key": "m_" + suffix(f.rule), "name": "m", "unit": "unit", "aggregation": "sum", "rating_rule_version_id": f.rule}
+			return map[string]any{"event_name": "m_" + suffix(f.rule), "name": "m", "unit": "unit", "aggregation": "sum", "rating_rule_version_id": f.rule}
 		}, 422, "rating rule not found", 201},
 		{"meter update [rating_rule_version_id]", "PATCH", func(o, _ scopeRefs) string { return "/v1/meters/" + o.meter }, func(_, f scopeRefs) any {
 			return map[string]any{"rating_rule_version_id": f.rule}

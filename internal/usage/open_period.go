@@ -45,8 +45,7 @@ type Class int
 
 const (
 	// Outside: no subscription bills it and none billed its time. Before a
-	// subscription started, in a trial, after a final period, or on a
-	// last_ever meter (see MeterBuckets).
+	// subscription started, in a trial, or after a final period.
 	Outside Class = iota
 	// AfterClose: a subscription that prices the meter already invoiced the
 	// row's time, and no future invoice counts it.
@@ -102,14 +101,11 @@ type ThresholdWatermark struct {
 
 // MeterBuckets is what classify needs from the meter itself.
 type MeterBuckets struct {
-	// LastEver: a rule of the meter aggregates last_ever, which has no
-	// lower time bound, so a late reading can still be the latest one at a
-	// later close and be billed there. Never AfterClose.
-	LastEver bool
-	// Additive: the meter's own aggregation and every rule's are sum or
-	// count. Only then does the threshold watermark leave a pre-watermark
-	// event unbilled: a max or last bucket the fire deferred is billed over
-	// the whole period at close (ADR-066 §4).
+	// Additive: the meter's aggregation is sum or count. Only then does
+	// the threshold watermark leave a pre-watermark event unbilled: a max
+	// or last bucket the fire deferred is billed over the whole period at
+	// close (ADR-066 §4). One aggregation per meter (ADR-130 §2) makes this
+	// a property of the meter, the same for every price of it.
 	Additive bool
 }
 
@@ -158,21 +154,10 @@ func OpenPeriodOf(sub domain.Subscription, plans map[string]domain.Plan, wm Thre
 	return p, true
 }
 
-// BucketsOf builds a meter's MeterBuckets from the meter and its pricing
-// rules.
-func BucketsOf(meter domain.Meter, rules []domain.MeterPricingRule) MeterBuckets {
-	b := MeterBuckets{Additive: meter.Aggregation == "" || meter.Aggregation == "sum" || meter.Aggregation == "count"}
-	for _, r := range rules {
-		switch r.AggregationMode {
-		case domain.AggSum, domain.AggCount:
-		case domain.AggLastEver:
-			b.LastEver = true
-			b.Additive = false
-		default:
-			b.Additive = false
-		}
-	}
-	return b
+// BucketsOf builds a meter's MeterBuckets. An empty aggregation reads as
+// sum, as billing reads it.
+func BucketsOf(meter domain.Meter) MeterBuckets {
+	return MeterBuckets{Additive: meter.Aggregation == "" || domain.AdditiveAggregation(meter.Aggregation)}
 }
 
 // classify places one row of meter meterID at time at against periods. The
@@ -183,11 +168,11 @@ func BucketsOf(meter domain.Meter, rules []domain.MeterPricingRule) MeterBuckets
 //     the next period counts it if the subscription continues and prices the
 //     meter from End on. Never AfterClose: the next close bills it.
 //   - Start <= at < End: InOpen if a current plan prices the meter, else
-//     NotOnPlan. When the meter is additive and has no last_ever rule and
-//     at is past the floor: before PaidThrough it is AfterClose, and before
-//     BilledThrough (a threshold invoice not paid yet) it is Unsettled.
-//   - at < Start: AfterClose when a current plan prices the meter, at is at
-//     or past the floor, and the meter has no last_ever rule. Else Outside.
+//     NotOnPlan. When the meter is additive and at is past the floor:
+//     before PaidThrough it is AfterClose, and before BilledThrough (a
+//     threshold invoice not paid yet) it is Unsettled.
+//   - at < Start: AfterClose when a current plan prices the meter and at is
+//     at or past the floor. Else Outside.
 //
 // The highest class over all periods wins, so another subscription whose
 // open period holds at keeps the row out of AfterClose.
@@ -224,7 +209,7 @@ func classify(at time.Time, meterID string, periods []OpenPeriod, meter func() (
 					if err != nil {
 						return Outside, err
 					}
-					if b.Additive && !b.LastEver {
+					if b.Additive {
 						c = Unsettled
 						if p.PaidThrough != nil && at.Before(*p.PaidThrough) {
 							c = AfterClose
@@ -233,13 +218,7 @@ func classify(at time.Time, meterID string, periods []OpenPeriod, meter func() (
 				}
 			}
 		case p.Meters[meterID] && pastFloor:
-			b, err := buckets()
-			if err != nil {
-				return Outside, err
-			}
-			if !b.LastEver {
-				c = AfterClose
-			}
+			c = AfterClose
 		}
 		if c > best {
 			best = c

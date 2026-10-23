@@ -38,15 +38,15 @@ func newUsageLadder(wm thresholdWatermark) *usageLadder {
 }
 
 // continues reports whether a bucket priced under rule continues a ladder.
-func (l *usageLadder) continues(rule domain.RatingRuleVersion, mode domain.AggregationMode) bool {
-	return l.on && !nonAdditiveMode(mode) && rule.Mode != domain.PricingFlat
+func (l *usageLadder) continues(rule domain.RatingRuleVersion, aggregation string) bool {
+	return l.on && !nonAdditive(aggregation) && rule.Mode != domain.PricingFlat
 }
 
 // price returns the amount for qty more units of the bucket under rule.
 // bucketKey identifies the closer's bucket (meter + pricing rule); rule is
 // the RESOLVED rule, whose id is how the fire's line is found.
-func (l *usageLadder) price(rule domain.RatingRuleVersion, meterID, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-	if !l.continues(rule, mode) {
+func (l *usageLadder) price(rule domain.RatingRuleVersion, meterID, bucketKey, aggregation string, qty decimal.Decimal) (int64, error) {
+	if !l.continues(rule, aggregation) {
 		return domain.ComputeAmountCents(rule, qty)
 	}
 	if _, seen := l.qty[bucketKey]; !seen {
