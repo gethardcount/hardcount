@@ -3,6 +3,8 @@ package billing
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -392,13 +394,15 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	// Usage: each meter over the windows a plan carrying it was on the
 	// subscription, from its usage floor, clamped to the threshold watermark
 	// — the close's meterUsageIntervals. Meters only a segment plan carries come after the
-	// current plans' meters.
+	// current plans' meters, by plan id, so the line order is the same on every
+	// call.
 	order := append([]string(nil), meterOrder...)
 	seen := make(map[string]struct{}, len(order))
 	for _, mid := range order {
 		seen[mid] = struct{}{}
 	}
-	for _, pl := range plans {
+	for _, planID := range slices.Sorted(maps.Keys(plans)) {
+		pl := plans[planID]
 		for _, mid := range pl.MeterIDs {
 			if _, ok := seen[mid]; !ok {
 				seen[mid] = struct{}{}
