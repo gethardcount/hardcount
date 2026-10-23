@@ -470,7 +470,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	}
 	reminder := EmailEventRow{EmailType: "dunning_warning", Status: "dispatched", DeliveryState: "delivered"}
 	for _, reason := range []string{"payment failed: Your card has insufficient funds.", string(domain.DunningCauseNoPaymentMethod),
-		domain.ErrNoPaymentMethodOnRetry.Error(), domain.DunningRetryReasonCardRefused, "succeeded"} {
+		domain.ErrNoPaymentMethodOnRetry.Error(), domain.DunningRetryReasonCardRefused, domain.DunningRetryReasonNeedsConfirmation, "succeeded"} {
 		add("dunning/retry/"+reason, dunningLine(domain.InvoiceDunningEvent{EventType: domain.DunningEventRetryAttempted, AttemptCount: 2, Reason: reason}, dunningContext{email: &reminder}))
 	}
 	// The retry that recovered a paid invoice: folded into "Invoice paid" on

@@ -334,7 +334,7 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		if !res.AnchorAt.IsZero() {
 			settleCtx = withSettleAnchor(ctx, res.AnchorAt)
 		}
-		return r.settle(settleCtx, inv, res.ID, res.AmountReceivedCents, res.Purpose, "", terminalSucceeded, res.Status, "", "")
+		return r.settle(settleCtx, inv, res.ID, res.AmountReceivedCents, res.Purpose, "", terminalSucceeded, res.Status, "", "", "")
 
 	case "canceled", "requires_payment_method":
 		// The PI purpose travels with the report, as on the webhook: it
@@ -347,8 +347,10 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		}
 		// The decline code and card ride along too (#966): a hard decline
 		// the charge response never reported must still stop the next
-		// dunning retry from charging that card.
-		return r.settle(settleCtx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status, res.DeclineCode, res.PaymentMethodID)
+		// dunning retry from charging that card. So does Stripe's card
+		// message, the customer email's reason, as on the webhook; the
+		// "reconciled:" text is the invoice's only.
+		return r.settle(settleCtx, inv, res.ID, 0, res.Purpose, "reconciled: "+res.Status, terminalFailed, res.Status, res.DeclineCode, res.PaymentMethodID, res.CardMessage)
 
 	case "processing", "requires_action", "requires_confirmation", "requires_capture":
 		// Not terminal, so nothing settles here — but RECORD WHAT WE OBSERVED
@@ -392,7 +394,7 @@ func (r *Reconciler) recordSync(ctx context.Context, inv domain.Invoice, provide
 // through the settlement primitive so it fires the full side-effects (dunning,
 // event, email, card stamp) — identical to the webhook (ADR-049 Phase 2).
 // Falls back to legacy bare writes when no settler is wired (test-only).
-func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string, capturedCents int64, purpose, failMsg string, kind terminalKind, providerStatus, declineCode, declinedCard string) (bool, error) {
+func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string, capturedCents int64, purpose, failMsg string, kind terminalKind, providerStatus, declineCode, declinedCard, cardMessage string) (bool, error) {
 	// Fresh re-read so a webhook that won the race during the round-trip is
 	// observed (the sweep-list snapshot may be stale). On read error, proceed
 	// with the snapshot — the primitive's own guards still apply.
@@ -435,7 +437,7 @@ func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string
 		default:
 			if err := r.settler.SettleFailed(ctx, inv.TenantID, fresh, PaymentFailure{
 				PaymentIntentID: piID, Message: failMsg, Purpose: purpose,
-				DeclineCode: declineCode, PaymentMethodID: declinedCard,
+				DeclineCode: declineCode, PaymentMethodID: declinedCard, CardMessage: cardMessage,
 			}, SourceReconciler); err != nil {
 				return false, fmt.Errorf("settle failed: %w", err)
 			}

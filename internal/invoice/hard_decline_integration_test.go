@@ -94,9 +94,9 @@ func (r *hardDeclineStoreRig) attempt(invID, pi string) domain.InvoiceChargeAtte
 
 func (r *hardDeclineStoreRig) refused(invID, pm string) string {
 	r.t.Helper()
-	code, err := r.store.HardDeclineOnCard(r.ctx, r.tenantID, invID, pm)
+	code, err := r.store.RetryBlockingDecline(r.ctx, r.tenantID, invID, pm)
 	if err != nil {
-		r.t.Fatalf("HardDeclineOnCard: %v", err)
+		r.t.Fatalf("RetryBlockingDecline: %v", err)
 	}
 	return code
 }
@@ -174,12 +174,12 @@ func TestHardDecline_AttemptRowAndReads_RealStore(t *testing.T) {
 	inv3 := r.invoice(cust3, "INV-HDS-3")
 	r.decline(inv3, "pi_c1", "stolen_card", "pm_c_old")
 	page := []string{inv, otherInv, inv3}
-	got, err := r.store.HardDeclinesOnDefaultCards(ctx, r.tenantID, page)
+	got, err := r.store.RetryBlockingDeclinesOnDefaultCards(ctx, r.tenantID, page)
 	if err != nil {
-		t.Fatalf("HardDeclinesOnDefaultCards: %v", err)
+		t.Fatalf("RetryBlockingDeclinesOnDefaultCards: %v", err)
 	}
 	if len(got) != 1 || got[inv] != "lost_card" {
-		t.Errorf("HardDeclinesOnDefaultCards = %v, want only %s → lost_card", got, inv)
+		t.Errorf("RetryBlockingDeclinesOnDefaultCards = %v, want only %s → lost_card", got, inv)
 	}
 
 	// The card is replaced: a new card becomes the default, and the refused
@@ -188,7 +188,7 @@ func TestHardDecline_AttemptRowAndReads_RealStore(t *testing.T) {
 	if _, err := r.pms.SetDefault(ctx, r.tenantID, cust, fresh.ID); err != nil {
 		t.Fatalf("set default: %v", err)
 	}
-	if got, err := r.store.HardDeclinesOnDefaultCards(ctx, r.tenantID, page); err != nil || len(got) != 0 {
+	if got, err := r.store.RetryBlockingDeclinesOnDefaultCards(ctx, r.tenantID, page); err != nil || len(got) != 0 {
 		t.Errorf("after the card was replaced: %v (err %v), want none", got, err)
 	}
 	if got := r.refused(inv, "pm_a"); got != "lost_card" {
@@ -198,18 +198,18 @@ func TestHardDecline_AttemptRowAndReads_RealStore(t *testing.T) {
 	// Row-level security: another tenant sees none of it, and the queries
 	// carry no tenant filter of their own.
 	otherTenant := testutil.CreateTestTenant(t, db, "Hard Decline Other Tenant")
-	if code, err := r.store.HardDeclineOnCard(ctx, otherTenant, inv, "pm_a"); err != nil || code != "" {
-		t.Errorf("other tenant HardDeclineOnCard = %q, %v, want empty", code, err)
+	if code, err := r.store.RetryBlockingDecline(ctx, otherTenant, inv, "pm_a"); err != nil || code != "" {
+		t.Errorf("other tenant RetryBlockingDecline = %q, %v, want empty", code, err)
 	}
 	// Put the refused card back as the default so the own-tenant read has a
 	// row to find; the other tenant must still see nothing.
 	if _, err := r.pms.SetDefault(ctx, r.tenantID, cust, r.findPM(cust, "pm_a").ID); err != nil {
 		t.Fatalf("restore default: %v", err)
 	}
-	if got, err := r.store.HardDeclinesOnDefaultCards(ctx, otherTenant, page); err != nil || len(got) != 0 {
-		t.Errorf("other tenant HardDeclinesOnDefaultCards = %v, %v, want none", got, err)
+	if got, err := r.store.RetryBlockingDeclinesOnDefaultCards(ctx, otherTenant, page); err != nil || len(got) != 0 {
+		t.Errorf("other tenant RetryBlockingDeclinesOnDefaultCards = %v, %v, want none", got, err)
 	}
-	if got, err := r.store.HardDeclinesOnDefaultCards(ctx, r.tenantID, page); err != nil || got[inv] != "lost_card" {
+	if got, err := r.store.RetryBlockingDeclinesOnDefaultCards(ctx, r.tenantID, page); err != nil || got[inv] != "lost_card" {
 		t.Errorf("own tenant after restoring the refused default = %v, %v, want %s → lost_card", got, err, inv)
 	}
 }

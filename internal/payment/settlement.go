@@ -294,24 +294,39 @@ type PaymentFailure struct {
 	// (domain.PaymentFailureReport), where a dunning retry reads them.
 	DeclineCode     string
 	PaymentMethodID string
+	// CardMessage is Stripe's message for a card error, when the source has
+	// one (cardErrorMessage): the reason the customer's payment-failed email
+	// shows. Message is the invoice's text, and can be Velox's own
+	// ("reconciled: requires_payment_method", "payment failed") or Stripe's
+	// developer text for another error type, so it is never emailed.
+	CardMessage string
 }
 
 // refusedCardCustomerMessage is the reason the customer's payment-failed
 // email gives when the bank refused the card for good (domain.IsHardDecline).
 // It does not say why: Stripe asks that lost, stolen and fraud declines be
 // shown to the customer as a plain decline
-// (https://docs.stripe.com/declines/codes). It says what to do, since
-// Velox will not charge that card again for this invoice.
-const refusedCardCustomerMessage = "Your bank declined this card, and we won't try it again. Please pay with a different card."
+// (https://docs.stripe.com/declines/codes). It says what to do. It does not
+// say the card won't be charged again: only dunning retries skip it, while
+// Collect payment and the customer's next invoice still charge it.
+const refusedCardCustomerMessage = "Your bank declined this card. Please pay with a different card."
 
 // customerFailureReason is the reason the payment-failed email shows the
-// customer: Stripe's own message, except for a card the bank refused for
-// good, where "try again later" would be the wrong advice.
+// customer: Stripe's message for a card error (CardMessage; none, so no
+// reason line, when the source has no such message), except for a card the
+// bank refused for good, where "try again later" would be the wrong advice,
+// and for a payment the bank wants the customer to confirm, whose email has
+// its own copy and no reason line: Stripe's message for it is written for
+// the developer ("If the customer is off session, ask them to return to
+// your application").
 func customerFailureReason(f PaymentFailure) string {
-	if domain.IsHardDecline(f.DeclineCode) {
+	switch domain.DeclineAskOf(f.DeclineCode) {
+	case domain.DeclineAskNewCard:
 		return refusedCardCustomerMessage
+	case domain.DeclineAskConfirm:
+		return ""
 	}
-	return f.Message
+	return f.CardMessage
 }
 
 // failureEmailSuppressed reports whether a failure of a PaymentIntent with
@@ -393,7 +408,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// on the first notice by the store — the same shape as the paid twin.
 	var failedTx func(tx *sql.Tx, fresh domain.Invoice) error
 	if !report.External && !failureEmailSuppressed(f.Purpose) {
-		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f))
+		failedTx = s.buildPaymentFailedHook(ctx, tenantID, inv, customerFailureReason(f), domain.DeclineAskOf(f.DeclineCode))
 	}
 	fresh, res, err := s.invoices.MarkPaymentFailedReportingTransition(ctx, tenantID, inv.ID, report, failedTx)
 	if err != nil {
@@ -674,8 +689,8 @@ func (s *Stripe) buildReceiptHook(ctx context.Context, tenantID string, inv doma
 // buildPaymentFailedHook is the decline-notice counterpart of
 // buildReceiptHook. SettleFailed skips it for a dunning retry
 // (failureEmailSuppressed) and for a hosted attempt — dunning still runs;
-// only this email is skipped.
-func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, inv domain.Invoice, failureMsg string) func(tx *sql.Tx, fresh domain.Invoice) error {
+// only this email is skipped. ask selects the email's copy.
+func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, inv domain.Invoice, failureMsg string, ask domain.DeclineAsk) func(tx *sql.Tx, fresh domain.Invoice) error {
 	if s.emailPaymentFailed == nil {
 		return nil
 	}
@@ -696,6 +711,6 @@ func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, in
 			return nil
 		}
 		return s.emailPaymentFailed.SendPaymentFailedTx(ctx, tx, tenantID, email, cc, name,
-			inv.InvoiceNumber, failureMsg, inv.PublicToken)
+			inv.InvoiceNumber, failureMsg, inv.PublicToken, ask)
 	}
 }
