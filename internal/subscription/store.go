@@ -339,8 +339,8 @@ type Store interface {
 	//
 	// Every write to subscription_items locks the subscription row first
 	// (#1270), so item writers wait for each other and for the period
-	// closers, and all of them lock in one order: subscription row, item
-	// rows, billing_intervals, invoices.
+	// closers. A write that references more than one plan takes them next,
+	// in ascending id, before any other row (LockPlansTx, D08 §4.21).
 
 	// LockForItemChangeTx locks the subscription row on the caller's tx and
 	// returns the subscription with its live items, read after the lock
@@ -350,6 +350,12 @@ type Store interface {
 	// changes price their proration from what this returns. ErrNotFound when
 	// the row is gone.
 	LockForItemChangeTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID string) (domain.Subscription, error)
+
+	// LockPlansTx takes the plans FOR KEY SHARE on the caller's tx, in
+	// ascending id, in one statement (D08 §4.21). A writer that does other
+	// writes before its plan write, such as the cross-interval swap's refund
+	// drafts, calls it right after the subscription row lock.
+	LockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error
 
 	// WithTenantTx runs fn in one tenant-scoped transaction: commit when fn
 	// returns nil, rollback otherwise. An item change that prorates nothing

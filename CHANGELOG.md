@@ -141,6 +141,7 @@ original text.
 
 ### Fixed
 
+- **A plan change, a new subscription or an activation no longer fails with a deadlock error when a meter's prices or aggregation are edited at the same time (2026-10-23).** When two plans that bill an edited meter were involved, Postgres could stop one of the requests (`40P01`). Subscription writes now lock plans in the same order as the meter edit ([#1367](https://github.com/getvelox/velox/pull/1367)).
 - **A webhook endpoint can subscribe to `payment.currency_mismatch` (2026-10-23).** Velox sent it, but an endpoint that named it was refused as an unknown event (only `*` and `payment.*` got it), and the dashboard's event picker did not offer it, nor `payment.dispute_opened` and `payment.dispute_closed`. A test now fails when an event Velox can send is missing from the list endpoints accept, the picker or [the webhooks page](docs/webhooks.md) ([#1365](https://github.com/getvelox/velox/pull/1365)).
 - **The OpenAPI file lists the values the database accepts (2026-10-23).** `tax_error_code` is an enum and includes `provider_not_configured`, and the removed values above are gone. A test now fails when a stored enum's database check and its OpenAPI enum differ ([#1365](https://github.com/getvelox/velox/pull/1365)).
 - **A subscription's `billing_threshold_reset_cycle` column defaults to false, as the API does (2026-10-23).** It is read only when a spend threshold is set, and setting one always writes it, so billing does not change ([#1365](https://github.com/getvelox/velox/pull/1365)).

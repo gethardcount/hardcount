@@ -149,6 +149,9 @@ func (s *PostgresStore) backfillIntervalsPartition(ctx context.Context, tenantID
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
+	if err := lockBackfillPlans(ctx, tx, items); err != nil {
+		return 0, err
+	}
 
 	inserted := 0
 	for _, it := range items {
@@ -162,6 +165,42 @@ func (s *PostgresStore) backfillIntervalsPartition(ctx context.Context, tenantID
 		return 0, nil
 	}
 	return inserted, tx.Commit()
+}
+
+// lockBackfillPlans takes, before the first insert, every plan the
+// partition's segments can name (lockPlansTx): each item's plan and every
+// plan in its fact log. That is a superset of the segments' plans.
+func lockBackfillPlans(ctx context.Context, tx *sql.Tx, items []backfillItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	itemIDs := make([]string, 0, len(items))
+	planIDs := make([]string, 0, len(items))
+	for _, it := range items {
+		itemIDs = append(itemIDs, it.id)
+		planIDs = append(planIDs, it.planID)
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT COALESCE(from_plan_id, ''), COALESCE(to_plan_id, '')
+		FROM subscription_item_changes
+		WHERE subscription_item_id = ANY($1)`,
+		postgres.StringArray(itemIDs),
+	)
+	if err != nil {
+		return fmt.Errorf("read backfill plans: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var from, to string
+		if err := rows.Scan(&from, &to); err != nil {
+			return err
+		}
+		planIDs = append(planIDs, from, to)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return lockPlansTx(ctx, tx, planIDs)
 }
 
 // ivSegment is one reconstructed [startsAt, endsAt) lifetime slice.
