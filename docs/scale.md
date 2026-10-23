@@ -126,10 +126,14 @@ These steps come before Velox needs any new dependency:
    above ran out of.
 3. Add API copies. Ingest keeps no state in the Velox process, so this should
    help, but it has not been measured.
-4. Split `usage_events` by month (partitioning). Not built. It needs a Velox
-   migration, because the idempotency-key unique rule must then include the
-   month.
-5. Set a retention window on raw events. Not built.
+4. Split `usage_events` by month (partitioning). Not built. On a split table,
+   Postgres requires every unique rule to include the column the table is
+   split on. So the idempotency key would move to its own small table,
+   written in the same commit as the event. Dedup would stay permanent, as
+   it is today.
+5. Set a retention window on raw events. Not built. Deleting an event
+   deletes its idempotency key with it, so this needs the key table from
+   step 4 too.
 6. Move analytics to a read replica. Not built. Velox has no reader
    connection setting today.
 

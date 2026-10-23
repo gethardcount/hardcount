@@ -142,7 +142,7 @@ The default 20 connections carried 1,200 requests a second for one account in th
 | `invoices`, `invoice_line_items`, `credit_notes`, `credit_note_line_items` | Each invoice, line and credit note | All. These are financial records. |
 | `subscriptions`, `subscription_items`, `customers`, `customer_billing_profiles` | Slowly | All. There is no automatic deletion of a customer's personal data yet. |
 
-**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. One event takes about 0.5 to 0.6 KB, counting indexes: on the benchmark rig, 62 million rows used 14 GB of table plus 18 GB of indexes ([sustained throughput](../benchmarks/sustained-throughput.md)). Plan for about 15 GB a month, or 185 GB a year, and split the table by month or set a retention window before the second year.
+**How much space:** 10,000 subscriptions sending 100 events a day each make about 30 million `usage_events` rows a month. One event takes about 0.5 to 0.6 KB, counting indexes: on the benchmark rig, 62 million rows used 14 GB of table plus 18 GB of indexes ([sustained throughput](../benchmarks/sustained-throughput.md)). Plan for about 15 GB a month, or 185 GB a year. Velox cannot yet split the table by month or delete old events ([If you need more](../scale.md#if-you-need-more)), so the table keeps every event: size the disk for that.
 
 ## Indexes
 

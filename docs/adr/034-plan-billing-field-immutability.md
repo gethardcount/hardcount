@@ -28,6 +28,8 @@ Surveyed billing platforms on this exact question:
 
 **Common pattern:** every mature billing platform either makes billing-affecting fields **always immutable** (Stripe, Orb) or **snapshots them at sub attach** (Lago, Chargebee, Recurly, Zuora). Velox is the outlier — mutable plans, live-reading engine, no snapshot, no versioning.
 
+**Correction (2026-10-23):** the Lago row and Lago's place in the "snapshot" group are wrong. Lago edits a plan in place. While subscriptions use a plan, its base fee (`amount_cents`) and its charge prices stay editable, and the organization's open draft invoices are flagged for refresh. Only code, interval, currency, trial, `pay_in_advance`, monthly charge billing and the charge model lock. `plan_overrides`, which need a premium licence, create a child plan for one subscription. Checked in lago-api `2e52dfc` (2026-10-22): `app/services/plans/update_service.rb:32-85`, `app/services/charges/update_service.rb:28-43`, `app/services/subscriptions/create_service.rb:37`.
+
 ## Decision
 
 Adopt a **soft-block** shape: billing-affecting fields are mutable **until any non-canceled, non-archived subscription references the plan**, then frozen.

@@ -108,11 +108,11 @@ Small AI teams kept running into the same gaps. Velox is built for them.
 | **Key parts sit behind a paid licence,** such as automatic failed-payment retries and invoice previews in Lago. | **One MIT licence, nothing held back.** |
 | **They are heavy to run:** some default setups run nine or eleven services, including Kafka and ClickHouse. | **Three parts:** the Velox server, Postgres and Redis. |
 | **No way to fast-forward time** to test a billing change. | **Test clocks:** months of billing in minutes. |
-| **No idea which customers lose you money.** | **Margin per customer and per model.** |
+| **No idea which customers lose you money.** | **Margin per customer and per model,** from the provider cost Velox records on each usage event. |
 
 Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Every claim above has a source in [Why Velox exists](docs/why-velox.md), and [How it compares](docs/comparison.md) lists where the other projects are ahead.
 
-**Pre-1.0.** Velox is young: one maintainer, Stripe and cards only, no SDKs yet. Until 1.0.0, breaking API changes land on minor releases ([versioning policy](CHANGELOG.md)).
+**Pre-1.0.** Velox is young: one maintainer, Stripe and cards only, no SDKs yet. Until 1.0.0, breaking API changes land on minor releases ([versioning before 1.0](docs/versioning.md)).
 
 ---
 

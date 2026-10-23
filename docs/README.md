@@ -11,8 +11,11 @@
 2. [What's in the box](features.md): every feature, with what it does for you.
 3. [How Velox compares](comparison.md) with four open-source billing
    engines, with sources, and [why Velox exists](why-velox.md).
-4. [Roadmap](roadmap.md): what shipped recently and what is deferred.
-   Every change, by date: [CHANGELOG](../CHANGELOG.md).
+4. [Roadmap](roadmap.md): what is being built now, next and later, and
+   what Velox will not build. Every change, by date:
+   [CHANGELOG](../CHANGELOG.md).
+5. [Versioning before 1.0](versioning.md): what a release can break, and
+   where each breaking change is written down.
 
 ## Understand it
 

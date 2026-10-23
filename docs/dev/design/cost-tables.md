@@ -20,6 +20,16 @@ pushes COGS joins to the operator's warehouse. LLM tooling (LiteLLM/
 Langfuse/Helicone) all model cost as a rate table. Velox builds the table
 the billing engines lack, in the LLM-tooling shape, joined in-app.
 
+**Correction (2026-10-23):** the "verified differentiation" is wrong for
+OpenMeter and Flexprice. OpenMeter has an LLM price table (`llmcost`, synced
+from models.dev) and a per-feature cost query. Flexprice's cost sheets report
+margin and margin percent from cost prices. What Velox does differently is
+record the provider cost on each usage event when it arrives. Checked in
+OpenMeter `f04b561f` (`openmeter/ent/schema/llmcostprice.go`,
+`openmeter/llmcost/sync/fetcher_modelsdev.go:17`,
+`api/v3/openapi.yaml:2966`) and Flexprice `1c23b81`
+(`internal/api/dto/costsheet_analytics.go:141-142`), both 2026-10-22.
+
 ## Corrected census (panel-verified; the pre-panel RFC was wrong)
 
 - LiteLLM observed cost (the cost LiteLLM itself reports) is **never persisted**: mapper stamps

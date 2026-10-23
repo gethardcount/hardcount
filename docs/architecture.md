@@ -57,7 +57,7 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
 - **Row-Level Security (RLS).** Most tenant-scoped work runs inside a transaction where Postgres enforces tenant isolation (`postgres.TxTenant`). A tenant is one account's data in the shared database. Integration tests prove it. Some work runs under `postgres.TxBypass`, where RLS does not apply: background jobs, public links such as the hosted invoice page, and login. Those queries must filter by tenant themselves.
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
-- **Append-only records for money.** Every change to a credit balance is a new ledger entry, and the database refuses any change or delete in the audit log.
+- **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: the database refuses any change or delete in it.
 
 ## Package layout
 
@@ -66,7 +66,7 @@ cmd/velox/                  — single Go binary
 cmd/velox-doctor/           — read-only money-invariant sweep (see ENGINEERING.md)
 internal/                     (abridged — one package per domain)
   domain/                   — pure domain models, zero deps
-  auth/                     — API key auth (3 key types, per-route permissions)
+  auth/                     — API key auth (3 stored key types plus dashboard sessions, per-route permissions)
   customer/                 — customer CRUD + billing profiles
   pricing/                  — meters, rating rules, plans, price overrides
   subscription/             — lifecycle (draft → trialing → active → canceled → archived)
@@ -75,7 +75,7 @@ internal/                     (abridged — one package per domain)
   billing/                  — billing engine + scheduler + preview
   payment/                  — Stripe PaymentIntent + webhook receiver
   dunning/                  — payment retry state machine
-  credit/                   — event-sourced prepaid balance ledger
+  credit/                   — prepaid credit ledger (grants, usage, expiry, adjustments)
   creditnote/               — credit notes + refunds
   webhook/                  — outbound webhooks (HMAC-signed delivery)
   email/                    — email outbox + sender

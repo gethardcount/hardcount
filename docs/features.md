@@ -26,10 +26,10 @@ labels on a usage event, such as `model` or `token_type`.
 | One program to run | Velox is a single Go program. Background jobs run inside it, so there is no queue, worker fleet or separate scheduler to run. The Compose file adds Postgres, Redis (for rate limits only), the dashboard and nginx in front: five containers, one of them Velox. | [Self-host](self-host.md) |
 | Nothing held back, nothing sent home | MIT with no licence key or paid tier. No telemetry; data goes only to services you set up, such as Stripe, your email server and your tracing collector. Billing data lives in your own Postgres. | [Why Velox](why-velox.md) |
 | Audit log that cannot be edited | A log of who changed what in your account. The database refuses to change or delete any entry in it. | [Architecture](architecture.md) |
-| Data kept apart | Each account's data, and its test and live data, are kept apart by Postgres Row-Level Security as well as by the application code. With `APP_ENV` set to `staging` or `production`, Velox will not start without RLS. | [Postgres requirements](ops/postgres-requirements.md#the-two-database-users) |
+| Data kept apart | On API request paths, each account's data, and its test and live data, are kept apart by Postgres Row-Level Security (RLS) as well as by the application code. Background jobs, sign-in and public links such as the hosted invoice page run outside RLS and filter by account in the application code. With `APP_ENV` set to `staging` or `production`, Velox will not start without RLS. | [Postgres requirements](ops/postgres-requirements.md#the-two-database-users) |
 
 Velox has no SSO. It has no roles either: every team member has full
-access ([Roadmap](roadmap.md#not-planned-for-now)).
+access ([Roadmap](roadmap.md#later)).
 
 ## Subscriptions and invoices
 

@@ -18,6 +18,7 @@ A spine/wedge audit flagged it as off-wedge B2C-flavored surface maintained for 
 
 - **A hosted self-serve portal is fundamentally a B2C/SMB/PLG pattern.** Stripe's Customer Portal is "a secure, Stripe-hosted page" for SMB self-service; for usage-based subscriptions it "can only be canceled, not modified."
 - **AI-native peers do NOT ship a lifecycle portal.** Orb/Metronome/Lago emphasize *embeddable* in-product cost/usage surfaces the vendor builds on their APIs; Lago's portal is read-only. Metronome: build dashboards "directly off of the Metronome API."
+  - **Correction (2026-10-23):** Lago's portal is not read-only. It shows invoices, usage and wallets, and the customer can edit their own details and buy a wallet top-up. Checked in lago-api `2e52dfc` (2026-10-22): `app/graphql/mutations/customer_portal/update_customer.rb` and `app/graphql/mutations/customer_portal/wallet_transactions/create.rb`.
 - **Every real AI infra/API company builds its own billing UI** in its own console (platform.openai.com, console.anthropic, Modal/Replicate/Baseten settings). None redirects customers to a billing-vendor's hosted portal. Self-serve there = top-up credits / set spend limits / watch usage — not "log in to a portal to cancel."
 - **B2B billing is operator-/contract-mediated**: AP pays via wire/ACH, lifecycle changes are CSM-negotiated, not a portal button.
 

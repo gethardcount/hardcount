@@ -111,6 +111,10 @@ Mounted under the existing `hostedInvoiceRL` 60/min/IP bucket. Tighter than the 
   Listed on the pricing page under **Premium only**, not the open-source tier
   ([pricing](https://getlago.com/pricing)) — so for a self-hosted OSS comparison
   the gap narrows, though we did not verify license enforcement in their code.
+  **Correction (2026-10-23):** lago-api has no licence check on the portal.
+  Lago's pricing page lists the portal as premium, but the service that makes
+  the portal link checks no licence. Checked in lago-api `2e52dfc`
+  (2026-10-22): `app/services/customer_portal/generate_url_service.rb:13-21`.
 - **What an AI company's customers already expect**, as the ICP reference point:
   OpenAI ships a console usage dashboard with per-project breakdowns, spend
   categories, CSV export and 1-minute granularity

@@ -7,7 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Pre-1.0 versioning:** we're on `0.MINOR.PATCH`. MINOR bumps for new
 features, PATCH for fixes. The public API is stabilising but not yet
-frozen; breaking changes land on MINOR until `1.0.0`.
+frozen; breaking changes land on MINOR until `1.0.0`. What can break, and how
+it is announced: [Versioning before 1.0](docs/versioning.md).
 
 How to write an entry (one bold outcome, who is affected, any action needed,
 a link; at most about 50 words): [docs/dev/writing-style.md](docs/dev/writing-style.md#shapes-for-common-docs).
@@ -89,6 +90,10 @@ original text.
 
 ### Changed
 
+- **New page: what can break before 1.0, and where each break is announced (2026-10-23).** See [Versioning before 1.0](docs/versioning.md). `SECURITY.md` now says only the latest release gets security fixes.
+- **The roadmap is now Now, Next, Later and Not building (2026-10-23).** Next: usage prices set per plan (v0.10.0), spend alerts, and generated Go and TypeScript SDKs ([roadmap](docs/roadmap.md)).
+- **Twenty claims about Lago, OpenMeter, Flexprice and Kill Bill are corrected against their code (2026-10-23).** [How Velox compares](docs/comparison.md) names the commits read. ADRs keep their text and gain a dated correction.
+- **Docs no longer overstate Velox (2026-10-23).** Row-level security covers API request paths; background jobs filter by account in code. Grant entries in the credit ledger are updated in place. There is no `volume` pricing mode. [Scale](docs/scale.md) says how dedup stays permanent if the usage table is split by month.
 - Docs: internal records, audits and design notes moved to docs/dev/; overlapping pages merged; two runbook steps corrected.
 - Docs: the self-host, ops, benchmark and runbook pages lead with the short path, with repeats and analogies cut. Claims corrected include the email rate, the shutdown worst case and the parked-invoice gauge.
 - Docs: the front-door pages and guides lead with the short path, with repeats, analogies and padding cut. Claims corrected include tenant isolation, which webhooks are never lost, and what the LiteLLM integration stores.

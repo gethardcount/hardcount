@@ -81,6 +81,13 @@ Two product decisions gated P4 and P10:
    while active overrides reference that key — a rule_key-following override
    would otherwise silently reinterpret its integer cents in the new
    currency.
+
+   **Correction (2026-10-23):** Lago has no full-immunity model. Lago edits
+   plans in place, so base-fee and charge-price edits reach live
+   subscriptions. Only a premium per-subscription override (`plan_overrides`,
+   a child plan) keeps one customer apart. Checked in lago-api `2e52dfc`
+   (2026-10-22): `app/services/plans/update_service.rb:32-85`. See the
+   correction in [ADR-034](034-plan-billing-field-immutability.md#industry-reference).
 6. **Resolution failures are loud.** `errs.ErrNotFound` from the override
    lookup means "no override — list price". Any other error aborts the
    close/preview and is returned; today all five engine lookup sites treat
