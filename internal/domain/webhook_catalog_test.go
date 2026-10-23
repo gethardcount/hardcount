@@ -21,37 +21,44 @@ var eventTypeValue = regexp.MustCompile(`^[a-z_]+(\.[a-z_]+)+$`)
 // constants, so a constant that is declared is a type Velox can send.
 func declaredEventTypes(t *testing.T) map[string]string {
 	t.Helper()
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("parse package domain: %v", err)
+		t.Fatalf("read package domain: %v", err)
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, e.Name(), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", e.Name(), err)
+		}
+		files = append(files, f)
 	}
 	out := map[string]string{} // value -> constant name
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			for _, decl := range f.Decls {
-				gd, ok := decl.(*ast.GenDecl)
-				if !ok || gd.Tok != token.CONST {
-					continue
-				}
-				for _, spec := range gd.Specs {
-					vs := spec.(*ast.ValueSpec)
-					for i, name := range vs.Names {
-						if !strings.HasPrefix(name.Name, "Event") || i >= len(vs.Values) {
-							continue
-						}
-						lit, ok := vs.Values[i].(*ast.BasicLit)
-						if !ok || lit.Kind != token.STRING {
-							continue
-						}
-						v, err := strconv.Unquote(lit.Value)
-						if err != nil || !eventTypeValue.MatchString(v) {
-							continue
-						}
-						out[v] = name.Name
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				for i, name := range vs.Names {
+					if !strings.HasPrefix(name.Name, "Event") || i >= len(vs.Values) {
+						continue
 					}
+					lit, ok := vs.Values[i].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						continue
+					}
+					v, err := strconv.Unquote(lit.Value)
+					if err != nil || !eventTypeValue.MatchString(v) {
+						continue
+					}
+					out[v] = name.Name
 				}
 			}
 		}
