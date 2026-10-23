@@ -134,7 +134,9 @@ check (D05 in the velox-ops strategy of 2026-10-23):
 **Decision.** While a draft, trialing or active subscription uses the meter,
 these edits are refused with 409 `meter_in_use`. The message gives the
 number of subscriptions and points to publishing a new version, which waits
-for the next period. A subscription uses the meter when an item is on a plan
+for the next period. On a test clock moved forward, a version published now
+can apply to the period already open (the test-clock caveat in decision 4),
+so in test mode the message says so. A subscription uses the meter when an item is on a plan
 that lists it. It also uses it when an item moved to or from such a plan
 during the current period, because the close bills the meter up to the move.
 
@@ -148,7 +150,12 @@ Edits that change no price already billed are allowed:
 - a write of the values the meter already has.
 
 The first two do change what a subscription pays: usage that had no price,
-including usage already recorded this period, is then billed.
+including usage already recorded this period, is then billed. One exception:
+if a spend threshold already invoiced the subscription this period, a sum or
+count price bills only the usage after that invoice. The usage before it
+stays unbilled, as the threshold invoice left it out
+([ADR-096](096-unpriced-meter-plan-attach-guard.md)). A max or last price
+is billed over the whole period.
 
 The check runs in the edit's transaction. It locks the meter row, then
 every plan that lists the meter, then counts. A subscription item insert or

@@ -1029,7 +1029,8 @@ export interface paths {
          *     change would reprice the billing period already open. A first
          *     default, or another version of the same rating rule, is allowed. To
          *     change a rate, publish a new version of the rating rule; it applies
-         *     from each subscription's next period. `name` and `unit` can always
+         *     from each subscription's next period (on a test clock, it can apply
+         *     to the current simulated period). `name` and `unit` can always
          *     change.
          */
         patch: {
@@ -1136,7 +1137,8 @@ export interface paths {
          *     default rating rule and every rule that could match the same events
          *     has a higher priority: then it prices only usage no rule prices
          *     now. To change a rate, publish a new version of the rating rule; it
-         *     applies from each subscription's next period.
+         *     applies from each subscription's next period (on a test clock, it
+         *     can apply to the current simulated period).
          */
         post: operations["upsertMeterPricingRule"];
         delete?: never;

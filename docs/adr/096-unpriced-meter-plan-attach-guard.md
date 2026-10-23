@@ -8,7 +8,7 @@ Relates: ADR-070 (no-silent-fallbacks in billing — this extends its fail-LOUD 
 
 ## Summary
 
-A plan can attach a usage meter only if the meter has a price: a default rating rule or at least one meter pricing rule. Without this check, a meter that only looked priced billed its usage at $0 with no signal. Amended 2026-10-14: removing a meter's last price is refused with 409 `invalid_state` while a plan using the meter has a draft, trialing or active subscription. Usage that still matches no price is left off the invoice and never billed later; each invoice that leaves such usage out logs a WARN and adds the quantity to `velox_usage_unpriced_quantity_total`. Status: active, amended 2026-10-14.
+A plan can attach a usage meter only if the meter has a price: a default rating rule or at least one meter pricing rule. Without this check, a meter that only looked priced billed its usage at $0 with no signal. Amended 2026-10-14: removing a meter's last price was refused with 409 `invalid_state` while a plan using the meter had a draft, trialing or active subscription. Since 2026-10-23 the wider guard of the [ADR-070 amendment](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter) replaces it: while such a subscription uses the meter, a rule delete, a default price pointed at another price or removed, and any other edit that would reprice usage is refused with 409 `meter_in_use`. Usage that still matches no price is left off the invoice and never billed later; each invoice that leaves such usage out logs a WARN and adds the quantity to `velox_usage_unpriced_quantity_total`. Status: active, amended 2026-10-14 and 2026-10-23.
 
 ## Context
 

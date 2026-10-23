@@ -5,7 +5,7 @@
 
 ## Summary
 
-Applying a recipe (`POST /v1/recipes/{key}/instantiate`) creates objects once and never removes them. There is no uninstall. The badge (a `recipe_instances` row) is checked before any write, so a repeat apply returns the existing row unchanged (same id, HTTP 201) and creates nothing. Amended 2026-07-26: the badge is unique per tenant, recipe and mode (test or live), so applying in test mode no longer counts as applying in live mode. A first apply always creates a new plan with a free code (`<code>_2` if the code is taken), so an existing plan is never reused or changed. An existing meter is reused only if its aggregation matches the recipe. An existing rating rule is reused only if its money fields match (amended 2026-07-26). On any mismatch the whole apply is refused and rolled back. Rules are reused at their current version and never republished. Amended 2026-10-23: on a reused meter that a live subscription uses, the apply is also refused (409 `meter_in_use`) when one of its pricing rules would take usage from a price that bills it now. With both, an apply never changes the price of usage a live subscription is billed for. It can price usage that had no price, and the open period's invoice then bills that usage.
+Applying a recipe (`POST /v1/recipes/{key}/instantiate`) creates objects once and never removes them. There is no uninstall. The badge (a `recipe_instances` row) is checked before any write, so a repeat apply returns the existing row unchanged (same id, HTTP 201) and creates nothing. Amended 2026-07-26: the badge is unique per tenant, recipe and mode (test or live), so applying in test mode no longer counts as applying in live mode. A first apply always creates a new plan with a free code (`<code>_2` if the code is taken), so an existing plan is never reused or changed. An existing meter is reused only if its aggregation matches the recipe. An existing rating rule is reused only if its money fields match (amended 2026-07-26). On any mismatch the whole apply is refused and rolled back. Rules are reused at their current version and never republished. Amended 2026-10-23: on a reused meter that a live subscription uses, the apply is also refused (409 `meter_in_use`) when one of its pricing rules would take usage from a price that bills it now. With both, an apply never changes the price of usage a live subscription is billed for. It can price usage that had no price, and the open period's invoice then bills that usage. If a spend threshold already invoiced the subscription this period, a sum or count price bills only the usage after that invoice.
 
 ## Context
 
@@ -132,4 +132,7 @@ creates has no subscription, so a fresh install is never refused. Rules for
 models no rule prices, on a meter with no default price, still go on. They
 do change what a live subscription pays: usage of those models that had no
 price, including usage already recorded this period, is billed on the
-period's invoice.
+period's invoice. One exception: if a spend threshold already invoiced the
+subscription this period, a sum or count price bills only the usage after
+that invoice. The usage before it stays unbilled, as the threshold invoice
+left it out ([ADR-096](096-unpriced-meter-plan-attach-guard.md)).

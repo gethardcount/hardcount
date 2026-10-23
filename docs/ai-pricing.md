@@ -175,7 +175,8 @@ see it in four places:
 - a server log line when the invoice is made.
 
 To bill it, add a rule or a default price. Invoices not made yet then
-include it. For a period that is already invoiced, bill it with a one-off
+include it. If a spend threshold already invoiced the subscription this
+period, a sum or count price bills only the usage after that invoice. For a period that is already invoiced, bill it with a one-off
 invoice ([runbook](ops/runbook/usage-with-no-price.md)). A first default
 price is accepted while subscriptions use the meter. A new rule is accepted while subscriptions use the
 meter only as described above.
@@ -195,7 +196,10 @@ The message says how many subscriptions use the meter. To change a rate,
 publish a new version of the rating rule (`POST /v1/rating-rules` with the
 same `rule_key`). It applies from each subscription's next billing period,
 and the current period keeps the old rate. On the dashboard, that is **New
-version** on the Prices tab.
+version** on the Prices tab. A subscription on a test clock is the
+exception: a version is stamped with the real time, so if the clock's
+current period started later than now, the new version applies to that
+period. In test mode the 409 message says so.
 
 ## Price a Claude model Velox does not know
 

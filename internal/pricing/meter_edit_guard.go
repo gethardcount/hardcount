@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // The meter-in-use guard (D05). Usage is priced at billing time from the
@@ -72,7 +73,7 @@ func (s *Service) meterEditGuard(ctx context.Context, meterID string, change fun
 			return err
 		}
 		if n > 0 {
-			return errs.InvalidState(meterInUseMessage(locked.Key, n, r.newRule)).WithCode(errs.CodeMeterInUse)
+			return errs.InvalidState(meterInUseMessage(locked.Key, n, r.newRule, !postgres.Livemode(ctx))).WithCode(errs.CodeMeterInUse)
 		}
 		return nil
 	}
@@ -163,13 +164,20 @@ func canonicalMatch(m map[string]any) (string, error) {
 }
 
 // meterInUseMessage is the D05 refusal. It names the count and the way that
-// waits for the next period: a new version of the price. For a new rule it
-// also says when one is allowed.
-func meterInUseMessage(meterKey string, subs int, newRule bool) string {
+// waits for the next period: a new version of the price. In test mode it
+// adds the test-clock exception: a version is stamped with real time
+// (clock.Now of the catalog call), and a test clock moved forward can open a
+// period in simulated time after that stamp, so GetRuleByKeyAsOf resolves
+// the new version for the period already open (ADR-070 §4). Live mode has no
+// test clocks. For a new rule it also says when one is allowed.
+func meterInUseMessage(meterKey string, subs int, newRule, testMode bool) string {
 	msg := fmt.Sprintf("%s meter %q, so the prices and aggregation that bill its usage are locked: "+
 		"a change now would change what they are billed for usage already recorded. "+
 		"To change a rate, publish a new version of the price; it applies from each subscription's next period.",
 		subscriptionsUse(subs), meterKey)
+	if testMode {
+		msg += " For a subscription on a test clock, it can apply to the current simulated period."
+	}
 	if newRule {
 		msg += " A new price can be added only when the meter has no default price " +
 			"and no price with the same or a lower priority matches the same events."

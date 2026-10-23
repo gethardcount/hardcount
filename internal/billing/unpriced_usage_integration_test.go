@@ -19,6 +19,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/usage"
@@ -480,5 +481,120 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	}
 	if got := unpricedCounter(t, tok.ID); got != 33 {
 		t.Fatalf("counter = %v, want 33", got)
+	}
+}
+
+// TestUnpricedUsage_PricedAfterThresholdFire pins what the meter-in-use
+// guard's allowed edits bill (ADR-070 and ADR-085 amendments, #1362). A new
+// rule for a model no rule prices is allowed on a meter in use. When a spend
+// threshold already invoiced the subscription this period, the close bills a
+// sum or count price only for the usage after that invoice: the usage before
+// it stays unbilled (the threshold invoice left it out, ADR-096). A max price
+// is billed over the whole period, because the close reads non-additive
+// prices the fire did not bill over the full window (ADR-066 §4).
+func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	cases := []struct {
+		name string
+		mode domain.AggregationMode
+		want int64
+	}{
+		{"sum price bills only the usage after the threshold invoice", domain.AggSum, 30},
+		{"max price bills the whole period", domain.AggMax, 70},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newThresholdFixture(t, "Priced After Fire "+string(tc.mode))
+			ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
+			defer cancel()
+
+			key := "tok_paf_" + string(tc.mode)
+			tok := tokensMeter(t, ctx, f, key)
+			plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+				Code: "pln_paf_" + string(tc.mode), Name: "Priced After Fire", Currency: "USD",
+				BillingInterval: domain.BillingMonthly, MeterIDs: []string{f.meterID, tok.ID},
+			})
+			if err != nil {
+				t.Fatalf("create plan: %v", err)
+			}
+			custID, subID := seedUnpricedSub(t, ctx, f, "cus_paf_"+string(tc.mode), plan.ID, 500)
+
+			// Pre-fire: 1000c of priced calls crosses the 500c cap; 70 tokens
+			// of model=b match no price.
+			for j := 0; j < 10; j++ {
+				ingestUnpricedAt(t, ctx, f, custID, f.meterID, 100, f.cycleStart.Add(time.Duration(j+1)*time.Minute), nil)
+			}
+			ingestUnpricedAt(t, ctx, f, custID, tok.ID, 70, f.cycleStart.Add(20*time.Minute), map[string]any{"model": "b"})
+			fired, scanErrs := f.engine.ScanThresholds(ctx, 50)
+			if len(scanErrs) > 0 {
+				t.Fatalf("scan errors: %v", scanErrs)
+			}
+			if fired != 1 {
+				t.Fatalf("fired = %d, want 1", fired)
+			}
+
+			rrB, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
+				RuleKey: key + "_b", Name: key + " b", Mode: domain.PricingFlat,
+				Currency: "USD", FlatAmountCents: decimal.NewFromInt(int64(2 + i)),
+			})
+			if err != nil {
+				t.Fatalf("create rule b: %v", err)
+			}
+			// The guard counts this subscription: changing model a's rule is
+			// refused.
+			rules, err := f.pricingSvc.ListMeterPricingRulesByMeter(ctx, f.tenantID, tok.ID)
+			if err != nil || len(rules) != 1 {
+				t.Fatalf("list rules: %v (%d rules)", err, len(rules))
+			}
+			if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
+				MeterID: tok.ID, RatingRuleVersionID: rules[0].RatingRuleVersionID,
+				DimensionMatch: map[string]any{"model": "a"}, Priority: 5,
+			}); errs.Code(err) != "meter_in_use" {
+				t.Fatalf("editing model a's rule: want meter_in_use, got %v", err)
+			}
+			// A rule for model b, which no rule prices, is allowed.
+			if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
+				MeterID: tok.ID, RatingRuleVersionID: rrB.ID,
+				DimensionMatch: map[string]any{"model": "b"}, AggregationMode: tc.mode,
+			}); err != nil {
+				t.Fatalf("pricing model b on a meter in use must be allowed: %v", err)
+			}
+
+			time.Sleep(10 * time.Millisecond)
+			ingestUnpricedAt(t, ctx, f, custID, tok.ID, 30, time.Now().UTC(), map[string]any{"model": "b"})
+			time.Sleep(10 * time.Millisecond)
+			endPeriodNow(t, ctx, f, subID)
+			if _, failures := f.engine.RunCycleForTenant(ctx, f.tenantID, 50); len(failures) > 0 {
+				t.Fatalf("cycle failures: %v", failures)
+			}
+
+			var billedB int64
+			var cycles int
+			for _, inv := range f.listInvoices(t, ctx) {
+				if inv.SubscriptionID != subID {
+					continue
+				}
+				if inv.BillingReason != domain.BillingReasonThreshold {
+					cycles++
+				}
+				lines, err := f.invStore.ListLineItems(ctx, f.tenantID, inv.ID)
+				if err != nil {
+					t.Fatalf("lines: %v", err)
+				}
+				for _, li := range lines {
+					if li.RatingRuleVersionID == rrB.ID {
+						billedB += li.QuantityDecimal.IntPart()
+					}
+				}
+			}
+			if cycles != 1 {
+				t.Fatalf("cycle invoices = %d, want 1", cycles)
+			}
+			if billedB != tc.want {
+				t.Errorf("model b billed quantity = %d, want %d", billedB, tc.want)
+			}
+		})
 	}
 }
