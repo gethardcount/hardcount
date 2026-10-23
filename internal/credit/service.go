@@ -449,22 +449,17 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 // back, so the invoice never lands voided with the customer's applied credits
 // still consumed. The reading of usage entries runs on its own conn (those
 // rows were committed when the credit was applied); only the grant INSERT
-// rides the tx, and the 0106 dedup index keeps it exactly-once.
+// rides the tx.
+//
+// The 0106 dedup index allows one reversal per invoice. The void refuses an
+// invoice that is already voided, on the locked row, so a second reversal is
+// not expected. If one comes, the index refuses the INSERT, which aborts the
+// caller's tx, so the error (code credit_reversal_source_taken) is returned,
+// not swallowed: the caller must fail, not carry on with a dead tx.
+//
+// bindForCustomer stamps the grant in simulated time when the customer is
+// clock-pinned.
 func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (int64, error) {
-	return s.reverseForInvoice(ctx, tenantID, customerID, invoiceID, invoiceNumber,
-		func(entry domain.CreditLedgerEntry) error {
-			_, err := s.store.AppendEntryTx(ctx, tx, tenantID, entry)
-			return err
-		})
-}
-
-// reverseForInvoice is the body: sum the usage entries applied to the invoice
-// and append a matching grant via the supplied appender. bindForCustomer
-// stamps the grant in simulated time when the customer is clock-pinned.
-func (s *Service) reverseForInvoice(ctx context.Context, tenantID, customerID, invoiceID, invoiceNumber string, appendFn func(domain.CreditLedgerEntry) error) (int64, error) {
-	// Bind ctx clock to the customer pin so the reversal grant entry's
-	// created_at stamps in simulated time when called from the void /
-	// dunning-writeoff flow on a clock-pinned customer.
 	ctx = s.bindForCustomer(ctx, tenantID, customerID)
 	entries, err := s.store.ListEntries(ctx, ListFilter{
 		TenantID:   tenantID,
@@ -506,22 +501,14 @@ func (s *Service) reverseForInvoice(ctx context.Context, tenantID, customerID, i
 		desc = fmt.Sprintf("Reversed — invoice %s voided", invoiceID)
 	}
 
-	err = appendFn(domain.CreditLedgerEntry{
+	if _, err := s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:              customerID,
 		EntryType:               domain.CreditGrant,
 		AmountCents:             totalUsed,
 		Description:             desc,
 		InvoiceID:               invoiceID,
 		SourceInvoiceReversalID: invoiceID,
-	})
-	if err != nil {
-		// A second void / dunning manual-resolve of the same invoice hits the
-		// partial unique index (migration 0106) and the store returns
-		// ErrAlreadyExists with this code — the reversal already happened, so
-		// this is an idempotent no-op rather than a double-credit.
-		if errs.Code(err) == "credit_reversal_source_taken" {
-			return 0, nil
-		}
+	}); err != nil {
 		return 0, err
 	}
 

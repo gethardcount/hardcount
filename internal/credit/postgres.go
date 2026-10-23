@@ -155,12 +155,13 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		return domain.CreditLedgerEntry{}, fmt.Errorf("acquire credit ledger lock: %w", err)
 	}
 	// A second entry for the same source (credit note, invoice reversal,
-	// commit funding, proration) is refused by the dedup indexes, and callers
-	// treat that refusal as "already done". That is only true when the amount
-	// matches: a different amount for the same source means some code path
-	// computed it differently, and swallowing it hides the bug (P06). Checked
-	// here, under the customer lock and before the INSERT — a unique violation
-	// would abort the tx, so it cannot be compared afterwards.
+	// commit funding, proration) is refused by the dedup indexes; the INSERT
+	// fails, the tx is aborted, and every caller returns the error. A
+	// different amount for the same source is a worse fault: some code path
+	// computed it differently (P06). This check names it and logs it at
+	// ERROR. It runs here, under the customer lock and before the INSERT,
+	// because after a unique violation the tx is aborted and nothing more
+	// can be read.
 	if err := checkSameSourceAmount(ctx, tx, tenantID, entry); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
@@ -224,15 +225,12 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
-			// Route by constraint name so callers can distinguish a
-			// proration-dedup replay (idempotent: re-fetch and return
-			// the prior entry) from a credit-note-dedup replay (same
-			// shape, different semantic — caller's responsibility to
-			// handle). Pre-2026-05-28 every unique violation collapsed
-			// into a generic ErrAlreadyExists and the caller assumed it
-			// was proration — silent misroute when the credit-note
-			// dedup index fired instead. ADR-030 cross-flow audit
-			// 2026-05-28 / feedback_no_silent_fallbacks memory.
+			// Route by constraint name so the error says which source
+			// was already taken. The violation has aborted the tx, so no
+			// caller can recover inside it: each one returns the error
+			// and its tx rolls back. Pre-2026-05-28 every unique
+			// violation collapsed into a generic ErrAlreadyExists and the
+			// caller assumed it was proration (ADR-030 cross-flow audit).
 			switch postgres.UniqueViolationConstraint(err) {
 			case "idx_credit_ledger_proration_dedup":
 				return domain.CreditLedgerEntry{}, errs.AlreadyExists("proration_source",
