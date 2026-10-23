@@ -104,10 +104,10 @@ type Store interface {
 	// that bill it: an item on such a plan, or an item change to or from
 	// one since the subscription's current period started. The plan lock is
 	// what orders the count against a subscription being created or moved
-	// onto such a plan: the subscription writer takes FOR KEY SHARE on every
-	// plan it references before its first write, which waits for this lock.
-	// Both take plans in ascending id, so the two cannot deadlock (D08
-	// §4.21).
+	// onto such a plan: the subscription writer takes FOR KEY SHARE on each
+	// plan it references, which waits for this lock. A writer that
+	// references more than one plan takes them in ascending id, as this
+	// does, right after its subscription row (D08 §4.21).
 	CountSubsUsingMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (int, error)
 	// GetMeterPricingRuleByPairTx returns the meter's rule bound to the rating
 	// rule version, or errs.ErrNotFound.

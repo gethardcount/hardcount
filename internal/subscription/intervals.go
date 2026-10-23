@@ -45,8 +45,9 @@ type intervalSubCtx struct {
 // takes the row via its status UPDATE) serializes against it: an item
 // mutation can't thread an open interval under a committing cancel's
 // close-all sweep. The share lock here is then the tx's own row and does
-// not wait. Lock order everywhere is subscription row → plans
-// (lockPlansTx) → item rows → interval rows.
+// not wait. Lock order everywhere is subscription row → item rows →
+// interval rows. A writer that references more than one plan takes them
+// right after the subscription row (lockPlansTx).
 func intervalSubContext(ctx context.Context, tx *sql.Tx, subscriptionID string) (intervalSubCtx, error) {
 	ic := intervalSubCtx{subID: subscriptionID}
 	var status, tz string

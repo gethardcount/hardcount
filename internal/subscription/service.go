@@ -1849,6 +1849,17 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 	if !sameItems(locked.Items, sub.Items) {
 		return ItemChangeResult{}, errItemChanged()
 	}
+	// The swap references the item's current plan and the new one. Take
+	// both now, before the refund drafts lock invoices and number a credit
+	// note: a swap that waited for a plan while holding the tenant's number
+	// row could deadlock with a meter edit and an activation (lockPlansTx).
+	var currentPlanID string
+	if it, ok := findItem(sub.Items, itemID); ok {
+		currentPlanID = it.PlanID
+	}
+	if err := s.store.LockPlansTx(ctx, tx, []string{currentPlanID, newPlanID}); err != nil {
+		return ItemChangeResult{}, err
+	}
 
 	// Fire-vs-swap residual (ADR-115): a reset=false threshold fire that
 	// committed after UpdateItemTx read the sub passes the CAS above — it does

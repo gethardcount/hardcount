@@ -2034,13 +2034,13 @@ func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, ex
 // (ADR-115). That mode leaves the FOR KEY SHARE of an invoice insert's
 // foreign-key check free.
 //
-// With every item writer taking this row first, all writers of a
-// subscription's state lock in one order: subscription row, the plans the
-// writer references (lockPlansTx), item rows, billing_intervals, invoices.
-// The dunning pause takes the same order: its
-// write (SetDunningPause) and the payment that lifts it (LockDunningPauseTx,
-// before the payment locks the invoice) lock the subscription row first,
-// except when the pause commits after the payment's check (see
+// Every writer of a subscription's state takes this row first. A writer that
+// references more than one plan takes them next (lockPlansTx); item rows,
+// billing_intervals and invoices come after. The dunning pause takes the same
+// order: its write (SetDunningPause) and the payment that lifts it
+// (LockDunningPauseTx, before the payment locks the invoice) lock the
+// subscription row first, except when the pause commits after the payment's
+// check (see
 // LockDunningPauseTx). So two of them cannot deadlock, and a change
 // that read the state under this lock (LockForItemChangeTx) has seen every
 // item change that committed before it. A transaction that already holds the
@@ -2071,11 +2071,9 @@ func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) erro
 }
 
 // lockPlansTx takes every plan a writer will reference, in ascending id, in
-// one statement (D08 §4.21). A writer that references plans calls it right
-// after it locks the subscription row and before its first write. FOR KEY
-// SHARE is the lock the foreign-key checks on subscription_items,
-// subscription_item_changes and billing_intervals take, so those checks then
-// find it held.
+// one statement (D08 §4.21). FOR KEY SHARE is the lock the foreign-key checks
+// on subscription_items, subscription_item_changes and billing_intervals
+// take, so those checks then find it held.
 //
 // Without it, the checks take plans in the order the statements reach them.
 // A swap A→B reaches B first (the item's new plan_id), then A (the change
@@ -2084,15 +2082,22 @@ func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) erro
 // id(A) < id(B) the two waited on each other, and Postgres aborted one with
 // a deadlock error (40P01). Both now take plans in the same order.
 //
+// A writer that references more than one plan calls it right after its
+// subscription row, before it locks any other row. D05 is the only plan lock
+// that blocks FOR KEY SHARE, and it waits only for plans. A writer that waits
+// for a plan while it holds another row can still close a cycle through a
+// third transaction: one that holds a higher plan and waits for that row. The
+// cross-interval swap is the case: an activation holds plan B and waits for
+// the tenant's number row to number its invoice, D05 holds A and waits for B,
+// and a swap off A that has numbered its refund credit note waits for A. So
+// the swap takes its plans (LockPlansTx) after its period CAS and before its
+// refund drafts. Item add and schedule call it too, though one plan is in
+// order by itself. Quantity change and removal reference only the item's own
+// plan and leave it to their foreign-key checks.
+//
 // The order is the database's ORDER BY id, the one D05 uses. A plan RLS hides
 // from the transaction is not locked here; its foreign-key check still
 // refuses or locks it as before.
-//
-// The cross-interval swap writes its refund drafts before it calls
-// ApplyItemPlanImmediatelyTx, so it takes the plans after those invoice
-// writes. That cannot deadlock: no transaction holds a plan in a mode that
-// blocks FOR KEY SHARE (only D05's FOR UPDATE does) and then waits for an
-// invoice or a subscription row.
 func lockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
 	ids := make([]string, 0, len(planIDs))
 	seen := make(map[string]bool, len(planIDs))
@@ -2121,6 +2126,11 @@ func itemPlanIDs(items []domain.SubscriptionItem) []string {
 		ids = append(ids, it.PlanID)
 	}
 	return ids
+}
+
+// LockPlansTx: see the Store interface.
+func (s *PostgresStore) LockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
+	return lockPlansTx(ctx, tx, planIDs)
 }
 
 // LockForItemChangeTx: see the Store interface. tenantID is accepted for

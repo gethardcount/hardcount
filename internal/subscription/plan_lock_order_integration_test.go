@@ -15,8 +15,10 @@ import (
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// C10 (D08 §4.21): every subscription writer that references plans takes them
-// in ascending id, in one statement, before its first write.
+// C10 (D08 §4.21): every subscription writer that references more than one
+// plan takes them in ascending id, in one statement, right after its
+// subscription row. The cross-interval swap, which numbers a credit note in
+// between, is raced in internal/billing (swap_plan_lock_order_integration_test.go).
 //
 // The meter-in-use guard (D05) locks the meter, then every plan that lists it
 // FOR UPDATE in ascending id. A subscription writer's foreign-key checks take
