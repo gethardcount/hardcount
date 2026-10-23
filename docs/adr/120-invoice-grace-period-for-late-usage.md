@@ -208,7 +208,8 @@ pipeline lags longer raises it.
   bills usage only from the threshold invoice's end on
   (`meterUsageIntervals`). This was already so before the grace. Bill it
   with a one-off invoice. With `reset_billing_cycle`, the threshold invoice
-  closes the period at once.
+  closes the period at once. *(2026-10-23: `reset_billing_cycle` is removed;
+  a threshold invoice never closes the period.)*
 - **The subscription shows the ended period during the grace.** Spend
   thresholds do not fire on the new period's usage, and the live credit
   balance leaves it out, until the invoice is built. A grant created during

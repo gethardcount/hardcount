@@ -30,7 +30,7 @@ func TestThresholdScan_CreditApplyFailure_FlagsAndSkipsCharge(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		NextBillingAt:             &nextBilling,
-		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: true},
+		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000},
 	}
 	base := &mockSubs{subs: map[string]domain.Subscription{"sub_1": sub}, cycleUpdated: make(map[string]bool)}
 	subs := &thresholdMockSubs{mockSubs: base, candidates: []domain.Subscription{sub}}
@@ -97,7 +97,7 @@ func TestThresholdScan_CreditsApplied_ChargesRemainder(t *testing.T) {
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		NextBillingAt:             &nextBilling,
-		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: true},
+		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000},
 	}
 	base := &mockSubs{subs: map[string]domain.Subscription{"sub_1": sub}, cycleUpdated: make(map[string]bool)}
 	subs := &thresholdMockSubs{mockSubs: base, candidates: []domain.Subscription{sub}}

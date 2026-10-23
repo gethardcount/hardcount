@@ -318,13 +318,12 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 		}
 	}
 	var planStatus string
-	var resetCycle bool
 	if err := db.QueryRow(`SELECT status FROM plans WHERE id = 'pln_def'`).Scan(&planStatus); err != nil || planStatus != "active" {
 		t.Errorf("a plan inserted without a status is %q (%v), want active", planStatus, err)
 	}
-	if err := db.QueryRow(`SELECT billing_threshold_reset_cycle FROM subscriptions WHERE id = 'sub_def'`).Scan(&resetCycle); err != nil || resetCycle {
-		t.Errorf("a subscription inserted without the flag has billing_threshold_reset_cycle %v (%v), want false (the API default)", resetCycle, err)
-	}
+	// 00201's false default for billing_threshold_reset_cycle is checked by
+	// TestThresholdResetColumnDropped: 00205 drops the column, and its Down
+	// puts it back as 00201 left it.
 
 	if tableExists(t, db, "public.billed_entries") {
 		t.Error("00201 left the table billed_entries")

@@ -1,22 +1,23 @@
 # Billing Thresholds — Technical Design
 
-> - **Decided:** a subscription can carry a spend cap (`amount_gte`) or per-item usage caps (`usage_gte`). When the period's total reaches one, Velox invoices early, can reset the billing cycle, and sends `subscription.threshold_crossed`.
+> - **Decided:** a subscription can carry a spend cap (`amount_gte`) or per-item usage caps (`usage_gte`). When the period's usage reaches one, Velox invoices that usage early and sends `subscription.threshold_crossed`. The period keeps its dates, and the base fee is billed as it would be with no threshold.
 > - **Shipped:** v0.1.0, in [#29](https://github.com/getvelox/velox/pull/29) (migration `0056_subscription_billing_thresholds`).
 > - **Current docs:** [Billing thresholds](../../features.md#subscriptions-and-invoices) in the feature list and the [threshold event](../../webhooks.md#subscriptions). The decisions made since are listed below. Where this page and the code disagree, the code wins.
 
 > **Design document, last revised 2026-04-26** (the pre-build RFC). The body below is kept as written and is not the current design.
 >
-> **Current design:** [ADR-065](../../adr/065-threshold-scan-boundary-fire-once-drain.md) (scan kernel: boundary-skip, fire-once probe, full drain), [ADR-066](../../adr/066-threshold-money-semantics.md) (money semantics: prorated reset base, atomic fire-then-reset), [ADR-115](../../adr/115-one-closer-for-the-billing-period.md) (a threshold fire and the cycle close cannot both bill one period), and [ADR-029](../../adr/029-fully-disjoint-test-clock-flows.md) section 2 (the threshold scan skips test-clock subscriptions; they are scanned when the clock is advanced). Code: `internal/billing/threshold_scan.go`, `internal/subscription/`.
+> **Current design:** [ADR-065](../../adr/065-threshold-scan-boundary-fire-once-drain.md) (scan kernel: boundary-skip, fire-once probe, full drain), [ADR-066](../../adr/066-threshold-money-semantics.md) (money semantics: what the fire and the close each bill, the one-transaction fire), [ADR-115](../../adr/115-one-closer-for-the-billing-period.md) (a threshold fire and the cycle close cannot both bill one period), and [ADR-029](../../adr/029-fully-disjoint-test-clock-flows.md) section 2 (the threshold scan skips test-clock subscriptions; they are scanned when the clock is advanced). Code: `internal/billing/threshold_scan.go`, `internal/subscription/`.
 >
 > **Where the body is out of date** (verified against code 2026-08-23):
 >
 > 1. Validation failures return **`422 validation_error`**, not 400.
-> 2. `reset_billing_cycle` **defaults `false`** when omitted (Stripe's keep-anchor default; the body's `true` was found wrong in the 2026-07-10 design review).
+> 2. `reset_billing_cycle` is **removed** (2026-10-23). A fire always keeps the billing period (Stripe's default), and a body that sends the field is refused with 422. Every part of the body below about resetting the cycle no longer applies.
 > 3. Only **negative** `usage_gte` is rejected; zero is accepted.
 > 4. The planned base-fee-only PATCH-time rejection was **not shipped** (validation checks item membership, duplicates, and decimal parse).
 > 5. The once-fired guard is the **partial unique index alone**, surfacing `errs.ErrAlreadyExists` on a retried tick. There is no invoice source-key column, and `ON CONFLICT DO NOTHING` returns no row.
 > 6. The scheduler tick is now reconcilers → auto-charge retry → dunning enrollment → threshold scan → cycle scan.
 > 7. `amount_gte` is integer cents in the currency's **minor** unit; the body's "major-unit-cents" contradicts itself.
+> 8. A threshold counts and bills **usage only** (2026-10-23). `amount_gte` is compared with the period's usage so far, and the base fee, in advance or in arrears, is billed by the period's own invoice, not the threshold invoice.
 >
 > Related design docs: `docs/dev/design/create-preview.md` (same wire conventions), `docs/dev/design/multi-dim-meters.md` (`usage.AggregateByPricingRules`).
 

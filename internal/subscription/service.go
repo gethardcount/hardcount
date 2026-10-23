@@ -1834,7 +1834,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 	// row-locks the subscription and proves the snapshot this request was
 	// planned from — status, period start, watermark — before the refund
 	// drafts, the plan write or the new-period invoice touch anything. A cycle
-	// close, a threshold reset or a sibling swap that committed after the Get
+	// close, a threshold fire or a sibling swap that committed after the Get
 	// in UpdateItemTx makes it 0 rows → ErrWatermarkMoved → 409 here, and the
 	// handler's deferred rollback has nothing to undo. Holding the row
 	// exclusively from the first statement also removes the share→exclusive
@@ -1882,7 +1882,7 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		return ItemChangeResult{}, err
 	}
 
-	// Fire-vs-swap residual (ADR-115): a reset=false threshold fire that
+	// Fire-vs-swap residual (ADR-115): a threshold fire that
 	// committed after UpdateItemTx read the sub passes the CAS above — it does
 	// not move the period — but may have billed usage through an instant AFTER
 	// `now`. Re-anchoring the period below that window would re-bill
@@ -3442,24 +3442,16 @@ type ItemThresholdInput struct {
 // always-array of per-item caps. Either AmountGTE or ItemThresholds (or both)
 // must be set — a body with neither is rejected as no-op.
 //
-// ResetBillingCycle defaults to FALSE at PATCH time when omitted — the
-// threshold fire bills mid-cycle and the period anchor stays put, which is
-// Stripe's documented default (reset_billing_cycle_anchor=false; the earlier
-// comment claimed the opposite and was verified wrong, 2026-07-10 design
-// review). Keep-anchor is also the safer silent default: it avoids the
-// ADR-066 §5 {in_advance × reset=true} interaction entirely for operators
-// who never chose a value. The pointer-on-field shape lets the handler
-// distinguish "not supplied" (apply default) from an explicit choice.
-// (The 0056 column default remains TRUE — historical and inert: every
-// threshold write flows through this PATCH, which always stores an
-// explicit value.)
+// A threshold fire always keeps the billing period (Stripe's default,
+// reset_billing_cycle_anchor=false). reset_billing_cycle was removed on
+// 2026-10-23: the handler decodes strictly, so a body that still sends it,
+// true or false, is refused with a 422 naming the field.
 type BillingThresholdsInput struct {
-	AmountGTE         int64                `json:"amount_gte,omitempty"`
-	ResetBillingCycle *bool                `json:"reset_billing_cycle,omitempty"`
-	ItemThresholds    []ItemThresholdInput `json:"item_thresholds,omitempty"`
+	AmountGTE      int64                `json:"amount_gte,omitempty"`
+	ItemThresholds []ItemThresholdInput `json:"item_thresholds,omitempty"`
 }
 
-// SetBillingThresholds writes (amount_gte, reset_cycle, item_thresholds) onto
+// SetBillingThresholds writes (amount_gte, item_thresholds) onto
 // a subscription. Validates: at least one of amount_gte or item_thresholds is
 // supplied (a body with neither is a no-op masquerade); amount_gte > 0 if
 // supplied; usage_gte parses as a non-negative decimal; every
@@ -3528,15 +3520,9 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 		})
 	}
 
-	resetCycle := false
-	if input.ResetBillingCycle != nil {
-		resetCycle = *input.ResetBillingCycle
-	}
-
 	return s.store.SetBillingThresholds(ctx, tenantID, id, domain.BillingThresholds{
-		AmountGTE:         input.AmountGTE,
-		ResetBillingCycle: resetCycle,
-		ItemThresholds:    parsed,
+		AmountGTE:      input.AmountGTE,
+		ItemThresholds: parsed,
 	})
 }
 

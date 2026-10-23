@@ -124,7 +124,7 @@ func TestRunCycle_MeterReadBlipFailsTheClose(t *testing.T) {
 // invoice under-billed while the cycle close failed loudly on the same rule.
 // Now the evaluation fails like the close does.
 func TestEvaluateThresholds_MissingRuleFails(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 100, ResetBillingCycle: false}
+	thresholds := &domain.BillingThresholds{AmountGTE: 100}
 	engine, _, _ := setupThresholdEngine(thresholds, 1500)
 	mp := engine.pricing.(*mockPricing)
 	for id := range mp.rules {
@@ -175,7 +175,7 @@ func TestCheckTaxCalculationUsable_ResolveErrorFails(t *testing.T) {
 // negative mid-period. That must not abort the threshold evaluation (which
 // would stop every threshold on the subscription from firing): it counts as 0.
 func TestEvaluateThresholds_NegativeRunningUsageCountsAsZero(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 100, ResetBillingCycle: false}
+	thresholds := &domain.BillingThresholds{AmountGTE: 100}
 	engine, _, _ := setupThresholdEngine(thresholds, -500)
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart

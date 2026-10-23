@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -113,18 +112,14 @@ func setupThresholdEngine(thresholds *domain.BillingThresholds, usageQty int64) 
 }
 
 // TestEvaluateThresholds_AmountCross verifies the running-subtotal check —
-// usage * unit_amount + base_fee crossing AmountGTE flips CrossedAny and
-// CrossedAmount. The minimum bar to ship; if this drifts the engine would
+// usage * unit_amount crossing AmountGTE flips CrossedAny and CrossedAmount.
+// The base fee is not counted. The minimum bar to ship; if this drifts the engine would
 // either over- or under-fire.
 func TestEvaluateThresholds_AmountCross(t *testing.T) {
-	// Plan: $49 base + 1000 calls @ $1 each = $1049 (104900 cents).
-	// Threshold: $1000 (100000 cents) → crossed.
-	// reset=false so the FULL in_arrears base counts (byte-identical legacy
-	// arm); reset=true prorates the base — covered by the ResetProratesBase
-	// tests below.
+	// Plan: $49 base + 1000 calls @ $1 each. Usage alone is $1000
+	// (100000 cents). Threshold: $1000 (100000 cents) → crossed.
 	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100000,
-		ResetBillingCycle: false,
+		AmountGTE: 100000,
 	}
 	engine, _, _ := setupThresholdEngine(thresholds, 1000)
 
@@ -146,8 +141,8 @@ func TestEvaluateThresholds_AmountCross(t *testing.T) {
 	if eval.CrossedItem {
 		t.Error("CrossedItem should be false (no item caps configured)")
 	}
-	// $49 base (4900) + 1000 calls × 100 cents/call (100000) = 104900 cents
-	wantSubtotal := int64(4900 + 1000*100)
+	// 1000 calls × 100 cents/call = 100000 cents; the base is not counted.
+	wantSubtotal := int64(1000 * 100)
 	if eval.RunningSubtotal != wantSubtotal {
 		t.Errorf("running subtotal: got %d, want %d", eval.RunningSubtotal, wantSubtotal)
 	}
@@ -163,10 +158,9 @@ func TestEvaluateThresholds_AmountCross(t *testing.T) {
 // is below the configured cap. The natural cycle would still bill at end —
 // the threshold scan just stays out of the way.
 func TestEvaluateThresholds_BelowAmount(t *testing.T) {
-	// Plan: $49 base + 100 calls × 100 cents = 14900 cents. Threshold: 100000 → not crossed.
+	// 100 calls × 100 cents = 10000 cents of usage. Threshold: 100000 → not crossed.
 	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100000,
-		ResetBillingCycle: true,
+		AmountGTE: 100000,
 	}
 	engine, _, _ := setupThresholdEngine(thresholds, 100)
 
@@ -192,7 +186,6 @@ func TestEvaluateThresholds_BelowAmount(t *testing.T) {
 // any single item crossing fires.
 func TestEvaluateThresholds_ItemCross(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
-		ResetBillingCycle: true,
 		ItemThresholds: []domain.SubscriptionItemThreshold{
 			{SubscriptionItemID: "subitem_1", UsageGTE: decimal.NewFromInt(1000)},
 		},
@@ -226,7 +219,6 @@ func TestEvaluateThresholds_ItemCross(t *testing.T) {
 // respects the < cap case so we never spuriously fire.
 func TestEvaluateThresholds_BelowItemQuantity(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
-		ResetBillingCycle: true,
 		ItemThresholds: []domain.SubscriptionItemThreshold{
 			{SubscriptionItemID: "subitem_1", UsageGTE: decimal.NewFromInt(1000)},
 		},
@@ -247,209 +239,22 @@ func TestEvaluateThresholds_BelowItemQuantity(t *testing.T) {
 	}
 }
 
-// TestEvaluateThresholds_ResetProratesBase locks fix 4 (ADR-066): with
-// reset_billing_cycle=true the fire re-anchors the cycle, so the cycle close
-// never true-ups this window's base — the threshold invoice is the base bill,
-// and it must carry only the ELAPSED fraction. Pre-fix the full month's base
-// rode every fire (a sub crossing 3x/month paid base 3x). The whole line
-// triple must be rewritten (emitBaseSegmentLine parity), not just the amount.
-func TestEvaluateThresholds_ResetProratesBase(t *testing.T) {
-	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100000,
-		ResetBillingCycle: true,
-	}
-	engine, _, _ := setupThresholdEngine(thresholds, 1000)
-
-	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
-	periodStart := *sub.CurrentBillingPeriodStart // Apr 1; monthly ⇒ 30-day full cycle
-	now := periodStart.AddDate(0, 0, 9)           // 9 days elapsed
-
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
-	if err != nil {
-		t.Fatalf("evaluateThresholds: %v", err)
-	}
-
-	// Base 4900 × 9/30 = 1470 exactly (RoundHalfToEven). Usage unchanged.
-	wantBase := int64(1470)
-	if eval.RunningSubtotal != 100000+wantBase {
-		t.Errorf("running subtotal: got %d, want %d (prorated base feeds the cap)", eval.RunningSubtotal, 100000+wantBase)
-	}
-	var base *domain.InvoiceLineItem
-	for i := range eval.LineItems {
-		if eval.LineItems[i].LineType == domain.LineTypeBaseFee {
-			base = &eval.LineItems[i]
-		}
-	}
-	if base == nil {
-		t.Fatal("expected a base_fee line")
-	}
-	if base.AmountCents != wantBase || base.TotalAmountCents != wantBase {
-		t.Errorf("base amount = %d/%d, want %d", base.AmountCents, base.TotalAmountCents, wantBase)
-	}
-	// qty × unit must reconcile with amount on every render surface.
-	if base.UnitAmountCents != wantBase {
-		t.Errorf("base unit = %d, want %d (qty 1 — unit must be recomputed, not the full plan price)", base.UnitAmountCents, wantBase)
-	}
-	if !strings.Contains(base.Description, "prorated 9/30 days") {
-		t.Errorf("base description = %q, want the standard '(prorated 9/30 days)' suffix", base.Description)
-	}
-}
-
-// TestEvaluateThresholds_ResetProration_StubPeriodDenominator locks the
-// denominator convention: the FULL plan interval advanced from periodStart —
-// never the current period length (domain/subscription.go invariant). A
-// re-anchored stub period (a prior reset=true fire left [Apr 10, May 1), 21
-// days) must still prorate a second fire against the plan's 30-day month:
-// 10 elapsed days = 4900×10/30 = 1633, NOT 4900×10/21 = 2333 (a 43% base
-// over-bill that compounds per fire).
-func TestEvaluateThresholds_ResetProration_StubPeriodDenominator(t *testing.T) {
-	thresholds := &domain.BillingThresholds{
-		AmountGTE:         50000,
-		ResetBillingCycle: true,
-	}
-	engine, subs, _ := setupThresholdEngine(thresholds, 1000)
-
-	// Re-anchor the sub to a 21-day stub [Apr 10, May 1).
-	stubStart := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
-	stubEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	sub := subs.subs["sub_1"]
-	sub.CurrentBillingPeriodStart = &stubStart
-	sub.CurrentBillingPeriodEnd = &stubEnd
-	subs.subs["sub_1"] = sub
-
-	now := stubStart.AddDate(0, 0, 10) // Apr 20 — 10 days into the stub
-
-	eval, err := engine.evaluateThresholds(context.Background(), sub, stubStart, now)
-	if err != nil {
-		t.Fatalf("evaluateThresholds: %v", err)
-	}
-	var base *domain.InvoiceLineItem
-	for i := range eval.LineItems {
-		if eval.LineItems[i].LineType == domain.LineTypeBaseFee {
-			base = &eval.LineItems[i]
-		}
-	}
-	if base == nil {
-		t.Fatal("expected a base_fee line")
-	}
-	// advanceBillingPeriod(Apr 10, monthly) = May 10 ⇒ fullCycleDays = 30.
-	want := int64(1633) // RoundHalfToEven(4900×10, 30)
-	if base.AmountCents != want {
-		t.Errorf("stub-period prorated base = %d, want %d (denominator must be the full 30-day interval, not the 21-day stub)", base.AmountCents, want)
-	}
-	if !strings.Contains(base.Description, "prorated 10/30 days") {
-		t.Errorf("base description = %q, want 'prorated 10/30 days'", base.Description)
-	}
-}
-
-// TestEvaluateThresholds_ResetProration_SwapMutatedAnchorIgnored locks the
-// #581 anchor convention onto the threshold mirror: the denominator's anchor
-// derives from THE PERIOD BEING BILLED (domain.AnchorDayFor(periodStart)),
-// never the sub's live billing_anchor_day. A cross-interval swap rewrites
-// the sub anchor before the old window closes; #581 fixed the four
-// emitBaseSegmentLine billers but this fifth copy of the math still read
-// the mutated anchor and stretched (or collapsed) the fire invoice's
-// denominator — the same "prorated 15/46 days" leak class.
-func TestEvaluateThresholds_ResetProration_SwapMutatedAnchorIgnored(t *testing.T) {
-	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100000,
-		ResetBillingCycle: true,
-	}
-	engine, subs, _ := setupThresholdEngine(thresholds, 1000)
-
-	// Mimic the post-swap state: the sub-level anchor now points at day
-	// 15 while the period being billed still runs [Apr 1, May 1).
-	sub := subs.subs["sub_1"]
-	sub.BillingAnchorDay = 15
-	subs.subs["sub_1"] = sub
-
-	periodStart := *sub.CurrentBillingPeriodStart
-	now := periodStart.AddDate(0, 0, 9) // 9 days elapsed
-
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
-	if err != nil {
-		t.Fatalf("evaluateThresholds: %v", err)
-	}
-	var base *domain.InvoiceLineItem
-	for i := range eval.LineItems {
-		if eval.LineItems[i].LineType == domain.LineTypeBaseFee {
-			base = &eval.LineItems[i]
-		}
-	}
-	if base == nil {
-		t.Fatal("expected a base_fee line")
-	}
-	// The period's own anchor (calendar, Apr 1) gives a 30-day cycle:
-	// RoundHalfToEven(4900×9, 30) = 1470 — identical to the unmutated
-	// case. Reading sub.BillingAnchorDay=15 instead stretches the
-	// denominator to Apr 1 → May 15 = 44 days (1002, an under-bill).
-	want := int64(1470)
-	if base.AmountCents != want {
-		t.Errorf("prorated base = %d, want %d (anchor must derive from the period, not the swap-mutated sub anchor)", base.AmountCents, want)
-	}
-	if !strings.Contains(base.Description, "prorated 9/30 days") {
-		t.Errorf("base description = %q, want 'prorated 9/30 days'", base.Description)
-	}
-}
-
-// TestEvaluateThresholds_ResetProration_CrossIntervalDenominator: a
-// yearly-interval item riding a monthly-period sub (cross-interval swaps are
-// allowed) must prorate its base against ITS OWN 365-day cycle, exactly as
-// emitBaseSegmentLine does per line — 36500×9/365 = 900, not 36500×9/30 =
-// 10950 (a 12x over-bill).
-func TestEvaluateThresholds_ResetProration_CrossIntervalDenominator(t *testing.T) {
-	thresholds := &domain.BillingThresholds{
-		AmountGTE:         50000,
-		ResetBillingCycle: true,
-	}
-	engine, _, _ := setupThresholdEngine(thresholds, 1000)
-	mp := engine.pricing.(*mockPricing)
-	pln := mp.plans["pln_1"]
-	pln.BillingInterval = domain.BillingYearly
-	pln.BaseAmountCents = 36500
-	mp.plans["pln_1"] = pln
-
-	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
-	periodStart := *sub.CurrentBillingPeriodStart
-	now := periodStart.AddDate(0, 0, 9)
-
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
-	if err != nil {
-		t.Fatalf("evaluateThresholds: %v", err)
-	}
-	var base *domain.InvoiceLineItem
-	for i := range eval.LineItems {
-		if eval.LineItems[i].LineType == domain.LineTypeBaseFee {
-			base = &eval.LineItems[i]
-		}
-	}
-	if base == nil {
-		t.Fatal("expected a base_fee line")
-	}
-	want := int64(900) // RoundHalfToEven(36500×9, 365)
-	if base.AmountCents != want {
-		t.Errorf("cross-interval prorated base = %d, want %d (denominator = the LINE plan's own interval)", base.AmountCents, want)
-	}
-}
-
-// TestScanThresholds_ResetAdvanceFailure_IsLoud locks the ADR-066 error
-// contract: a reset=true fire whose cycle re-anchor (the period CAS, ADR-115)
-// fails must surface an ERROR from the scan (the whole tx rolls back and the
-// next tick retries). Pre-fix the failure arm logged and returned
-// (fired=true, nil) — and because the invoice had already committed, the
-// fire-once probe blocked every retry, stranding the reset forever.
-func TestScanThresholds_ResetAdvanceFailure_IsLoud(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: true}
+// TestScanThresholds_PeriodCASFailure_IsLoud locks the ADR-066 error
+// contract: a fire whose period CAS (ADR-115) fails with an error must
+// surface it from the scan (the whole tx rolls back and the next tick
+// retries), with no invoice written.
+func TestScanThresholds_PeriodCASFailure_IsLoud(t *testing.T) {
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
 	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	subs.closePeriodErr = fmt.Errorf("injected advance failure")
 
 	fired, errs := engine.ScanThresholds(context.Background(), 50)
 	if fired != 0 {
-		t.Errorf("fired = %d, want 0 (a failed reset fire must not count)", fired)
+		t.Errorf("fired = %d, want 0 (a failed fire must not count)", fired)
 	}
 	if len(errs) == 0 {
-		t.Fatal("scan swallowed the cycle-advance failure; want a loud per-sub error (retryable next tick)")
+		t.Fatal("scan swallowed the period CAS failure; want a loud per-sub error (retryable next tick)")
 	}
 	if len(invoices.invoices) != 0 {
 		t.Fatalf("the CAS failed before the insert, yet %d invoice(s) exist", len(invoices.invoices))
@@ -460,7 +265,7 @@ func TestScanThresholds_ResetAdvanceFailure_IsLoud(t *testing.T) {
 // commit boundary must surface an ERROR (retryable next tick) and count
 // nothing — never a silent success, never a degraded two-write shape.
 func TestScanThresholds_CommitFailure_IsLoud(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: true}
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
 	engine, subs, _ := setupThresholdEngine(thresholds, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	subs.txErr = fmt.Errorf("injected commit failure")
@@ -470,37 +275,33 @@ func TestScanThresholds_CommitFailure_IsLoud(t *testing.T) {
 		t.Fatalf("fired=%d errs=%v; want 0 fired + a loud commit error", fired, errs)
 	}
 	if subs.cycleUpdated["sub_1"] {
-		t.Fatal("cycle re-anchor survived a failed commit")
+		t.Fatal("the period write survived a failed commit")
 	}
 }
 
 // TestScanThresholds_PeriodMoved_SkipsQuietly (ADR-115): a fire whose period
 // CAS misses — a cycle close, a swap or a sibling fire committed after the
 // scan page was read — writes nothing, counts nothing and returns no error;
-// the next tick re-evaluates against the new period. Both reset arms.
+// the next tick re-evaluates against the new period.
 func TestScanThresholds_PeriodMoved_SkipsQuietly(t *testing.T) {
-	for _, reset := range []bool{true, false} {
-		t.Run(fmt.Sprintf("reset=%v", reset), func(t *testing.T) {
-			thresholds := &domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: reset}
-			engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
-			engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
-			// Concurrent closer: the row's period moves right before the fire's tx.
-			subs.beforeCloserTx = func(m *mockSubs) {
-				s := m.subs["sub_1"]
-				moved := s.NextBillingAt.AddDate(0, 1, 0)
-				s.CurrentBillingPeriodStart = s.CurrentBillingPeriodEnd
-				s.CurrentBillingPeriodEnd = &moved
-				s.NextBillingAt = &moved
-				m.subs["sub_1"] = s
-			}
-			fired, errs := engine.ScanThresholds(context.Background(), 50)
-			if fired != 0 || len(errs) != 0 {
-				t.Fatalf("fired=%d errs=%v; want 0 fired and no error on a lost race", fired, errs)
-			}
-			if len(invoices.invoices) != 0 {
-				t.Fatalf("a lost race wrote %d invoice(s), want 0", len(invoices.invoices))
-			}
-		})
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
+	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
+	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
+	// Concurrent closer: the row's period moves right before the fire's tx.
+	subs.beforeCloserTx = func(m *mockSubs) {
+		s := m.subs["sub_1"]
+		moved := s.NextBillingAt.AddDate(0, 1, 0)
+		s.CurrentBillingPeriodStart = s.CurrentBillingPeriodEnd
+		s.CurrentBillingPeriodEnd = &moved
+		s.NextBillingAt = &moved
+		m.subs["sub_1"] = s
+	}
+	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	if fired != 0 || len(errs) != 0 {
+		t.Fatalf("fired=%d errs=%v; want 0 fired and no error on a lost race", fired, errs)
+	}
+	if len(invoices.invoices) != 0 {
+		t.Fatalf("a lost race wrote %d invoice(s), want 0", len(invoices.invoices))
 	}
 }
 
@@ -527,8 +328,7 @@ func setupThresholdEngineWithTiming(thresholds *domain.BillingThresholds, usageQ
 // line items would carry a duplicate base_fee row.
 func TestEvaluateThresholds_InAdvanceBaseExcluded(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100000,
-		ResetBillingCycle: true,
+		AmountGTE: 100000,
 	}
 	// $49 base is in_advance (prepaid); 1000 calls × 100 cents = 100000 usage.
 	engine, _, _ := setupThresholdEngineWithTiming(thresholds, 1000, domain.BillInAdvance)
@@ -559,15 +359,15 @@ func TestEvaluateThresholds_InAdvanceBaseExcluded(t *testing.T) {
 	}
 }
 
-// TestEvaluateThresholds_InArrearsBaseIncluded is the control: an in_arrears
-// base fee is NOT prepaid, so it must still count toward the running total and
-// appear on the early-finalize line items.
-func TestEvaluateThresholds_InArrearsBaseIncluded(t *testing.T) {
-	// reset=false: the full in_arrears base counts (the reset=true arm
-	// prorates it — see the ResetProratesBase tests).
+// TestEvaluateThresholds_InArrearsBaseExcluded: a threshold counts and
+// bills usage only. An in_arrears base fee neither counts toward the running
+// total nor rides the threshold invoice; the period's own invoice (its close
+// or an immediate cancel) bills it, prorated as it would be without a fire.
+// When the fire billed the full base, a cancel after it charged the whole
+// month's base for part of a month.
+func TestEvaluateThresholds_InArrearsBaseExcluded(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100000,
-		ResetBillingCycle: false,
+		AmountGTE: 100000,
 	}
 	engine, _, _ := setupThresholdEngineWithTiming(thresholds, 1000, domain.BillInArrears)
 
@@ -580,19 +380,38 @@ func TestEvaluateThresholds_InArrearsBaseIncluded(t *testing.T) {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
 
-	// $49 base (4900) + 1000 calls × 100 cents (100000) = 104900.
-	wantSubtotal := int64(4900 + 1000*100)
+	// 1000 calls × 100 cents = 100000; the $49 base is not counted.
+	wantSubtotal := int64(1000 * 100)
 	if eval.RunningSubtotal != wantSubtotal {
-		t.Errorf("running subtotal: got %d, want %d (in_arrears base must be included)", eval.RunningSubtotal, wantSubtotal)
+		t.Errorf("running subtotal: got %d, want %d (usage only, the in_arrears base excluded)", eval.RunningSubtotal, wantSubtotal)
 	}
-	var baseFeeLines int
+	if eval.BilledSubtotal != wantSubtotal {
+		t.Errorf("billed subtotal: got %d, want %d", eval.BilledSubtotal, wantSubtotal)
+	}
 	for _, li := range eval.LineItems {
 		if li.LineType == domain.LineTypeBaseFee {
-			baseFeeLines++
+			t.Errorf("threshold line items carry a base fee (%dc), want none", li.AmountCents)
 		}
 	}
-	if baseFeeLines != 1 {
-		t.Errorf("base_fee line items: got %d, want 1", baseFeeLines)
+}
+
+// TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross: a cap below the
+// base fee, with no usage yet, does not fire. Counting the base made such a
+// cap fire on the first scan of every period, billing the base in advance.
+func TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross(t *testing.T) {
+	thresholds := &domain.BillingThresholds{
+		AmountGTE: 4000, // below the $49 base
+	}
+	engine, _, _ := setupThresholdEngineWithTiming(thresholds, 0, domain.BillInArrears)
+
+	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
+	periodStart := *sub.CurrentBillingPeriodStart
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatalf("evaluateThresholds: %v", err)
+	}
+	if eval.CrossedAny || eval.RunningSubtotal != 0 {
+		t.Errorf("crossed=%v running=%d with no usage, want not crossed and 0", eval.CrossedAny, eval.RunningSubtotal)
 	}
 }
 
@@ -602,8 +421,7 @@ func TestEvaluateThresholds_InArrearsBaseIncluded(t *testing.T) {
 // defense in scanOneThreshold so a stale candidate row can't bypass.
 func TestScanThresholds_SkipsTerminalSubs(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100, // very low cap so we'd cross if it fired
-		ResetBillingCycle: true,
+		AmountGTE: 100, // very low cap so we'd cross if it fired
 	}
 	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
 
@@ -629,8 +447,7 @@ func TestScanThresholds_SkipsTerminalSubs(t *testing.T) {
 // scan must not emit an invoice that can't be charged or dunned.
 func TestScanThresholds_SkipsPauseCollection(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
-		AmountGTE:         100,
-		ResetBillingCycle: true,
+		AmountGTE: 100,
 	}
 	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
 
@@ -724,7 +541,7 @@ func TestThresholdFire_ClockPinned_StampsIsSimulated(t *testing.T) {
 }
 
 // TestScanThresholds_FireOnceProbe_NoReEvaluate locks the fire-once probe. A
-// reset=false threshold that has already fired keeps its crossed running total
+// threshold that has already fired keeps its crossed running total
 // on the next tick (the cycle stays put), so without the fire-once probe
 // short-circuit the scan re-evaluates and re-fires every tick — burning an
 // invoice number + a paid tax calculation before the dedup index rejects it.
@@ -732,7 +549,7 @@ func TestThresholdFire_ClockPinned_StampsIsSimulated(t *testing.T) {
 // genuine duplicate here: that is the mutation seam. Delete the probe in
 // scanOneThreshold and the final assertion flips to 2 invoices.
 func TestScanThresholds_FireOnceProbe_NoReEvaluate(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: false}
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
 	engine, _, invoices := setupThresholdEngine(thresholds, 1000)
 	// Anchor now mid-cycle. setupThresholdEngine's period is [2026-04, 2026-05],
 	// which is in the past under the real wall clock — the boundary-skip guard
@@ -752,7 +569,7 @@ func TestScanThresholds_FireOnceProbe_NoReEvaluate(t *testing.T) {
 		t.Fatalf("after first scan: %d invoices, want 1", len(invoices.invoices))
 	}
 
-	// Second tick over the same reset=false cycle — the probe must short-circuit
+	// Second tick over the same cycle — the probe must short-circuit
 	// before evaluate/fire.
 	fired2, errs2 := engine.ScanThresholds(ctx, 50)
 	if len(errs2) != 0 {
@@ -773,7 +590,7 @@ func TestScanThresholds_FireOnceProbe_NoReEvaluate(t *testing.T) {
 // 60 crossed subs with batchSize 50 forces a second page. Mutation seam: revert
 // ScanThresholds to a single ListWithThresholds fetch and `fired` drops to 50.
 func TestScanThresholds_DrainsPastBatchSize(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: false}
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
 	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 
@@ -821,7 +638,7 @@ func TestScanThresholds_DrainsPastBatchSize(t *testing.T) {
 // whole elapsed period through the full-fidelity path. Mutation seam: delete the
 // `!now.Before(periodEnd)` guard and this crossed sub fires.
 func TestScanOneThreshold_BoundarySkip(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: false}
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
 	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
 	// now == periodEnd: the window is closed.
 	engine.clock = clock.NewFake(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC))
@@ -847,7 +664,6 @@ func TestScanOneThreshold_BoundarySkip(t *testing.T) {
 // conjunct and this fails.
 func TestFireThreshold_ZeroTotal_AutoPaid(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
-		ResetBillingCycle: false,
 		ItemThresholds: []domain.SubscriptionItemThreshold{
 			{SubscriptionItemID: "subitem_1", UsageGTE: decimal.NewFromInt(1000)},
 		},
@@ -896,7 +712,7 @@ func TestFireThreshold_ZeroTotal_AutoPaid(t *testing.T) {
 // (ADR-066 heal-on-re-entry). Mutation seam: drop the healStrandedZeroDue
 // call from the probe hit and this fails.
 func TestScanThresholds_ProbeHealsStrandedZeroDue(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: false}
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
 	engine, _, invoices := setupThresholdEngine(thresholds, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 

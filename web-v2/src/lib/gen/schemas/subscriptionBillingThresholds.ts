@@ -10,12 +10,13 @@
 import type { SubscriptionItemThreshold } from './subscriptionItemThreshold';
 
 /**
- * Limits that make Velox invoice before the period ends.
+ * Limits that make Velox invoice before the period ends. A threshold
+ * invoice bills the period's usage so far, and no base fee. The period
+ * keeps its dates, the base fee is billed as it would be with no
+ * threshold, and the period's next invoice bills the rest of the usage.
  */
 export interface SubscriptionBillingThresholds {
-  /** Running-subtotal threshold in cents. Absent when not set. */
+  /** Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set. */
   amount_gte?: number;
-  /** Whether a threshold invoice starts a new billing period. */
-  reset_billing_cycle: boolean;
   item_thresholds: SubscriptionItemThreshold[];
 }

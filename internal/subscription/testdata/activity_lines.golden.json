@@ -1056,7 +1056,7 @@
             }
           },
           {
-            "text": " total"
+            "text": " usage total"
           }
         ],
         [
@@ -1070,7 +1070,7 @@
     },
     "text": [
       "Spend thresholds set",
-      "meta: $50.00 total · 2 item thresholds",
+      "meta: $50.00 usage total · 2 item thresholds",
       "tone: neutral"
     ]
   },
@@ -1089,7 +1089,7 @@
             }
           },
           {
-            "text": " total"
+            "text": " usage total"
           }
         ]
       ],
@@ -1098,7 +1098,7 @@
     },
     "text": [
       "Spend thresholds set",
-      "meta: ₹1,234,567.89 total",
+      "meta: ₹1,234,567.89 usage total",
       "tone: neutral"
     ]
   },
@@ -1139,7 +1139,7 @@
             }
           },
           {
-            "text": " total"
+            "text": " usage total"
           }
         ]
       ],
@@ -1148,7 +1148,7 @@
     },
     "text": [
       "Spend thresholds set",
-      "meta: 50.00 total",
+      "meta: 50.00 usage total",
       "tone: neutral"
     ]
   },

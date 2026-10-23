@@ -1526,8 +1526,8 @@ export default function InvoiceDetailPage() {
           </p>
         )}
         {/* Whether a later invoice bills a voided threshold invoice's
-            charges depends on reset_billing_cycle and on when the void
-            lands, which this page does not know; the runbook
+            charges depends on when the void lands (before or after the
+            period's invoice is built), which this page does not know; the runbook
             (invoice-timing-late-usage.md) and ADR-066's 2026-10-23
             amendment give each case. This line is true in all of them. */}
         {invoice.billing_reason === 'threshold' && (
@@ -1551,11 +1551,10 @@ export default function InvoiceDetailPage() {
         onConfirm={() => markUncollectibleMutation.mutate()}
         loading={markUncollectibleMutation.isPending}
       >
-        {/* A written-off threshold invoice keeps its charges billed, with
-            either reset_billing_cycle setting (ADR-066 amendment
-            2026-10-23). A later void can give them back to the period's
-            invoice (reset_billing_cycle: false, before that invoice is
-            built), so the line names it. */}
+        {/* A written-off threshold invoice keeps its charges billed
+            (ADR-066 amendment 2026-10-23). A later void can give them
+            back to the period's invoice (before that invoice is built),
+            so the line names it. */}
         {invoice.billing_reason === 'threshold' && (
           <p className="text-xs text-muted-foreground">
             The charges on this spend-threshold invoice will not be billed again. Voiding it later can change that.

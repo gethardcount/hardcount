@@ -197,7 +197,7 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 //     no earlier than the trial end or another subscription's coverage end
 //     of the meter that day (usageFloors).
 //   - No threshold invoice this period: every bucket over those windows.
-//   - A reset=false threshold invoice exists: it billed usage up to its
+//   - A threshold invoice exists: it billed usage up to its
 //     billing_period_end, and credit already paid for it. Additive buckets
 //     (sum, count) count only from that instant on, priced continuing the
 //     tiers the invoice reached. Non-additive buckets (max, last) that the
