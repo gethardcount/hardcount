@@ -1,10 +1,12 @@
 # ADR-096: Unpriced meter on a plan — guard at authoring, loud at finalize
 
 Date: 2026-07-18
-Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage); the last-price guard was replaced on 2026-10-23 by the wider meter-in-use guard of [ADR-070](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter)). Current rule: an invoice is still built without usage that has no price. Removing a meter's last price is refused while a live subscription's plan uses the meter, and every invoice built without priceless usage logs it and counts its quantity.
+Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage); the last-price guard was replaced on 2026-10-23 by the wider meter-in-use guard of [ADR-070](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter)). Current rule: an invoice is still built without usage that has no price. Removing a meter's last price is refused while a live subscription's plan uses the meter, and every invoice built without priceless usage logs it and counts its quantity. Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet.
 
 Original status: Accepted. The **guard + loud-log** below is IMPLEMENTED in this PR. The fuller "durable marker + critical banner + metering-only flag" design (from the design panel) is **deferred** — see *Deferred* — because live-doc verification showed it has no industry precedent and the guard already fixes the real defect.
 Relates: ADR-070 (no-silent-fallbacks in billing — this extends its fail-LOUD mandate to the finalize path), ADR-044 (multi-dim `{model,token_type}` rating — the meters this most affects), ADR-034 (plan immutability — the guard runs after it).
+
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. The plan-attach guard (decision 1) and the meter-in-use guard that replaced the last-price guard go, because a plan's meters become the meters it has prices for and a price edit on a used plan waits for the next period (PR-4). Decision 2 and the amendment's WARN and counter stay. Ingest also answers `billing_status: "no_price"` for an event no price matches (PR-6).
 
 ## Summary
 

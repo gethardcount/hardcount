@@ -1,8 +1,10 @@
 # ADR-031: Per-plan base bill_timing (in_advance vs in_arrears)
 
-**Status:** Accepted (amended 2026-06-01)
+**Status:** Accepted (amended 2026-06-01); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet
 **Date:** 2026-05-14
 **Related**: ADR-028 (period loop), `project_billing_timing_model.md`, `feedback_stripe_parity_framing.md`
+
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. `base_bill_timing` has no default when the base fee is above 0, so a plan must name it; with a base of 0 it is stored `in_arrears`, and `in_advance` is refused (PR-4). Usage still bills in arrears.
 
 ## Summary
 
