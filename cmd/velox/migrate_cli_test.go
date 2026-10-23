@@ -25,20 +25,21 @@ func runHelper(t *testing.T, test, helper string, env ...string) (string, int) {
 	return string(out), 0
 }
 
-// `velox migrate force` is a one-release stub: exit 2 and a pointer.
-func TestMigrateForceIsRemoved(t *testing.T) {
+// `velox migrate force` is gone (B5): the one-release stub that pointed at
+// the runbook is removed before the first tag, so it is an unknown
+// subcommand like any other.
+func TestMigrateForceIsUnknown(t *testing.T) {
 	if os.Getenv("VELOX_CLI_HELPER") == "force" {
-		runMigrateForce()
+		os.Args = []string{"velox", "migrate", "force"}
+		main()
 		return
 	}
-	out, code := runHelper(t, "TestMigrateForceIsRemoved", "force")
-	if code != 2 {
-		t.Fatalf("exit code %d, want 2; output:\n%s", code, out)
+	out, code := runHelper(t, "TestMigrateForceIsUnknown", "force")
+	if code != 1 {
+		t.Fatalf("exit code %d, want 1; output:\n%s", code, out)
 	}
-	for _, want := range []string{"removed in v0.9.0", "run \"velox migrate\" again", "docs/ops/runbook/migration-failed-midway.md"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output lacks %q:\n%s", want, out)
-		}
+	if !strings.Contains(out, "unknown migrate subcommand: force") || strings.Contains(out, "removed in") {
+		t.Errorf("want the plain unknown-subcommand answer; output:\n%s", out)
 	}
 }
 

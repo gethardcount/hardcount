@@ -283,46 +283,47 @@ func TestIdempotency_OrphanedReservation_AnswersUnresolved(t *testing.T) {
 	}
 }
 
-// TestIdempotency_IngestServerError_ReleasedForRetry is HA work item 11: on
-// routes the release predicate names (the dedup-safe ingest surface), a 5xx
-// must release the reservation so the client's documented move — retry with
-// the SAME key — re-executes the write instead of replaying the failure for
-// the 24 h TTL. Everywhere else the 5xx stays cached (the Stripe-charge
-// class), pinned by TestIdempotency_Caches5xx above. Mutation check:
-// neutralize the release branch → the retry replays the 500.
-func TestIdempotency_IngestServerError_ReleasedForRetry(t *testing.T) {
+// TestIdempotency_IngestRoutesIgnoreTheHeader is B5: on the usage routes
+// (the predicate names them) each event's own idempotency_key is the only
+// dedup rule, so the Idempotency-Key header is ignored. The handler runs on
+// every request, nothing is replayed, no key is stored, and a different body
+// under the same header key is not a 422. Before B5 the header cached the
+// first answer for 24 hours on top of the event keys. Mutation check: drop
+// the skip branch → the second call replays and the handler runs once.
+func TestIdempotency_IngestRoutesIgnoreTheHeader(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	tenantID := testutil.CreateTestTenant(t, db, "Idempotency Ingest 5xx")
+	tenantID := testutil.CreateTestTenant(t, db, "Idempotency Ingest Skip")
 
 	var calls atomic.Int64
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if calls.Add(1) == 1 {
-			http.Error(w, `{"error":"storage blip"}`, http.StatusInternalServerError)
-			return
-		}
+		calls.Add(1)
 		w.WriteHeader(http.StatusCreated)
 	})
 	handler := Idempotency(db, func(*http.Request) bool { return true })(inner)
 
-	rec1 := invokeWithKey(t, handler, tenantID, "idem-ingest-5xx", `{"events":[1]}`)
-	if rec1.Code != http.StatusInternalServerError {
-		t.Fatalf("first call: got %d, want 500", rec1.Code)
-	}
-	// The release runs on a background ctx after the response; poll briefly.
-	deadline := time.Now().Add(2 * time.Second)
-	rec2code := 0
-	for {
-		rec2 := invokeWithKey(t, handler, tenantID, "idem-ingest-5xx", `{"events":[1]}`)
-		rec2code = rec2.Code
-		if rec2code == http.StatusCreated || time.Now().After(deadline) {
-			break
+	for i, body := range []string{`{"events":[1]}`, `{"events":[1]}`, `{"events":[2]}`} {
+		rec := invokeWithKey(t, handler, tenantID, "idem-ingest", body)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("call %d: got %d, want 201 (the handler's own answer)", i+1, rec.Code)
 		}
-		time.Sleep(25 * time.Millisecond)
+		if rec.Header().Get("Idempotent-Replayed") != "" {
+			t.Fatalf("call %d: replayed a stored answer; ingest routes must ignore the header", i+1)
+		}
 	}
-	if rec2code != http.StatusCreated {
-		t.Fatalf("retry with the same key: got %d, want 201 (the pinned 500 must have been released and re-executed)", rec2code)
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("handler ran %d times, want 3", got)
 	}
-	if calls.Load() < 2 {
-		t.Fatalf("handler ran %d time(s), want >= 2 — the retry must re-execute", calls.Load())
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var stored int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM idempotency_keys`).Scan(&stored); err != nil {
+		t.Fatalf("count keys: %v", err)
+	}
+	if stored != 0 {
+		t.Fatalf("%d idempotency_keys rows stored, want 0", stored)
 	}
 }
