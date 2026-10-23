@@ -332,15 +332,16 @@ export const api = {
   // Credits
   listBalances: () =>
     apiRequest<{ data: CreditBalance[] }>('GET', '/credits/balances'),
+  // One balance per currency the customer holds credit in (ADR-129).
   getBalance: (customerId: string) =>
-    apiRequest<CreditBalance>('GET', `/credits/balance/${customerId}`),
+    apiRequest<{ data: CreditBalance[] }>('GET', `/credits/balance/${customerId}`),
   // Burndown: per-grant granted/drawn/remaining + kind subtotals — the
   // commit-drawdown answer without reconstructing it from the raw ledger.
   listCreditGrants: (customerId: string, includeExhausted = false) =>
     apiRequest<CreditGrantsResponse>('GET', `/credits/grants/${customerId}${includeExhausted ? '?include_exhausted=true' : ''}`),
-  grantCredits: (data: { customer_id: string; amount_cents: number; description: string; expires_at?: string; grant_kind?: 'promotional' }, idempotencyKey?: string) =>
+  grantCredits: (data: { customer_id: string; currency: string; amount_cents: number; description: string; expires_at?: string; grant_kind?: 'promotional' }, idempotencyKey?: string) =>
     apiRequest<CreditLedgerEntry>('POST', '/credits/grant', data, { idempotencyKey }),
-  adjustCredits: (data: { customer_id: string; amount_cents: number; description: string }, idempotencyKey?: string) =>
+  adjustCredits: (data: { customer_id: string; currency: string; amount_cents: number; description: string }, idempotencyKey?: string) =>
     apiRequest<CreditLedgerEntry>('POST', '/credits/adjust', data, { idempotencyKey }),
   listLedger: (customerId: string, params?: { entry_type?: string; limit?: number; offset?: number; sort?: string; dir?: string }) => {
     const qs = new URLSearchParams()
@@ -1099,8 +1100,8 @@ export interface CreditBalance {
   // an operator deducted. granted = used + expired + retired + deducted + balance.
   total_retired: number
   total_deducted: number
-  // The currency the customer is billed in. The ledger has none of its own
-  // (ADR-100), so the balance and every ledger row read in this one.
+  // The currency of this balance. Each ledger row stores its own currency,
+  // and a customer with credit in two currencies has two balances (ADR-129).
   currency: string
 }
 
@@ -1108,6 +1109,7 @@ export interface CreditBalance {
 export interface CreditGrantSummary {
   id: string
   entry_type: string
+  currency: string
   grant_kind?: 'commit' | 'promotional' | ''
   description: string
   amount_cents: number
@@ -1125,11 +1127,18 @@ export interface CreditGrantSummary {
   created_at: string
 }
 
-export interface CreditGrantsResponse {
-  grants: CreditGrantSummary[]
+// What is left of a customer's credit in one currency, by kind.
+export interface CreditRemaining {
+  currency: string
   commit_remaining_cents: number
   promotional_remaining_cents: number
   other_remaining_cents: number
+}
+
+export interface CreditGrantsResponse {
+  grants: CreditGrantSummary[]
+  // One entry per currency with credit left, ordered by currency.
+  remaining_by_currency: CreditRemaining[]
 }
 
 // CustomerPaymentMethod mirrors the operator-facing JSON shape from
@@ -1150,6 +1159,8 @@ export interface CreditLedgerEntry {
   id: string
   customer_id: string
   entry_type: string
+  // The entry's own currency; balance_after is the balance in it (ADR-129).
+  currency: string
   amount_cents: number
   balance_after: number
   description: string
@@ -1781,7 +1792,8 @@ export interface AnalyticsOverview {
   // outstanding_ar alone is the default currency only.
   outstanding_by_currency: { currency: string; amount_cents: number }[]
   avg_invoice_value: number
-  credit_balance_total: number
+  // Credit customers hold, one row per currency (default first).
+  credit_balance_by_currency: { currency: string; amount_cents: number }[]
   // Customer records with status active (includes customers with no live
   // subscription). Home shows live_customers instead.
   active_customers: number

@@ -4,7 +4,7 @@
 > [ADR-115](../adr/115-one-closer-for-the-billing-period.md) (2026-08-30), every
 > period close also locks the subscription row and checks its period first, so the
 > unique index below is now the second guard, not the only one. The negative
-> control has not been re-run on that code. `velox-doctor` now has 30 checks, not 28.
+> control has not been re-run on that code. `velox-doctor` now has 32 checks, not 28.
 
 What happens to your invoices when the billing process dies mid-run.
 

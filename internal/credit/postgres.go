@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -38,21 +39,26 @@ type OutboxEnqueuer interface {
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
 // emitBalanceCrossings enqueues the ADR-078 balance-VALUE crossing events for
-// a before→after balance change, on the caller's tx. Callers MUST hold the
-// per-customer advisory lock — that lock is what makes crossings well-ordered
-// per customer (every balance writer acquires it: append/adjust/apply/expiry).
+// a before→after balance change in one currency, on the caller's tx. Callers
+// MUST hold the per-customer advisory lock — that lock is what makes crossings
+// well-ordered per customer (every balance writer acquires it:
+// append/adjust/apply/expiry).
 //
-// Crossings are defined on the raw SUM(amount_cents) balance. Known, accepted
-// lag: an expired-but-unswept block keeps SUM positive until the expiry sweep
-// retires it — the sweep's expiry entry produces the crossing then
-// (minutes-scale, matches the expiry discipline).
-func (s *PostgresStore) emitBalanceCrossings(ctx context.Context, tx *sql.Tx, tenantID, customerID string, before, after int64) error {
+// Crossings are defined on the raw SUM(amount_cents) balance of the currency
+// the write is in (ADR-129): a customer whose EUR credit runs out is depleted
+// in EUR even while it holds USD credit. The low threshold is one number
+// applied in each currency's own units. Known, accepted lag: an
+// expired-but-unswept block keeps SUM positive until the expiry sweep retires
+// it — the sweep's expiry entry produces the crossing then (minutes-scale,
+// matches the expiry discipline).
+func (s *PostgresStore) emitBalanceCrossings(ctx context.Context, tx *sql.Tx, tenantID, customerID, currency string, before, after int64) error {
 	if s.outbox == nil || before == after {
 		return nil
 	}
 	base := func() map[string]any {
 		return map[string]any{
 			"customer_id":   customerID,
+			"currency":      currency,
 			"balance_cents": after,
 		}
 	}
@@ -131,6 +137,13 @@ func (s *PostgresStore) AppendEntryTx(ctx context.Context, tx *sql.Tx, tenantID 
 // appendEntryInTx is the shared body. AppendEntry opens+commits its
 // own tx; AppendEntryTx delegates to the caller.
 func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error) {
+	// Every row stores its currency (ADR-129), uppercase. This is the
+	// chokepoint for every writer that appends through the store; a row with
+	// no currency is a caller bug, so the error is plain, not a 4xx.
+	entry.Currency = strings.ToUpper(strings.TrimSpace(entry.Currency))
+	if entry.Currency == "" {
+		return domain.CreditLedgerEntry{}, fmt.Errorf("credit ledger entry for customer %s has no currency", entry.CustomerID)
+	}
 	// Serialize concurrent AppendEntry-path writers for this customer so two
 	// grants can't compute the same balance_after off a stale snapshot. A
 	// `SELECT ... FOR UPDATE` over customer_credit_ledger only locks EXISTING
@@ -167,8 +180,8 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 	}
 	var currentBalance int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2`,
-		tenantID, entry.CustomerID,
+		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2 AND currency = $3`,
+		tenantID, entry.CustomerID, entry.Currency,
 	).Scan(&currentBalance); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
@@ -197,13 +210,13 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type,
 			amount_cents, balance_after, description, invoice_id, expires_at, metadata, created_at,
 			source_subscription_id, source_subscription_item_id, source_plan_changed_at, source_change_type,
-			source_credit_note_id, source_invoice_reversal_id, grant_kind, source_invoice_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+			source_credit_note_id, source_invoice_reversal_id, grant_kind, source_invoice_id, currency)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		RETURNING id, tenant_id, customer_id, entry_type, amount_cents, balance_after,
 			description, COALESCE(invoice_id,''), expires_at, metadata, created_at,
 			COALESCE(source_subscription_id,''), COALESCE(source_subscription_item_id,''),
 			source_plan_changed_at, COALESCE(source_change_type,''),
-			COALESCE(source_credit_note_id,''), COALESCE(grant_kind,''), COALESCE(source_invoice_id,'')
+			COALESCE(source_credit_note_id,''), COALESCE(grant_kind,''), COALESCE(source_invoice_id,''), currency
 	`, entry.ID, tenantID, entry.CustomerID, entry.EntryType,
 		entry.AmountCents, entry.BalanceAfter, entry.Description,
 		postgres.NullableString(entry.InvoiceID), postgres.NullableTime(entry.ExpiresAt),
@@ -216,12 +229,13 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		postgres.NullableString(entry.SourceInvoiceReversalID),
 		postgres.NullableString(string(entry.GrantKind)),
 		postgres.NullableString(entry.SourceInvoiceID),
+		entry.Currency,
 	).Scan(&entry.ID, &entry.TenantID, &entry.CustomerID, &entry.EntryType,
 		&entry.AmountCents, &entry.BalanceAfter, &entry.Description,
 		&entry.InvoiceID, &entry.ExpiresAt, &metaJSON, &entry.CreatedAt,
 		&entry.SourceSubscriptionID, &entry.SourceSubscriptionItemID, &entry.SourcePlanChangedAt,
 		(*string)(&entry.SourceChangeType),
-		&entry.SourceCreditNoteID, (*string)(&entry.GrantKind), &entry.SourceInvoiceID)
+		&entry.SourceCreditNoteID, (*string)(&entry.GrantKind), &entry.SourceInvoiceID, &entry.Currency)
 
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
@@ -263,7 +277,7 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 
 	// ADR-078 balance-crossing events, atomic with the entry (the advisory
 	// lock acquired above keeps crossings well-ordered per customer).
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, entry.CustomerID, currentBalance, entry.BalanceAfter); err != nil {
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, entry.CustomerID, entry.Currency, currentBalance, entry.BalanceAfter); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
 	return entry, nil
@@ -323,11 +337,12 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 
 	var amount, consumed int64
 	var expiresAt sql.NullTime
+	var currency string
 	err = tx.QueryRowContext(ctx, `
-		SELECT amount_cents, consumed_cents, expires_at
+		SELECT amount_cents, consumed_cents, expires_at, currency
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1 AND customer_id = $2 AND id = $3 AND entry_type = 'grant'
-	`, tenantID, customerID, grantID).Scan(&amount, &consumed, &expiresAt)
+	`, tenantID, customerID, grantID).Scan(&amount, &consumed, &expiresAt, &currency)
 	if err == sql.ErrNoRows {
 		return 0, fmt.Errorf("expire grant %s: %w", grantID, errs.ErrNotFound)
 	}
@@ -369,6 +384,7 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 	if _, err := s.appendEntryInTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  customerID,
 		EntryType:   domain.CreditExpiry,
+		Currency:    currency, // the grant's own (ADR-129)
 		AmountCents: -remaining,
 		// velox-doctor's expired_grant_headroom_reopened check and
 		// ListGrantSummaries' expired_cents JOIN on this exact string
@@ -403,17 +419,23 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 // don't drain; they're themselves drainable by future operations because
 // ApplyToInvoiceAtomic now selects any positive entry, not only grants.
 func (s *PostgresStore) AdjustAtomic(
-	ctx context.Context, tenantID, customerID, description string, amountCents int64,
+	ctx context.Context, tenantID, customerID, currency, description string, amountCents int64,
 ) (domain.CreditLedgerEntry, error) {
-	return s.AdjustAtomicAudited(ctx, tenantID, customerID, description, amountCents, nil)
+	return s.AdjustAtomicAudited(ctx, tenantID, customerID, currency, description, amountCents, nil)
 }
 
 // AdjustAtomicAudited is AdjustAtomic with an in-tx audit emission hook —
-// same contract as AppendEntryAudited (ADR-090 shared fate).
+// same contract as AppendEntryAudited (ADR-090 shared fate). The balance
+// check, the drain and the entry are all in `currency` (ADR-129): a EUR
+// deduction draws only on EUR blocks.
 func (s *PostgresStore) AdjustAtomicAudited(
-	ctx context.Context, tenantID, customerID, description string, amountCents int64,
+	ctx context.Context, tenantID, customerID, currency, description string, amountCents int64,
 	emit func(tx *sql.Tx, out domain.CreditLedgerEntry) error,
 ) (domain.CreditLedgerEntry, error) {
+	currency = strings.ToUpper(strings.TrimSpace(currency))
+	if currency == "" {
+		return domain.CreditLedgerEntry{}, fmt.Errorf("credit adjustment for customer %s has no currency", customerID)
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.CreditLedgerEntry{}, err
@@ -444,19 +466,19 @@ func (s *PostgresStore) AdjustAtomicAudited(
 
 	var currentBalance int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2`,
-		tenantID, customerID,
+		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2 AND currency = $3`,
+		tenantID, customerID, currency,
 	).Scan(&currentBalance); err != nil {
 		return domain.CreditLedgerEntry{}, fmt.Errorf("read credit balance: %w", err)
 	}
 
 	if amountCents < 0 && currentBalance+amountCents < 0 {
-		// errs.Invalid so the API surfaces a 400 — this is operator input
+		// errs.Invalid so the API surfaces a 422 — this is operator input
 		// exceeding the available balance, not a server fault (was a plain
 		// fmt.Errorf that respond.FromError mapped to 500 internal_error).
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents",
-			fmt.Sprintf("Insufficient balance: only %.2f is available, so %.2f can't be deducted.",
-				float64(currentBalance)/100, float64(-amountCents)/100))
+			fmt.Sprintf("Insufficient balance: only %.2f %s is available, so %.2f %s can't be deducted.",
+				float64(currentBalance)/100, currency, float64(-amountCents)/100, currency))
 	}
 
 	now := clock.Now(ctx)
@@ -472,7 +494,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 	// prevent. Fail loud on the shortfall instead (P14, plan §4.4).
 	var drainedFrom []drainedBlock
 	if amountCents < 0 {
-		drained, _, blocks, err := s.drainPositiveBlocks(ctx, tx, tenantID, customerID, -amountCents, now)
+		drained, _, blocks, err := s.drainPositiveBlocks(ctx, tx, tenantID, customerID, currency, -amountCents, now)
 		if err != nil {
 			return domain.CreditLedgerEntry{}, fmt.Errorf("attribute clawback: %w", err)
 		}
@@ -480,8 +502,8 @@ func (s *PostgresStore) AdjustAtomicAudited(
 			// errs.Invalid → 400 for the same reason as the balance check
 			// above: operator asked for more than the drainable balance.
 			return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", fmt.Sprintf(
-				"Insufficient balance: only %.2f of the %.2f can be deducted. The rest of the balance has expired.",
-				float64(drained)/100, float64(-amountCents)/100))
+				"Insufficient balance: only %.2f of the %.2f %s can be deducted. The rest of the balance has expired.",
+				float64(drained)/100, float64(-amountCents)/100, currency))
 		}
 		drainedFrom = blocks
 	}
@@ -491,6 +513,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 		TenantID:     tenantID,
 		CustomerID:   customerID,
 		EntryType:    domain.CreditAdjustment,
+		Currency:     currency,
 		AmountCents:  amountCents,
 		BalanceAfter: currentBalance + amountCents,
 		Description:  description,
@@ -499,10 +522,10 @@ func (s *PostgresStore) AdjustAtomicAudited(
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type,
-			amount_cents, balance_after, description, metadata, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			amount_cents, balance_after, description, metadata, created_at, currency)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 	`, entry.ID, entry.TenantID, entry.CustomerID, entry.EntryType,
-		entry.AmountCents, entry.BalanceAfter, entry.Description, drainMetadataJSON(drainedFrom), entry.CreatedAt,
+		entry.AmountCents, entry.BalanceAfter, entry.Description, drainMetadataJSON(drainedFrom), entry.CreatedAt, entry.Currency,
 	); err != nil {
 		if postgres.IsForeignKeyViolation(err) {
 			return domain.CreditLedgerEntry{}, fmt.Errorf("customer %q not found", customerID)
@@ -511,7 +534,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 	}
 
 	// ADR-078 balance-crossing events (advisory lock held above).
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currentBalance, entry.BalanceAfter); err != nil {
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, currentBalance, entry.BalanceAfter); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
 
@@ -552,12 +575,16 @@ func (s *PostgresStore) AdjustAtomicAudited(
 // period ends, and pays that period's invoice. The expiry sweeps use the
 // same rule (`expires_at < now` is expired).
 //
+// Only blocks in `currency` drain (ADR-129): a credit pays only what is in its
+// own currency, never converted.
+//
 // Caller MUST hold a FOR UPDATE lock on the customer's ledger rows.
-// In a clean ledger `available` equals the SUM(amount_cents) balance
-// (every negative ledger entry attributes via this path). ApplyToInvoiceAtomic
-// compares the two to detect drift and caps its drain at the balance.
+// In a clean ledger `available` equals the SUM(amount_cents) balance of the
+// currency (every negative ledger entry attributes via this path).
+// ApplyToInvoiceAtomic compares the two to detect drift and caps its drain at
+// the balance.
 func (s *PostgresStore) drainPositiveBlocks(
-	ctx context.Context, tx *sql.Tx, tenantID, customerID string, wantDrain int64, now time.Time,
+	ctx context.Context, tx *sql.Tx, tenantID, customerID, currency string, wantDrain int64, now time.Time,
 ) (int64, int64, []drainedBlock, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, amount_cents, consumed_cents
@@ -567,9 +594,10 @@ func (s *PostgresStore) drainPositiveBlocks(
 		  AND amount_cents > 0
 		  AND consumed_cents < amount_cents
 		  AND (expires_at IS NULL OR expires_at >= $3)
+		  AND currency = $4
 		ORDER BY (grant_kind IS NOT DISTINCT FROM 'promotional') DESC,
 		         expires_at NULLS LAST, created_at, id
-	`, tenantID, customerID, now)
+	`, tenantID, customerID, now, currency)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("scan positive blocks: %w", err)
 	}
@@ -663,6 +691,10 @@ func drainMetadataJSON(drainedFrom []drainedBlock) []byte {
 // Writes across two tables (customer_credit_ledger + invoices) inside one
 // tenant-scoped tx — intentional: the invoice's credit fields are a cache of
 // the ledger's source of truth, and they must stay in lockstep.
+//
+// Only credit in the invoice's currency is drawn (ADR-129). The currency is
+// read from the locked invoice row, which no writer changes after insert, so
+// no concurrent write can make the drain read a different one.
 func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, customerID, invoiceID, invoiceDesc string, invoiceAmountCents int64, at time.Time) (int64, error) {
 	if invoiceAmountCents <= 0 {
 		return 0, nil
@@ -694,9 +726,12 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 		billingReason   sql.NullString
 		issuedAt        sql.NullTime
 		isCommitFunding bool
+		currency        string
 	)
+	// invoices.currency has no CHECK and only the store's insert uppercases
+	// it, so the read uppercases too: a stored "eur" must not miss EUR blocks.
 	err = tx.QueryRowContext(ctx, `
-		SELECT i.status, i.amount_due_cents, i.billing_reason, i.issued_at,
+		SELECT i.status, i.amount_due_cents, i.billing_reason, i.issued_at, UPPER(i.currency),
 			EXISTS (
 				SELECT 1 FROM invoice_line_items li
 				WHERE li.invoice_id = i.id AND li.tenant_id = i.tenant_id
@@ -705,7 +740,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 		FROM invoices i
 		WHERE i.id = $1 AND i.tenant_id = $2
 		FOR UPDATE OF i
-	`, invoiceID, tenantID).Scan(&invStatus, &invAmountDue, &billingReason, &issuedAt, &isCommitFunding)
+	`, invoiceID, tenantID).Scan(&invStatus, &invAmountDue, &billingReason, &issuedAt, &currency, &isCommitFunding)
 	if err == sql.ErrNoRows {
 		return 0, fmt.Errorf("apply credits: invoice %s: %w", invoiceID, errs.ErrNotFound)
 	}
@@ -762,14 +797,14 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 
 	var currentBalance int64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2`,
-		tenantID, customerID,
+		`SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2 AND currency = $3`,
+		tenantID, customerID, currency,
 	).Scan(&currentBalance); err != nil {
 		return 0, fmt.Errorf("read credit balance: %w", err)
 	}
 
 	if currentBalance <= 0 {
-		return 0, nil // No credits to apply — no need to write anything.
+		return 0, nil // No credit in the invoice's currency — nothing to write.
 	}
 
 	now := at
@@ -810,7 +845,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	// invoiceAmountCents (ADR-078: the pre-read may predate a concurrent
 	// settle or credit note).
 	drainTarget := min(invAmountDue, currentBalance)
-	deduct, drainable, drainedFrom, err := s.drainPositiveBlocks(ctx, tx, tenantID, customerID, drainTarget, liveAt)
+	deduct, drainable, drainedFrom, err := s.drainPositiveBlocks(ctx, tx, tenantID, customerID, currency, drainTarget, liveAt)
 	if err != nil {
 		return 0, fmt.Errorf("drain credits for invoice: %w", err)
 	}
@@ -822,6 +857,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 		// negative; surface the drift so it's reconciled, never absorbed.
 		slog.WarnContext(ctx, "credit ledger drift: drainable block capacity != balance",
 			"customer_id", customerID,
+			"currency", currency,
 			"balance_cents", currentBalance,
 			"drainable_cents", drainable,
 		)
@@ -836,10 +872,10 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type,
-			amount_cents, balance_after, description, invoice_id, metadata, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			amount_cents, balance_after, description, invoice_id, metadata, created_at, currency)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 	`, entryID, tenantID, customerID, domain.CreditUsage,
-		-deduct, balanceAfter, invoiceDesc, invoiceID, drainMetadataJSON(drainedFrom), now,
+		-deduct, balanceAfter, invoiceDesc, invoiceID, drainMetadataJSON(drainedFrom), now, currency,
 	); err != nil {
 		if postgres.IsForeignKeyViolation(err) {
 			return 0, fmt.Errorf("customer %q not found", customerID)
@@ -874,7 +910,7 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	}
 
 	// ADR-078 balance-crossing events (advisory lock held above).
-	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currentBalance, balanceAfter); err != nil {
+	if err := s.emitBalanceCrossings(ctx, tx, tenantID, customerID, currency, currentBalance, balanceAfter); err != nil {
 		return 0, err
 	}
 
@@ -890,9 +926,10 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 type commitGrantState struct {
 	GrantID        string
 	CustomerID     string
-	AmountCents    int64 // G
-	ConsumedCents  int64 // C
-	CNRetiredCents int64 // K — cumulative credits retired by relief CNs
+	Currency       string // the grant's own; its retire entries carry it (ADR-129)
+	AmountCents    int64  // G
+	ConsumedCents  int64  // C
+	CNRetiredCents int64  // K — cumulative credits retired by relief CNs
 }
 
 func (g commitGrantState) Remaining() int64 { return g.AmountCents - g.ConsumedCents }
@@ -907,10 +944,10 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 	// Find the funded grant. No FOR UPDATE yet — the advisory lock comes
 	// first (grant-path writers serialize on it, not on row locks).
 	err := tx.QueryRowContext(ctx, `
-		SELECT id, customer_id, amount_cents, consumed_cents, cn_retired_cents
+		SELECT id, customer_id, currency, amount_cents, consumed_cents, cn_retired_cents
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1 AND source_invoice_id = $2 AND grant_kind = 'commit'
-	`, tenantID, invoiceID).Scan(&g.GrantID, &g.CustomerID, &g.AmountCents, &g.ConsumedCents, &g.CNRetiredCents)
+	`, tenantID, invoiceID).Scan(&g.GrantID, &g.CustomerID, &g.Currency, &g.AmountCents, &g.ConsumedCents, &g.CNRetiredCents)
 	if err == sql.ErrNoRows {
 		return commitGrantState{}, false, nil
 	}
@@ -1040,6 +1077,7 @@ func (s *PostgresStore) retireCommitSliceTx(ctx context.Context, tx *sql.Tx, ten
 	if _, err := s.appendEntryInTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  g.CustomerID,
 		EntryType:   domain.CreditAdjustment,
+		Currency:    g.Currency,
 		AmountCents: -slice,
 		Description: description,
 		Metadata:    meta,
@@ -1127,6 +1165,7 @@ func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sq
 		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventCreditCommitRetired, map[string]any{
 			"customer_id":           g.CustomerID,
 			"grant_id":              g.GrantID,
+			"currency":              g.Currency,
 			"funding_invoice_id":    invoiceID,
 			"credit_note_id":        creditNoteID,
 			"retired_cents":         slice,
@@ -1161,83 +1200,60 @@ const balanceWriteOffColumns = `COALESCE(SUM(CASE WHEN entry_type = 'expiry' THE
 			                   AND COALESCE(metadata->>'reason', '') NOT IN ('commit_void_retire', 'commit_refund_retire')
 			              THEN ABS(amount_cents) ELSE 0 END), 0)`
 
-// customerCurrenciesSQL is the currency each customer is billed in
-// (CreditBalance.Currency), one row (customer_id, currency) for every id the
-// customerIDs query yields in a column named id. The ledger has no currency
-// column (ADR-100), so a balance reads in the customer's. The first two arms
-// are the order the engine stamps an invoice's currency in
-// (Engine.invoiceCurrency): the billing profile, then the plan of the live
-// subscription. A customer with neither takes the newest invoice's currency,
-// then the workspace default; the dashboard's customer page resolves the same
-// order (web-v2/src/lib/customerCurrency.ts). ADR-100 keeps a customer's live
-// subscriptions in one currency, so which live item is read does not matter.
-// Each arm reads its table once for all the customers, not once per customer:
-// subscriptions has no index on customer_id. $1 is the tenant id.
-func customerCurrenciesSQL(customerIDs string) string {
-	return `WITH ids AS (` + customerIDs + `),
-		live_plan AS (
-			SELECT DISTINCT ON (s.customer_id) s.customer_id, p.currency
-			  FROM subscriptions s
-			  JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
-			  JOIN plans p ON p.id = si.plan_id
-			 WHERE s.tenant_id = $1 AND s.status IN ('active', 'trialing')
-			   AND s.customer_id IN (SELECT id FROM ids)
-			 ORDER BY s.customer_id, s.current_billing_period_start DESC NULLS LAST, s.created_at DESC),
-		newest_invoice AS (
-			SELECT DISTINCT ON (i.customer_id) i.customer_id, i.currency
-			  FROM invoices i
-			 WHERE i.tenant_id = $1 AND i.customer_id IN (SELECT id FROM ids)
-			 ORDER BY i.customer_id, i.created_at DESC)
-		SELECT ids.id AS customer_id,
-		       UPPER(COALESCE(NULLIF(bp.currency, ''), lp.currency, ni.currency,
-		             (SELECT NULLIF(ts.default_currency, '') FROM tenant_settings ts WHERE ts.tenant_id = $1),
-		             'USD')) AS currency
-		  FROM ids
-		  LEFT JOIN customer_billing_profiles bp ON bp.tenant_id = $1 AND bp.customer_id = ids.id
-		  LEFT JOIN live_plan lp ON lp.customer_id = ids.id
-		  LEFT JOIN newest_invoice ni ON ni.customer_id = ids.id`
-}
-
-func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error) {
+// GetBalance returns the customer's balances, one per currency the ledger
+// holds (ADR-129), ordered by currency. An empty ledger returns none.
+func (s *PostgresStore) GetBalance(ctx context.Context, tenantID, customerID string) ([]domain.CreditBalance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return domain.CreditBalance{}, err
+		return nil, err
 	}
 	defer postgres.Rollback(tx)
 
-	var b domain.CreditBalance
-	b.CustomerID = customerID
-
-	err = tx.QueryRowContext(ctx, `
+	rows, err := tx.QueryContext(ctx, `
 		SELECT
+			currency,
 			COALESCE(SUM(amount_cents), 0),
 			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-			`+balanceWriteOffColumns+`,
-			(SELECT cc.currency FROM (`+customerCurrenciesSQL("SELECT $2::text AS id")+`) cc)
+			`+balanceWriteOffColumns+`
 		FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2
-	`, tenantID, customerID).Scan(&b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted, &b.Currency)
+		GROUP BY currency
+		ORDER BY currency
+	`, tenantID, customerID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
 
-	return b, err
+	out := []domain.CreditBalance{}
+	for rows.Next() {
+		b := domain.CreditBalance{CustomerID: customerID}
+		if err := rows.Scan(&b.Currency, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
-// GetSpendableBalance is the credit a draw at `at` could use: the ledger sum,
-// less what is left of every positive block already past its expires_at. Such
-// a block stays in the sum until the expiry sweep writes its expiry entry,
-// but drainPositiveBlocks skips it (it takes expires_at >= now), so an invoice issued
-// in between draws nothing from it. The expired predicate is the exact
-// complement of the drain's liveness predicate; keep the two in step.
-// One statement, so the sum and the expired part are the same snapshot.
-func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (int64, error) {
+// GetSpendableBalance is the credit a draw at `at` could use, per currency:
+// the ledger sum, less what is left of every positive block already past its
+// expires_at. Such a block stays in the sum until the expiry sweep writes its
+// expiry entry, but drainPositiveBlocks skips it (it takes expires_at >= now),
+// so an invoice issued in between draws nothing from it. The expired predicate
+// is the exact complement of the drain's liveness predicate; keep the two in
+// step. One statement, so the sum and the expired part are the same snapshot.
+// A currency the ledger does not hold is absent from the map.
+func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, customerID string, at time.Time) (map[string]int64, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer postgres.Rollback(tx)
 
-	var spendable int64
-	err = tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount_cents), 0)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT currency,
+		       COALESCE(SUM(amount_cents), 0)
 		     - COALESCE(SUM(CASE
 		           WHEN amount_cents > 0
 		            AND consumed_cents < amount_cents
@@ -1246,10 +1262,26 @@ func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, custo
 		           ELSE 0
 		       END), 0)
 		FROM customer_credit_ledger WHERE tenant_id = $1 AND customer_id = $2
-	`, tenantID, customerID, at).Scan(&spendable)
-	return spendable, err
+		GROUP BY currency
+	`, tenantID, customerID, at)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]int64{}
+	for rows.Next() {
+		var c string
+		var cents int64
+		if err := rows.Scan(&c, &cents); err != nil {
+			return nil, err
+		}
+		out[c] = cents
+	}
+	return out, rows.Err()
 }
 
+// ListBalances returns one row per (customer, currency) the tenant's ledger
+// holds (ADR-129), largest balance first.
 func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]domain.CreditBalance, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1258,22 +1290,17 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		WITH balances (customer_id, balance_cents, total_granted, total_used, total_expired, total_retired, total_deducted) AS (
-			SELECT
-				customer_id,
-				COALESCE(SUM(amount_cents), 0),
-				COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
-				COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
-				`+balanceWriteOffColumns+`
-			FROM customer_credit_ledger
-			WHERE tenant_id = $1
-			GROUP BY customer_id
-		)
-		SELECT b.customer_id, b.balance_cents, b.total_granted, b.total_used,
-		       b.total_expired, b.total_retired, b.total_deducted, cc.currency
-		FROM balances b
-		JOIN (`+customerCurrenciesSQL("SELECT customer_id AS id FROM balances")+`) cc ON cc.customer_id = b.customer_id
-		ORDER BY b.balance_cents DESC
+		SELECT
+			customer_id,
+			currency,
+			COALESCE(SUM(amount_cents), 0) AS balance_cents,
+			COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN entry_type = 'usage' THEN ABS(amount_cents) ELSE 0 END), 0),
+			`+balanceWriteOffColumns+`
+		FROM customer_credit_ledger
+		WHERE tenant_id = $1
+		GROUP BY customer_id, currency
+		ORDER BY balance_cents DESC, customer_id, currency
 	`, tenantID)
 	if err != nil {
 		return nil, err
@@ -1283,7 +1310,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 	var balances []domain.CreditBalance
 	for rows.Next() {
 		var b domain.CreditBalance
-		if err := rows.Scan(&b.CustomerID, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted, &b.Currency); err != nil {
+		if err := rows.Scan(&b.CustomerID, &b.Currency, &b.BalanceCents, &b.TotalGranted, &b.TotalUsed, &b.TotalExpired, &b.TotalRetired, &b.TotalDeducted); err != nil {
 			return nil, err
 		}
 		balances = append(balances, b)
@@ -1425,14 +1452,15 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 	// stays correct even when the operator filters the view to
 	// "usage only" or one invoice — they still see "balance after
 	// this row's chronological moment" rather than "balance after
-	// this row's row-order moment."
+	// this row's row-order moment." It is partitioned by currency: a
+	// row's balance is the balance in its own currency (ADR-129).
 	//
 	// CTE pattern: compute running balance over all rows, THEN apply
 	// filter + sort + pagination on the outer query.
 	query := `WITH ledger AS (
-		SELECT id, tenant_id, customer_id, entry_type, amount_cents,
+		SELECT id, tenant_id, customer_id, entry_type, currency, amount_cents,
 			SUM(amount_cents) OVER (
-				PARTITION BY tenant_id, customer_id
+				PARTITION BY tenant_id, customer_id, currency
 				ORDER BY created_at, id
 				ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
 			) AS running_balance,
@@ -1441,7 +1469,7 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1 AND customer_id = $2
 	)
-	SELECT id, tenant_id, customer_id, entry_type, amount_cents,
+	SELECT id, tenant_id, customer_id, entry_type, currency, amount_cents,
 		running_balance AS balance_after,
 		description, COALESCE(invoice_id,''), expires_at, metadata, created_at,
 		consumed_cents, COALESCE(grant_kind,''), COALESCE(source_invoice_id,'')
@@ -1473,7 +1501,7 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 	for rows.Next() {
 		var e domain.CreditLedgerEntry
 		var metaJSON []byte
-		if err := rows.Scan(&e.ID, &e.TenantID, &e.CustomerID, &e.EntryType,
+		if err := rows.Scan(&e.ID, &e.TenantID, &e.CustomerID, &e.EntryType, &e.Currency,
 			&e.AmountCents, &e.BalanceAfter, &e.Description, &e.InvoiceID,
 			&e.ExpiresAt, &metaJSON, &e.CreatedAt,
 			&e.ConsumedCents, (*string)(&e.GrantKind), &e.SourceInvoiceID); err != nil {
@@ -1575,6 +1603,7 @@ func creditEntrySortColumn(key string) string {
 type GrantSummary struct {
 	ID              string     `json:"id"`
 	EntryType       string     `json:"entry_type"`
+	Currency        string     `json:"currency"`
 	GrantKind       string     `json:"grant_kind,omitempty"`
 	Description     string     `json:"description"`
 	AmountCents     int64      `json:"amount_cents"`
@@ -1623,7 +1652,7 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	// Usage entries also carry drained_blocks; the entry_type filter keeps
 	// them out — they are what "used" means.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT g.id, g.entry_type, COALESCE(g.grant_kind,''), g.description,
+		SELECT g.id, g.entry_type, g.currency, COALESCE(g.grant_kind,''), g.description,
 			g.amount_cents, g.consumed_cents,
 			COALESCE(w.expired_cents, 0), COALESCE(w.retired_cents, 0), COALESCE(w.deducted_cents, 0),
 			g.expires_at, COALESCE(g.source_invoice_id,''), g.created_at
@@ -1666,7 +1695,7 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 	var out []GrantSummary
 	for rows.Next() {
 		var g GrantSummary
-		if err := rows.Scan(&g.ID, &g.EntryType, &g.GrantKind, &g.Description,
+		if err := rows.Scan(&g.ID, &g.EntryType, &g.Currency, &g.GrantKind, &g.Description,
 			&g.AmountCents, &g.ConsumedCents, &g.ExpiredCents, &g.RetiredCents, &g.DeductedCents, &g.ExpiresAt, &g.SourceInvoiceID, &g.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -1678,9 +1707,11 @@ func (s *PostgresStore) ListGrantSummaries(ctx context.Context, tenantID, custom
 
 // checkSameSourceAmount looks for an existing entry with the same dedup key as
 // entry — the keys of the four partial unique indexes on the ledger — and
-// refuses with a mismatch error when its amount differs. A matching amount, or
-// no existing entry, returns nil: the INSERT then either succeeds or hits the
-// index and reports the usual "already exists".
+// refuses with a mismatch error when its amount or its currency differs
+// (ADR-129: the same source in another currency is a different computation,
+// not a replay). A matching amount and currency, or no existing entry, returns
+// nil: the INSERT then either succeeds or hits the index and reports the usual
+// "already exists". entry.Currency is already uppercase here.
 func checkSameSourceAmount(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) error {
 	var (
 		where string
@@ -1699,21 +1730,27 @@ func checkSameSourceAmount(ctx context.Context, tx *sql.Tx, tenantID string, ent
 	default:
 		return nil
 	}
-	var existing int64
-	err := tx.QueryRowContext(ctx, `SELECT amount_cents FROM customer_credit_ledger WHERE tenant_id = $1 AND `+where+` LIMIT 1`, args...).Scan(&existing)
+	var (
+		existing         int64
+		existingCurrency string
+	)
+	err := tx.QueryRowContext(ctx, `SELECT amount_cents, currency FROM customer_credit_ledger WHERE tenant_id = $1 AND `+where+` LIMIT 1`, args...).Scan(&existing, &existingCurrency)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("check existing credit entry for this source: %w", err)
 	}
-	if existing == entry.AmountCents {
+	if existing == entry.AmountCents && existingCurrency == entry.Currency {
 		return nil
 	}
-	slog.ErrorContext(ctx, "credit ledger: a second entry for the same source with a DIFFERENT amount — refusing; one of the two computations is wrong",
-		"tenant_id", tenantID, "customer_id", entry.CustomerID, "existing_amount_cents", existing, "new_amount_cents", entry.AmountCents,
+	slog.ErrorContext(ctx, "credit ledger: a second entry for the same source with a DIFFERENT amount or currency — refusing; one of the two computations is wrong",
+		"tenant_id", tenantID, "customer_id", entry.CustomerID,
+		"existing_amount_cents", existing, "existing_currency", existingCurrency,
+		"new_amount_cents", entry.AmountCents, "new_currency", entry.Currency,
 		"source_credit_note_id", entry.SourceCreditNoteID, "source_invoice_reversal_id", entry.SourceInvoiceReversalID,
 		"source_invoice_id", entry.SourceInvoiceID, "source_subscription_id", entry.SourceSubscriptionID)
-	return errs.InvalidState(fmt.Sprintf("a credit entry for this source already exists with a different amount (%d, now %d)", existing, entry.AmountCents)).
+	return errs.InvalidState(fmt.Sprintf("a credit entry for this source already exists with a different amount or currency (%d %s, now %d %s)",
+		existing, existingCurrency, entry.AmountCents, entry.Currency)).
 		WithCode("credit_source_amount_mismatch")
 }

@@ -193,6 +193,7 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	wantCredited := int64(reliefCents)
 	if o.day1Credit > 0 {
 		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+			Currency:   "USD",
 			CustomerID: cust.ID, AmountCents: o.day1Credit, Description: "seed balance", At: periodStart,
 		}); err != nil {
 			t.Fatalf("grant credit: %v", err)
@@ -290,7 +291,7 @@ func (r *reliefCancelRig) invoice(t *testing.T, id string) domain.Invoice {
 
 func (r *reliefCancelRig) balance(t *testing.T) int64 {
 	t.Helper()
-	bal, err := r.credit.GetBalance(r.ctx, r.tenantID, r.customerID)
+	bal, err := testutil.BalanceUSD(r.credit.GetBalance(r.ctx, r.tenantID, r.customerID))
 	if err != nil {
 		t.Fatalf("credit balance: %v", err)
 	}

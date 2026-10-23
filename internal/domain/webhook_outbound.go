@@ -195,9 +195,15 @@ const (
 	// threshold_cents on balance_low) so consumers with heterogeneous
 	// commit sizes can layer per-customer logic without server config.
 	//
+	// The three balance events are per currency (ADR-129): each one is about
+	// the balance in the payload's `currency`, which the crossing is computed
+	// on. Payload: customer_id, currency, balance_cents (+ threshold_cents on
+	// low).
+	//
 	// EventCreditBalanceLow fires when the balance crosses from >= to
 	// < the tenant's configured threshold (tenant_settings.
-	// credit_balance_low_threshold_cents; unset = never fires).
+	// credit_balance_low_threshold_cents, applied in each currency's own
+	// units; unset = never fires).
 	EventCreditBalanceLow = "credit.balance_low"
 	// EventCreditBalanceDepleted fires on the >0 → <=0 crossing. Known
 	// lag: an expired-but-unswept block keeps SUM positive until the
@@ -211,7 +217,7 @@ const (
 	EventCreditBalanceRecovered = "credit.balance_recovered"
 	// EventCreditCommitRetired fires when a relief credit note retires
 	// commit credits (ADR-080): payload carries customer_id, grant_id,
-	// funding_invoice_id, credit_note_id, retired_cents,
+	// currency, funding_invoice_id, credit_note_id, retired_cents,
 	// refunded_gross_cents, remaining_after_cents. Enqueued IN the CN
 	// coordinator tx — exactly-once with the retire.
 	EventCreditCommitRetired = "credit.commit_retired"

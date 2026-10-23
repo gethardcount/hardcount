@@ -14,7 +14,7 @@ import (
 type tzTermsSettings struct{ tz string }
 
 func (f tzTermsSettings) Get(_ context.Context, _ string) (domain.TenantSettings, error) {
-	return domain.TenantSettings{Timezone: f.tz, NetPaymentTerms: 30}, nil
+	return domain.TenantSettings{DefaultCurrency: "USD", Timezone: f.tz, NetPaymentTerms: 30}, nil
 }
 
 // A manual invoice carries the org billing timezone, as every engine invoice

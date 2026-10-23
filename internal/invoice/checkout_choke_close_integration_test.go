@@ -219,6 +219,7 @@ func TestChokePointCloses(t *testing.T) {
 		}
 		creditStore := credit.NewPostgresStore(db)
 		if _, err := creditStore.AppendEntry(ctx, tenantID, domain.CreditLedgerEntry{
+			Currency:    "USD",
 			CustomerID:  inv.CustomerID,
 			EntryType:   domain.CreditGrant,
 			AmountCents: 400,

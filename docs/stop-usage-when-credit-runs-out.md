@@ -25,17 +25,29 @@ Authorization: Bearer <secret key>
 ```json
 {
   "customer_id": "vlx_cus_…",
-  "balance_cents": 4000,
-  "unbilled_usage_cents": 1000,
-  "estimated_remaining_cents": 3000,
+  "balances": [
+    {
+      "currency": "USD",
+      "balance_cents": 4000,
+      "unbilled_usage_cents": 1000,
+      "estimated_remaining_cents": 3000
+    }
+  ],
   "computed_at": "2026-10-13T09:30:00Z"
 }
 ```
 
+`balances` has one entry per currency: each currency the customer holds
+credit in, and each currency a live subscription will invoice usage in.
+Credit pays only invoices in its own currency, so gate on the entry in the
+currency the customer is billed in. No entry in that currency means no
+credit in it.
+
 | Field | Meaning |
 |---|---|
-| `balance_cents` | The credit the customer can spend now: what is left after every invoice issued so far. A grant that is past its expiry date is not counted. |
-| `unbilled_usage_cents` | What the usage of the current period will cost when it is invoiced. |
+| `currency` | The currency of the entry. |
+| `balance_cents` | The credit the customer can spend now in this currency: what is left after every invoice issued so far. A grant that is past its expiry date is not counted. |
+| `unbilled_usage_cents` | What the usage of the current period will cost when it is invoiced in this currency. |
 | `estimated_remaining_cents` | The first minus the second, never below zero. Gate on this. |
 | `computed_at` | When Velox worked the figures out. |
 
@@ -81,7 +93,9 @@ for customer_id in customers_active_since_last_poll() | customers_refused():
     except Exception as err:
         alert(customer_id, err)   # keep the last figure, go on to the next customer
         continue
-    cache.set(f"credit:{customer_id}", live["estimated_remaining_cents"])   # no expiry
+    # The entry in the currency this customer is billed in; none means no credit in it.
+    entry = next((b for b in live["balances"] if b["currency"] == billing_currency(customer_id)), None)
+    cache.set(f"credit:{customer_id}", entry["estimated_remaining_cents"] if entry else 0)   # no expiry
 
 # Runs in your request path.
 def may_serve(customer_id):
@@ -92,6 +106,7 @@ def may_serve(customer_id):
 ```
 
 `customers_refused()` is every customer whose stored figure is zero.
+`billing_currency()` is the currency you invoice the customer in.
 
 ## When the read fails
 
@@ -151,9 +166,6 @@ It can read lower than the truth in one case:
   invoice still draws on that credit
   ([ADR-071](adr/071-credit-expiry-retires-the-block.md)).
 
-If a customer is billed in more than one currency, the amounts are added
-together as plain cents.
-
 Usage sent for a customer who has no active subscription is recorded but not
 priced, so it does not lower the figure.
 
@@ -191,7 +203,7 @@ reminders, and the live read to decide whether to serve
 ## The same figure on the public cost page
 
 The public cost dashboard, `GET /v1/public/cost-dashboard/{token}`, returns
-the same three numbers in its `credits` object. Your customer sees the
-figure your backend gates on.
+the same three numbers for each currency in its `credits` array. Your
+customer sees the figure your backend gates on.
 
 **Next:** remind customers to top up with the [credit webhooks](webhooks.md#customers-dunning-and-credit).

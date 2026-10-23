@@ -28,6 +28,7 @@ type cnGrantAdapter struct{ svc *credit.Service }
 
 func (a *cnGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, in creditnote.CreditGrantInput) error {
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.GrantInput{
+		Currency:   in.Currency,
 		CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID,
 	})
 	return err
@@ -262,7 +263,7 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	if !found {
 		t.Fatal("the cancel-credit draft must be a pending issue_pending draft after commit (pre-issue)")
 	}
-	if bal, _ := creditSvc.GetBalance(ctx, tenantID, cust.ID); bal.BalanceCents != 0 {
+	if bal, _ := testutil.BalanceUSD(creditSvc.GetBalance(ctx, tenantID, cust.ID)); bal.BalanceCents != 0 {
 		t.Fatalf("balance must be 0 before the draft is issued; got %d", bal.BalanceCents)
 	}
 
@@ -274,7 +275,7 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	if issued != 1 {
 		t.Fatalf("issued=%d, want 1", issued)
 	}
-	if bal, _ := creditSvc.GetBalance(ctx, tenantID, cust.ID); bal.BalanceCents != wantCredit {
+	if bal, _ := testutil.BalanceUSD(creditSvc.GetBalance(ctx, tenantID, cust.ID)); bal.BalanceCents != wantCredit {
 		t.Fatalf("balance after reconciler issue: got %d, want %d", bal.BalanceCents, wantCredit)
 	}
 
@@ -283,7 +284,7 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	if issued2 != 0 {
 		t.Errorf("second sweep issued=%d, want 0 (draft already issued)", issued2)
 	}
-	if bal, _ := creditSvc.GetBalance(ctx, tenantID, cust.ID); bal.BalanceCents != wantCredit {
+	if bal, _ := testutil.BalanceUSD(creditSvc.GetBalance(ctx, tenantID, cust.ID)); bal.BalanceCents != wantCredit {
 		t.Errorf("balance after second sweep: got %d, want %d (no double-credit)", bal.BalanceCents, wantCredit)
 	}
 

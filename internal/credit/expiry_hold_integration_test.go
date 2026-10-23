@@ -453,7 +453,7 @@ func TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree(t *testing.T) {
 		if err != nil {
 			t.Fatalf("spendable at %v: %v", at, err)
 		}
-		return v
+		return v["USD"]
 	}
 	drawable := func(at time.Time) int64 {
 		t.Helper()

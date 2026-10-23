@@ -323,10 +323,10 @@ read the invoice with `GET /v1/invoices/{id}`: its `amount_due_cents` and
 | `customer.email_complained` | A customer marked an email from Velox as spam, and Velox stopped emailing that address |
 | `dunning.started` | Payment retries started for an invoice *(always sent)* |
 | `dunning.escalated` / `.resolved` | Payment retries ran out (the final action from your policy was taken), or ended early, for example because the invoice was paid or someone resolved it by hand |
-| `credit.balance_low` | The settled credit balance fell below your account's threshold. Carries `threshold_cents`. *(always sent)* |
-| `credit.balance_depleted` | The settled credit balance reached zero or less *(always sent)* |
-| `credit.balance_recovered` | The settled credit balance went above zero again *(always sent)* |
-| `credit.commit_retired` | A credit note took back prepaid credit. Carries `grant_id`, `credit_note_id`, `retired_cents`, `refunded_gross_cents` and `remaining_after_cents`. *(always sent)* |
+| `credit.balance_low` | The settled credit balance in one currency fell below your account's threshold. Carries `currency`, `balance_cents` and `threshold_cents`. *(always sent)* |
+| `credit.balance_depleted` | The settled credit balance in one currency reached zero or less. Carries `currency` and `balance_cents`. *(always sent)* |
+| `credit.balance_recovered` | The settled credit balance in one currency went above zero again. Carries `currency` and `balance_cents`. *(always sent)* |
+| `credit.commit_retired` | A credit note took back prepaid credit. Carries `grant_id`, `currency`, `credit_note_id`, `retired_cents`, `refunded_gross_cents` and `remaining_after_cents`. *(always sent)* |
 
 ### The credit events follow the settled balance
 
@@ -334,6 +334,12 @@ read the invoice with `GET /v1/invoices/{id}`: its `amount_due_cents` and
 `credit.balance_recovered` follow the settled balance: the credit a customer
 holds after every invoice issued so far. They fire when an invoice, a grant,
 an adjustment or an expiry moves that balance. They do not follow usage.
+
+Each currency has its own balance, and each event is about one of them: a
+customer whose EUR credit runs out gets `credit.balance_depleted` with
+`currency` `EUR` even while it holds USD credit. Credit pays only invoices in
+its own currency. The low threshold is one number applied in each currency's
+own units: 1000 means $10.00 for USD credit and €10.00 for EUR credit.
 
 Usage draws on credit only when it is invoiced. A customer billed at the end
 of the period can use up all their credit in the first week, and

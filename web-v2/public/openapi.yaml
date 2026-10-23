@@ -1443,10 +1443,10 @@ components:
     CreditBalance:
       type: object
       description: >
-        A customer's credit balance and where the credit went. Every cent
-        granted is either still in the balance or in one of the totals:
-        total_granted = total_used + total_expired + total_retired +
-        total_deducted + balance_cents.
+        A customer's credit balance in one currency and where that credit
+        went. Every cent granted is either still in the balance or in one of
+        the totals: total_granted = total_used + total_expired +
+        total_retired + total_deducted + balance_cents.
       required: [customer_id, balance_cents, total_granted, total_used, total_expired, total_retired, total_deducted, currency]
       properties:
         customer_id:
@@ -1454,12 +1454,10 @@ components:
         currency:
           type: string
           description: >
-            The currency the customer is billed in, uppercase. Credit has no
-            currency of its own: it pays the customer's invoices one cent for
-            one cent, so its amounts read in this currency. The first of: the
-            billing profile's currency, the plan of the customer's active or
-            trialing subscription, the newest invoice's currency, the
-            workspace default.
+            The currency of this balance, uppercase. Each credit ledger entry
+            stores its own currency, and credit pays only invoices in that
+            currency. A customer with credit in two currencies has two
+            balances; they are never added together or converted.
         balance_cents:
           type: integer
           format: int64
@@ -1491,40 +1489,59 @@ components:
     CreditLiveBalance:
       type: object
       description: >
-        A customer's credit position right now. `balance_cents` is the credit
-        the customer can spend: the settled ledger balance, which moves only
+        A customer's credit position right now, one entry per currency: every
+        currency the customer holds credit in, and every currency a live
+        subscription will invoice usage in. Amounts in two currencies are
+        never added together.
+      required: [customer_id, balances, computed_at]
+      properties:
+        customer_id:
+          type: string
+        balances:
+          type: array
+          description: Ordered by currency.
+          items:
+            $ref: "#/components/schemas/CreditLiveCurrency"
+        computed_at:
+          type: string
+          format: date-time
+          description: When the server computed these figures.
+
+    CreditLiveCurrency:
+      type: object
+      description: >
+        The live position in one currency. `balance_cents` is the credit the
+        customer can spend in it: the settled ledger balance, which moves only
         when an invoice, grant, adjustment or expiry is written, less any
         grant that is past its expiry date and not yet written off.
         `unbilled_usage_cents` is the usage of the current period that no
-        invoice has billed yet. `estimated_remaining_cents` is the first
-        minus the second, never below zero.
-      required:
-        - customer_id
-        - balance_cents
-        - unbilled_usage_cents
-        - estimated_remaining_cents
-        - computed_at
+        invoice has billed yet and that will be invoiced in this currency.
+        `estimated_remaining_cents` is the first minus the second, never
+        below zero.
+      required: [currency, balance_cents, unbilled_usage_cents, estimated_remaining_cents]
       properties:
-        customer_id:
+        currency:
           type: string
         balance_cents:
           type: integer
           format: int64
           description: >
-            Settled ledger balance, less what is left of any grant past its
-            expiry date that the hourly expiry run has not written off yet (an
-            invoice cannot draw on such a grant). Can be negative.
+            Settled ledger balance in this currency, less what is left of any
+            grant past its expiry date that the hourly expiry run has not
+            written off yet (an invoice cannot draw on such a grant). Can be
+            negative.
         unbilled_usage_cents:
           type: integer
           format: int64
           description: >
-            Metered usage that the next invoice of each subscription will
-            bill, priced as the period close prices it. Usage that a
-            mid-period threshold invoice already billed is not counted again.
-            After a mid-period plan change each meter is counted for the time
-            a plan carrying it was on the subscription. For a trialing
-            subscription only usage inside its first paid period counts; that
-            period starts at the beginning of the day the trial ends.
+            Metered usage that the next invoice of each subscription invoiced
+            in this currency will bill, priced as the period close prices it.
+            Usage that a mid-period threshold invoice already billed is not
+            counted again. After a mid-period plan change each meter is
+            counted for the time a plan carrying it was on the subscription.
+            For a trialing subscription only usage inside its first paid
+            period counts; that period starts at the beginning of the day the
+            trial ends.
         estimated_remaining_cents:
           type: integer
           format: int64
@@ -1532,10 +1549,6 @@ components:
             `balance_cents` minus `unbilled_usage_cents`, floored at zero. To
             see how far past zero a customer is, subtract the two parts
             yourself.
-        computed_at:
-          type: string
-          format: date-time
-          description: When the server computed these figures.
 
     RecipeOverride:
       type: object
@@ -2236,7 +2249,7 @@ components:
 
     CreditLedgerEntry:
       type: object
-      required: [id, customer_id, entry_type, amount_cents, balance_after, description, created_at]
+      required: [id, customer_id, entry_type, currency, amount_cents, balance_after, description, created_at]
       properties:
         id:
           type: string
@@ -2247,6 +2260,11 @@ components:
         entry_type:
           type: string
           enum: [grant, usage, expiry, adjustment]
+        currency:
+          type: string
+          description: >
+            The entry's currency, uppercase. Credit pays only invoices in its
+            own currency.
         amount_cents:
           type: integer
           format: int64
@@ -2254,7 +2272,7 @@ components:
         balance_after:
           type: integer
           format: int64
-          description: Customer's credit balance after this entry, in cents.
+          description: The customer's credit balance in this entry's currency after it, in cents.
         description:
           type: string
         invoice_id:
@@ -2598,7 +2616,7 @@ components:
         - outstanding_ar
         - outstanding_by_currency
         - avg_invoice_value
-        - credit_balance_total
+        - credit_balance_by_currency
         - active_customers
         - new_customers
         - live_customers
@@ -2626,7 +2644,7 @@ components:
           $ref: "#/components/schemas/AnalyticsPeriod"
         currency:
           type: string
-          description: The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`.
+          description: The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
         mrr:
           type: integer
           format: int64
@@ -2676,10 +2694,18 @@ components:
           type: integer
           format: int64
           description: Average total of invoices paid in the window.
-        credit_balance_total:
-          type: integer
-          format: int64
-          description: Sum of all customers' credit balances. Not limited to `currency`.
+        credit_balance_by_currency:
+          type: array
+          description: >
+            Customers' credit balances added up per currency, `currency`
+            first, then largest. A currency whose balance is zero is left
+            out. Customers on a test clock are not counted.
+          items:
+            type: object
+            required: [currency, amount_cents]
+            properties:
+              currency: { type: string }
+              amount_cents: { type: integer, format: int64 }
         active_customers:
           type: integer
           description: |
@@ -2799,7 +2825,7 @@ components:
           description: Optional. Must belong to `customer_id`. Leave out for a one-off invoice.
         currency:
           type: string
-          description: ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
+          description: ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
           example: USD
         billing_period_start:
           type: string
@@ -4146,8 +4172,10 @@ components:
           nullable: true
           minimum: 1
           description: |
-            When a customer's credit balance drops below this amount, the
-            `credit.balance_low` webhook fires. null turns it off.
+            When a customer's credit in one currency drops below this
+            amount, in that currency's minor units, the `credit.balance_low`
+            webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+            credit. null turns it off.
         tax_provider:
           type: string
           enum: [none, manual, stripe_tax]
@@ -4876,7 +4904,7 @@ components:
       description: |
         One block of credit on a customer's balance (a grant or a positive
         adjustment) and how much of it is left.
-      required: [id, entry_type, description, amount_cents, consumed_cents, remaining_cents, expired_cents, retired_cents, deducted_cents, created_at]
+      required: [id, entry_type, currency, description, amount_cents, consumed_cents, remaining_cents, expired_cents, retired_cents, deducted_cents, created_at]
       properties:
         id:
           type: string
@@ -4884,6 +4912,9 @@ components:
         entry_type:
           type: string
           description: "`grant` or `adjustment`."
+        currency:
+          type: string
+          description: The block's currency, uppercase.
         grant_kind:
           type: string
           enum: [commit, promotional]
@@ -4935,25 +4966,34 @@ components:
       type: object
       description: |
         A customer's credit blocks, newest first, with the remaining credit
-        added up by kind.
-      required: [grants, commit_remaining_cents, promotional_remaining_cents, other_remaining_cents]
+        added up by currency and kind.
+      required: [grants, remaining_by_currency]
       properties:
         grants:
           type: array
           items:
             $ref: "#/components/schemas/CreditGrantBlock"
-        commit_remaining_cents:
-          type: integer
-          format: int64
-          description: Remaining credit the customer paid for (`commit`).
-        promotional_remaining_cents:
-          type: integer
-          format: int64
-          description: Remaining free credit (`promotional`).
-        other_remaining_cents:
-          type: integer
-          format: int64
-          description: Remaining credit with no kind, such as adjustments and proration credits.
+        remaining_by_currency:
+          type: array
+          description: One entry per currency with credit left, ordered by currency.
+          items:
+            type: object
+            required: [currency, commit_remaining_cents, promotional_remaining_cents, other_remaining_cents]
+            properties:
+              currency:
+                type: string
+              commit_remaining_cents:
+                type: integer
+                format: int64
+                description: Remaining credit the customer paid for (`commit`).
+              promotional_remaining_cents:
+                type: integer
+                format: int64
+                description: Remaining free credit (`promotional`).
+              other_remaining_cents:
+                type: integer
+                format: int64
+                description: Remaining credit with no kind, such as adjustments and credit-note credit.
 
     WebhookEndpointCreated:
       type: object
@@ -6292,35 +6332,39 @@ paths:
                       Recurring base fees are not included — an in_advance base
                       is already invoiced at period open.
                   credits:
-                    type: object
+                    type: array
                     description: >
-                      The customer's credit position. `balance_cents` is the
-                      ledger balance, less any grant past its expiry date that
-                      is not yet written off: credit is drawn down when an
-                      invoice is issued, so it does not move with usage.
-                      `unbilled_usage_cents` is the usage no invoice has billed
-                      yet, and `estimated_remaining_cents` is the balance minus
-                      that, never below zero. These three are the same figures
+                      The customer's credit position, one entry per currency,
+                      ordered by currency. `balance_cents` is the ledger
+                      balance in that currency, less any grant past its expiry
+                      date that is not yet written off: credit is drawn down
+                      when an invoice is issued, so it does not move with
+                      usage. `unbilled_usage_cents` is the usage no invoice has
+                      billed yet that will be invoiced in that currency, and
+                      `estimated_remaining_cents` is the balance minus that,
+                      never below zero. These three are the same figures
                       `GET /v1/credits/balance/{customer_id}/live` returns.
                       `unbilled_usage_cents` can differ from
                       `projected_total_cents`: it leaves out usage a threshold
                       invoice already billed and usage sent before a trial's
                       first paid period, and counts each subscription over its
                       own period. It is an estimate: tax, base fees billed at
-                      period end and unpaid invoices are not subtracted, and
-                      totals in different currencies are added together.
-                    properties:
-                      balance_cents: { type: integer, format: int64 }
-                      unbilled_usage_cents: { type: integer, format: int64 }
-                      commit_remaining_cents:
-                        type: integer
-                        format: int64
-                        description: What is left of the customer's prepaid commit.
-                      promotional_remaining_cents:
-                        type: integer
-                        format: int64
-                        description: What is left of promotional credit.
-                      estimated_remaining_cents: { type: integer, format: int64 }
+                      period end and unpaid invoices are not subtracted.
+                    items:
+                      type: object
+                      properties:
+                        currency: { type: string }
+                        balance_cents: { type: integer, format: int64 }
+                        unbilled_usage_cents: { type: integer, format: int64 }
+                        commit_remaining_cents:
+                          type: integer
+                          format: int64
+                          description: What is left of the customer's prepaid commit.
+                        promotional_remaining_cents:
+                          type: integer
+                          format: int64
+                          description: What is left of promotional credit.
+                        estimated_remaining_cents: { type: integer, format: int64 }
         "401":
           description: Invalid token
         "429":
@@ -7067,9 +7111,9 @@ paths:
       summary: Per-grant burndown + kind subtotals
       description: |
         The customer's credit blocks with drawdown state — granted /
-        drawn / remaining per grant, expiry, and remaining split by
-        cost-basis class (commit = money-backed, promotional = free,
-        other = legacy/adjustments). include_exhausted=true adds
+        drawn / remaining per grant, expiry, and remaining per currency
+        split by cost-basis class (commit = money-backed, promotional =
+        free, other = legacy/adjustments). include_exhausted=true adds
         fully-drawn blocks for history. Each grant's `consumed_cents`
         also counts credit no invoice used: `expired_cents`, the part that
         expired unused; `retired_cents`, commit credit taken back when the
@@ -7106,14 +7150,17 @@ paths:
       tags: [Credits]
       summary: Add or remove credit
       description: |
-        Writes one `adjustment` entry to the customer's credit ledger. A
-        positive amount adds credit; a negative amount removes it. Audit
-        action is `credit.adjustment` or `credit.deduction`.
+        Writes one `adjustment` entry to the customer's credit ledger in
+        `currency`. A positive amount adds credit in that currency; a
+        negative amount removes credit in that currency only. Audit action
+        is `credit.adjustment` or `credit.deduction`.
 
-        Errors (422, `param` names the field): `customer_id` or
-        `description` missing; `amount_cents` is zero, above 100000000
-        ($1,000,000), or a removal larger than the credit that can be
-        drawn (expired grants not yet written off do not count).
+        Errors (422, `param` names the field): `customer_id`, `currency` or
+        `description` missing; `currency` not supported (an unknown code or
+        a zero-decimal currency such as JPY); `amount_cents` is zero, above
+        100000000 (1,000,000.00 in that currency), or a removal larger than
+        the credit in that currency that can be drawn (expired grants not
+        yet written off do not count).
       operationId: adjustCredits
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -7123,10 +7170,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [customer_id, amount_cents, description]
+              required: [customer_id, currency, amount_cents, description]
               properties:
                 customer_id:
                   type: string
+                currency:
+                  type: string
+                  description: ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
+                  example: USD
                 amount_cents:
                   type: integer
                   format: int64
@@ -7164,10 +7215,10 @@ paths:
       tags: [Credits]
       summary: List credit balances for all customers
       description: |
-        One row per customer that has any credit ledger entry, highest
-        balance first. No paging and no `total`. `total_granted` is the
-        sum of every credit added (grants, positive adjustments and
-        reversals).
+        One row per customer and currency that has any credit ledger
+        entry, highest balance first. No paging and no `total`.
+        `total_granted` is the sum of every credit added in that currency
+        (grants, positive adjustments and reversals).
       operationId: listCreditBalances
       responses:
         "200":
@@ -7189,8 +7240,8 @@ paths:
       summary: List a customer's credit ledger
       description: |
         Ledger entries for one customer. `balance_after` is the running
-        balance in time order over the whole ledger, so it stays right
-        when you filter by `entry_type`.
+        balance in the entry's currency, in time order over the whole
+        ledger, so it stays right when you filter by `entry_type`.
       operationId: listCreditLedgerEntries
       parameters:
         - name: customer_id
@@ -10058,9 +10109,16 @@ paths:
         one transaction, or omit them and add lines later with
         `POST /v1/invoices/{id}/line-items`.
 
+        A manual invoice uses the customer's currency. A `currency` that
+        differs from the customer's billing-profile currency, or from the
+        plan currency of any of the customer's live (draft, trialing or
+        active) subscriptions, is refused with 409. A customer with neither
+        may be invoiced in any supported currency.
+
         Defaults when a field is left out:
-        - `currency`: the customer's billing-profile currency, then the
-          tenant default, then `USD`.
+        - `currency`: the customer's billing-profile currency, then the plan
+          currency of the customer's live subscriptions, then the tenant
+          default.
         - `net_payment_term_days`: the tenant's net payment terms. A
           negative value is stored as 0 (due on receipt).
         - `billing_period_start` / `billing_period_end`: now.
@@ -10099,6 +10157,15 @@ paths:
             Validation error: missing `customer_id`, unsupported currency,
             an invalid line item (the message names the line number), or
             an unknown field (`param` names it; the body must use only the fields listed here).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `currency` is not the customer's (code
+            `customer_currency_conflict`). The message names the billing
+            profile or subscription plan currency it conflicts with.
           content:
             application/json:
               schema:
@@ -11972,6 +12039,11 @@ paths:
     post:
       tags: [Credits]
       summary: Grant credits to customer
+      description: |
+        Adds a block of credit in `currency`. The credit pays only the
+        customer's invoices in that currency; it is never converted. A
+        grant in a currency the customer is not billed in is accepted and
+        shows as its own balance.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -11980,10 +12052,17 @@ paths:
           application/json:
             schema:
               type: object
-              required: [customer_id, amount_cents]
+              required: [customer_id, currency, amount_cents]
               properties:
                 customer_id:
                   type: string
+                currency:
+                  type: string
+                  description: |
+                    ISO 4217 code of the credit. Required. Case-insensitive;
+                    stored uppercase. Zero-decimal currencies (such as JPY)
+                    are not supported yet.
+                  example: USD
                 amount_cents:
                   type: integer
                   format: int64
@@ -12016,7 +12095,7 @@ paths:
                 $ref: "#/components/schemas/CreditLedgerEntry"
         "422":
           description: |
-            A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+            A field failed validation (a missing or unsupported `currency` has `param` `currency`), or the body has an unknown field (`param` names it; the body must use only the fields listed here).
           content:
             application/json:
               schema:
@@ -12026,6 +12105,10 @@ paths:
     get:
       tags: [Credits]
       summary: Get customer credit balance
+      description: |
+        The customer's balances, one per currency the customer's credit
+        ledger holds, ordered by currency. Empty when the customer has no
+        ledger entry.
       parameters:
         - name: customer_id
           in: path
@@ -12034,11 +12117,17 @@ paths:
             type: string
       responses:
         "200":
-          description: Credit balance
+          description: Credit balances, one per currency.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/CreditBalance"
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CreditBalance"
         "404":
           description: No customer with this ID in this tenant and mode.
           content:
@@ -12051,8 +12140,9 @@ paths:
       tags: [Credits]
       summary: Get customer live credit balance
       description: |
-        How much credit the customer has left right now: the settled balance
-        less the usage no invoice has billed yet. Use it to decide in your
+        How much credit the customer has left right now, per currency: the
+        settled balance less the usage no invoice has billed yet in that
+        currency. Use it to decide in your
         own code whether to keep serving a prepaid customer; Velox records
         usage and never refuses it.
 

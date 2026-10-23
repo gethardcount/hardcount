@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { api, usd, uniq } from './fixtures/api'
+import { api, usd, usdBalance, uniq } from './fixtures/api'
 import { billedCustomer, createCustomer, invoicesFor, type Invoice } from './fixtures/seed'
 
 // Invoices through the screen: issue one, settle it, correct it, close it.
@@ -36,7 +36,7 @@ async function creditNotesFor(invoiceId: string): Promise<CreditNote[]> {
 }
 
 async function creditBalance(customerId: string): Promise<number> {
-  return (await api<{ balance_cents: number }>('GET', `/credits/balance/${customerId}`)).balance_cents
+  return usdBalance(await api<{ data: { currency: string; balance_cents: number }[] }>('GET', `/credits/balance/${customerId}`)).balance_cents
 }
 
 // Lets the next "Issue credit note" request reach the server, then drops the
@@ -111,7 +111,7 @@ async function issueFromCreditNotesPage(page: Page, customerName: string, invoic
 // credit balance when it was finalized.
 async function invoicePaidPartlyByCredit(creditCents: number) {
   const customer = await createCustomer()
-  await api('POST', '/credits/grant', { customer_id: customer.id, amount_cents: creditCents, description: 'E2E credit used by an invoice' })
+  await api('POST', '/credits/grant', { customer_id: customer.id, currency: 'USD', amount_cents: creditCents, description: 'E2E credit used by an invoice' })
   const draft = await api<Invoice>('POST', '/invoices', {
     customer_id: customer.id,
     currency: 'USD',

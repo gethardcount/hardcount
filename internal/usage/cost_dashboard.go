@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,8 +45,11 @@ func (a *CostDashboardAssembler) SetLiveBalanceReader(r CostDashboardLiveBalance
 // CostDashboardCreditReader is the narrow surface the assembler uses to read
 // a customer's credit position. The credit service implements it through an
 // adapter in internal/api, so this package does not import the credit domain.
+// CreditSummary returns one entry per currency the customer holds credit in
+// (ADR-129), with Currency, BalanceCents and the commit/promotional split
+// set.
 type CostDashboardCreditReader interface {
-	CreditSummary(ctx context.Context, tenantID, customerID string) (CostDashboardCredits, error)
+	CreditSummary(ctx context.Context, tenantID, customerID string) ([]CostDashboardCredits, error)
 }
 
 // CustomerTokenLookup is the narrow surface the assembler uses to
@@ -98,7 +102,9 @@ type CostDashboardProjection struct {
 	Usage               []CostDashboardMeter        `json:"usage"`
 	Totals              []CostDashboardTotal        `json:"totals"`
 	ProjectedTotalCents int64                       `json:"projected_total_cents"`
-	Credits             CostDashboardCredits        `json:"credits"`
+	// Credits is the credit position, one entry per currency (ADR-129),
+	// ordered by currency.
+	Credits []CostDashboardCredits `json:"credits"`
 	// Livemode marks whether this dashboard reflects real-money usage; the
 	// embed shows a "Test mode" banner when false. Shipped in the JSON
 	// contract pre-outreach so partner UIs never face a mid-pilot schema
@@ -106,7 +112,8 @@ type CostDashboardProjection struct {
 	Livemode bool `json:"livemode"`
 }
 
-// CostDashboardCredits is the customer's credit position (issue #86).
+// CostDashboardCredits is the customer's credit position in one currency
+// (issue #86, ADR-129). Amounts in two currencies are never added together.
 //
 // BalanceCents is the ledger balance: credit is drawn down when an invoice is
 // issued, so it does not move during a billing period. EstimatedRemainingCents
@@ -121,11 +128,12 @@ type CostDashboardProjection struct {
 // CostDashboardLiveBalance and the block adds up on its own:
 // estimated = max(balance - unbilled, 0).
 type CostDashboardCredits struct {
-	BalanceCents              int64 `json:"balance_cents"`
-	CommitRemainingCents      int64 `json:"commit_remaining_cents"`
-	PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
-	UnbilledUsageCents        int64 `json:"unbilled_usage_cents"`
-	EstimatedRemainingCents   int64 `json:"estimated_remaining_cents"`
+	Currency                  string `json:"currency"`
+	BalanceCents              int64  `json:"balance_cents"`
+	CommitRemainingCents      int64  `json:"commit_remaining_cents"`
+	PromotionalRemainingCents int64  `json:"promotional_remaining_cents"`
+	UnbilledUsageCents        int64  `json:"unbilled_usage_cents"`
+	EstimatedRemainingCents   int64  `json:"estimated_remaining_cents"`
 }
 
 type CostDashboardPeriod struct {
@@ -163,6 +171,38 @@ type CostDashboardRule struct {
 type CostDashboardTotal struct {
 	Currency    string `json:"currency"`
 	AmountCents int64  `json:"amount_cents"`
+}
+
+// mergeCredits joins the ledger summary and the live figure by currency: the
+// balance, unbilled usage and estimate come from the live read, the
+// commit/promotional split from the summary. The result is ordered by
+// currency and is never nil.
+func mergeCredits(summary []CostDashboardCredits, live domain.CreditLiveBalance) []CostDashboardCredits {
+	byCurrency := map[string]*CostDashboardCredits{}
+	entry := func(c string) *CostDashboardCredits {
+		if byCurrency[c] == nil {
+			byCurrency[c] = &CostDashboardCredits{Currency: c}
+		}
+		return byCurrency[c]
+	}
+	for _, s := range summary {
+		e := entry(s.Currency)
+		e.CommitRemainingCents = s.CommitRemainingCents
+		e.PromotionalRemainingCents = s.PromotionalRemainingCents
+		e.BalanceCents = s.BalanceCents
+	}
+	for _, l := range live.Balances {
+		e := entry(l.Currency)
+		e.BalanceCents = l.BalanceCents
+		e.UnbilledUsageCents = l.UnbilledUsageCents
+		e.EstimatedRemainingCents = l.EstimatedRemainingCents
+	}
+	out := make([]CostDashboardCredits, 0, len(byCurrency))
+	for _, e := range byCurrency {
+		out = append(out, *e)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Currency < out[j].Currency })
+	return out
 }
 
 // GetByToken resolves the token, composes the usage view, sanitizes,
@@ -208,7 +248,7 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	}
 	// A failed credit read fails the response. Showing a zero balance to a
 	// customer who holds credit would be wrong and silent.
-	credits, err := a.credits.CreditSummary(ctx, cust.TenantID, cust.ID)
+	summary, err := a.credits.CreditSummary(ctx, cust.TenantID, cust.ID)
 	if err != nil {
 		return nil, fmt.Errorf("read credits: %w", err)
 	}
@@ -221,10 +261,9 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	if err != nil {
 		return nil, fmt.Errorf("read live credit balance: %w", err)
 	}
-	// One read supplies all three so the block is consistent with itself.
-	credits.BalanceCents = live.BalanceCents
-	credits.UnbilledUsageCents = live.UnbilledUsageCents
-	credits.EstimatedRemainingCents = live.EstimatedRemainingCents
+	// One read supplies the three live figures of each currency, so each
+	// entry is consistent with itself.
+	credits := mergeCredits(summary, live)
 
 	activeCount := 0
 	for _, s := range subs {

@@ -76,6 +76,7 @@ func TestBillOnCreate_CreditBalance_E2E(t *testing.T) {
 		}
 		if grantCents > 0 {
 			if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+				Currency:   "USD",
 				CustomerID: cust.ID, AmountCents: grantCents,
 				Description: "seed balance", At: periodStart,
 			}); err != nil {
@@ -114,7 +115,7 @@ func TestBillOnCreate_CreditBalance_E2E(t *testing.T) {
 		if got.AmountDueCents != 0 || got.CreditsAppliedCents != 4900 {
 			t.Errorf("due=%d creditsApplied=%d, want 0/4900", got.AmountDueCents, got.CreditsAppliedCents)
 		}
-		bal, err := creditSvc.GetBalance(ctx, tenantID, sub.CustomerID)
+		bal, err := testutil.BalanceUSD(creditSvc.GetBalance(ctx, tenantID, sub.CustomerID))
 		if err != nil {
 			t.Fatalf("balance: %v", err)
 		}

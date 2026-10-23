@@ -7,6 +7,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // TestCommitFinalize_ConcurrentDoubleFinalize pins the D5 CAS under true
@@ -125,6 +126,7 @@ func TestBalanceCrossings_ConcurrentGrantAndDrain(t *testing.T) {
 		// (recovered); a grant-first ordering produces no crossing at all
 		// beyond the seed's.
 		if _, err := h.creditSvc.Grant(ctx, h.tenantID, credit.GrantInput{
+			Currency:   "USD",
 			CustomerID: cust, AmountCents: 500, Description: "seed",
 		}); err != nil {
 			t.Fatalf("seed grant: %v", err)
@@ -137,6 +139,7 @@ func TestBalanceCrossings_ConcurrentGrantAndDrain(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, err := h.creditSvc.Grant(ctx, h.tenantID, credit.GrantInput{
+				Currency:   "USD",
 				CustomerID: cust, AmountCents: 10000, Description: "racing grant",
 			})
 			errCh <- err
@@ -155,7 +158,7 @@ func TestBalanceCrossings_ConcurrentGrantAndDrain(t *testing.T) {
 		}
 
 		// Final balance is 10000 under EVERY serial order (500+10000-500).
-		bal, err := h.creditSvc.GetBalance(ctx, h.tenantID, cust)
+		bal, err := testutil.BalanceUSD(h.creditSvc.GetBalance(ctx, h.tenantID, cust))
 		if err != nil {
 			t.Fatalf("round %d balance: %v", round, err)
 		}

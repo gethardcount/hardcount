@@ -42,6 +42,7 @@ func TestAppendEntry_SerializesOnEmptyLedger(t *testing.T) {
 		go func(amt int64) {
 			defer wg.Done()
 			if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+				Currency:   "USD",
 				CustomerID: cust.ID, AmountCents: amt, Description: "concurrent first grant",
 			}); err != nil {
 				t.Errorf("grant %d: %v", amt, err)
@@ -51,7 +52,7 @@ func TestAppendEntry_SerializesOnEmptyLedger(t *testing.T) {
 	wg.Wait()
 
 	// Final authoritative balance is order-independent.
-	bal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}

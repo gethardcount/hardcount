@@ -238,11 +238,12 @@ export const DEFAULT_ACTIONS = [
   'password_reset_requested', 'password_reset_completed',
 ]
 
-// auditAmount renders one *_cents metadata value. Invoice, payment and credit
-// note rows record their currency beside the amount, so the amount is shown in
-// it. Credit rows record none (the ledger has no currency, ADR-100); their
-// amount is shown without a symbol, never with the workspace's. A string value
-// is a decimal per-unit rate ("0.0003" cents), shown at full precision.
+// auditAmount renders one *_cents metadata value. Invoice, payment, credit
+// note and credit rows record their currency beside the amount, so the amount
+// is shown in it (credit rows since ADR-129). A row that records none, such
+// as a credit row written before, is shown without a symbol, never with the
+// workspace's. A string value is a decimal per-unit rate ("0.0003" cents),
+// shown at full precision.
 export function auditAmount(value: number | string, currency: unknown): string {
   const c = typeof currency === 'string' && currency !== '' ? currency : null
   if (typeof value === 'string') return c ? formatRate(value, c) : formatRateBare(value)

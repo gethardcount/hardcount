@@ -84,10 +84,10 @@ func TestE2E_CustomerIDIsTenantAndModeScoped(t *testing.T) {
 		body              func(customerID, suffix string) map[string]any
 	}{
 		{"credit grant", "/v1/credits/grant", "customer_credit_ledger", func(id, _ string) map[string]any {
-			return map[string]any{"customer_id": id, "amount_cents": 500, "description": "scope check"}
+			return map[string]any{"customer_id": id, "currency": "USD", "amount_cents": 500, "description": "scope check"}
 		}},
 		{"credit adjust", "/v1/credits/adjust", "customer_credit_ledger", func(id, _ string) map[string]any {
-			return map[string]any{"customer_id": id, "amount_cents": 500, "description": "scope check"}
+			return map[string]any{"customer_id": id, "currency": "USD", "amount_cents": 500, "description": "scope check"}
 		}},
 		{"subscription create", "/v1/subscriptions", "subscriptions", func(id, suffix string) map[string]any {
 			return map[string]any{
@@ -600,7 +600,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			}
 			before := mentions()
 			code, out := call("POST", "/v1/credits/grant", aLive, map[string]any{
-				"customer_id": own.cus, "amount_cents": 100, "description": "scope check",
+				"customer_id": own.cus, "currency": "USD", "amount_cents": 100, "description": "scope check",
 				"invoice_id": f.refs.draftInv, "source_credit_note_id": f.refs.creditNote,
 				"source_subscription_id": f.refs.sub, "source_subscription_item_id": f.refs.item,
 				"source_plan_changed_at": "2026-03-01T00:00:00Z", "source_change_type": "plan",

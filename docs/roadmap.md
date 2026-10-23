@@ -4,7 +4,7 @@ What changed lately, and what waits. Every change, with its date and reasoning, 
 
 ## Now: v0.9.0
 
-Not yet released. Migrations run with goose, and `velox migrate force` is gone. There is no upgrade from v0.8.x: install fresh. Everything else it changes: [Unreleased](../CHANGELOG.md#unreleased).
+Not yet released. Migrations run with goose, and `velox migrate force` is gone. There is no upgrade from v0.8.x: install fresh. Credit is per currency: each credit pays only invoices in its own currency, and grant and adjust take a `currency` ([ADR-129](adr/129-credit-carries-its-own-currency.md)). Everything else it changes: [Unreleased](../CHANGELOG.md#unreleased).
 
 ## Shipped recently
 
