@@ -2,7 +2,6 @@ package domain
 
 import (
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -111,31 +110,20 @@ func (i Invoice) Parked() bool {
 	return i.PaymentStatus == PaymentUnknown && i.StripePaymentIntentID == ""
 }
 
-// OutOfBandPaymentIntentPrefix marks the synthetic PaymentIntent id that
-// RecordOfflinePayment stamps ("out_of_band:<RFC3339>") so an operator-recorded
-// bank transfer / cheque is distinguishable from an engine-collected card
-// charge. It is NOT a Stripe id: nothing at the provider will resolve it.
-const OutOfBandPaymentIntentPrefix = "out_of_band:"
-
 // HasCardPayment reports whether this invoice's settled money is refundable to
-// a card — i.e. a real Stripe PaymentIntent backs it. False for never-charged
-// invoices AND for offline-recorded ones, whose PI field holds only the
-// synthetic OutOfBandPaymentIntentPrefix marker.
+// a card: a Stripe PaymentIntent backs it. False for a never-charged invoice,
+// one paid by credits or with nothing due, and one paid out of band
+// (PaidOutOfBand).
 //
-// This is the single canonical answer to "can money go back the way it came?".
-// It exists because the rule was hand-copied at four sites while the three that
-// actually move refund money tested only `!= ""` — so an operator could promise
-// a card refund on a bank transfer, Velox would call Stripe with the synthetic
-// marker as a PaymentIntent id, and the credit note issued with a permanently
-// failed refund leg that no retry could ever clear (found walking FLOW C2,
-// 2026-08-02: VLX-000068 offered "Refund to card — max $53.62" on an invoice
-// paid entirely by bank transfer; Retry refund answered HTTP 500 forever).
-//
-// Callers that move refund money must gate on this, not on a bare emptiness
-// check: an out-of-band invoice has a NON-empty PI that is not a PI.
+// It is the one answer to "can money go back the way it came?", and a bare
+// emptiness check gives the same answer: the PaymentIntent column holds only
+// Stripe's ids, and an offline payment leaves it empty (migration 00203
+// refuses anything else). Before, an offline payment wrote a synthetic
+// "out_of_band:<time>" id there, every reader had to know the prefix, and
+// one that did not offered a card refund on a bank transfer (VLX-000068,
+// 2026-08-02).
 func (i Invoice) HasCardPayment() bool {
-	return i.StripePaymentIntentID != "" &&
-		!strings.HasPrefix(i.StripePaymentIntentID, OutOfBandPaymentIntentPrefix)
+	return i.StripePaymentIntentID != ""
 }
 
 // CardRefundableCents is the ceiling on what a credit note may push back to the
@@ -337,15 +325,23 @@ type Invoice struct {
 	// surface that shows the period (PDF, dashboard, list) shows this one value
 	// verbatim so it can't drift across the Go and TS runtimes. The hosted
 	// invoice page shows no period; its linked PDF does.
-	BillingPeriodDisplay  string     `json:"billing_period_display,omitempty"`
-	IssuedAt              *time.Time `json:"issued_at,omitempty"`
-	DueAt                 *time.Time `json:"due_at,omitempty"`
-	PaidAt                *time.Time `json:"paid_at,omitempty"`
-	VoidedAt              *time.Time `json:"voided_at,omitempty"`
-	UncollectibleAt       *time.Time `json:"uncollectible_at,omitempty"`
-	StripePaymentIntentID string     `json:"stripe_payment_intent_id,omitempty"`
-	LastPaymentError      string     `json:"last_payment_error,omitempty"`
-	AutoChargePending     bool       `json:"auto_charge_pending,omitempty"`
+	BillingPeriodDisplay string     `json:"billing_period_display,omitempty"`
+	IssuedAt             *time.Time `json:"issued_at,omitempty"`
+	DueAt                *time.Time `json:"due_at,omitempty"`
+	PaidAt               *time.Time `json:"paid_at,omitempty"`
+	VoidedAt             *time.Time `json:"voided_at,omitempty"`
+	UncollectibleAt      *time.Time `json:"uncollectible_at,omitempty"`
+	// StripePaymentIntentID is the Stripe PaymentIntent behind the invoice's
+	// latest charge, and only that: empty when no charge was sent, and for an
+	// invoice paid out of band.
+	StripePaymentIntentID string `json:"stripe_payment_intent_id,omitempty"`
+	// PaidOutOfBand is set when the operator recorded the payment as made
+	// outside Velox (RecordOfflinePayment: a bank transfer, a cheque, cash).
+	// Stripe's paid_out_of_band. Such an invoice has no PaymentIntent (a
+	// CHECK holds both), so there is no card to refund.
+	PaidOutOfBand     bool   `json:"paid_out_of_band"`
+	LastPaymentError  string `json:"last_payment_error,omitempty"`
+	AutoChargePending bool   `json:"auto_charge_pending,omitempty"`
 	// NoPMNotifiedAt is the send-once marker for the "payment method needed"
 	// setup-link email: stamped by whichever sender delivered it (finalize-time
 	// collect or the auto-charge retry sweep), checked by the sweep so a no-PM

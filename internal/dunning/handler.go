@@ -28,7 +28,7 @@ import (
 // UpdateStatus(Voided) directly — a second, less-guarded void writer that
 // reversed no tax and emitted no event (an overlapping-flow hole). The
 // payment_recovered leg had the same hole until 2026-07-26: a raw
-// MarkPaid("") skipped the out_of_band: marker, the in-flight guard, and
+// MarkPaid("") skipped the out-of-band record, the in-flight guard, and
 // the invoice.payment_recorded webhook that the Record-offline-payment
 // dialog's path emits — two offline-payment writers with different
 // evidence trails for the same operator action.
@@ -496,8 +496,8 @@ func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoic
 	case domain.ResolutionPaymentRecovered:
 		// Route through the invoice service's offline-payment writer —
 		// the same path the invoice page's Record-offline-payment dialog
-		// uses — so the recovery gets the out_of_band: PaymentIntent
-		// marker, the in-flight-charge guard, the payment_recorded audit
+		// uses — so the recovery is recorded as paid out of band, with
+		// the in-flight-charge guard, the payment_recorded audit
 		// row, and the invoice.payment_recorded webhook. A raw MarkPaid
 		// here was a second offline-payment writer with a thinner
 		// evidence trail for the same operator action. The service binds

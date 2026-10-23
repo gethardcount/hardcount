@@ -9,10 +9,10 @@ import (
 )
 
 // The invariant under test: refund money may only target a REAL card
-// PaymentIntent. RecordOfflinePayment settles an invoice by stamping a
-// synthetic "out_of_band:<ts>" marker into the PI field, so AmountPaidCents > 0
-// does NOT imply a card was charged, and the field being non-empty does not
-// imply it is a Stripe id.
+// PaymentIntent. RecordOfflinePayment settles an invoice with no PaymentIntent
+// and paid_out_of_band set, so AmountPaidCents > 0 does NOT imply a card was
+// charged. (Until migration 00203 it stamped a synthetic "out_of_band:<ts>"
+// marker into the PI field instead, which is how the bug below happened.)
 //
 // Found by walking FLOW C2 (2026-08-02) on VLX-000068 — $53.62 settled entirely
 // by bank transfer. Every site that moved refund money tested only `!= ""`, so
@@ -23,21 +23,22 @@ import (
 // answered HTTP 500 and could never succeed.
 //
 // Every case below is a CONTROL/TREATMENT pair over the same amounts: the only
-// difference is whether the PI field holds a card id or the offline marker. A
-// single-sided test would pass against a cap wired to AmountPaidCents alone.
+// difference is whether a card PaymentIntent or an offline payment settled it.
+// A single-sided test would pass against a cap wired to AmountPaidCents alone.
 
 func offlineInvoice() domain.Invoice {
 	return domain.Invoice{
 		ID: "inv_offline", TenantID: "t1", CustomerID: "cus_1",
 		Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
 		Currency: "USD", TotalAmountCents: 5362, AmountPaidCents: 5362,
-		StripePaymentIntentID: domain.OutOfBandPaymentIntentPrefix + "2026-08-02T15:22:52Z",
+		PaidOutOfBand: true,
 	}
 }
 
 func cardInvoice() domain.Invoice {
 	inv := offlineInvoice()
 	inv.ID = "inv_card"
+	inv.PaidOutOfBand = false
 	inv.StripePaymentIntentID = "pi_real_card"
 	return inv
 }
@@ -54,19 +55,19 @@ func mkRailSvc(inv domain.Invoice) (*Service, *fakeRefunder) {
 func TestDomain_HasCardPayment(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name string
-		pi   string
-		want bool
+		name    string
+		pi      string
+		offline bool
+		want    bool
 	}{
-		{"real card PaymentIntent", "pi_3TynLTGcT3wmy5fZ", true},
-		{"never charged", "", false},
-		{"offline marker", "out_of_band:2026-08-02T15:22:52Z", false},
-		// Guards the prefix test against a naive Contains/suffix rewrite.
-		{"card id merely containing the word", "pi_out_of_band_lookalike", true},
+		{"real card PaymentIntent", "pi_3TynLTGcT3wmy5fZ", false, true},
+		{"never charged", "", false, false},
+		{"paid out of band", "", true, false},
+		{"card id merely containing the word", "pi_out_of_band_lookalike", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			inv := domain.Invoice{StripePaymentIntentID: tc.pi, AmountPaidCents: 5000}
+			inv := domain.Invoice{StripePaymentIntentID: tc.pi, PaidOutOfBand: tc.offline, AmountPaidCents: 5000}
 			if got := inv.HasCardPayment(); got != tc.want {
 				t.Errorf("HasCardPayment(%q) = %v, want %v", tc.pi, got, tc.want)
 			}
@@ -180,8 +181,7 @@ func TestCreateRefund_InvoiceEndpoint_RequiresCardPayment(t *testing.T) {
 		if !strings.Contains(err.Error(), "outside Stripe") {
 			t.Errorf("error should explain the rail: %q", err.Error())
 		}
-		// Mutation-verify: the whole point is that the synthetic marker never
-		// reaches the provider as a PaymentIntent id.
+		// Mutation-verify: an offline payment never reaches the provider.
 		if len(refunder.calls) != 0 {
 			t.Fatalf("Stripe must not be called; got %d call(s) with pi=%q",
 				len(refunder.calls), refunder.calls[0].paymentIntentID)
@@ -197,7 +197,7 @@ func TestRetryRefund_OfflinePaid_FailsCleanlyInsteadOfForever(t *testing.T) {
 	// already in the DB with refund_amount > 0 against an offline-paid
 	// invoice. Retry is the operator's only button on the "needs attention"
 	// queue, so it must answer with an actionable terminal state rather than
-	// calling Stripe with a marker and surfacing an opaque 500.
+	// calling Stripe with no PaymentIntent and surfacing an opaque 500.
 	inv := offlineInvoice()
 	store := newMemStore()
 	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{inv.ID: inv}}

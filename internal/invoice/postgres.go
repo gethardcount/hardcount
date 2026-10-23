@@ -240,7 +240,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
 	COALESCE(provider_payment_status,''), provider_synced_at,
-	bill_to_snapshot, supplier_snapshot, below_minimum_at`
+	bill_to_snapshot, supplier_snapshot, below_minimum_at, paid_out_of_band`
 
 // invClockCol reads the test clock an invoice's dates follow from its
 // customer (domain.Invoice.TestClockID). It follows invCols on the list and
@@ -1245,19 +1245,21 @@ func (s *PostgresStore) MarkPaid(ctx context.Context, tenantID, id string, strip
 // catch — fires them once, not twice. invoice.paid itself is already
 // once-only (enqueued inside this tx, after the no-op branch returns).
 func (s *PostgresStore) MarkPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, false, nil, nil)
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleOther, nil, nil)
 }
 
 // MarkPaidOffline is MarkPaid for an operator-recorded payment (cheque,
-// wire): check runs on the invoice as it is under this transition's row lock,
-// before anything is written, and its error refuses the payment. It exists so
-// the offline path can refuse while a card charge is in progress (#975) —
-// the service's own read comes before the lock and can miss a charge that
-// started after it. Only the offline path gets a check: the card settlement
-// and the credit-covered settles run inside the charge's own hold and must
-// always be able to record it.
-func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
-	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, false, check, nil)
+// wire): the paid flip sets paid_out_of_band and leaves the invoice with no
+// PaymentIntent, since no charge was sent to Stripe (it takes none, so this
+// path cannot write one). check runs on the invoice as it is under this
+// transition's row lock, before anything is written, and its error refuses
+// the payment. It exists so the offline path can refuse while a card charge
+// is in progress (#975) — the service's own read comes before the lock and
+// can miss a charge that started after it. Only the offline path gets a
+// check: the card settlement and the credit-covered settles run inside the
+// charge's own hold and must always be able to record it.
+func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+	inv, _, err := s.markPaidReportingTransition(ctx, tenantID, id, "", paidAt, settleOffline, check, nil)
 	return inv, err
 }
 
@@ -1279,16 +1281,32 @@ func (s *PostgresStore) MarkPaidOffline(ctx context.Context, tenantID, id string
 // suppresses every later attempt). It receives the freshly-written row
 // because the receipt's amount is the amount actually booked here.
 func (s *PostgresStore) MarkPaidCardSettlementTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
-	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, true, nil, then)
+	return s.markPaidReportingTransition(ctx, tenantID, id, stripePaymentIntentID, paidAt, settleCard, nil, then)
 }
 
-// markPaidReportingTransition is the shared core. cardSettlement=true also
-// enqueues payment.succeeded on the SAME tx as the paid-flip (gated on the
-// transition, so exactly-once). Both event enqueues live inside this one tx, so
+// settleKind says which paid flip markPaidLockedTx writes: the effects that
+// ride it differ by how the money arrived.
+type settleKind int
+
+const (
+	// settleOther: credits cover it, nothing is due, or a caller that names
+	// the PaymentIntent it settles without being the card settle path (the
+	// reconciler's fallback). invoice.paid only.
+	settleOther settleKind = iota
+	// settleCard: SettleSucceeded. Adds payment.succeeded in the same tx.
+	settleCard
+	// settleOffline: RecordOfflinePayment. Sets paid_out_of_band; no
+	// PaymentIntent, no charge attempt.
+	settleOffline
+)
+
+// markPaidReportingTransition is the shared core. settleCard also enqueues
+// payment.succeeded on the SAME tx as the paid-flip (gated on the
+// transition, so exactly-once); settleOffline marks the payment out of band. Both event enqueues live inside this one tx, so
 // they are atomic with finalized/uncollectible→paid: tx rolls back → no events;
 // commits → the dispatcher delivers.
 // check (nil = none) is MarkPaidOffline's refusal, run under the row lock.
-func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, cardSettlement bool, check func(tx *sql.Tx, locked domain.Invoice) error, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
+func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, kind settleKind, check func(tx *sql.Tx, locked domain.Invoice) error, then func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Invoice{}, false, err
@@ -1392,7 +1410,7 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 		))
 	}
 
-	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, cardSettlement)
+	inv, err := s.markPaidLockedTx(ctx, tx, tenantID, id, stripePaymentIntentID, paidAt, kind)
 	if err != nil {
 		return domain.Invoice{}, false, err
 	}
@@ -1423,11 +1441,12 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 
 // markPaidLockedTx writes the finalized/uncollectible → paid transition on tx
 // and the effects that ride it: the open checkout claims close, invoice.paid
-// is enqueued, and so is payment.succeeded for a card settlement. The caller
+// is enqueued, and so is payment.succeeded for a card settlement. An offline
+// settlement sets paid_out_of_band and names no PaymentIntent. The caller
 // holds the invoice row lock on tx and has decided the invoice may be paid.
 // Every paid flip goes through here (ADR-068 choke point), so the effects
 // cannot differ between settle paths.
-func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, cardSettlement bool) (domain.Invoice, error) {
+func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, kind settleKind) (domain.Invoice, error) {
 	now := clock.Now(ctx)
 	var inv domain.Invoice
 	// amount_paid_cents records the CURRENT amount_due (what the PaymentIntent was
@@ -1456,6 +1475,7 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 			status = 'paid',
 			payment_status = 'succeeded',
 			stripe_payment_intent_id = $1,
+			paid_out_of_band = $5,
 			charge_attempt_seq = charge_attempt_seq + 1,
 			paid_at = $2,
 			amount_paid_cents = amount_due_cents,
@@ -1464,7 +1484,7 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 			updated_at = $3
 		WHERE id = $4
 		RETURNING `+invCols,
-		postgres.NullableString(stripePaymentIntentID), paidAt, now, id,
+		postgres.NullableString(stripePaymentIntentID), paidAt, now, id, kind == settleOffline,
 	).Scan(s.scanInvDest(&inv)...)
 
 	if err == sql.ErrNoRows {
@@ -1514,7 +1534,7 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	// tiering block in payment/settlement.go). Reaches here only on the
 	// finalized/uncollectible→paid transition, so it fires exactly once, same
 	// as invoice.paid.
-	if cardSettlement && s.outbox != nil {
+	if kind == settleCard && s.outbox != nil {
 		if _, err := s.outbox.Enqueue(ctx, tx, tenantID, domain.EventPaymentSucceeded, map[string]any{
 			"invoice_id":        inv.ID,
 			"customer_id":       inv.CustomerID,
@@ -1745,7 +1765,7 @@ func (s *PostgresStore) SettleZeroDueTx(ctx context.Context, tx *sql.Tx, tenantI
 	if hold != domain.ChargeHoldNone {
 		return inv, false, nil
 	}
-	paid, err := s.markPaidLockedTx(ctx, tx, tenantID, id, "", paidAt, false)
+	paid, err := s.markPaidLockedTx(ctx, tx, tenantID, id, "", paidAt, settleOther)
 	if err != nil {
 		return domain.Invoice{}, false, err
 	}
@@ -3820,7 +3840,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,
 		domain.SnapshotScanner[domain.DocumentBillTo]{Dst: &inv.BillToSnapshot, Open: s.openBillTo},
 		domain.SnapshotScanner[domain.DocumentSupplier]{Dst: &inv.SupplierSnapshot},
-		&inv.BelowMinimumAt,
+		&inv.BelowMinimumAt, &inv.PaidOutOfBand,
 	}
 }
 

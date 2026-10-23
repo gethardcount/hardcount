@@ -51,3 +51,22 @@ func TestClassifyInvoiceAttention_PaymentAnomalyPiercesTerminal(t *testing.T) {
 		t.Fatalf("clean paid invoice grew a banner: %+v", att)
 	}
 }
+
+// A card payment on an invoice already paid outside Velox: the detail names
+// the extra charge and says how the first payment was made. It has no
+// PaymentIntent to name, and must not pretend to.
+func TestClassifyInvoiceAttention_DuplicateChargeAfterOfflinePayment(t *testing.T) {
+	inv := Invoice{
+		Status: InvoicePaid, PaymentStatus: PaymentSucceeded, PaidOutOfBand: true,
+		PaymentAnomalyKind:            EventPaymentDuplicateCharge,
+		PaymentAnomalyPaymentIntentID: "pi_B",
+	}
+	att := ClassifyInvoiceAttention(inv, AttentionContext{})
+	if att == nil {
+		t.Fatal("no attention for a second payment on an offline-paid invoice")
+	}
+	want := "Extra payment: pi_B. Original payment: recorded as paid outside Velox."
+	if !strings.HasPrefix(att.Detail, want) {
+		t.Errorf("detail = %q, want it to start %q", att.Detail, want)
+	}
+}

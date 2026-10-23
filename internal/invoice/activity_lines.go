@@ -136,7 +136,7 @@ func retriesText(n int) string {
 // failed.
 func paidLine(inv domain.Invoice, retries int, note string, actor *activity.Actor, byNote *activity.Part) activity.Line {
 	amount := activity.Amount(inv.AmountPaidCents, inv.Currency)
-	if strings.HasPrefix(inv.StripePaymentIntentID, "out_of_band:") {
+	if inv.PaidOutOfBand {
 		// "Recorded" is only the timestamp word (ADR-104 Invariant C), and the
 		// actor says who entered it.
 		l := activity.Line{Kind: "invoice.offline_payment_received", Title: "Offline payment received", Tone: activity.ToneSuccess, Amount: amount, Actor: actor}

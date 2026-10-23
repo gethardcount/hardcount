@@ -106,8 +106,8 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 	paidA := getInvoice(idA)
 	if flowStr(paidA, "status") != "paid" || flowStr(paidA, "payment_status") != "succeeded" ||
 		flowInt(paidA, "amount_due_cents") != 0 || flowInt(paidA, "amount_paid_cents") != 12000 ||
-		flowStr(paidA, "paid_at") == "" || !strings.HasPrefix(flowStr(paidA, "stripe_payment_intent_id"), "out_of_band:") {
-		t.Errorf("invoice A after record-payment: %s, want paid, 0 due, 12000 paid, an out_of_band: marker", settled(paidA))
+		flowStr(paidA, "paid_at") == "" || flowStr(paidA, "stripe_payment_intent_id") != "" || paidA["paid_out_of_band"] != true {
+		t.Errorf("invoice A after record-payment: %s paid_out_of_band=%v, want paid, 0 due, 12000 paid, no PaymentIntent, paid_out_of_band", settled(paidA), paidA["paid_out_of_band"])
 	}
 	if settled(recorded.body) != settled(paidA) {
 		t.Errorf("record-payment answered %s, but the invoice reads %s", settled(recorded.body), settled(paidA))
@@ -215,8 +215,8 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 	paidB := getInvoice(idB)
 	if flowStr(paidB, "status") != "paid" || flowStr(paidB, "payment_status") != "succeeded" ||
 		flowInt(paidB, "amount_due_cents") != 0 || flowInt(paidB, "amount_paid_cents") != 4500 ||
-		flowStr(paidB, "stripe_payment_intent_id") != "pi_settlement_flow_b" || flowStr(paidB, "paid_at") == "" {
-		t.Errorf("invoice B after payment_intent.succeeded: %s, want paid, 0 due, 4500 paid, pi_settlement_flow_b", settled(paidB))
+		flowStr(paidB, "stripe_payment_intent_id") != "pi_settlement_flow_b" || flowStr(paidB, "paid_at") == "" || paidB["paid_out_of_band"] != false {
+		t.Errorf("invoice B after payment_intent.succeeded: %s paid_out_of_band=%v, want paid, 0 due, 4500 paid, pi_settlement_flow_b, not out of band", settled(paidB), paidB["paid_out_of_band"])
 	}
 	if flowStr(paidB, "payment_card_brand") != "visa" || flowStr(paidB, "payment_card_last4") != "4242" {
 		t.Errorf("invoice B card = %q %q, want visa 4242 from the PaymentIntent", flowStr(paidB, "payment_card_brand"), flowStr(paidB, "payment_card_last4"))

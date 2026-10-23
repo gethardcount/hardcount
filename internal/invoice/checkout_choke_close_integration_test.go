@@ -117,7 +117,7 @@ func TestChokePointCloses(t *testing.T) {
 				return err
 			}},
 			{"offline payment", false, func(store *invoice.PostgresStore, tenantID, invID string, at time.Time) error {
-				_, err := store.MarkPaidOffline(ctx, tenantID, invID, "out_of_band:wire", at, nil)
+				_, err := store.MarkPaidOffline(ctx, tenantID, invID, at, nil)
 				return err
 			}},
 			{"credits cover it", true, func(store *invoice.PostgresStore, tenantID, invID string, at time.Time) error {

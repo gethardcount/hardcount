@@ -240,13 +240,21 @@ func (m *memStore) ChargeHoldStateOf(_ context.Context, _, _ string) (domain.Cha
 }
 
 // MarkPaidOffline: check sees the current in-memory invoice as the locked row.
-func (m *memStore) MarkPaidOffline(ctx context.Context, tenantID, id, stripeID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+// Like the real store, the paid flip sets paid_out_of_band and no PaymentIntent.
+func (m *memStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
 	if inv, ok := m.invoices[id]; ok && inv.TenantID == tenantID && check != nil {
 		if err := check(nil, inv); err != nil {
 			return domain.Invoice{}, err
 		}
 	}
-	return m.MarkPaid(ctx, tenantID, id, stripeID, paidAt)
+	wasPaid := m.invoices[id].Status == domain.InvoicePaid
+	inv, err := m.MarkPaid(ctx, tenantID, id, "", paidAt)
+	if err != nil || wasPaid {
+		return inv, err
+	}
+	inv.PaidOutOfBand = true
+	m.invoices[id] = inv
+	return inv, nil
 }
 
 // Tx variant: the fake ignores tx; the closure sees the current in-memory

@@ -1616,10 +1616,10 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 	}
 	// Tripwire (ADR-103): a card-paid invoice with no succeeded attempt
 	// means the one owner of payment rows is missing its fact — the
-	// timeline will simply show no charge. Out-of-band settlements
-	// (offline payment, credit-covered, $0) legitimately have none.
-	if inv.PaidAt != nil && !sawSucceeded &&
-		inv.StripePaymentIntentID != "" && !strings.HasPrefix(inv.StripePaymentIntentID, "out_of_band:") {
+	// timeline will simply show no charge. Settlements with no charge
+	// (offline payment, credit-covered, $0) have no PaymentIntent and
+	// legitimately no attempt.
+	if inv.PaidAt != nil && !sawSucceeded && inv.HasCardPayment() {
 		slog.Warn("invoice is paid by card but has no succeeded charge attempt — payment row will be missing (ADR-103 single-source invariant)",
 			"invoice_id", inv.ID, "payment_intent_id", inv.StripePaymentIntentID)
 	}

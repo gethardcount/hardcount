@@ -35,9 +35,9 @@ export function IssueCreditDialog({ invoice, existingCreditNotes, onClose, onCre
 }) {
   const isPaid = invoice.status === 'paid'
 
-  // An offline-recorded payment (Record payment) carries a NON-empty PI field
-  // holding a synthetic "out_of_band:<ts>" marker, so `amount_paid_cents > 0`
-  // does not imply a card was charged. Mirrors domain.Invoice.HasCardPayment.
+  // `amount_paid_cents > 0` does not imply a card was charged: an offline
+  // payment (Record payment) or credits pay with no PaymentIntent. Mirrors
+  // domain.Invoice.HasCardPayment.
   const hasCard = hasCardPayment(invoice.stripe_payment_intent_id)
 
   const [amount, setAmount] = useState('')

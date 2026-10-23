@@ -946,10 +946,10 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 		}
 		pmRefundable := inv.CardRefundableCents(existingRefunds)
 		if refundAmount > pmRefundable {
-			// An offline-recorded payment carries a NON-empty PI field that is
-			// not a PaymentIntent, so the over-cap wording ("exceeds 0.00 paid
-			// via card") would misdescribe the cause. Name the rail instead —
-			// the operator's fix is to re-route the money, not to lower it.
+			// With no card behind the payment (offline, credits) the over-cap
+			// wording ("exceeds 0.00 paid via card") would misdescribe the
+			// cause. Name the rail instead — the operator's fix is to
+			// re-route the money, not to lower it.
 			if !inv.HasCardPayment() {
 				return domain.CreditNote{}, errs.Invalid("refund_amount_cents", fmt.Sprintf(
 					"this invoice was not paid by card, so there is no card to refund (%.2f requested) — route the amount to credit_amount_cents or out_of_band_amount_cents.",
@@ -1209,8 +1209,8 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 
 		// Allocation: the two permitted channels only (requirement f).
 		var refundAmount, outOfBand int64
-		// RecordOfflinePayment stamps a synthetic "out_of_band:<ts>" marker
-		// into the PI field — there is no card to refund behind it.
+		// An offline-paid commit (RecordOfflinePayment) has no PaymentIntent:
+		// there is no card to refund behind it.
 		if input.RefundAmountCents == nil && input.OutOfBandAmountCents == nil {
 			if inv.HasCardPayment() {
 				refundAmount = x
@@ -1237,7 +1237,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		// minus prior refunds — an out-of-band Stripe-dashboard refund may
 		// have drained the PI. Zero when no card backs the payment at all, so
 		// an EXPLICIT refund allocation on an offline-paid invoice is refused
-		// here rather than reaching Stripe with a synthetic marker.
+		// here rather than reaching Stripe with no PaymentIntent.
 		pmRefundable := inv.CardRefundableCents(existingRefunds)
 		if refundAmount > pmRefundable {
 			if !inv.HasCardPayment() {
@@ -1382,11 +1382,9 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 	if inv.Status != domain.InvoicePaid {
 		return domain.CreditNote{}, errs.InvalidState("can only refund paid invoices")
 	}
-	// Not a bare emptiness check: an offline-recorded payment has a NON-empty
-	// PI field holding only the synthetic out_of_band marker, which no Stripe
-	// refund can resolve.
+	// No card behind the payment: say which kind of payment it was.
 	if !inv.HasCardPayment() {
-		if inv.StripePaymentIntentID == "" {
+		if !inv.PaidOutOfBand {
 			return domain.CreditNote{}, errs.InvalidState("invoice has no associated payment to refund")
 		}
 		return domain.CreditNote{}, errs.InvalidState("invoice was paid outside Stripe — there is no card to refund; issue a credit note allocated to out_of_band_amount_cents instead")
@@ -1867,11 +1865,9 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 	// `velox_cn_<cn_id>` key makes a retry after a partial failure return the
 	// original refund_id rather than double-refund; refund_status is persisted
 	// immediately, and a failed, unknown or pending leg recovers via RetryRefund.
-	// HasCardPayment, not `!= ""`: an offline-recorded payment's PI field holds
-	// the synthetic out_of_band marker, and handing that to Stripe as a
-	// PaymentIntent id burns the leg into a permanently-failed state that no
-	// RetryRefund can clear. Validation now refuses such an allocation up
-	// front; this keeps rows written before that guard from reaching Stripe.
+	// With no PaymentIntent there is nothing to hand Stripe, and the leg could
+	// never succeed. Validation refuses such an allocation up front; this
+	// keeps rows written before that guard from reaching Stripe.
 	if inv.PaymentStatus == domain.PaymentSucceeded && cn.RefundAmountCents > 0 && cn.StripeRefundID == "" {
 		unknownKey := ""
 		if s.refunder != nil && inv.HasCardPayment() {
@@ -1906,8 +1902,7 @@ func (s *Service) runPostIssueExternalLegs(ctx context.Context, tenantID, id str
 			// say it loudly — RetryRefund answers with the void-and-re-issue
 			// instruction rather than another doomed Stripe call.
 			slog.Warn("credit note allocates a card refund on an invoice not paid by card; refund leg cannot execute",
-				"credit_note_id", cn.ID, "invoice_id", inv.ID,
-				"payment_intent_id", inv.StripePaymentIntentID)
+				"credit_note_id", cn.ID, "invoice_id", inv.ID, "paid_out_of_band", inv.PaidOutOfBand)
 			cn.RefundStatus = domain.RefundFailed
 		} else {
 			cn.RefundStatus = domain.RefundPending
@@ -2094,14 +2089,14 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 		return domain.CreditNote{}, fmt.Errorf("get invoice: %w", err)
 	}
 	// The operator-facing dead end this closes: a refund leg written against an
-	// offline-paid invoice can NEVER succeed, because the PI field holds a
-	// synthetic marker rather than a Stripe id. Before this guard the retry
-	// sailed past `!= ""`, failed at Stripe, and surfaced as an opaque 500 —
-	// leaving the row in the "refunds needing attention" queue with no way out.
-	// Answer it as the un-retryable state it is, so the operator voids the note
-	// and re-issues against out_of_band instead of clicking forever.
+	// offline-paid invoice can NEVER succeed, because no Stripe payment backs
+	// it. Before this guard the retry failed at Stripe and surfaced as an
+	// opaque 500 — leaving the row in the "refunds needing attention" queue
+	// with no way out. Answer it as the un-retryable state it is, so the
+	// operator voids the note and re-issues against out_of_band instead of
+	// clicking forever.
 	if !inv.HasCardPayment() {
-		if inv.StripePaymentIntentID == "" {
+		if !inv.PaidOutOfBand {
 			return domain.CreditNote{}, errs.InvalidState("invoice has no PaymentIntent — refund cannot be processed via Stripe")
 		}
 		return domain.CreditNote{}, errs.InvalidState("invoice was paid outside Stripe — this refund can never succeed; void this credit note and re-issue it allocated to out-of-band instead")

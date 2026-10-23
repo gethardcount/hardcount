@@ -162,7 +162,7 @@ Words used in the Velox docs and dashboard. For the big picture, read
 - **PaymentIntent**: Stripe's name for one attempt to charge a card. Velox
   charges cards only through PaymentIntents, not through Stripe Billing, so
   Velox keeps the invoice. An invoice stores its PaymentIntent ID. A payment
-  made outside Stripe stores an `out_of_band:` marker instead.
+  recorded as made outside Velox has none, and sets `paid_out_of_band`.
   [More](adr/001-paymentintent-only-stripe.md)
 - **payment method (PM)**: A customer's saved card. Stripe holds the card,
   and Velox keeps its Stripe ID and the details it shows. A customer can

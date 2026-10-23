@@ -59,6 +59,9 @@ refund at face (over-refund); charging consumption at face under-refunds.
    balance would refund the very block being retired. Offline-paid
    commits (the `out_of_band:` PI marker) default to the out_of_band
    channel — the CN records the obligation; cash moves outside.
+   *(Amended 2026-10-23, #1370: an offline payment now sets
+   `paid_out_of_band` and records no PaymentIntent. The default reads
+   "no PaymentIntent", which also covers it.)*
 5. **Retire primitive single-sourced.** `retireCommitSliceTx` is the one
    retirement core; the void leg (slice = remaining, silent no-op on a
    missing grant, no K bump, `commit_void_retire`) and the relief leg

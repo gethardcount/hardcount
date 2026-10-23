@@ -151,7 +151,23 @@ export interface Invoice {
   voided_at?: string | null;
   /** When the invoice was marked uncollectible. */
   uncollectible_at?: string;
+  /**
+     * The Stripe PaymentIntent of the card charge that paid the
+     * invoice, or of its last charge that is in progress or failed. It
+     * can be absent after a charge was sent: for example when the
+     * invoice was then paid without a card (by credits, with nothing
+     * due, or outside Velox: `paid_out_of_band`), or when Stripe
+     * refused the last charge as below its minimum.
+     */
   stripe_payment_intent_id?: string;
+  /**
+     * True when the payment was recorded as made outside Velox, such as
+     * a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
+     * or a payment recovery run resolved as `payment_recovered`). Such
+     * an invoice has no `stripe_payment_intent_id`, so there is no card
+     * to refund.
+     */
+  paid_out_of_band?: boolean;
   last_payment_error?: string;
   auto_charge_pending?: boolean;
   /**

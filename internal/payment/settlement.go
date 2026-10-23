@@ -503,6 +503,7 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 		"invoice_id", inv.ID,
 		"tenant_id", tenantID,
 		"recorded_payment_intent_id", inv.StripePaymentIntentID,
+		"paid_out_of_band", inv.PaidOutOfBand,
 		"incoming_payment_intent_id", incomingPI,
 		"captured_cents", capturedCents,
 		"amount_paid_cents", inv.AmountPaidCents,
@@ -513,6 +514,9 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 			"invoice_number":             inv.InvoiceNumber,
 			"customer_id":                inv.CustomerID,
 			"recorded_payment_intent_id": inv.StripePaymentIntentID,
+			// An invoice paid outside Velox has no PaymentIntent, the same
+			// as one paid by credits; this tells the two apart.
+			"paid_out_of_band":           inv.PaidOutOfBand,
 			"incoming_payment_intent_id": incomingPI,
 			"captured_cents":             capturedCents,
 			"amount_paid_cents":          inv.AmountPaidCents,

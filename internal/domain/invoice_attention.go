@@ -1580,6 +1580,8 @@ func classifyPaymentAnomaly(inv Invoice) *Attention {
 		detail = "Extra payment: " + pi + "."
 		if inv.StripePaymentIntentID != "" {
 			detail += " Original payment: " + inv.StripePaymentIntentID + "."
+		} else if inv.PaidOutOfBand {
+			detail += " Original payment: recorded as paid outside Velox."
 		}
 		detail += " The extra charge exists only in Stripe; Velox records one payment."
 	case EventPaymentAmountMismatch:

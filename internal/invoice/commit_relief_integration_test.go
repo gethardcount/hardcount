@@ -47,10 +47,11 @@ func newReliefCNService(h *commitHarness) *creditnote.Service {
 	return cnSvc
 }
 
-// payOffline marks the commit invoice paid out-of-band (the migration norm).
+// payOffline marks the commit invoice paid out-of-band (the migration norm),
+// as Record offline payment does.
 func payOffline(t *testing.T, h *commitHarness, ctx context.Context, invoiceID string) {
 	t.Helper()
-	if _, err := h.invStore.MarkPaid(ctx, h.tenantID, invoiceID, "out_of_band:test", time.Now().UTC()); err != nil {
+	if _, err := h.invStore.MarkPaidOffline(ctx, h.tenantID, invoiceID, time.Now().UTC(), nil); err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
 }

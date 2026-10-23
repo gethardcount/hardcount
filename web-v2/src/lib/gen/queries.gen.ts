@@ -9189,6 +9189,8 @@ export const getRecordInvoicePaymentUrl = (id: string,) => {
  * Marks a `finalized` or `uncollectible` invoice as paid for money
  * received another way, such as a bank transfer, cheque or cash. The
  * full amount due is recorded; partial payments are not supported.
+ * The invoice gets `paid_out_of_band: true` and no
+ * `stripe_payment_intent_id`.
  *
  * Resolves any active dunning run with `payment_recovered`. Fires the
  * `invoice.payment_recorded` webhook event. The optional `note` is

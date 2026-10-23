@@ -27,7 +27,7 @@ func (v *recordingVoider) RecordOfflinePayment(_ context.Context, tenantID, id, 
 	if v.err != nil {
 		return domain.Invoice{}, v.err
 	}
-	return domain.Invoice{ID: id, TenantID: tenantID, CustomerID: "cus_1", Status: domain.InvoicePaid, StripePaymentIntentID: "out_of_band:2026-07-26T00:00:00Z"}, nil
+	return domain.Invoice{ID: id, TenantID: tenantID, CustomerID: "cus_1", Status: domain.InvoicePaid, PaidOutOfBand: true}, nil
 }
 
 func (v *recordingVoider) Void(_ context.Context, tenantID, id string) (domain.Invoice, error) {
@@ -81,8 +81,8 @@ func TestResolveRun_RejectsUnknownResolution(t *testing.T) {
 // TestResolveRun_PaymentRecovered_RoutesThroughOfflinePaymentWriter pins the
 // single-offline-payment-writer contract (2026-07-26): payment_recovered
 // resolves through invoice.Service.RecordOfflinePayment — the same path as
-// the invoice page's Record-offline-payment dialog — so the recovery carries
-// the out_of_band: PaymentIntent marker, the in-flight guard, and the
+// the invoice page's Record-offline-payment dialog — so the recovery is
+// recorded as paid out of band, with the in-flight guard and the
 // invoice.payment_recorded webhook. Pre-fix it called a raw MarkPaid("")
 // with none of those.
 func TestResolveRun_PaymentRecovered_RoutesThroughOfflinePaymentWriter(t *testing.T) {
