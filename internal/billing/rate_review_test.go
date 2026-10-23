@@ -132,3 +132,117 @@ func TestCloserAfterFire_AdditiveMeterSkipsTheFullWindowRead(t *testing.T) {
 		}
 	}
 }
+
+// Review round 2 of the one rater (ADR-130 PR-1).
+
+// seedFireAt10 stores fireAt10 as a threshold invoice for sub_1's March
+// period, so every reader of the watermark finds it.
+func seedFireAt10(invoices *mockInvoices) {
+	wm := fireAt10()
+	invoices.invoices = append(invoices.invoices, domain.Invoice{
+		ID: "inv_thr", TenantID: "t1", CustomerID: "cus_1", SubscriptionID: "sub_1",
+		BillingReason: domain.BillingReasonThreshold, Status: domain.InvoiceFinalized,
+		BillingPeriodStart: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), BillingPeriodEnd: *wm.billedThrough,
+	})
+	for _, li := range wm.lines {
+		li.InvoiceID = "inv_thr"
+		invoices.lineItems = append(invoices.lineItems, li)
+	}
+}
+
+// A pricing rule bound to the same graduated version as its meter's own
+// binding makes the threshold invoice's line ambiguous: its quantity could
+// seed either bucket's tiers. Only the closers refuse (checkLadderSeeds):
+// they would write the guess on an invoice. The close-mirror preview and the
+// live balance are estimates and still answer.
+func TestLadderSeedCheck_OnlyTheClosersRefuse(t *testing.T) {
+	engine, subs, _, pricing, invoices := setupEngine()
+	pricing.meterPricingRules = map[string][]domain.MeterPricingRule{
+		"mtr_api": {{ID: "mpr_gpt", MeterID: "mtr_api", RatingRuleVersionID: "rrv_api",
+			DimensionMatch: map[string]any{"model": "gpt"}, AggregationMode: domain.AggSum}},
+	}
+	seedFireAt10(invoices)
+	ctx := context.Background()
+	sub := subs.subs["sub_1"]
+	ps := *sub.CurrentBillingPeriodStart
+	canceledAt := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	if _, _, err := engine.buildCancelLineItems(ctx, sub, fireAt10(), clonePlans(pricing.plans), "USD", ps, canceledAt, time.UTC, unpricedUsage{}, netNegativeUsage{}, cancelUsageSuffix); err == nil || !strings.Contains(err.Error(), "resolve to rating rule rrv_api") {
+		t.Fatalf("cancel err = %v, want the ambiguous-seed refusal", err)
+	}
+	if _, err := engine.previewCycle(ctx, sub); err != nil {
+		t.Errorf("close-mirror preview: %v, want an estimate", err)
+	}
+	if _, _, err := engine.unbilledUsageCents(ctx, sub); err != nil {
+		t.Errorf("live balance: %v, want a total", err)
+	}
+}
+
+// A preview lists usage lines in the plan's meter order, not in meter id
+// order. setupEngine's plan lists its meters in id order, so it is reversed
+// here.
+func TestPreview_UsageLinesFollowThePlansMeterOrder(t *testing.T) {
+	engine, subs, _, pricing, _ := setupEngine()
+	plan := pricing.plans["pln_1"]
+	plan.MeterIDs = []string{"mtr_storage", "mtr_api"}
+	pricing.plans["pln_1"] = plan
+	sub := subs.subs["sub_1"]
+	ctx := context.Background()
+	usageMeters := func(res PreviewResult) []string {
+		var ids []string
+		for _, l := range res.Lines {
+			if l.LineType == "usage" {
+				ids = append(ids, l.MeterID)
+			}
+		}
+		return ids
+	}
+	closeMirror, err := engine.previewCycle(ctx, sub)
+	if err != nil {
+		t.Fatalf("close-mirror preview: %v", err)
+	}
+	flat, err := engine.previewWithWindow(ctx, sub, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
+	if err != nil {
+		t.Fatalf("flat preview: %v", err)
+	}
+	for name, res := range map[string]PreviewResult{"close mirror": closeMirror, "flat window": flat} {
+		if got := strings.Join(usageMeters(res), ","); got != "mtr_storage,mtr_api" {
+			t.Errorf("%s usage lines = %s, want mtr_storage,mtr_api (the plan's order)", name, got)
+		}
+	}
+}
+
+// The close-mirror preview lists the meters only a segment plan carries (a
+// plan the subscription left this period) after the current plans' meters,
+// by plan id. It walked those plans in map order, so with two such plans
+// the line order changed from call to call.
+func TestPreview_SegmentPlanMetersInPlanIDOrder(t *testing.T) {
+	engine, subs, usage, pricing, _ := setupEngine()
+	for planID, meterID := range map[string]string{"pln_a": "mtr_a", "pln_b": "mtr_b"} {
+		pricing.plans[planID] = domain.Plan{ID: planID, Name: planID, Currency: "USD", BillingInterval: domain.BillingMonthly, MeterIDs: []string{meterID}}
+		pricing.meters[meterID] = domain.Meter{ID: meterID, Name: meterID, Unit: "calls", RatingRuleVersionID: "rrv_storage"}
+		usage.totals[meterID] = 10
+	}
+	day := func(d int) time.Time { return time.Date(2026, 3, d, 0, 0, 0, 0, time.UTC) }
+	mar5, mar10 := day(5), day(10)
+	subs.intervals = []domain.ItemInterval{
+		{PlanID: "pln_b", Quantity: 1, StartsAt: day(1), EndsAt: &mar5},
+		{PlanID: "pln_a", Quantity: 1, StartsAt: mar5, EndsAt: &mar10},
+		{PlanID: "pln_1", Quantity: 1, StartsAt: mar10},
+	}
+	sub := subs.subs["sub_1"]
+	for i := 0; i < 20; i++ {
+		res, err := engine.previewCycle(context.Background(), sub)
+		if err != nil {
+			t.Fatalf("preview: %v", err)
+		}
+		var ids []string
+		for _, l := range res.Lines {
+			if l.LineType == "usage" {
+				ids = append(ids, l.MeterID)
+			}
+		}
+		if got := strings.Join(ids, ","); got != "mtr_api,mtr_storage,mtr_a,mtr_b" {
+			t.Fatalf("call %d: usage lines = %s, want mtr_api,mtr_storage,mtr_a,mtr_b", i, got)
+		}
+	}
+}

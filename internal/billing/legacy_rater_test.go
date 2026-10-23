@@ -23,11 +23,13 @@ package billing
 //
 // Everything below the "Old rating loops" line is the code that origin/main
 // 672eb6d5 ran, cut verbatim from engine.go, preview.go, live_balance.go and
-// usage_ladder.go, with only the names changed and one edit: the three loops
-// over a map of meters (the period close, the cancel, the live balance) walk
-// the meters in id order, as the new code does. The old code walked them in
-// map order, which is random, so id order is one order it could take; it
-// makes the error text of a call that fails on every meter the same in both.
+// usage_ladder.go, with only the names changed and two edits, each made in the
+// new code too. The three loops over a map of meters (the period close, the
+// cancel, the live balance) walk the meters in id order, and the close-mirror
+// preview adds the meters only a segment plan carries by plan id. The old code
+// walked both maps in map order, which is random, so each is one order it
+// could take; it makes the line order, and the error text of a call that
+// fails on every meter, the same in both.
 // Shared helpers this PR does not change (the window builders, the base-fee
 // lines, the usage reads, the watermark, line descriptions) are not copied.
 // PR-4 deletes this file with the rating-rule tables.
@@ -438,15 +440,16 @@ func callerIs(fn string) bool {
 
 // The renderings are exact: every field of every line, decimals by
 // coefficient and exponent (so 10 and 10.0 differ), times to the nanosecond
-// with their zone. Lines are grouped by meter, keeping their order inside a
-// meter: the closers walk meters in map order, so the order of meters is
-// random in the old code and the new alike.
+// with their zone. Lines, preview warnings and left-out buckets are compared
+// in the order the call returned them: the closers and the live balance walk
+// meters in id order, the previews in the plan's meter order, in the old code
+// and the new alike.
 
 func renderClose(lines []domain.InvoiceLineItem, subtotal int64, billedThrough *time.Time, err error, u unpricedUsage, b netNegativeUsage) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "subtotal=%d\nbilled_through=%s\nerr=%s\n", subtotal, canon(reflect.ValueOf(billedThrough)), errText(err))
-	sb.WriteString(renderByMeter(len(lines), func(i int) (string, string) {
-		return lines[i].MeterID, canon(reflect.ValueOf(lines[i]))
+	sb.WriteString(renderInOrder(len(lines), func(i int) string {
+		return canon(reflect.ValueOf(lines[i]))
 	}))
 	sb.WriteString(renderUnpriced(u))
 	sb.WriteString(renderBelowZero(b))
@@ -457,24 +460,18 @@ func renderPreview(res PreviewResult, err error) string {
 	res.GeneratedAt = time.Time{} // the clock reading, not a rating result
 	lines := res.Lines
 	res.Lines = nil
-	warnings := append([]string(nil), res.Warnings...)
-	sort.Strings(warnings)
+	warnings := res.Warnings
 	res.Warnings = nil
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "err=%s\nheader=%s\n", errText(err), canon(reflect.ValueOf(res)))
-	sb.WriteString(renderByMeter(len(lines), func(i int) (string, string) {
-		return lines[i].MeterID, canon(reflect.ValueOf(lines[i]))
+	sb.WriteString(renderInOrder(len(lines), func(i int) string {
+		return canon(reflect.ValueOf(lines[i]))
 	}))
 	for _, w := range warnings {
 		fmt.Fprintf(&sb, "warning=%s\n", w)
 	}
-	leftOut := make([]string, 0, len(res.leftOut))
 	for _, lo := range res.leftOut {
-		leftOut = append(leftOut, canon(reflect.ValueOf(lo)))
-	}
-	sort.Strings(leftOut)
-	for _, lo := range leftOut {
-		fmt.Fprintf(&sb, "left_out=%s\n", lo)
+		fmt.Fprintf(&sb, "left_out=%s\n", canon(reflect.ValueOf(lo)))
 	}
 	fmt.Fprintf(&sb, "floors.trial_end=%s\n", canon(reflect.ValueOf(res.floors.trialEnd)))
 	meters := make([]string, 0, len(res.floors.coverageEnds))
@@ -488,24 +485,11 @@ func renderPreview(res PreviewResult, err error) string {
 	return sb.String()
 }
 
-// renderByMeter renders n lines grouped by meter, in their order inside each
-// meter, the meters sorted.
-func renderByMeter(n int, line func(i int) (meterID, rendered string)) string {
-	byMeter := map[string][]string{}
-	for i := 0; i < n; i++ {
-		m, r := line(i)
-		byMeter[m] = append(byMeter[m], r)
-	}
-	meters := make([]string, 0, len(byMeter))
-	for m := range byMeter {
-		meters = append(meters, m)
-	}
-	sort.Strings(meters)
+// renderInOrder renders n lines in their order.
+func renderInOrder(n int, line func(i int) string) string {
 	var sb strings.Builder
-	for _, m := range meters {
-		for i, r := range byMeter[m] {
-			fmt.Fprintf(&sb, "line[%s#%d]=%s\n", m, i, r)
-		}
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&sb, "line[%d]=%s\n", i, line(i))
 	}
 	return sb.String()
 }
@@ -1682,7 +1666,8 @@ func (e *Engine) legacyPreviewAsClose(ctx context.Context, sub domain.Subscripti
 	for _, mid := range order {
 		seen[mid] = struct{}{}
 	}
-	for _, pl := range plans {
+	for _, planID := range slices.Sorted(maps.Keys(plans)) {
+		pl := plans[planID]
 		for _, mid := range pl.MeterIDs {
 			if _, ok := seen[mid]; !ok {
 				seen[mid] = struct{}{}

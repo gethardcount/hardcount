@@ -172,9 +172,9 @@ func TestImmediateCancel_GraduatedTiersContinueAcrossFire_RealStore(t *testing.T
 // A pricing rule whose version resolves to the same version as the meter's
 // default binding makes the fire's line ambiguous (lines carry no
 // pricing-rule id): the close refuses loudly instead of guessing whose tiers
-// to continue. Pinned to v1 (the binding itself) and to v2 (a different pin
-// that resolves to the same graduated version) — the guard must compare
-// RESOLVED versions.
+// to continue; the estimates still answer. Pinned to v1 (the binding itself)
+// and to v2 (a different pin that resolves to the same graduated version) —
+// the guard must compare RESOLVED versions.
 func TestThresholdCycle_AmbiguousSeedFailsLoud_RealStore(t *testing.T) {
 	for _, pin := range []string{"v1", "v2"} {
 		t.Run("rule pinned to "+pin, func(t *testing.T) {
@@ -192,6 +192,14 @@ func TestThresholdCycle_AmbiguousSeedFailsLoud_RealStore(t *testing.T) {
 			})
 			newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
 			p.seedAfterFire(t, 600, &newEnd)
+			// The estimates do not refuse: only the closers write the guess
+			// on an invoice. The close-mirror preview and the live balance
+			// still answer.
+			closer := p.f.engine
+			lf := wireLive(t, p.f, p.ctx)
+			lf.createPreview(t, p.ctx, lf.customerID, lf.subID)
+			lf.liveAll(t)
+			p.f.engine = closer
 			if wait := time.Until(newEnd.Add(500 * time.Millisecond)); wait > 0 {
 				time.Sleep(wait)
 			}
