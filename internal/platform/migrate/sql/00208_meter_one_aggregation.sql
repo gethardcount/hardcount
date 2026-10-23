@@ -6,8 +6,9 @@
 -- A rule whose mode is its meter's (last_during_period is a last meter's)
 -- bills exactly as before. A rule whose mode differs, last_ever included,
 -- would bill differently, so if there is one the upgrade stops here before
--- changing anything, and the error counts them. This release has no
--- upgrade path from Velox 0.8.x, so no such rule is converted.
+-- changing anything, and the error counts them. So does a meter whose
+-- aggregation the new CHECK below would refuse. This release has no
+-- upgrade path from Velox 0.8.x, so no such row is converted.
 --
 -- The meter's key becomes event_name, the name usage events send it by,
 -- and so does the meter_key of held usage rows. A meter's aggregation gets
@@ -32,7 +33,7 @@ BEGIN
     IF n > 0 THEN found := found || format(E'\n  %s meter(s) whose aggregation is not sum, count, max or last', n); END IF;
     IF found <> '' THEN
         RAISE EXCEPTION 'migration 00208 gives each meter one aggregation for all its pricing rules, and this database has rows it cannot keep as they bill:%', found
-            USING HINT = 'This release has no upgrade path from Velox 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, change or delete those rows, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00208-found-pricing-rules-that-aggregate-differently';
+            USING HINT = 'This release has no upgrade path from Velox 0.8.x: install fresh (see the v0.9.0 release notes). On a development database, change or delete those rows, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00208-found-rows-it-cannot-keep-as-they-bill';
     END IF;
 END
 $$;

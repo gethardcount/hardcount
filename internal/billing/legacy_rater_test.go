@@ -290,6 +290,7 @@ func (d *rateDifferential) compare(entry string, sub domain.Subscription, got, w
 // differently from the next ones, and why. Their calls are not compared.
 var movesBetweenRuns = map[string]string{
 	"TestRunCycle_MeterReadBlipFailsTheClose": "its pricing fake fails the first read of one meter only",
+	"TestCloser_ReadsEachMeterOnce":           "its pricing fake changes one meter's aggregation after the first read",
 }
 
 func (d *rateDifferential) tally(entry string, sub domain.Subscription, feats []string) {
@@ -830,7 +831,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 	// that was active at ANY point during the period: a meter that existed
 	// on plan_A (now swapped out or removed) bills its [seg.start, seg.end)
 	// window.
-	meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
+	meters, err := e.planMeters(ctx, sub.TenantID, plans)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -862,7 +863,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 
 	// Usage is read once per window (one read covers every meter for a
 	// window; a pricing-rule meter reads its buckets per window).
-	reads := newWindowUsage(e, sub, meterAggs)
+	reads := newWindowUsage(e, sub, meters)
 
 	// Union of meters with billable windows. When a watermark exists, a
 	// meter whose clamped intervals vanished entirely (all usage inside the
@@ -1203,7 +1204,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 	// boundaries differ. Iterates the full `plans` map (current items'
 	// plans + hydrated change-log plans) so segment-aware billing
 	// picks up meters that existed on now-removed plans.
-	meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
+	meters, err := e.planMeters(ctx, sub.TenantID, plans)
 	if err != nil {
 		return nil, 0, fmt.Errorf("cancel: %w", err)
 	}
@@ -1220,7 +1221,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, canceledAt, wm.billedThrough, floors)
 
 	// The lines read usage through reads, once per window.
-	reads := newWindowUsage(e, sub, meterAggs)
+	reads := newWindowUsage(e, sub, meters)
 
 	// Union of meters with billable windows (a meter fully clamped away can
 	// still owe a full-window bill for a deferred non-additive bucket) +

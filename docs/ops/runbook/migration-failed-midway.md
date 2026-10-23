@@ -113,33 +113,43 @@ For a count or first wait, set `max_retry_attempts` (1 to 15) or
 
 Then run `velox migrate` again.
 
-## 00208 found pricing rules that aggregate differently
+## 00208 found rows it cannot keep as they bill
 
-**Symptom:**
+**Symptom:** one or both of these lines:
 
 ```
 migration 00208_meter_one_aggregation.sql failed: ERROR: migration 00208 gives each meter one aggregation for all its pricing rules, and this database has rows it cannot keep as they bill:
   2 pricing rule(s) whose aggregation_mode is not their meter's aggregation
+  1 meter(s) whose aggregation is not sum, count, max or last
 ```
 
 **Why:** from this release a meter has one aggregation, and every pricing
-rule of the meter bills under it. A rule whose own mode differed from its
-meter's aggregation, or was `last_ever`, would bill differently, so the
-migration stops instead of converting it. Nothing was changed. This
-release has no upgrade path from Velox 0.8.x, so a production database
-never reaches this step: install fresh (see the v0.9.0 release notes).
+rule of the meter bills under it. The migration stops for two kinds of rows:
 
-**Fix:** on a development database, find the rules (as the database owner,
+- A pricing rule whose own mode differed from its meter's aggregation, or
+  was `last_ever`. It would bill differently.
+- A meter whose aggregation is not `sum`, `count`, `max` or `last`, such as
+  an empty value written by raw SQL. This release adds a check that refuses
+  any other value.
+
+It does not convert them, and nothing was changed. This release has no
+upgrade path from Velox 0.8.x, so a production database never reaches this
+step: install fresh (see the v0.9.0 release notes).
+
+**Fix:** on a development database, find the rows (as the database owner,
 with `SET LOCAL app.bypass_rls = 'on'` in a transaction):
 
 ```sql
 SELECT r.id, r.meter_id, r.aggregation_mode, m.aggregation
 FROM meter_pricing_rules r JOIN meters m ON m.id = r.meter_id
 WHERE r.aggregation_mode IS DISTINCT FROM CASE m.aggregation WHEN 'last' THEN 'last_during_period' ELSE m.aggregation END;
+
+SELECT id, key, aggregation FROM meters WHERE aggregation NOT IN ('sum', 'count', 'max', 'last');
 ```
 
-Delete each rule, or put it on a meter with the aggregation it needs. Then
-run `velox migrate` again. Or re-create the database.
+Delete each rule, or put it on a meter with the aggregation it needs. Set
+each meter's aggregation to the one it should bill by. Then run
+`velox migrate` again. Or re-create the database.
 
 ## It waited 5s for a table lock
 

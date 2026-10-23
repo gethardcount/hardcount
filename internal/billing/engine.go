@@ -2840,7 +2840,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// that was active at ANY point during the period: a meter that existed
 	// on plan_A (now swapped out or removed) bills its [seg.start, seg.end)
 	// window.
-	meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
+	meters, err := e.planMeters(ctx, sub.TenantID, plans)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -2875,7 +2875,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// by the one rater (rate.go): the clamped pass, then after a threshold
 	// invoice the full-window pass for the buckets it deferred, with one tier
 	// ladder per bucket continuing from that invoice (P21, ADR-066 amendment).
-	reads := newWindowUsage(e, sub, meterAggs)
+	reads := newWindowUsage(e, sub, meters)
 	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, reads, rateSite{}, meterIntervals, meterIntervalsFull, wm, periodStart, invoiceCurrency, "", "cycle", unpriced, belowZero)
 	if err != nil {
 		return nil, 0, nil, err
@@ -3933,7 +3933,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	// boundaries differ. Iterates the full `plans` map (current items'
 	// plans + hydrated change-log plans) so segment-aware billing
 	// picks up meters that existed on now-removed plans.
-	meterAggs, err := e.planMeterAggregations(ctx, sub.TenantID, plans)
+	meters, err := e.planMeters(ctx, sub.TenantID, plans)
 	if err != nil {
 		return nil, 0, fmt.Errorf("cancel: %w", err)
 	}
@@ -3951,7 +3951,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 
 	// The lines read usage through reads, once per window, and are priced by
 	// the one rater, with the same passes and ladder as the period close.
-	reads := newWindowUsage(e, sub, meterAggs)
+	reads := newWindowUsage(e, sub, meters)
 	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, reads, rateSite{cancel: true}, meterIntervals, meterIntervalsFull, wm, periodStart, invoiceCurrency, usageSuffix, "cancel", unpriced, belowZero)
 	if err != nil {
 		return nil, 0, err

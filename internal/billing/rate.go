@@ -503,7 +503,7 @@ func (e *Engine) rateCloseUsage(ctx context.Context, sub domain.Subscription, re
 			}
 		}
 	}
-	r := rater{prices: e.prices(), reads: reads, site: site, tenantID: sub.TenantID, customerID: sub.CustomerID}
+	r := rater{prices: closeMeters{PriceSource: e.prices(), meters: reads.meters}, reads: reads, site: site, tenantID: sub.TenantID, customerID: sub.CustomerID}
 	buckets, err := r.rateUsageWindows(ctx, windows, pinFor(sub, periodStart), newUsageLadder(wm))
 	var lines []domain.InvoiceLineItem
 	var subtotal int64
