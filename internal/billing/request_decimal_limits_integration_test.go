@@ -214,3 +214,100 @@ func TestRequestUsageGTE_StoredExactlyInPostgres(t *testing.T) {
 		}
 	}
 }
+
+// A rate inside its limits can price a line whose tax, or whose total with
+// tax, is past what an int64 product holds. The manual tax provider works
+// those products in 128 bits, so the tax is exact; an invoice whose total
+// does not fit int64 cents fails the close with ErrAmountOverflow and no
+// invoice is written. The rule is posted through the route and billed at the
+// real period close.
+func TestRequestRates_LargeAmountsTaxedExactly(t *testing.T) {
+	cases := []struct {
+		name      string
+		rate      string
+		qty       string
+		taxRate   float64
+		inclusive bool
+		// want subtotal, tax, total; overflow: the close fails instead.
+		subtotal, tax, total int64
+		overflow             bool
+	}{
+		{name: "exclusive 1e14 at 20%", rate: "100000000000000", qty: "1", taxRate: 20,
+			subtotal: 100_000_000_000_000, tax: 20_000_000_000_000, total: 120_000_000_000_000},
+		// Gross 1e14 at 20% inclusive: net 83333333333333, tax 16666666666667.
+		{name: "inclusive 1e14 at 20%", rate: "100000000000000", qty: "1", taxRate: 20, inclusive: true,
+			subtotal: 83_333_333_333_333, tax: 16_666_666_666_667, total: 100_000_000_000_000},
+		// 5 × 999999999999999999 = 4999999999999999995; 20% = 999999999999999999.
+		{name: "exclusive near 5e18 at 20%", rate: "999999999999999999", qty: "5", taxRate: 20,
+			subtotal: 4_999_999_999_999_999_995, tax: 999_999_999_999_999_999, total: 5_999_999_999_999_999_994},
+		// At 100% the total, 9999999999999999990, does not fit int64.
+		{name: "total past int64 at 100%", rate: "999999999999999999", qty: "5", taxRate: 100, overflow: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lf := newLiveFixture(t, "Request Rates Tax "+tc.name, 0)
+			ctx := lf.ctx
+			setManualTax(t, ctx, lf.settings, lf.tenantID, tc.taxRate)
+			if tc.inclusive {
+				ts, err := lf.settings.Get(ctx, lf.tenantID)
+				if err != nil {
+					t.Fatalf("get settings: %v", err)
+				}
+				ts.TaxInclusive = true
+				if _, err := lf.settings.Upsert(ctx, ts); err != nil {
+					t.Fatalf("upsert settings: %v", err)
+				}
+			}
+			h := pricing.NewHandler(lf.pricingSvc)
+			v1 := lf.seededRule(t, ctx)
+			backdateRuleVersion(t, lf.thresholdFixture, ctx, v1.ID, lf.cycleStart.Add(-3*time.Hour))
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(
+				`{"rule_key":"calls_flat","name":"Calls","currency":"USD","mode":"flat","flat_amount_cents":"`+tc.rate+`"}`)).
+				WithContext(auth.WithTenantID(ctx, lf.tenantID))
+			rr := httptest.NewRecorder()
+			h.RatingRuleRoutes().ServeHTTP(rr, req)
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("POST rule: status %d; body %s", rr.Code, rr.Body.String())
+			}
+			var v2 domain.RatingRuleVersion
+			if err := json.Unmarshal(rr.Body.Bytes(), &v2); err != nil {
+				t.Fatalf("decode rule: %v", err)
+			}
+			backdateRuleVersion(t, lf.thresholdFixture, ctx, v2.ID, lf.cycleStart.Add(-2*time.Hour))
+
+			ts := lf.cycleStart.Add(time.Minute)
+			if _, err := lf.usageSvc.Ingest(ctx, lf.tenantID, usage.IngestInput{
+				CustomerID: lf.customerID, MeterID: lf.meterID, Quantity: decimal.RequireFromString(tc.qty), Timestamp: &ts,
+			}); err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+
+			newEnd := time.Now().UTC().Add(time.Second).Truncate(time.Microsecond)
+			lf.exec(t, `UPDATE subscriptions SET current_billing_period_end = $1, next_billing_at = $1 WHERE tenant_id = $2`, newEnd, lf.tenantID)
+			time.Sleep(time.Until(newEnd.Add(500 * time.Millisecond)))
+			generated, failures := lf.engine.RunCycleForTenant(ctx, lf.tenantID, 50)
+			invs := lf.listInvoices(t, ctx)
+
+			if tc.overflow {
+				if len(failures) != 1 || !errors.Is(failures[0].Err, domain.ErrAmountOverflow) {
+					t.Fatalf("close failures = %v, want one ErrAmountOverflow", failures)
+				}
+				if generated != 0 || len(invs) != 0 {
+					t.Fatalf("close made %d invoices (%d listed), want none", generated, len(invs))
+				}
+				return
+			}
+			if len(failures) > 0 || generated != 1 || len(invs) != 1 {
+				t.Fatalf("close: generated=%d failures=%v invoices=%d, want 1 invoice", generated, failures, len(invs))
+			}
+			inv := invs[0]
+			if inv.Status != domain.InvoiceFinalized || inv.TaxStatus != domain.InvoiceTaxOK {
+				t.Errorf("status/tax_status = %s/%s, want finalized/ok", inv.Status, inv.TaxStatus)
+			}
+			if inv.SubtotalCents != tc.subtotal || inv.TaxAmountCents != tc.tax || inv.TotalAmountCents != tc.total {
+				t.Errorf("subtotal/tax/total = %d/%d/%d, want %d/%d/%d",
+					inv.SubtotalCents, inv.TaxAmountCents, inv.TotalAmountCents, tc.subtotal, tc.tax, tc.total)
+			}
+		})
+	}
+}
