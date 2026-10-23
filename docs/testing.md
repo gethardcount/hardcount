@@ -1,8 +1,8 @@
 # How we test Velox
 
-Every change ships with a test at the right layer. This page says which test
-to write for a change, how to run each kind, and what is checked by hand
-before a release.
+Each code change should ship with a test at the right layer. This page says
+which test to write for a change, how to run each kind, and what is checked
+by hand before a release.
 
 ## The four layers
 
@@ -105,7 +105,7 @@ the built dashboard (`vite preview`, which forwards `/v1` to the API).
   test-mode secret key from `velox-bootstrap`. Each test uses its own unique
   names, so the suite can run many times against the same database. Use a
   database of your own anyway, so the tests never touch your dev data.
-- **In CI:** the `e2e` job runs on every PR. It is not a required check yet.
+- **In CI:** the `e2e` job runs on every PR. It is not a required check.
   On a failure, download the `playwright-report` artifact and open its trace
   with `npx playwright show-trace`.
 
@@ -139,10 +139,10 @@ habits have caught real bugs here:
 
 ## Before a release
 
-Run the [release checklist](dev/release-checklist.md). It covers what only a
-real provider can show: a Stripe charge, refund and webhook, an email you
-open and read, the LiteLLM callback, and the invoice PDF.
+Run the [release checklist](dev/release-checklist.md) before each tag.
 
 The golden-path demo (`scripts/demo.sh`) and the `velox-doctor` sweep also
 run in CI on every PR. The doctor checks the money invariants over the rows
 the golden path left behind.
+
+**Next:** set up your machine: [CONTRIBUTING](../CONTRIBUTING.md#development-setup).

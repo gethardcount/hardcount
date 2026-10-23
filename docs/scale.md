@@ -1,13 +1,11 @@
 # How much traffic Velox handles
 
-Velox keeps all its billing data in one Postgres database. In production it
-also needs Redis, which it uses only for rate limits. This page answers one
-question: how many usage events per second can that database take, and what
-do you do when you need more?
+Velox keeps all its billing data in one Postgres database. This page answers
+one question: how many usage events per second can that database take, and
+what do you do when you need more?
 
 A usage event is one record of something a customer used, such as 1,200 input
-tokens on one model. Think of the database as a road: we measured how many
-cars it carries before traffic slows, and which part wears out first.
+tokens on one model.
 
 ## Short answer
 
@@ -18,20 +16,15 @@ cars it carries before traffic slows, and which part wears out first.
    memory), with 10 events in each request. It passed all five runs after one
    Postgres setting change ([WAL pool size](failure-modes/rfm-001-wal-pool-exhaustion.md)),
    and four of five without it.
-3. The database was the limit every time, never the Velox process: first its
-   memory, then how fast its disk could write.
-
-One small VM takes far less than these figures. The next section measures
-one.
-
-**Need more?** In this order: send events in batches (up to 1,000 per
-request), give the database more memory, then give it faster disks. The
-[full list](#if-you-need-more) has the later steps.
+3. After one Velox fix ([#818](https://github.com/getvelox/velox/issues/818)),
+   the database was the limit every time: first its memory, then how fast
+   its disk could write. The Velox process was never short of CPU. Need
+   more? See [If you need more](#if-you-need-more).
 
 ## What one small server handles
 
-One €6.49-a-month server took about 1 million events a day for 20 minutes,
-with no errors and memory to spare. Disk space is what runs out first.
+One €6.49-a-month server took 12 events a second (about 1 million a day at
+that rate) for 20 minutes, with no errors and memory to spare. Disk space is what runs out first.
 
 The server was a Hetzner CX23: 2 shared vCPU, 4 GB memory and a 40 GB disk.
 Its list price was €6.49 a month before VAT, checked on 2026-10-17
@@ -50,20 +43,18 @@ same data center sent the load through Caddy, over plain HTTP.
 | Billing: 300 invoices | All finished in 32 s. CPU was about 70% busy while it ran. |
 | Dashboard | Most calls under 45 ms at p99. The invoice list is the slow one: 145 ms p50, 173 ms p99. The cause, a few database reads per row, is fixed after v0.8.0 ([#1142](https://github.com/getvelox/velox/issues/1142)); not yet re-measured. |
 
-**Disk.** Each event takes about 0.5 to 0.6 KB in the database, counting its
-indexes ([how the data grows](ops/postgres-requirements.md#how-the-data-grows)).
-At 1 million events a day that is 15 to 18 GB a month. The system and
-the images already use about 3.5 GB, so the 40 GB disk fills in about two
-months. Before you go live, add a volume for the database or pick a server
-with a bigger disk. The nightly backups also sit on this disk until you copy
-them off.
+**Disk.** At 1 million events a day the database grows by 15 to 18 GB a month
+([how the data grows](ops/postgres-requirements.md#how-the-data-grows)), so
+this server's 40 GB disk fills in about two months. Before you go live, add
+a volume for the database or pick a server with a bigger disk. The nightly
+backups also sit on this disk until you copy them off.
 
 **How it was measured.** [k6](https://k6.io), a load-testing tool, sent a mix
 shaped like a LiteLLM proxy fleet, across 300 customers. Half the events came
 in batches of 10, a quarter as LiteLLM callbacks (3 events each) and a quarter
 one at a time. The 20 minutes alternated steady load and bursts at five times
 the rate: steady for 5 minutes, burst for 3, steady 5, burst 3, steady 4. Then
-a test clock (a pretend clock for test customers) moved 32 days forward to
+a [test clock](glossary.md#testing-with-simulated-time) moved 32 days forward to
 bill all 300 customers. Last, each of six dashboard calls ran 20 times, one at
 a time. The general rate limit was raised so that creating the 300 customers
 did not hit it; the ingest limit was left as shipped. CPU and memory were
@@ -142,40 +133,8 @@ These steps come before Velox needs any new dependency:
 6. Move analytics to a read replica. Not built. Velox has no reader
    connection setting today.
 
-Each step uses tools Postgres already has. Steps 4 to 6 also need changes in
-Velox that are not built yet. A columnar store only earns its place in two
-cases: you want to slice years of raw events any way you like, or you need
-sustained ingest well past the figures above. At that point it belongs beside
-Velox as a read-side add-on, not underneath it. Money never leaves Postgres.
+**Already run Kafka? Keep it.** Point a consumer at the batch ingest endpoint.
 
-**If you already run Kafka, keep it.** Velox does not want to own your
-transport. Point a consumer at the batch ingest endpoint, and your existing
-pipeline feeds it directly. Velox is the last mile: rating, invoicing,
-credits, dunning (retrying a failed payment and emailing the customer) and
-collection.
-
-Velox is built to be self-hosted. Each company's deployment carries only its
-own volume, so the combined load that pushes a shared SaaS platform onto Kafka
-does not build up in one instance.
-
-## How this compares with Lago's guidance
-
-Lago, another open-source billing engine, ships a Kafka + ClickHouse tier. It
-routes everything under **10,000 events/sec** to its ordinary REST API,
-batched above ~1,000/s. It only recommends streaming above that, noting that
-*"Many customers start on REST and switch to Kafka only when they outgrow
-it."*
-
-Lago's docs also describe one unnamed self-hosted deployment: *"A major global
-payments company runs Lago self-hosted, processing thousands of transactions
-per second. They started on Postgres (validated at 10K events/sec) and later
-migrated to ClickHouse + Kafka for higher throughput …"*
-([source](https://getlago.com/docs/guide/events/ingesting-usage), checked
-2026-10-14).
-
-So in Lago's guidance, 10,000 a second is where you start to consider
-streaming, not where Postgres stops working. That is roughly 26 billion
-events a month. That figure is theirs, not ours; Velox's own figures are
-above.
+How Lago's guidance on scale compares: [How Velox compares](comparison.md).
 
 **Next:** [Run Velox in production on one VM](production-one-vm.md).

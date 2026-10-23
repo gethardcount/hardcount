@@ -1,6 +1,6 @@
 # How Velox compares
 
-This page compares Velox with four open-source billing engines: Lago, OpenMeter, Flexprice and Kill Bill. Every cell is a fact read from that project's own source or docs, and each was checked line by line against the source listed under the table.
+This page compares Velox with four open-source billing engines: Lago, OpenMeter, Flexprice and Kill Bill. Each cell comes from that project's own source or docs, linked under the table. Cells marked ¹ and "None found" are our reading, not the project's own words.
 
 **Checked on 2026-10-12.** Projects change. Re-check any cell you plan to rely on.
 
@@ -12,7 +12,7 @@ Velox is pre-1.0 and has no production users yet. The other four are in producti
 
 - One MIT licence, and every feature is in it.
 - A test clock for each test customer, on your normal deployment.
-- Tenant isolation uses Postgres row-level security: a query that forgets its tenant filter returns no other tenant's rows.
+- Tenant isolation uses Postgres row-level security, not only application code.
 - Failed-payment retries are included. Kill Bill includes them too.
 - Webhooks are signed, with a timestamp, without running another service.
 - The throughput figure comes with its hardware and method.
@@ -45,6 +45,10 @@ Velox is pre-1.0 and has no production users yet. The other four are in producti
 ¹ Our reading of the project's schema or API spec. No sentence in its docs states it.
 
 "None found" means a search of the project's source and docs found nothing. The project has not said so itself.
+
+**Lago on scale.** Lago's docs send everything under 10,000 events a second to its REST API, and recommend Kafka only above that ([source](https://getlago.com/docs/guide/events/ingesting-usage), checked 2026-10-14).
+
+**Fresh installs.** Users of these projects have reported a fresh install failing before the first invoice, often at sign-up, for example [lago#514](https://github.com/getlago/lago/issues/514), [lago#368](https://github.com/getlago/lago/issues/368) and [flexprice#819](https://github.com/flexprice/flexprice/issues/819) (open on 2026-10-23).
 
 ## Sources
 

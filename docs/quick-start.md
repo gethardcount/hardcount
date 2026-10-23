@@ -2,14 +2,7 @@
 
 This page starts Velox on your own computer and runs its demo. The demo bills
 one test customer for a month of AI token usage, so you can see the whole
-flow: usage in, invoice out. It takes about five minutes, and all you need is
-Docker.
-
-Think of the quick start as a demo car at a showroom: you drive it, you don't
-build it. To run Velox for real customers, see
-[Next steps](#next-steps).
-
-**Who it is for:** anyone deciding whether Velox fits their product.
+flow: usage in, invoice out.
 
 ## Words on this page
 
@@ -18,7 +11,7 @@ build it. To run Velox for real customers, see
 | Test mode | The side of Velox where nothing charges real money. The dashboard opens in it. |
 | Meter | A counter for one kind of usage, here AI tokens. |
 | Recipe | A ready-made pricing setup that Velox creates in one call. |
-| Usage record | One "this customer used this much" line that your app sends to Velox (a usage event). |
+| Usage event | One "this customer used this much" record that your app sends to Velox. |
 | Test clock | A pretend clock for test customers. Moving it forward makes a month pass in seconds. |
 | Provider cost | What your AI provider, such as Anthropic, charges you per token. |
 | Margin | What you billed a customer, minus what their usage cost you, as a percent of what you billed. |
@@ -128,21 +121,21 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
    tokens, $4.50 per million output tokens and $0.05 per million cache-read
    tokens. Claude Haiku 4.5 costs $0.80 per million input tokens and $4.00
    per million output tokens, closer to its price, so it earns you less.
-   From now on, Velox records your cost on each usage record that arrives.
+   From now on, Velox records your cost on each usage event that arrives.
    Usage that arrived earlier stays without a cost.
 
-   **You see:** `✓ Saved 5 costs for two models. Velox now records your cost on each new usage record.`
+   **You see:** `✓ Saved 5 costs for two models. Velox now records your cost on each new usage event.`
 
 6. **Send token usage, the way a LiteLLM proxy sends it.** LiteLLM is a
    proxy that sits between your app and AI providers. The demo sends ten AI
    calls to the same Velox address that LiteLLM reports to. Five go to
    Claude Sonnet 4.5. Each used 120,000 prompt tokens (40,000 of them read
    from the cache) and 35,000 output tokens. Velox splits it into three
-   usage records: 80,000 input, 40,000 cache read and 35,000 output. Five go
+   usage events: 80,000 input, 40,000 cache read and 35,000 output. Five go
    to Claude Haiku 4.5. Each used 120,000 prompt tokens and 50,000 output
-   tokens, so Velox splits it into two usage records.
+   tokens, so Velox splits it into two usage events.
 
-   **You see:** `✓ 10 AI calls became 25 usage records, one for each token type in each call`
+   **You see:** `✓ 10 AI calls became 25 usage events, one for each token type in each call`
 
 7. **Move the test clock forward one month.** The demo moves the clock 32
    days ahead, past the end of ACME Corp's first month. While the clock
@@ -218,7 +211,7 @@ At the end, the demo prints two links:
 3. Look around in the left menu.
 
    **You see:**
-   - **Usage**: the 25 usage records.
+   - **Usage**: the 25 usage events.
    - **Pricing**: the Tokens meter and the AI API plan.
    - **Provider costs**: the five costs from step 5.
    - **Test clocks**: the clock named "demo".
@@ -253,13 +246,5 @@ expected. Use the two links instead.
 The quick start runs the latest published release, so changes merged after
 that release are not in it yet.
 
-## Next steps
-
-- **Do the same steps yourself, from your own code:**
-  [Send usage and get your first invoice](first-invoice.md).
-- **Price your own AI usage:** [AI pricing reference](ai-pricing.md).
-- **Send usage from a LiteLLM proxy:** [LiteLLM integration](integrations/litellm.md).
-- **Run Velox for real customers:** [Production on one VM](production-one-vm.md),
-  then [Self-host](self-host.md).
-- **Change Velox itself:** [Development setup](../CONTRIBUTING.md#development-setup).
-  The demo script is [`scripts/demo.sh`](../scripts/demo.sh).
+**Next:** do the same from your own code:
+[Send usage and get your first invoice](first-invoice.md).
