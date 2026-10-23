@@ -347,9 +347,18 @@ added for one keyed on it. They are Haiku 5.5, Bedrock cross-region names
 such as `bedrock/us.anthropic.claude-sonnet-4-6`, `converse/` and
 `azure_ai/` names, and some Google Cloud dated names such as
 `claude-haiku-4-5@20251001`. Those names now arrive as the model's name,
-such as `claude-sonnet-4.6`, so such a rule stops matching. Change
-its `dimension_match` to the model's name, or to `model_raw` with the raw
-name at priority 101.
+such as `claude-sonnet-4.6`, so such a rule stops matching.
+
+**Change it before you upgrade:** set its `dimension_match` to `model_raw`
+with the raw name, at priority 101. The release you run now also puts the
+raw name in `model_raw`, so the rule matches the same usage before and
+after the upgrade.
+
+After the upgrade, while a subscription uses the meter, Velox refuses that
+change (409 `meter_in_use`). The usage then bills at the price of a rule
+on the model's name, if there is one. If there is none and the meter has
+no default price, add one with its own rating rule, as in [Price a model a recipe does not
+cover](#price-a-model-a-recipe-does-not-cover).
 
 ### Usage stored before you upgraded
 
@@ -363,14 +372,19 @@ price when its period is invoiced:
 - **Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1** were stored as Opus 5,
   Sonnet 5, Fable 5 and Mythos 5, and bill at those prices.
 
-To bill those rows at the right price, add a rating rule with its own
-`rule_key`, and a pricing rule on the raw name at **priority 101**. That
-priority wins over the recipe's rule; at equal priority, the older rule
-wins. Add
-one for each raw name and kind of token, such as
+To bill those rows at the right price, **before you upgrade**, add a
+rating rule with its own `rule_key`, and a pricing rule on the raw name at
+**priority 101**. That priority wins over the recipe's rule; at equal
+priority, the older rule wins. Add one for each raw name and kind of
+token, such as
 `{"model_raw": "vertex_ai/claude-opus-4-6@default", "token_type": "input"}`
 at the Opus 4.6 input price. It also prices later calls with that name,
 which bill at the same price.
+
+After the upgrade, while a subscription uses the meter, Velox refuses this
+rule (409 `meter_in_use`): it takes usage that the recipe's rule bills now.
+The period's invoice then bills those rows at the old price. Once it is
+made, give the difference back with a credit note (`POST /v1/credit-notes`).
 
 **Usage stored under a raw name that now finds a price** has no price.
 These are the names in [Rules you wrote on a raw Claude

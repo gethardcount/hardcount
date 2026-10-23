@@ -147,6 +147,9 @@ Edits that change no price already billed are allowed:
 - the default pointed at another version of the same rating rule;
 - a write of the values the meter already has.
 
+The first two do change what a subscription pays: usage that had no price,
+including usage already recorded this period, is then billed.
+
 The check runs in the edit's transaction. It locks the meter row, then
 every plan that lists the meter, then counts. A subscription item insert or
 plan change checks its foreign key with a share lock on the plan row. So a

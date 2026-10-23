@@ -414,6 +414,61 @@ func TestMeterEditGuard_AllowsEditsThatRepriceNothing(t *testing.T) {
 	})
 }
 
+// The upgrade steps in docs/ai-pricing.md ("Rules you wrote on a raw Claude
+// name", "Usage stored before you upgraded"), on a recipe-shaped tokens
+// meter in use: no default price, every rule names a model at priority 100.
+// The doc says which steps are refused after the upgrade and which still
+// work; this pins each one.
+func TestMeterEditGuard_AIPricingUpgradeSteps(t *testing.T) {
+	f := newMeterEditFixture(t)
+	opus4 := f.rule(t, "up_opus4_input", 15)
+	raw := f.rule(t, "up_raw_sonnet46_input", 3)
+	m := f.meter(t, "up_tokens", "")
+	f.bind(t, m.ID, opus4.ID, map[string]any{"model": "claude-opus-4", "token_type": "input"}, 100)
+	rawRule := f.bind(t, m.ID, raw.ID, map[string]any{"model": "bedrock/us.anthropic.claude-sonnet-4-6", "token_type": "input"}, 100)
+	p := f.plan(t, "up_tokens_plan", m.ID)
+	f.sub(t, p.ID, "active")
+
+	t.Run("a model_raw rule at 101 is refused: it outranks the model rules", func(t *testing.T) {
+		opus46 := f.rule(t, "up_vertex_opus46_input", 5)
+		_, err := f.svc.UpsertMeterPricingRule(f.ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
+			MeterID: m.ID, RatingRuleVersionID: opus46.ID,
+			DimensionMatch: map[string]any{"model_raw": "vertex_ai/claude-opus-4-6@default", "token_type": "input"},
+			Priority:       101,
+		})
+		wantInUse(t, "model_raw at 101", err, "1 subscription")
+	})
+
+	t.Run("changing a raw-name rule's dimension_match is refused", func(t *testing.T) {
+		_, err := f.svc.UpsertMeterPricingRule(f.ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
+			MeterID: m.ID, RatingRuleVersionID: rawRule.RatingRuleVersionID,
+			DimensionMatch: map[string]any{"model_raw": "bedrock/us.anthropic.claude-sonnet-4-6", "token_type": "input"},
+			Priority:       101,
+		})
+		wantInUse(t, "raw-name rule to model_raw", err, "1 subscription")
+	})
+
+	t.Run("a new rule on a model no rule prices passes", func(t *testing.T) {
+		sonnet46 := f.rule(t, "up_sonnet46_input", 3)
+		if _, err := f.svc.UpsertMeterPricingRule(f.ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
+			MeterID: m.ID, RatingRuleVersionID: sonnet46.ID,
+			DimensionMatch: map[string]any{"model": "claude-sonnet-4.6", "token_type": "input"}, Priority: 100,
+		}); err != nil {
+			t.Fatalf("rule on the model's name: %v", err)
+		}
+	})
+
+	t.Run("a new rule on model with a raw name passes", func(t *testing.T) {
+		haiku := f.rule(t, "up_raw_haiku45_input", 1)
+		if _, err := f.svc.UpsertMeterPricingRule(f.ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
+			MeterID: m.ID, RatingRuleVersionID: haiku.ID,
+			DimensionMatch: map[string]any{"model": "vertex_ai/claude-haiku-4-5@20251001", "token_type": "input"}, Priority: 100,
+		}); err != nil {
+			t.Fatalf("rule on model with the raw name: %v", err)
+		}
+	})
+}
+
 // A subscription that moved off the meter's plan during its current period
 // still bills the meter up to the move, so it counts. One that moved before
 // the period started does not.
