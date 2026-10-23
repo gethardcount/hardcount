@@ -40,6 +40,10 @@ type PaymentError struct {
 	DeclineCode     string // why the card was refused (insufficient_funds, lost_card, …): see declineCodeOf
 	PaymentIntentID string // set when Stripe returned a PI object alongside the error
 	Unknown         bool
+	// CardMessage is Stripe's message when the error is a card error, the
+	// one kind of message Stripe says can be shown to the customer
+	// (cardErrorMessage); empty otherwise.
+	CardMessage string
 }
 
 func (e *PaymentError) Error() string { return e.Message }
@@ -270,6 +274,19 @@ func declineCodeOf(errType, code, declineCode string) string {
 	return ""
 }
 
+// cardErrorMessage is Stripe's message for a card error, scrubbed, and ""
+// for any other error type. Stripe: "For card errors, these messages can be
+// shown to your users" (https://docs.stripe.com/api/errors, message). The
+// other types' messages are written for the developer ("This
+// PaymentIntent's payment_method could not be updated"), so the customer's
+// payment-failed email shows only this one (customerFailureReason).
+func cardErrorMessage(errType, msg string) string {
+	if errType != string(stripe.ErrorTypeCard) {
+		return ""
+	}
+	return errs.Scrub(msg)
+}
+
 // classifyStripeError maps a stripe-go SDK error to a PaymentError. Non-Stripe
 // errors (context cancel, DNS failure wrapped by our code, etc.) are treated
 // as unknown, because we cannot prove the request never reached Stripe.
@@ -285,6 +302,7 @@ func classifyStripeError(err error) *PaymentError {
 	pe := &PaymentError{
 		Message:     stripeErrorMessage(err),
 		DeclineCode: declineCodeOf(string(stripeErr.Type), string(stripeErr.Code), string(stripeErr.DeclineCode)),
+		CardMessage: cardErrorMessage(string(stripeErr.Type), stripeErr.Msg),
 	}
 	if stripeErr.PaymentIntent != nil {
 		pe.PaymentIntentID = stripeErr.PaymentIntent.ID
@@ -617,6 +635,7 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 	}
 	if lpe := pi.LastPaymentError; lpe != nil {
 		res.DeclineCode = declineCodeOf(string(lpe.Type), string(lpe.Code), string(lpe.DeclineCode))
+		res.CardMessage = cardErrorMessage(string(lpe.Type), lpe.Msg)
 		if lpe.PaymentMethod != nil {
 			res.PaymentMethodID = lpe.PaymentMethod.ID
 		}

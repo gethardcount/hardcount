@@ -259,6 +259,9 @@ type PaymentIntentResult struct {
 	// learn of still stops dunning from charging that card (#966).
 	DeclineCode     string
 	PaymentMethodID string
+	// CardMessage is last_payment_error's message when it is a card error
+	// (cardErrorMessage), for the customer's payment-failed email.
+	CardMessage string
 	// InvoiceID is the velox_invoice_id metadata every Velox PaymentIntent
 	// carries (the off-session charge and the hosted page alike). The
 	// stale-hold sweep matches on it. Populated by the read paths.
@@ -898,6 +901,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 				// skips this card (#966).
 				DeclineCode:     pe.DeclineCode,
 				PaymentMethodID: stripePaymentMethodID,
+				CardMessage:     pe.CardMessage,
 			})
 			switch {
 			case serr != nil:
@@ -1982,30 +1986,38 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	if err != nil {
 		return fmt.Errorf("decode payment_intent.payment_failed metadata: %w", err)
 	}
-	declineCode, declinedCard := declineFromEventPayload(event.Payload)
+	d := declineFromEventPayload(event.Payload)
 	return s.SettleFailed(ctx, tenantID, inv, PaymentFailure{
 		PaymentIntentID: event.PaymentIntentID,
 		Message:         event.FailureMessage,
 		Purpose:         md["velox_purpose"],
-		DeclineCode:     declineCode,
-		PaymentMethodID: declinedCard,
+		DeclineCode:     d.code,
+		PaymentMethodID: d.paymentMethodID,
+		CardMessage:     d.cardMessage,
 	}, SourceWebhook)
 }
 
-// declineFromEventPayload reads the bank's decline code and the declined card
-// from data.object.last_payment_error of a payment_intent.payment_failed body
-// (decline_code, payment_method.id — Stripe's PaymentIntent object; the code
-// and type too, for a hard decline Stripe sends as the error code, see
-// declineCodeOf). They
-// matter only to a later dunning retry (#966), so anything unreadable yields
-// empty values rather than an error: a decline the webhook could not label
-// is retried on schedule, as every decline was before, and the settlement
-// itself must not wait on it. payment_method is an object in the PaymentIntent
-// API; a bare id string is accepted too.
-func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethodID string) {
+// eventDecline is what declineFromEventPayload reads.
+type eventDecline struct {
+	code, paymentMethodID, cardMessage string
+}
+
+// declineFromEventPayload reads the bank's decline code, the declined card
+// and the customer-safe message from data.object.last_payment_error of a
+// payment_intent.payment_failed body (decline_code, payment_method.id,
+// message — Stripe's PaymentIntent object; the code and type too, for a
+// hard decline Stripe sends as the error code, see declineCodeOf, and for
+// the message, which only a card error's is, see cardErrorMessage). The
+// code and card matter only to a later dunning retry (#966), the message
+// only to the customer's email, so anything unreadable yields empty values
+// rather than an error: a decline the webhook could not label is retried on
+// schedule, as every decline was before, and the settlement itself must not
+// wait on it. payment_method is an object in the PaymentIntent API; a bare
+// id string is accepted too.
+func declineFromEventPayload(payload map[string]any) eventDecline {
 	rawStr, ok := payload["raw"].(string)
 	if !ok {
-		return "", ""
+		return eventDecline{}
 	}
 	var parsed struct {
 		Data struct {
@@ -2014,16 +2026,21 @@ func declineFromEventPayload(payload map[string]any) (declineCode, paymentMethod
 					Type          string          `json:"type"`
 					Code          string          `json:"code"`
 					DeclineCode   string          `json:"decline_code"`
+					Message       string          `json:"message"`
 					PaymentMethod json.RawMessage `json:"payment_method"`
 				} `json:"last_payment_error"`
 			} `json:"object"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(rawStr), &parsed); err != nil || parsed.Data.Object.LastPaymentError == nil {
-		return "", ""
+		return eventDecline{}
 	}
 	lpe := parsed.Data.Object.LastPaymentError
-	return declineCodeOf(lpe.Type, lpe.Code, lpe.DeclineCode), stripeObjectID(lpe.PaymentMethod)
+	return eventDecline{
+		code:            declineCodeOf(lpe.Type, lpe.Code, lpe.DeclineCode),
+		paymentMethodID: stripeObjectID(lpe.PaymentMethod),
+		cardMessage:     cardErrorMessage(lpe.Type, lpe.Message),
+	}
 }
 
 // stripeObjectID returns the id of a Stripe field that is either an expanded

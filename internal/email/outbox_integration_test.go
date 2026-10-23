@@ -1,7 +1,6 @@
 package email_test
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -542,7 +541,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 	case email.TypeDunningEscalation:
 		return d.SendDunningEscalation(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.EscalationOutcome, m.PublicToken)
 	case email.TypePaymentFailed:
-		return d.SendPaymentFailed(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, cmp.Or(m.FailureReason, m.Reason), m.PublicToken, m.DeclineAsk)
+		return d.SendPaymentFailed(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.Reason, m.PublicToken, m.DeclineAsk)
 	case email.TypePaymentSetupRequest:
 		return d.SendPaymentSetupRequest(ctx, row.TenantID, m.To, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.UpdateURL, m.InvoiceWrittenOff, m.Trigger)
 	case email.TypeCreditNote:

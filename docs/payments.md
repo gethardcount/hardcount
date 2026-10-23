@@ -108,9 +108,12 @@ payment failures, and the gaps still open.
   that card; for a confirmation, Stripe asks again and the customer gets
   another email
   ([ADR-126](adr/126-a-card-refused-for-good-is-not-retried.md)).
-- **A card the customer confirms on the hosted page does not replace the
-  default that needed confirmation.** It pays that invoice; the next
-  invoice charges the old default again, and the bank may ask again.
+- **A different card the customer pays with on the hosted page does not
+  replace a default that needed confirmation.** It pays that invoice; the
+  next invoice charges the old default again, and the bank may ask again.
+  If they pay with the same card, the copy that payment saved becomes the
+  default (Velox keeps one copy of a card), and the next retry or invoice
+  charges it.
 - **The dashboard has no badge for an open dispute.** An open dispute shows
   only as a row in the invoice's Activity list, and the lost-dispute notice
   carries the generic title "Needs attention". The dashboard's list of Stripe

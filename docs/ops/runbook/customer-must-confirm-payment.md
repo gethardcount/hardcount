@@ -35,9 +35,15 @@ One of these:
 - **The customer is asked to confirm.** The first email, and each payment
   reminder, says "Your bank asked you to confirm the payment" with a link to
   the hosted invoice page, where they pay and confirm. It says nothing about
-  a decline. Emails need SMTP set up and an email address on the customer.
+  a decline. Emails need SMTP set up and an email address on the customer,
+  and the link needs `HOSTED_INVOICE_BASE_URL`. Without it the email asks
+  the customer to contact you to pay.
 - **A different card ends it.** A card the customer saves through a setup
   or update link becomes the default, and the next retry charges it.
+- **Paying on the hosted page with the same card ends it too.** That
+  payment saves a new copy of the card, which replaces the old one as the
+  default, so the customer's other invoices are retried on it. A different
+  card paid with there is added beside the default and doesn't replace it.
 - **The newest answer for the card decides.** If a later charge on the same
   card gets an ordinary decline instead, retries charge the card again.
 
@@ -53,19 +59,30 @@ curl -s "$API/v1/invoices/$INVOICE_ID" -H "Authorization: Bearer $KEY"
 `payment.authentication_required`, and Stripe's message in
 `invoice.attention.provider_response`.
 
-To list every such invoice of every tenant (in `psql`), newest answer per
-invoice and card:
+To list every such invoice of every tenant (in `psql`), by the rule
+retries use: on the customer's default card, a hard decline first, else
+the newest answer:
 
 ```sql
-SELECT DISTINCT ON (a.invoice_id, a.stripe_payment_method_id)
-       i.tenant_id, i.id, i.invoice_number, a.stripe_payment_method_id, a.decline_code, a.created_at
-FROM invoice_charge_attempts a
-JOIN invoices i ON i.id = a.invoice_id
-WHERE i.status = 'finalized' AND i.payment_status = 'failed' AND a.decline_code <> ''
-ORDER BY a.invoice_id, a.stripe_payment_method_id, a.created_at DESC;
+SELECT * FROM (
+  SELECT DISTINCT ON (a.invoice_id)
+         i.tenant_id, i.id, i.invoice_number, a.stripe_payment_method_id, a.decline_code, a.created_at
+  FROM invoice_charge_attempts a
+  JOIN invoices i ON i.id = a.invoice_id
+  JOIN payment_methods pm ON pm.tenant_id = i.tenant_id AND pm.customer_id = i.customer_id
+       AND pm.is_default AND pm.detached_at IS NULL
+       AND pm.stripe_payment_method_id = a.stripe_payment_method_id
+  WHERE i.status = 'finalized' AND i.payment_status = 'failed' AND a.decline_code <> ''
+  ORDER BY a.invoice_id,
+           a.decline_code IN ('incorrect_number', 'lost_card', 'pickup_card', 'stolen_card',
+             'revocation_of_authorization', 'revocation_of_all_authorizations',
+             'transaction_not_allowed') DESC,
+           a.created_at DESC, a.id DESC
+) newest
+WHERE decline_code = 'authentication_required';
 ```
 
-Rows whose `decline_code` is `authentication_required` are the ones.
+The codes in the list are Stripe's hard declines (`internal/domain/hard_decline.go`).
 
 ## Fix
 

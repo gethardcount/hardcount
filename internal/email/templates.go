@@ -265,7 +265,7 @@ func confirmPaymentAsk(hasLink bool) string {
 	if hasLink {
 		return "Please pay the invoice using the link below. Your bank will ask you to confirm the payment."
 	}
-	return "Please contact us to pay the invoice. Your bank will ask you to confirm the payment."
+	return "Please contact us to pay the invoice."
 }
 
 func renderDunningEscalationHTML(customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {

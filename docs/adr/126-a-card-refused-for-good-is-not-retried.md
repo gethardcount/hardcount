@@ -245,9 +245,12 @@ Decision:
    confirm this payment"; a skipped retry reads "not attempted". **Collect
    payment** answers in the same words.
 4. **Not changed.** The default-card rule of decision 6 still lists only
-   the hard declines: a card the customer pays with on the hosted page is
-   added beside the default that needed confirmation. A card saved through
-   a setup or update link becomes the default, as for every customer.
+   the hard declines: a different card the customer pays with on the
+   hosted page is added beside the default that needed confirmation. If
+   they pay with the same card, the saved copy replaces the old one and
+   becomes the default (the payment-methods store keeps one copy per card
+   fingerprint), so the next retry or invoice charges it. A card saved through a
+   setup or update link becomes the default, as for every customer.
 
 ## References
 

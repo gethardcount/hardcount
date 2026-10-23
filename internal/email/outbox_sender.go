@@ -78,11 +78,16 @@ type outboxMessage struct {
 	AttemptNumber int    `json:"attempt_number,omitempty"`
 	MaxAttempts   int    `json:"max_attempts,omitempty"`
 	NextRetryDate string `json:"next_retry_date,omitempty"`
-	Reason        string `json:"reason,omitempty"`
-	// FailureReason carries the latest decline-or-error message for
-	// dunning_warning + payment_failed templates. Surfaced inline so
-	// the customer can act (insufficient_funds → top up; lost_card →
-	// swap card).
+	// Reason is the payment_failed email's reason line: Stripe's message
+	// for a card error, or the different-card message
+	// (payment.customerFailureReason). The previous release's settle
+	// transaction wrote it as failure_reason instead, unfiltered (it could
+	// be Velox's own "reconciled: requires_payment_method"); the dispatcher
+	// never read that for payment_failed, and still doesn't.
+	Reason string `json:"reason,omitempty"`
+	// FailureReason carries the latest decline message for the
+	// dunning_warning template. Surfaced inline so the customer can act
+	// (insufficient_funds → top up).
 	FailureReason string `json:"failure_reason,omitempty"`
 	// DeclineAsk selects the copy of a dunning warning or payment-failed
 	// email: "new_card" for a card the bank refused for good (#966),
@@ -368,7 +373,7 @@ func (s *OutboxSender) SendPaymentFailedTx(ctx context.Context, tx *sql.Tx, tena
 		Cc:            cc,
 		CustomerName:  customerName,
 		InvoiceNumber: invoiceNumber,
-		FailureReason: reason,
+		Reason:        reason,
 		PublicToken:   publicToken,
 		DeclineAsk:    ask,
 	})

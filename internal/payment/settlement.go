@@ -294,6 +294,12 @@ type PaymentFailure struct {
 	// (domain.PaymentFailureReport), where a dunning retry reads them.
 	DeclineCode     string
 	PaymentMethodID string
+	// CardMessage is Stripe's message for a card error, when the source has
+	// one (cardErrorMessage): the reason the customer's payment-failed email
+	// shows. Message is the invoice's text, and can be Velox's own
+	// ("reconciled: requires_payment_method", "payment failed") or Stripe's
+	// developer text for another error type, so it is never emailed.
+	CardMessage string
 }
 
 // refusedCardCustomerMessage is the reason the customer's payment-failed
@@ -305,11 +311,13 @@ type PaymentFailure struct {
 const refusedCardCustomerMessage = "Your bank declined this card, and we won't try it again. Please pay with a different card."
 
 // customerFailureReason is the reason the payment-failed email shows the
-// customer: Stripe's own message, except for a card the bank refused for
-// good, where "try again later" would be the wrong advice, and for a payment
-// the bank wants the customer to confirm, whose email has its own copy and
-// no reason line: Stripe's message for it is written for the developer ("If
-// the customer is off session, ask them to return to your application").
+// customer: Stripe's message for a card error (CardMessage; none, so no
+// reason line, when the source has no such message), except for a card the
+// bank refused for good, where "try again later" would be the wrong advice,
+// and for a payment the bank wants the customer to confirm, whose email has
+// its own copy and no reason line: Stripe's message for it is written for
+// the developer ("If the customer is off session, ask them to return to
+// your application").
 func customerFailureReason(f PaymentFailure) string {
 	switch domain.DeclineAskOf(f.DeclineCode) {
 	case domain.DeclineAskNewCard:
@@ -317,7 +325,7 @@ func customerFailureReason(f PaymentFailure) string {
 	case domain.DeclineAskConfirm:
 		return ""
 	}
-	return f.Message
+	return f.CardMessage
 }
 
 // failureEmailSuppressed reports whether a failure of a PaymentIntent with

@@ -1,7 +1,6 @@
 package email
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -236,11 +235,10 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 		return d.sender.SendDunningEscalation(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.EscalationOutcome, msg.PublicToken)
 	case TypePaymentFailed:
-		// The settle transaction's enqueue (SendPaymentFailedTx) writes the
-		// reason as failure_reason, the older non-transactional one as
-		// reason; before, only reason was read, so the reason never showed.
+		// Only reason: a row the previous release queued holds its reason in
+		// failure_reason, unfiltered (outboxMessage.Reason).
 		return d.sender.SendPaymentFailed(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
-			cmp.Or(msg.FailureReason, msg.Reason), msg.PublicToken, msg.declineAsk())
+			msg.Reason, msg.PublicToken, msg.declineAsk())
 	case TypePaymentSetupRequest:
 		return d.sender.SendPaymentSetupRequest(ctx, row.TenantID, msg.To, msg.CustomerName, msg.InvoiceNumber,
 			msg.AmountCents, msg.Currency, msg.UpdateURL, msg.InvoiceWrittenOff, msg.Trigger)
