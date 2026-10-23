@@ -3,8 +3,9 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  basePriceZeroBlocked, deleteMatchedPriceSentence, planLockedSentence,
+  basePriceZeroBlocked, deleteMatchedPriceSentence, meterInUseMessage, planLockedSentence,
 } from '../src/lib/pricingCopy.ts'
+import { ApiError } from '../src/lib/api.ts'
 import { formatQuantity, quantityWithUnit, unitFor } from '../src/lib/usageQuantity.ts'
 import { setupChecklistState, showSimulatedTotalsNote, usageNoneYet } from '../src/lib/homeNotices.ts'
 
@@ -82,4 +83,13 @@ test('"Show setup checklist" is offered only when it would bring the pill back',
   assert.deepEqual(setupChecklistState(false, true, 5, 5), { showPill: false, offerShowAgain: false })
   // still loading: neither
   assert.deepEqual(setupChecklistState(true, false, 0, 5), { showPill: false, offerShowAgain: false })
+})
+
+test('the meter-in-use refusal is shown as the server wrote it; other errors are not', () => {
+  const msg = '2 subscriptions use meter "tokens", so the prices and aggregation that bill its usage are locked.'
+  assert.equal(meterInUseMessage(new ApiError(msg, 409, { code: 'meter_in_use' })), msg)
+  assert.equal(meterInUseMessage(new ApiError('Currency differs', 409, { code: 'invalid_state' })), null)
+  assert.equal(meterInUseMessage(new ApiError('', 409, { code: 'meter_in_use' })), null)
+  assert.equal(meterInUseMessage(new Error('boom')), null)
+  assert.equal(meterInUseMessage(undefined), null)
 })

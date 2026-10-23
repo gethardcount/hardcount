@@ -3,6 +3,7 @@ package pricing
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -19,6 +20,10 @@ type memStore struct {
 	plans      map[string]domain.Plan
 	meterRules map[string]domain.MeterPricingRule
 	overrides  map[string]domain.CustomerPriceOverride
+	// subsUsing is what CountSubsUsingMeterTx answers per meter id (the
+	// meter-in-use guard, D05). The real count is pinned against Postgres in
+	// meter_edit_guard_integration_test.go.
+	subsUsing map[string]int
 }
 
 func newMemStore() *memStore {
@@ -253,7 +258,12 @@ func (m *memStore) ListOverrides(_ context.Context, _, _ string) ([]domain.Custo
 	return nil, nil
 }
 
-func (m *memStore) UpsertMeterPricingRule(_ context.Context, tenantID string, r domain.MeterPricingRule) (domain.MeterPricingRule, error) {
+func (m *memStore) UpsertMeterPricingRule(_ context.Context, tenantID string, r domain.MeterPricingRule, guard func(tx *sql.Tx) error) (domain.MeterPricingRule, error) {
+	if guard != nil {
+		if err := guard(nil); err != nil {
+			return domain.MeterPricingRule{}, err
+		}
+	}
 	if m.meterRules == nil {
 		m.meterRules = make(map[string]domain.MeterPricingRule)
 	}
@@ -308,7 +318,12 @@ func (m *memStore) DeleteMeterPricingRule(_ context.Context, tenantID, id string
 // store, an emission error rolls the in-memory write back exactly as the
 // aborted tx would. The real coupling is pinned against Postgres in
 // intx_audit_integration_test.go.
-func (m *memStore) UpdateMeterAudited(ctx context.Context, tenantID string, meter domain.Meter, emit func(tx *sql.Tx, out domain.Meter) error) (domain.Meter, error) {
+func (m *memStore) UpdateMeterAudited(ctx context.Context, tenantID string, meter domain.Meter, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, out domain.Meter) error) (domain.Meter, error) {
+	if guard != nil {
+		if err := guard(nil); err != nil {
+			return domain.Meter{}, err
+		}
+	}
 	before, existed := m.meters[meter.ID]
 	out, err := m.UpdateMeter(ctx, tenantID, meter)
 	if err != nil {
@@ -325,7 +340,12 @@ func (m *memStore) UpdateMeterAudited(ctx context.Context, tenantID string, mete
 	return out, nil
 }
 
-func (m *memStore) DeleteMeterPricingRuleAudited(ctx context.Context, tenantID, id string, emit func(tx *sql.Tx, deleted domain.MeterPricingRule) error) error {
+func (m *memStore) DeleteMeterPricingRuleAudited(ctx context.Context, tenantID, id string, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, deleted domain.MeterPricingRule) error) error {
+	if guard != nil {
+		if err := guard(nil); err != nil {
+			return err
+		}
+	}
 	deleted, ok := m.meterRules[id]
 	if !ok || deleted.TenantID != tenantID {
 		return errs.ErrNotFound // zero-row delete: never emits
@@ -358,7 +378,7 @@ func (m *memStore) CreatePlanTx(ctx context.Context, _ *sql.Tx, tenantID string,
 }
 
 func (m *memStore) UpsertMeterPricingRuleTx(ctx context.Context, _ *sql.Tx, tenantID string, r domain.MeterPricingRule) (domain.MeterPricingRule, error) {
-	return m.UpsertMeterPricingRule(ctx, tenantID, r)
+	return m.UpsertMeterPricingRule(ctx, tenantID, r, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -1374,17 +1394,53 @@ func (m *memStore) PlanCurrenciesBoundToRuleKey(_ context.Context, _ string, rul
 	return out, nil
 }
 
-func (m *memStore) PlansWiringMeter(_ context.Context, _ string, meterID string) ([]planRef, error) {
-	var out []planRef
-	for _, p := range m.plans {
-		for _, mid := range p.MeterIDs {
-			if mid == meterID {
-				out = append(out, planRef{ID: p.ID, Code: p.Code})
+func (m *memStore) LockMeterTx(_ context.Context, _ *sql.Tx, meterID string) (domain.Meter, error) {
+	mt, ok := m.meters[meterID]
+	if !ok {
+		return domain.Meter{}, errs.ErrNotFound
+	}
+	return mt, nil
+}
+
+func (m *memStore) CountSubsUsingMeterTx(_ context.Context, _ *sql.Tx, meterID string) (int, error) {
+	return m.subsUsing[meterID], nil
+}
+
+func (m *memStore) GetMeterPricingRuleByPairTx(_ context.Context, _ *sql.Tx, meterID, rrvID string) (domain.MeterPricingRule, error) {
+	for _, r := range m.meterRules {
+		if r.MeterID == meterID && r.RatingRuleVersionID == rrvID {
+			return r, nil
+		}
+	}
+	return domain.MeterPricingRule{}, errs.ErrNotFound
+}
+
+// CountRulesOutrankedTx mirrors the SQL: a rule at or below priority whose
+// shared keys all hold equal values (compared as JSON, as jsonb does).
+func (m *memStore) CountRulesOutrankedTx(_ context.Context, _ *sql.Tx, meterID string, match map[string]any, priority int) (int, error) {
+	n := 0
+	for _, r := range m.meterRules {
+		if r.MeterID != meterID || r.Priority > priority {
+			continue
+		}
+		overlap := true
+		for k, v := range r.DimensionMatch {
+			w, ok := match[k]
+			if !ok {
+				continue
+			}
+			a, _ := json.Marshal(v)
+			b, _ := json.Marshal(w)
+			if string(a) != string(b) {
+				overlap = false
 				break
 			}
 		}
+		if overlap {
+			n++
+		}
 	}
-	return out, nil
+	return n, nil
 }
 
 func (m *memStore) PlanCurrenciesWiringMeters(_ context.Context, _ string, meterIDs []string) ([]planCurrency, error) {

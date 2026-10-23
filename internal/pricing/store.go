@@ -40,7 +40,10 @@ type Store interface {
 	// actually landed, read inside the tx, never a pre-tx snapshot. It runs
 	// only when a row was updated (a missing meter returns ErrNotFound and
 	// emits nothing). nil emit = unaudited write.
-	UpdateMeterAudited(ctx context.Context, tenantID string, m domain.Meter, emit func(tx *sql.Tx, out domain.Meter) error) (domain.Meter, error)
+	//
+	// guard, when non-nil, runs first on the same transaction, before the
+	// UPDATE; an error from it aborts the patch (the D05 meter-in-use guard).
+	UpdateMeterAudited(ctx context.Context, tenantID string, m domain.Meter, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, out domain.Meter) error) (domain.Meter, error)
 
 	// Plans
 	CreatePlan(ctx context.Context, tenantID string, p domain.Plan) (domain.Plan, error)
@@ -59,7 +62,9 @@ type Store interface {
 
 	// Meter pricing rules — N-rules-per-meter dispatch via dimension_match.
 	// See docs/dev/design/multi-dim-meters.md.
-	UpsertMeterPricingRule(ctx context.Context, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error)
+	// guard, when non-nil, runs first on the upsert's transaction; an error
+	// from it aborts the write.
+	UpsertMeterPricingRule(ctx context.Context, tenantID string, rule domain.MeterPricingRule, guard func(tx *sql.Tx) error) (domain.MeterPricingRule, error)
 	UpsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error)
 	GetMeterPricingRule(ctx context.Context, tenantID, id string) (domain.MeterPricingRule, error)
 	ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error)
@@ -70,8 +75,9 @@ type Store interface {
 	// meter_id, read inside the tx, rather than a URL segment the caller
 	// could have mismatched. It runs ONLY when a row was actually removed;
 	// deleting a nonexistent rule returns ErrNotFound and emits nothing.
-	// nil emit = unaudited delete.
-	DeleteMeterPricingRuleAudited(ctx context.Context, tenantID, id string, emit func(tx *sql.Tx, deleted domain.MeterPricingRule) error) error
+	// nil emit = unaudited delete. guard, when non-nil, runs first on the
+	// same transaction; an error from it aborts the delete.
+	DeleteMeterPricingRuleAudited(ctx context.Context, tenantID, id string, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, deleted domain.MeterPricingRule) error) error
 
 	// ListMeterPricingRules lists every binding for the tenant (dashboard
 	// rule→meter resolution; read-only).
@@ -86,11 +92,29 @@ type Store interface {
 	MeterBoundKeyCurrencies(ctx context.Context, tenantID string, meterIDs []string) ([]keyCurrency, error)
 	RuleKeyResolvedCurrency(ctx context.Context, tenantID, ruleVersionID string) (keyCurrency, error)
 
-	// PlansWiringMeter lists every plan, of any status, whose meter_ids
-	// holds meterID. The unpriced-meter guard (#981) counts live
-	// subscriptions on each, so the status filter is the live-sub count,
-	// not this list.
-	PlansWiringMeter(ctx context.Context, tenantID, meterID string) ([]planRef, error)
+	// The meter-in-use guard's reads (D05). Each runs on the caller's
+	// transaction, so the guard and the edit it gates commit together.
+	//
+	// LockMeterTx locks the meter row FOR UPDATE and returns it as committed
+	// now. Every guarded edit on a meter takes it first, so two edits on one
+	// meter run one after the other and each sees the other's result.
+	LockMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (domain.Meter, error)
+	// CountSubsUsingMeterTx locks every plan whose meter_ids holds the meter
+	// (FOR UPDATE), then counts the draft, trialing and active subscriptions
+	// that bill it: an item on such a plan, or an item change to or from
+	// one since the subscription's current period started. The plan lock is
+	// what orders the count against a subscription being created or moved
+	// onto such a plan: an item insert or plan_id update checks its foreign
+	// key with FOR KEY SHARE on the plan row, which waits for this lock.
+	CountSubsUsingMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (int, error)
+	// GetMeterPricingRuleByPairTx returns the meter's rule bound to the rating
+	// rule version, or errs.ErrNotFound.
+	GetMeterPricingRuleByPairTx(ctx context.Context, tx *sql.Tx, meterID, ratingRuleVersionID string) (domain.MeterPricingRule, error)
+	// CountRulesOutrankedTx counts the meter's rules with priority at or below
+	// priority that one event could match together with match: no key the
+	// two share has different values. A new rule could take such a rule's
+	// events.
+	CountRulesOutrankedTx(ctx context.Context, tx *sql.Tx, meterID string, match map[string]any, priority int) (int, error)
 }
 
 type RatingRuleFilter struct {

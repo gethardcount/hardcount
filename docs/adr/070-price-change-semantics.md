@@ -1,11 +1,11 @@
 # ADR-070: Price-change semantics — overrides follow rule_key, periods pin at open
 
 **Date:** 2026-07-02 (decisions locked Day 1); **amended 2026-07-03 at ship time** — §4 resolver mechanics and §Consequences updated to what shipped (implementation = migration 0128 + resolveRatedRule)
-**Status:** Accepted & shipped (designed by the P4 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in plan §4.4) (amended 2026-07-03, and on 2026-07-26 by [ADR-100](100-currency-coherence-guard-ring.md))
+**Status:** Accepted & shipped (designed by the P4 adversarial panel — 3 lenses, all SHIP-WITH-FIXES; consolidated protocol in plan §4.4) (amended 2026-07-03, on 2026-07-26 by [ADR-100](100-currency-coherence-guard-ring.md), and on 2026-10-23: [meter pricing edits](#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter))
 
 ## Summary
 
-The rating-rule version in force when a billing period opened prices that whole period, so a price change never reprices usage already metered. New rule versions and changes to customer price overrides take effect at the next period open, and overrides are keyed by `rule_key`, so a negotiated price survives a new version. A failed price or override lookup stops the close or preview with an error; it never bills list price instead. A republish that changes a rule's currency is refused while active overrides use the rule or a plan in another currency bills it. Status: active, amended 2026-07-03 and 2026-07-26 ([ADR-100](100-currency-coherence-guard-ring.md) added the plan check).
+The rating-rule version in force when a billing period opened prices that whole period, so a price change never reprices usage already metered. New rule versions and changes to customer price overrides take effect at the next period open, and overrides are keyed by `rule_key`, so a negotiated price survives a new version. A failed price or override lookup stops the close or preview with an error; it never bills list price instead. A republish that changes a rule's currency is refused while active overrides use the rule or a plan in another currency bills it. Amended 2026-10-23: the meter's own pricing (its pricing rules, default price and aggregation) is read at billing time, so editing it would reprice the open period. While a draft, trialing or active subscription uses the meter, such an edit is refused with 409 `meter_in_use`; a new version is the way to change a rate. Status: active, amended 2026-07-03, 2026-07-26 ([ADR-100](100-currency-coherence-guard-ring.md) added the plan check) and 2026-10-23.
 
 ## Context
 
@@ -124,3 +124,58 @@ Two product decisions gated P4 and P10:
   (4 mutations killed: version-id override keying, latest-not-period-open
   resolution, fabricated ApplyTo dropping Currency, restored error
   swallow).
+
+## Amendment 2026-10-23: meter pricing edits are refused while a subscription uses the meter
+
+Decision 2 says a catalog change never reprices usage already metered. That
+held for rule versions and overrides, but not for the meter's own pricing.
+Billing reads the meter as it is at close, preview or threshold time: its
+pricing rules (which rule claims which event), its default price and its
+aggregation. So these edits repriced the period already open, with no
+check (D05 in the velox-ops strategy of 2026-10-23):
+
+- adding, editing or deleting a pricing rule;
+- pointing the default price at another rule, or removing it;
+- changing the aggregation.
+
+**Decision.** While a draft, trialing or active subscription uses the meter,
+these edits are refused with 409 `meter_in_use`. The message gives the
+number of subscriptions and points to publishing a new version, which waits
+for the next period. On a test clock moved forward, a version published now
+can apply to the period already open (the test-clock caveat in decision 4),
+so in test mode the message says so. A subscription uses the meter when an item is on a plan
+that lists it. It also uses it when an item moved to or from such a plan
+during the current period, because the close bills the meter up to the move.
+
+Edits that change no price already billed are allowed:
+
+- a first default price;
+- a new pricing rule on a meter with no default price, when every rule that
+  could match the same events has a higher priority. It prices only usage
+  no rule prices now, which is how a new model gets a price;
+- the default pointed at another version of the same rating rule;
+- a write of the values the meter already has.
+
+The first two do change what a subscription pays: usage that had no price,
+including usage already recorded this period, is then billed. One exception:
+if a spend threshold already invoiced the subscription this period, a sum or
+count price bills only the usage after that invoice. The usage before it
+stays unbilled, as the threshold invoice left it out
+([ADR-096](096-unpriced-meter-plan-attach-guard.md)). A max or last price
+is billed over the whole period.
+
+The check runs in the edit's transaction. It locks the meter row, then
+every plan that lists the meter, then counts. A subscription item insert or
+plan change checks its foreign key with a share lock on the plan row. So a
+subscription being created on such a plan and the edit wait for each other
+instead of interleaving. The guard replaces the narrower last-price guard of
+[ADR-096](096-unpriced-meter-plan-attach-guard.md#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage).
+
+**Not covered.** A plan that gains the meter (created with it, or attached
+to it) while a subscription is created on that plan, all between the check
+and the edit's commit, is not ordered. That subscription's period is priced
+as if the edit came first. On a meter with a default price, no new model can
+be priced while subscriptions use it.
+
+**Temporary.** Version 0.10 moves usage prices to the plan and makes every
+pricing edit wait for the next period (D08). This guard then goes.

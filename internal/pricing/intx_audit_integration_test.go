@@ -211,7 +211,7 @@ func TestMeterUpdateAudit_SharedFate(t *testing.T) {
 		// never touched (RLS/livemode-invisible rows reach exactly here).
 		_, err := f.store.UpdateMeterAudited(f.ctx, f.tenantID, domain.Meter{
 			ID: ghostID, Name: "Ghost", Unit: "unit", Aggregation: "sum",
-		}, func(tx *sql.Tx, out domain.Meter) error {
+		}, nil, func(tx *sql.Tx, out domain.Meter) error {
 			return emitter.LogInTx(f.ctx, tx, audit.Entry{})
 		})
 		if !errors.Is(err, errs.ErrNotFound) {

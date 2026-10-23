@@ -1,11 +1,11 @@
 # ADR-085: A recipe is an idempotent, additive provisioning event — one verb, no uninstall
 
 **Date:** 2026-07-08
-**Status:** Accepted (amended 2026-07-26)
+**Status:** Accepted (amended 2026-07-26 and 2026-10-23)
 
 ## Summary
 
-Applying a recipe (`POST /v1/recipes/{key}/instantiate`) creates objects once and never removes them. There is no uninstall. The badge (a `recipe_instances` row) is checked before any write, so a repeat apply returns the existing row unchanged (same id, HTTP 201) and creates nothing. Amended 2026-07-26: the badge is unique per tenant, recipe and mode (test or live), so applying in test mode no longer counts as applying in live mode. A first apply always creates a new plan with a free code (`<code>_2` if the code is taken), so an existing plan is never reused or changed. An existing meter is reused only if its aggregation matches the recipe. An existing rating rule is reused only if its money fields match (amended 2026-07-26). On any mismatch the whole apply is refused and rolled back. Rules are reused at their current version and never republished, so an apply can never change what a live subscription pays.
+Applying a recipe (`POST /v1/recipes/{key}/instantiate`) creates objects once and never removes them. There is no uninstall. The badge (a `recipe_instances` row) is checked before any write, so a repeat apply returns the existing row unchanged (same id, HTTP 201) and creates nothing. Amended 2026-07-26: the badge is unique per tenant, recipe and mode (test or live), so applying in test mode no longer counts as applying in live mode. A first apply always creates a new plan with a free code (`<code>_2` if the code is taken), so an existing plan is never reused or changed. An existing meter is reused only if its aggregation matches the recipe. An existing rating rule is reused only if its money fields match (amended 2026-07-26). On any mismatch the whole apply is refused and rolled back. Rules are reused at their current version and never republished. Amended 2026-10-23: on a reused meter that a live subscription uses, the apply is also refused (409 `meter_in_use`) when one of its pricing rules would take usage from a price that bills it now. With both, an apply never changes the price of usage a live subscription is billed for. It can price usage that had no price, and the open period's invoice then bills that usage. If a spend threshold already invoiced the subscription this period, a sum or count price bills only the usage after that invoice.
 
 ## Context
 
@@ -45,7 +45,7 @@ There is no `DELETE` route on `/v1/recipes/instances/{key}` and no store method 
 
 ### Meter guard
 
-Adopting an existing `tokens` meter is gated on **aggregation matching** — the sole billing-consulted meter field (`engine.go`'s `deferredBucket`/`mapMeterAggregation` roll up usage off it; `name`/`unit` are display labels). On a mismatch, `Instantiate` refuses loud: `errs.AlreadyExists("meter", …)`, naming the field (`"usage aggregation: recipe wants sum, existing is max"`), and the whole transaction — including any rating rules already adopted/created earlier in the same call — rolls back. There is deliberately **no live-subscription clause**: adoption only *reads* the meter to wire it onto the fresh plan and append disjoint pricing bindings; it never mutates the meter, so aggregation-match is a complete safety condition on its own. That completeness is also what lets a second AI recipe (e.g. a future `openai_style` re-apply, or a hand-authored plan) adopt the shared ADR-044 `tokens` meter post-go-live without a provenance system to arbitrate "whose meter is it."
+Adopting an existing `tokens` meter is gated on **aggregation matching** — the sole billing-consulted meter field (`engine.go`'s `deferredBucket`/`mapMeterAggregation` roll up usage off it; `name`/`unit` are display labels). On a mismatch, `Instantiate` refuses loud: `errs.AlreadyExists("meter", …)`, naming the field (`"usage aggregation: recipe wants sum, existing is max"`), and the whole transaction rolls back, including any rating rules adopted or created earlier in the same call. Adoption only *reads* the meter row to wire it onto the fresh plan. It does add pricing bindings to the meter. Those change prices when they take events from a price that bills them now (amended 2026-10-23, see [the amendment](#amendment-2026-10-23-pricing-rules-on-a-meter-in-use)). A second AI recipe can still adopt the shared ADR-044 `tokens` meter post-go-live when its rules price only models no rule prices. No provenance system has to arbitrate "whose meter is it."
 
 ### Never republish an existing rule key
 
@@ -114,3 +114,25 @@ Each item below is cut for a **named** reason, with the trigger that reopens it:
 - Migration `0055_recipe_instances` (badge schema — unchanged by this ADR)
 - Memory: `feedback_complexity_accretion_smell`, `feedback_no_silent_fallbacks`, `feedback_no_seed_data_shortcut`, `feedback_longterm_fixes`
 - `docs/dev/design/recipes.md` (amended alongside this ADR)
+
+## Amendment 2026-10-23: pricing rules on a meter in use
+
+"No live-subscription clause" was wrong. A reused meter does not change, but
+the pricing rules the apply adds to it can. On a meter with a default price,
+a new rule takes events the default bills now. A rule that outranks an
+existing one takes its events. Either reprices the open period of every
+subscription on the meter.
+
+`UpsertMeterPricingRuleTx` now runs the same check as the pricing endpoints
+([ADR-070 amendment](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter)),
+on the apply's transaction. A draft, trialing or active subscription may use
+the meter while a rule would change a price already billed. Then the apply
+is refused with 409 `meter_in_use` and rolls back whole. A meter the apply
+creates has no subscription, so a fresh install is never refused. Rules for
+models no rule prices, on a meter with no default price, still go on. They
+do change what a live subscription pays: usage of those models that had no
+price, including usage already recorded this period, is billed on the
+period's invoice. One exception: if a spend threshold already invoiced the
+subscription this period, a sum or count price bills only the usage after
+that invoice. The usage before it stays unbilled, as the threshold invoice
+left it out ([ADR-096](096-unpriced-meter-plan-attach-guard.md)).

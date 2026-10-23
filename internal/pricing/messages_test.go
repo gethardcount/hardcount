@@ -2,23 +2,28 @@ package pricing
 
 import "testing"
 
-// TestLastPriceMessage locks the refusal for removing a meter's last price:
-// plan codes stay in the text (the integration tests find plans by them),
-// counts read in plain words, and "plan … bills" agrees with one or many.
-func TestLastPriceMessage(t *testing.T) {
+// TestMeterInUseMessage locks the D05 refusal: it names the count in plain
+// words, the meter key, and the way that waits for the next period. Test
+// mode adds the test-clock exception. A refused new rule also says when a
+// new rule is allowed.
+func TestMeterInUseMessage(t *testing.T) {
 	cases := []struct {
-		name string
-		live []string
-		want string
+		name     string
+		subs     int
+		newRule  bool
+		testMode bool
+		want     string
 	}{
-		{"one plan", []string{"pro (" + subscriptionCount(1) + ")"},
-			`This is the last price on meter "tokens", and plan pro (1 subscription) bills it, so that usage would go unbilled. Add another price first, or move those subscriptions to a plan without this meter.`},
-		{"two plans", []string{"pro (" + subscriptionCount(3) + ")", "team (" + subscriptionCount(2) + ")"},
-			`This is the last price on meter "tokens", and plans pro (3 subscriptions), team (2 subscriptions) bill it, so that usage would go unbilled. Add another price first, or move those subscriptions to a plan without this meter.`},
+		{"one subscription", 1, false, false,
+			`1 subscription uses meter "tokens", so the prices and aggregation that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period.`},
+		{"test mode", 1, false, true,
+			`1 subscription uses meter "tokens", so the prices and aggregation that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period. For a subscription on a test clock, it can apply to the current simulated period.`},
+		{"new rule", 3, true, false,
+			`3 subscriptions use meter "tokens", so the prices and aggregation that bill its usage are locked: a change now would change what they are billed for usage already recorded. To change a rate, publish a new version of the price; it applies from each subscription's next period. A new price can be added only when the meter has no default price and no price with the same or a lower priority matches the same events.`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := lastPriceMessage("tokens", tc.live); got != tc.want {
+			if got := meterInUseMessage("tokens", tc.subs, tc.newRule, tc.testMode); got != tc.want {
 				t.Errorf("got  %q\nwant %q", got, tc.want)
 			}
 		})

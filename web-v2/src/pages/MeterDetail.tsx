@@ -8,9 +8,10 @@ import type { MeterPricingRule, MeterAggregationMode, RatingRule } from '@/lib/a
 import { showApiError } from '@/lib/formErrors'
 import { money, priceRate, unitScale } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
-import { deleteMatchedPriceSentence } from '@/lib/pricingCopy'
+import { deleteMatchedPriceSentence, METER_IN_USE_TITLE, meterInUseMessage } from '@/lib/pricingCopy'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
+import { Callout } from '@/components/Callout'
 import { statusBadgeVariant } from '@/lib/status'
 
 import { Button } from '@/components/ui/button'
@@ -68,6 +69,7 @@ export default function MeterDetailPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [defaultRuleOpen, setDefaultRuleOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<MeterPricingRule | null>(null)
+  const [deleteInUse, setDeleteInUse] = useState<string | null>(null)
 
   const { data: meter, isLoading: meterLoading, error: meterError, refetch } = useQuery({
     queryKey: ['meter', id],
@@ -135,12 +137,17 @@ export default function MeterDetailPage() {
 
   const deleteMutation = useMutation({
     mutationFn: (ruleId: string) => api.deleteMeterPricingRule(id!, ruleId),
+    onMutate: () => setDeleteInUse(null),
     onSuccess: () => {
       toast.success('Price removed from meter')
       queryClient.invalidateQueries({ queryKey: ['meter-pricing-rules', id] })
       setDeleteTarget(null)
     },
-    onError: (err) => showApiError(err, 'Failed to remove price'),
+    onError: (err) => {
+      const inUse = meterInUseMessage(err)
+      if (inUse) setDeleteInUse(inUse)
+      else showApiError(err, 'Failed to remove price')
+    },
   })
 
   usePageTitle(meter?.name)
@@ -478,7 +485,7 @@ export default function MeterDetailPage() {
       {deleteTarget && (
         <TypedConfirmDialog
           open
-          onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+          onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setDeleteInUse(null) } }}
           title={`Remove ${ratingRules?.data.find(r => r.id === deleteTarget?.rating_rule_version_id)?.name ?? 'this price'} from this meter?`}
           description={
             <>
@@ -489,6 +496,7 @@ export default function MeterDetailPage() {
               Type <span className="font-mono">remove</span> to confirm.
             </>
           }
+          notice={deleteInUse && <MeterInUseNotice message={deleteInUse} />}
           confirmWord="remove"
           confirmLabel="Remove"
           onConfirm={() => deleteMutation.mutate(deleteTarget.id)}
@@ -515,14 +523,20 @@ function SetDefaultRuleDialog({
   onSaved: () => void
 }) {
   const [ratingRuleId, setRatingRuleId] = useState<string>(currentRuleId)
+  const [inUse, setInUse] = useState<string | null>(null)
 
   const saveMutation = useMutation({
     mutationFn: (ruleId: string) => api.updateMeter(meterId, { rating_rule_version_id: ruleId }),
+    onMutate: () => setInUse(null),
     onSuccess: (_, ruleId) => {
       toast.success(ruleId ? 'Default price linked' : 'Default price unlinked')
       onSaved()
     },
-    onError: (err) => showApiError(err, 'Failed to update default price'),
+    onError: (err) => {
+      const msg = meterInUseMessage(err)
+      if (msg) setInUse(msg)
+      else showApiError(err, 'Failed to update default price')
+    },
   })
 
   return (
@@ -550,6 +564,8 @@ function SetDefaultRuleDialog({
             />
           </div>
         </div>
+
+        {inUse && <MeterInUseNotice message={inUse} />}
 
         <DialogFooter className={currentRuleId ? 'sm:justify-between' : undefined}>
           {currentRuleId && (
@@ -600,6 +616,7 @@ function CreatePricingRuleDialog({
   const [aggregation, setAggregation] = useState<MeterAggregationMode>('sum')
   const [ratingRuleId, setRatingRuleId] = useState<string>('')
   const [priority, setPriority] = useState<number>(100)
+  const [inUse, setInUse] = useState<string | null>(null)
 
   const createMutation = useMutation({
     mutationFn: () => {
@@ -616,11 +633,16 @@ function CreatePricingRuleDialog({
         priority,
       })
     },
+    onMutate: () => setInUse(null),
     onSuccess: () => {
       toast.success('Price added')
       onCreated()
     },
-    onError: (err) => showApiError(err, 'Failed to add price'),
+    onError: (err) => {
+      const msg = meterInUseMessage(err)
+      if (msg) setInUse(msg)
+      else showApiError(err, 'Failed to add price')
+    },
   })
 
   const updateRow = (i: number, patch: Partial<DimensionRow>) => {
@@ -751,6 +773,8 @@ function CreatePricingRuleDialog({
           </div>
         </div>
 
+        {inUse && <MeterInUseNotice message={inUse} />}
+
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => createMutation.mutate()} disabled={!canSubmit}>
@@ -760,6 +784,26 @@ function CreatePricingRuleDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// The meter lock's refusal, kept in the dialog that sent the change. The
+// server's sentence names the count and the way that waits for the next
+// period; the link opens the prices list, where New version is.
+function MeterInUseNotice({ message }: { message: string }) {
+  return (
+    <Callout
+      tone="amber"
+      role="alert"
+      title={METER_IN_USE_TITLE}
+      actions={
+        <Button variant="outline" size="sm" render={<Link to="/pricing?tab=rules" />}>
+          Open prices
+        </Button>
+      }
+    >
+      {message}
+    </Callout>
   )
 }
 

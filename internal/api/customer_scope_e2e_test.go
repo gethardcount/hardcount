@@ -425,12 +425,15 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		{"meter update [path meter]", "PATCH", at("/v1/meters/%s", func(f scopeRefs) string { return f.meter }), func(_, _ scopeRefs) any {
 			return map[string]any{"name": "renamed"}
 		}, 404, "", 200},
+		// Control 409: the own meter and rule resolve, then the meter-in-use
+		// guard (D05) refuses, because two subscriptions use the meter and it
+		// has a default price. The guard runs only after both ids resolved.
 		{"meter pricing rule upsert [path meter]", "POST", at("/v1/meters/%s/pricing-rules", func(f scopeRefs) string { return f.meter }), func(o, _ scopeRefs) any {
 			return map[string]any{"rating_rule_version_id": o.rule, "dimension_match": map[string]any{"k": "v"}}
-		}, 422, "", 201},
+		}, 422, "", 409},
 		{"meter pricing rule upsert [rating_rule_version_id]", "POST", func(o, _ scopeRefs) string { return "/v1/meters/" + o.meter + "/pricing-rules" }, func(_, f scopeRefs) any {
 			return map[string]any{"rating_rule_version_id": f.rule, "dimension_match": map[string]any{"k": "v"}}
-		}, 422, "", 201},
+		}, 422, "", 409},
 		{"price override create [rating_rule_version_id]", "POST", fixed("/v1/price-overrides"), func(o, f scopeRefs) any {
 			return map[string]any{"customer_id": o.cus, "rating_rule_version_id": f.rule, "mode": "flat", "flat_amount_cents": 50}
 		}, 422, "", 201},

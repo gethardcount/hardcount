@@ -110,7 +110,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [067](067-archive-blocks-never-cancels.md) | 2026-07-02 | Accepted (amended) | Subscriptions | Archiving a customer is refused while a subscription still bills; it never cancels anything |
 | [068](068-checkout-session-dedup.md) | 2026-07-02 | Accepted (amended) | Payments | One open checkout session per invoice; hosted payment and Velox charges exclude each other |
 | [069](069-trial-cancel-semantics.md) | 2026-07-02 | Accepted | Subscriptions | Cancelling a trial is free at trial end; SQL guards enforce it at every activation |
-| [070](070-price-change-semantics.md) | 2026-07-02 | Accepted (amended) | Pricing & usage | Customer price overrides follow the rule across versions; a period keeps its opening price |
+| [070](070-price-change-semantics.md) | 2026-07-02 | Accepted (amended) | Pricing & usage | Customer price overrides follow the rule across versions; a period keeps its opening price; a meter pricing edit that would reprice usage is refused while a subscription uses the meter |
 | [071](071-credit-expiry-retires-the-block.md) | 2026-07-03 | Accepted (amended) | Credits | An expired credit grant is fully retired in the same transaction as its expiry entry, once no period invoice still owed can draw on it |
 | [072](072-transport-lease-model.md) | 2026-07-03 | Accepted (amended) | Platform & ops | Outbox workers claim rows with a time-limited lease; budgets and lease lengths are derived |
 | [073](073-selfhost-boot-and-bootstrap-contract.md) | 2026-07-03 | Accepted (amended) | Platform & ops | One bootstrap path creates a tenant in one transaction; migrations run one at a time |

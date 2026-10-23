@@ -31,15 +31,15 @@ import (
 func (r *cancelRig) addLastEverRule(t *testing.T) {
 	t.Helper()
 	rule := r.f.seededRule(t, r.base)
-	if _, err := r.f.pricingSvc.UpsertMeterPricingRule(r.base, r.f.tenantID, pricing.UpsertMeterPricingRuleInput{
+	// Seeded past the meter-in-use guard: the rig's subscription already
+	// exists, and the rule stands for configuration made before the period.
+	seedPricingRule(t, r.f.db, r.base, r.f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID:             r.f.meterID,
 		RatingRuleVersionID: rule.ID,
 		DimensionMatch:      map[string]any{},
 		AggregationMode:     domain.AggLastEver,
 		Priority:            10,
-	}); err != nil {
-		t.Fatalf("add last_ever rule: %v", err)
-	}
+	})
 }
 
 func (r *cancelRig) ingestOne(t *testing.T, at time.Time, qty int64) {
