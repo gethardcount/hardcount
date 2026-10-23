@@ -16,6 +16,11 @@ export interface DunningRun {
   invoice_id: string;
   customer_id?: string;
   policy_id: string;
+  /**
+     * `active`: retries are running. `escalated`: retries ran out
+     * (`resolution` is `retries_exhausted`). `resolved`: the run ended
+     * another way; see `resolution`.
+     */
   state: DunningRunState;
   reason?: string;
   attempt_count: number;

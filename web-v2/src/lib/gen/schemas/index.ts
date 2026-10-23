@@ -242,6 +242,7 @@ export * from './invoicePreviewLineLineType';
 export * from './invoicePreviewLinePricingMode';
 export * from './invoicePreviewTotal';
 export * from './invoiceStatus';
+export * from './invoiceTaxErrorCode';
 export * from './invoiceTaxStatus';
 export * from './invoiceTimelineEvent';
 export * from './invoiceTimelineEventSource';

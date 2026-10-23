@@ -637,8 +637,6 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 		return nil
 	}
 	switch {
-	case inv.TaxStatus == InvoiceTaxFailed:
-		return classifyTaxAttention(inv, atc, AttentionSeverityCritical)
 	// Before the failure and pending states: while the customer's payment page
 	// is open no Velox charge can start, so their banners' Retry / Charge now
 	// would be refused, and a dunning retry date reads as overdue when it is
@@ -648,7 +646,7 @@ func classifyAttentionCause(inv Invoice, atc AttentionContext) *Attention {
 	case inv.PaymentStatus == PaymentFailed:
 		return classifyPaymentFailure(inv, atc)
 	case inv.TaxStatus == InvoiceTaxPending:
-		return classifyTaxAttention(inv, atc, AttentionSeverityWarning)
+		return classifyTaxAttention(inv, atc)
 	case inv.PaymentStatus == PaymentUnknown:
 		return classifyPaymentUnconfirmed(inv)
 	case inv.PaymentStatus == PaymentProcessing:
@@ -932,14 +930,14 @@ func TaxErrorCodeRetryable(code string) bool {
 	return false
 }
 
-func classifyTaxAttention(inv Invoice, atc AttentionContext, severity AttentionSeverity) *Attention {
+func classifyTaxAttention(inv Invoice, atc AttentionContext) *Attention {
 	errorCode := inv.TaxErrorCode
 	if errorCode == "" {
 		errorCode = "unknown"
 	}
 
 	att := &Attention{
-		Severity: severity,
+		Severity: AttentionSeverityWarning,
 		Since:    inv.TaxDeferredAt,
 		Code:     "tax." + errorCode,
 	}

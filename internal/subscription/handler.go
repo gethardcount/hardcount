@@ -513,9 +513,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	switch domain.SubscriptionStatus(status) {
 	case "", domain.SubscriptionDraft, domain.SubscriptionTrialing, domain.SubscriptionActive,
-		domain.SubscriptionCanceled, domain.SubscriptionArchived:
+		domain.SubscriptionCanceled:
 	default:
-		msg := "status must be one of draft, trialing, active, canceled, archived"
+		msg := "status must be one of draft, trialing, active, canceled"
 		if status == "paused" {
 			msg += `; paused collection is not a status, use collection=paused`
 		}

@@ -15,7 +15,6 @@ const (
 	SubscriptionTrialing SubscriptionStatus = "trialing"
 	SubscriptionActive   SubscriptionStatus = "active"
 	SubscriptionCanceled SubscriptionStatus = "canceled"
-	SubscriptionArchived SubscriptionStatus = "archived"
 )
 
 type SubscriptionBillingTime string

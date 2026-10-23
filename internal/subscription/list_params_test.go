@@ -14,6 +14,8 @@ import (
 // that reads as an answer. "paused" is not a status: the dashboard's Paused
 // tab sent ?status=paused and always showed nothing (sweep E6), because a
 // paused subscription stays active and only its collection pauses.
+// "archived" is not a status either: nothing ever wrote it, so it was
+// removed before the first release.
 func TestListHandler_StatusAndCollectionParams(t *testing.T) {
 	const tenantID = "t1"
 	store := newMemStore()
@@ -26,7 +28,7 @@ func TestListHandler_StatusAndCollectionParams(t *testing.T) {
 		"?status=trialing":                 http.StatusOK,
 		"?status=active":                   http.StatusOK,
 		"?status=canceled":                 http.StatusOK,
-		"?status=archived":                 http.StatusOK,
+		"?status=archived":                 http.StatusBadRequest,
 		"?status=paused":                   http.StatusBadRequest,
 		"?status=past_due":                 http.StatusBadRequest,
 		"?status=Active":                   http.StatusBadRequest,

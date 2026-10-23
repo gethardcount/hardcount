@@ -58,6 +58,23 @@ itself may need a fix: report it with the error text.
 If it says `waited 5s for a table lock`, see
 [It waited 5s for a table lock](#it-waited-5s-for-a-table-lock).
 
+## 00201 found rows no Velox version wrote
+
+**Symptom:**
+
+```
+migration 00201_remove_dead_contract.sql failed: ERROR: migration 00201 removes values that no Velox code writes, and this database has rows that hold them:
+  1 subscription(s) with status archived ...
+```
+
+**Why:** migration 201 removes values that no Velox version ever wrote,
+such as subscription status `archived` and the `billed_entries` table. A
+row that holds one was written outside Velox, for example by hand in
+`psql`. Nothing was changed.
+
+**Fix:** find the rows the error lists. Set each to a value that is true
+for it, or delete it if nothing needs it. Then run `velox migrate` again.
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).

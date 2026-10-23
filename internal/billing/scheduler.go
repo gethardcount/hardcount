@@ -171,7 +171,7 @@ func (s *Scheduler) SetLoginThrottleCleaner(cleaner LoginThrottleCleaner) {
 }
 
 // SetTaxRetrier wires the background tax-retry reconciler. Each
-// tick scans invoices stuck at tax_status pending|failed with a
+// tick scans invoices stuck at tax_status pending with a
 // retryable code (provider_outage, unknown) past their backoff
 // timestamp, recomputes tax, and (on success + non-manual
 // invoices) auto-finalizes. Without this hook, tax-pending

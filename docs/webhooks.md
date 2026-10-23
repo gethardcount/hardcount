@@ -271,6 +271,7 @@ lists the newest 50 events; it has no filters.
 | `payment_method.updated` | A customer's payment method was set up or replaced. Carries the card brand and last 4 digits. |
 | `payment.duplicate_charge` | A second charge succeeded on an invoice that was already paid. Refund it. |
 | `payment.amount_mismatch` | A charge settled for a different amount than the invoice owed |
+| `payment.currency_mismatch` | A charge settled in a different currency than the invoice's. The payment is recorded as usual and nothing is converted. Review it in Stripe. |
 | `payment.received_on_voided_invoice` | Money arrived for a voided invoice. Refund it. |
 | `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Velox recorded it against the invoice. Sent once per dispute. Carries `stripe_dispute_id`, `status`, `reason`, `amount_cents` and `evidence_due_by`, the deadline to respond in Stripe. *(always sent)* |
 | `payment.dispute_closed` | A recorded dispute closed. `status` is `won`, `lost`, `warning_closed` (an inquiry that never became a chargeback) or `prevented`. Sent again if Stripe turns a loss into a win. *(always sent)* |

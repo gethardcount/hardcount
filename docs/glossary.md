@@ -61,7 +61,7 @@ Words used in the Velox docs and dashboard. For the big picture, read
 - **plan**: A price package you sell: a currency, a billing interval
   (monthly or yearly), a fixed base fee, and the meters it charges usage
   for. A subscription has one or more items, each a plan with a quantity.
-  A plan's status is draft, active or archived. [More](features.md)
+  A plan's status is active or archived. [More](features.md)
 - **recipe**: A ready-made pricing setup that one API call applies. The
   built-in ones are `anthropic_style`, `openai_style` and
   `replicate_style`. A recipe creates meters, rating rules, pricing rules
@@ -79,7 +79,7 @@ Words used in the Velox docs and dashboard. For the big picture, read
 
 - **subscription**: A customer's agreement to pay for one or more plans,
   period after period. It holds items (each a plan and a quantity). Its
-  status is draft, trialing, active, canceled or archived.
+  status is draft, trialing, active or canceled.
   [More](features.md#subscriptions-and-invoices)
 - **billing period**: The dates one subscription invoice covers. The start
   day is included and the end is not. Periods start and end at midnight in

@@ -28,7 +28,6 @@ func TestInvoiceFinalizationStatus(t *testing.T) {
 	}{
 		{"happy path (tax ok, no pause)", InvoiceTaxOK, nil, InvoiceFinalized},
 		{"tax pending → draft", InvoiceTaxPending, nil, InvoiceDraft},
-		{"tax failed → finalized (worker exhausted, operator-resolved)", InvoiceTaxFailed, nil, InvoiceFinalized},
 		{"pause set + tax ok → draft", InvoiceTaxOK, pause, InvoiceDraft},
 		{"pause set + tax pending → draft (both gates fire)", InvoiceTaxPending, pause, InvoiceDraft},
 		// A close can run after resumes_at; it reads the pause as it stood

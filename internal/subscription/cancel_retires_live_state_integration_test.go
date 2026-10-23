@@ -221,12 +221,12 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 
 // TestMigration_ClearsLiveOnlyStateOnCanceledSubs: every cancel before this
 // release left its schedule and pending plan change on the row. The
-// migration clears them on canceled and archived subscriptions, keeps their
-// pause, and leaves a live one untouched.
+// migration clears them on canceled subscriptions, keeps their pause, and
+// leaves a live one untouched. (It also cleared archived ones; migration 201
+// removed that status.)
 func TestMigration_ClearsLiveOnlyStateOnCanceledSubs(t *testing.T) {
 	r := newLiveStateRig(t, "Migration Clears Live State")
 	canceled := r.seed("sub-mig-canceled", domain.SubscriptionActive)
-	archived := r.seed("sub-mig-archived", domain.SubscriptionActive)
 	live := r.seed("sub-mig-live", domain.SubscriptionActive)
 	r.schedule(live, nil, true)
 
@@ -236,8 +236,8 @@ func TestMigration_ClearsLiveOnlyStateOnCanceledSubs(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET status = CASE id WHEN $1 THEN 'canceled' ELSE 'archived' END,
-		canceled_at = now(), cancel_at_period_end = true WHERE id IN ($1, $2)`, canceled.ID, archived.ID); err != nil {
+	if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET status = 'canceled',
+		canceled_at = now(), cancel_at_period_end = true WHERE id = $1`, canceled.ID); err != nil {
 		t.Fatalf("seed terminal rows: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -246,7 +246,7 @@ func TestMigration_ClearsLiveOnlyStateOnCanceledSubs(t *testing.T) {
 
 	applyMigrationUp(t, r.ctx, r.db, "clear_canceled_subscription_live_state")
 
-	for _, id := range []string{canceled.ID, archived.ID} {
+	for _, id := range []string{canceled.ID} {
 		got, err := r.store.Get(r.ctx, r.tenantID, id)
 		if err != nil {
 			t.Fatalf("get %s: %v", id, err)

@@ -229,8 +229,9 @@ const (
 // accepted and matchesEvent silently never fired, so a Stripe-trained
 // subscriber to "invoice.payment_failed" (real name: payment.failed) got
 // silence forever — Velox's own shipped recipes carried two such phantom
-// names. Keep in lockstep with the constants above AND the dashboard's
-// EVENT_GROUPS picker (web-v2/src/pages/Webhooks.tsx).
+// names. Keep in lockstep with the constants above, the dashboard's
+// EVENT_GROUPS picker (web-v2/src/pages/Webhooks.tsx) and docs/webhooks.md;
+// webhook_catalog_test.go fails when they differ.
 var KnownWebhookEventTypes = map[string]bool{
 	EventInvoiceFinalized:                   true,
 	EventInvoicePaid:                        true,
@@ -241,6 +242,7 @@ var KnownWebhookEventTypes = map[string]bool{
 	EventPaymentFailed:                      true,
 	EventPaymentDuplicateCharge:             true,
 	EventPaymentAmountMismatch:              true,
+	EventPaymentCurrencyMismatch:            true,
 	EventPaymentReceivedOnVoidedInvoice:     true,
 	EventPaymentDisputeOpened:               true,
 	EventPaymentDisputeClosed:               true,

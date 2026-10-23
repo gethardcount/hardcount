@@ -129,7 +129,7 @@ Response: the full updated subscription, hydrated with items and thresholds.
 
 - `404 subscription_not_found` — subscription ID does not exist for the tenant.
 - `400 invalid_request` — `amount_gte <= 0`, or `usage_gte` non-positive, or `item_thresholds[].subscription_item_id` not on this subscription, or `billing_thresholds` set while the subscription has multiple line currencies (multi-currency cap not supported in v1).
-- `409 invalid_state` — subscription is canceled or archived (no point setting a threshold on a terminal subscription).
+- `409 invalid_state` — subscription is canceled (no point setting a threshold on a terminal subscription).
 
 ### Webhook event
 

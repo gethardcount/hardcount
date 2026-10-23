@@ -366,9 +366,10 @@ function EndpointsTab() {
 
 /* ─── Event Groups ─── */
 
-// Must match the events the backend actually dispatches
-// (internal/domain/webhook_outbound.go emit sites). An event listed here but
-// never emitted is worse than omitting it — a subscriber gets silence forever.
+// Must match KnownWebhookEventTypes (internal/domain/webhook_outbound.go);
+// internal/domain/webhook_catalog_test.go fails when they differ. An event
+// listed here but never emitted is worse than omitting it — a subscriber gets
+// silence forever.
 const EVENT_GROUPS: { label: string; events: { type: string; description: string }[] }[] = [
   {
     label: 'Payment method',
@@ -394,7 +395,10 @@ const EVENT_GROUPS: { label: string; events: { type: string; description: string
       { type: 'payment.failed', description: 'Payment attempt failed' },
       { type: 'payment.duplicate_charge', description: 'A second charge succeeded on an already-paid invoice — review and refund' },
       { type: 'payment.amount_mismatch', description: 'A charge settled for a different amount than the invoice was owed' },
+      { type: 'payment.currency_mismatch', description: 'A charge settled in a different currency than the invoice' },
       { type: 'payment.received_on_voided_invoice', description: 'A payment landed on a voided invoice — the customer is owed a refund' },
+      { type: 'payment.dispute_opened', description: 'A customer disputed a card payment with their bank' },
+      { type: 'payment.dispute_closed', description: 'A recorded dispute closed' },
     ],
   },
   {

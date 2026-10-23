@@ -31,10 +31,9 @@ type AuditEmitter interface {
 // immutable for billing-relevant fields). Narrow shape; concrete
 // query lives in *subscription.PostgresStore.
 //
-// "Live" = any sub that may still bill: status NOT IN ('canceled',
-// 'archived'). Draft / active / trialing / paused all qualify
-// because they could still produce future invoices and need
-// deterministic terms.
+// "Live" = any sub that may still bill: every status but canceled.
+// Draft, trialing and active all qualify because they could still
+// produce future invoices and need deterministic terms.
 type SubscriptionPlanUsageReader interface {
 	CountLiveSubsByPlan(ctx context.Context, tenantID, planID string) (int, error)
 }
@@ -585,7 +584,7 @@ func (s *Service) GetPlan(ctx context.Context, tenantID, id string) (domain.Plan
 }
 
 // LiveSubscriptionCount is how many subscriptions UpdatePlan's lock counts
-// on this plan: every status but canceled and archived. The plan page reads
+// on this plan: every status but canceled. The plan page reads
 // it to disable the price, timing and meter controls the server would
 // refuse, so the page and the refusal agree on one number. Zero when no
 // subscription reader is wired (the lock is then off too).
@@ -687,10 +686,10 @@ func (s *Service) UpdatePlan(ctx context.Context, tenantID, id string, input Upd
 		// Checked here, not left to plans_status_check: the constraint's
 		// error is a 500, which the idempotency middleware caches.
 		switch st := domain.PlanStatus(input.Status); st {
-		case domain.PlanDraft, domain.PlanActive, domain.PlanArchived:
+		case domain.PlanActive, domain.PlanArchived:
 			existing.Status = st
 		default:
-			return domain.Plan{}, errs.Invalid("status", "must be draft, active or archived")
+			return domain.Plan{}, errs.Invalid("status", "must be active or archived")
 		}
 	}
 	if input.TaxCode != nil {

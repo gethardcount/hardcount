@@ -112,7 +112,6 @@ const (
 type PlanStatus string
 
 const (
-	PlanDraft    PlanStatus = "draft"
 	PlanActive   PlanStatus = "active"
 	PlanArchived PlanStatus = "archived"
 )

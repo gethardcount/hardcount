@@ -25,7 +25,7 @@ import (
 
 // maxTaxRetryAttempts is the hard cap on automatic retries before
 // the reconciler stops re-scheduling. After the cap, the invoice
-// stays at tax_status=pending|failed with its last tax_error_code
+// stays at tax_status=pending with its last tax_error_code
 // — the attention banner ESCALATES to Critical on exhaustion (the
 // classifier reads the same policy), and the worker stops burning
 // provider quota. Sourced from domain so the banner's asserted

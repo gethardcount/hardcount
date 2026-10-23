@@ -523,12 +523,7 @@ function RunsTab() {
 
 const EVENT_LABELS: Record<string, { label: string; color: string }> = {
   dunning_started: { label: 'Dunning started', color: 'bg-blue-400' },
-  retry_scheduled: { label: 'Retry scheduled', color: 'bg-muted-foreground' },
   retry_attempted: { label: 'Retry attempted', color: 'bg-blue-400' },
-  retry_succeeded: { label: 'Payment recovered', color: 'bg-emerald-500' },
-  retry_failed: { label: 'Retry failed', color: 'bg-red-400' },
-  paused: { label: 'Dunning paused', color: 'bg-amber-400' },
-  resumed: { label: 'Dunning resumed', color: 'bg-blue-400' },
   escalated: { label: 'Escalated', color: 'bg-violet-500' },
   resolved: { label: 'Resolved', color: 'bg-emerald-500' },
 }
