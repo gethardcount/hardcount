@@ -2,18 +2,20 @@ package credit_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// TestReverseForInvoiceTx_IdempotentNoDoubleCredit reproduces the
+// TestReverseForInvoiceTx_SecondReversalRefused reproduces the
 // double-credit bug caught in the 2026-06 backend audit: voiding an
 // invoice and then manual-resolving the same invoice's dunning run (or
 // any retry of the void) re-summed the untouched usage rows and
@@ -22,9 +24,11 @@ import (
 // The fix stamps each reversal grant with source_invoice_reversal_id
 // and enforces one-reversal-per-invoice via the partial unique index
 // idx_credit_ledger_reversal_dedup (migration 0106). A second
-// ReverseForInvoiceTx hits the constraint and returns 0: no second credit.
-// The conflict aborts that second tx, so the test rolls it back.
-func TestReverseForInvoiceTx_IdempotentNoDoubleCredit(t *testing.T) {
+// ReverseForInvoiceTx hits the index. The conflict aborts the caller's tx,
+// so the call must return the error (code "credit_reversal_source_taken")
+// and not (0, nil): a caller told "nothing to reverse" would carry on with
+// an aborted tx and fail later with an unrelated error.
+func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
@@ -109,20 +113,20 @@ func TestReverseForInvoiceTx_IdempotentNoDoubleCredit(t *testing.T) {
 		t.Fatalf("balance after first reversal: got %d, want 10000 ($60 + $40 reversed)", balAfterFirst.BalanceCents)
 	}
 
-	// Second reversal: dunning manual-resolve / retry of the same void.
-	// Pre-fix this re-granted another $40 → balance $140. Post-fix it's an
-	// idempotent no-op returning 0 with balance unchanged.
+	// Second reversal of the same invoice. Before the 0106 index this
+	// re-granted another $40 (balance $140). Now the index refuses it, and
+	// the refusal must reach the caller, because its tx is aborted.
 	tx2, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		t.Fatalf("begin second tx: %v", err)
 	}
 	reversedAgain, err := svc.ReverseForInvoiceTx(ctx, tx2, tenantID, cust.ID, inv.ID, "INV-001")
 	_ = tx2.Rollback()
-	if err != nil {
-		t.Fatalf("second ReverseForInvoiceTx: %v", err)
+	if !errors.Is(err, errs.ErrAlreadyExists) || errs.Code(err) != "credit_reversal_source_taken" {
+		t.Fatalf("second ReverseForInvoiceTx: (%d, %v), want already-exists credit_reversal_source_taken", reversedAgain, err)
 	}
 	if reversedAgain != 0 {
-		t.Errorf("second reversal: got %d, want 0 (idempotent no-op)", reversedAgain)
+		t.Errorf("second reversal: got %d, want 0", reversedAgain)
 	}
 
 	balAfterSecond, err := svc.GetBalance(ctx, tenantID, cust.ID)
