@@ -61,7 +61,9 @@ longer exists. It supersedes the 2026-10-22 amendment below: a balance's
 currency is the stored one, not one derived at read time, and the live balance
 is per currency too.
 
-## Amendment 2026-10-22: a credit balance reads in the customer's currency (superseded 2026-10-23)
+## Amendment 2026-10-22: a credit balance reads in the customer's currency
+
+*Superseded 2026-10-23 by the amendment above (ADR-129): the ledger now stores a currency on each row.*
 
 The ledger still has no currency column (see Deferred). Without one, the dashboard printed every credit amount with the workspace symbol: a EUR customer's €20 read "$20.00", and the Credits page added it into one dollar total.
 
