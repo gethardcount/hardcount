@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -53,6 +54,12 @@ func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO tenants (id, name) VALUES ('ten_rd', 'Retry days')`)
+	// The policy writer before 00206 stored a schedule the caller left out
+	// (allowed for one retry) as json.Marshal of a nil slice: JSON null.
+	omitted, err := json.Marshal([]string(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		id         string
 		grace, max int
@@ -62,6 +69,7 @@ func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 		{"dpol_seed", 3, 3, `["96h","168h"]`, `[3, 4, 7]`},
 		{"dpol_recipe", 3, 4, `["24h","72h","168h","336h"]`, `[3, 1, 3, 7]`},
 		{"dpol_one", 1, 1, `[]`, `[1]`},
+		{"dpol_one_omitted", 2, 1, string(omitted), `[2]`},
 		// Entries past the last retry were never used, so they are dropped,
 		// even one that is not whole days.
 		{"dpol_unused", 2, 2, `["48h","1h30m","96h"]`, `[2, 2]`},
@@ -123,11 +131,12 @@ func TestRetryDays_ConvertsExactlyAndRollsBack(t *testing.T) {
 		t.Fatalf("Down to before %d: %v", retryDaysVersion, err)
 	}
 	wantOld := map[string]string{
-		"dpol_seed":      `3 3 ["96h", "168h"]`,
-		"dpol_recipe":    `3 4 ["24h", "72h", "168h"]`,
-		"dpol_one":       `1 1 []`,
-		"dpol_unused":    `2 2 ["48h"]`,
-		"dpol_spellings": `5 5 ["72h", "72h", "48h", "72h"]`,
+		"dpol_seed":        `3 3 ["96h", "168h"]`,
+		"dpol_recipe":      `3 4 ["24h", "72h", "168h"]`,
+		"dpol_one":         `1 1 []`,
+		"dpol_one_omitted": `2 1 []`,
+		"dpol_unused":      `2 2 ["48h"]`,
+		"dpol_spellings":   `5 5 ["72h", "72h", "48h", "72h"]`,
 	}
 	for id, want := range wantOld {
 		var grace, max int
@@ -176,6 +185,8 @@ func TestRetryDays_RefusesWhatCannotConvertExactly(t *testing.T) {
 	exec(oldPolicySQL("dpol_count", 3, 16, `["24h","24h","24h","24h","24h","24h","24h","24h","24h","24h","24h","24h","24h","24h","24h"]`))
 	exec(oldPolicySQL("dpol_short", 3, 3, `["72h"]`))
 	exec(oldPolicySQL("dpol_garbage", 3, 2, `["soon"]`))
+	// A schedule left out (JSON null) is an empty list: too short for 3.
+	exec(oldPolicySQL("dpol_omitted_short", 3, 3, `null`))
 
 	err := up(ctx, dsn, migrationFiles())
 	if err == nil {
@@ -189,6 +200,7 @@ func TestRetryDays_RefusesWhatCannotConvertExactly(t *testing.T) {
 		"dunning policy dpol_count: max_retry_attempts 16 is outside 1 to 15",
 		"dunning policy dpol_short: retry_schedule has 1 entries; max_retry_attempts 3 needs 2",
 		"dunning policy dpol_garbage: retry_schedule entry 1 (soon)",
+		"dunning policy dpol_omitted_short: retry_schedule has 0 entries; max_retry_attempts 3 needs 2",
 		"docs/ops/runbook/migration-failed-midway.md#00206-a-dunning-schedule-is-not-whole-days",
 	} {
 		if !strings.Contains(err.Error(), want) {
