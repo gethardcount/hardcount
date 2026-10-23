@@ -39,10 +39,9 @@ func TestAddItem_DayOneOfPeriod_BillsFullPeriod(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(AddItemInput{PlanID: "plan_new", Quantity: 1})
 	req := addItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, body)

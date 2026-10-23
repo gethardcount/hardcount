@@ -399,11 +399,8 @@ func TestRetryPendingCreditNoteTaxReversal_RecoversMarkerlessOrphan(t *testing.T
 }
 
 // fakeCreditGranter satisfies the CreditGranter optional dep so
-// CreateRefund doesn't blow up when refund_type is credit. The refund
-// happy path doesn't call Grant, but wiring one keeps the service's
-// optional-dep surface exercised.
+// CreateRefund doesn't blow up when refund_type is credit.
 type fakeCreditGranter struct {
-	calls                                          []CreditGrantInput
 	cnCalls                                        []fakeCreditGranterCNCall
 	seenCNIDs                                      map[string]bool
 	commitGranted, commitConsumed, commitCNRetired int64
@@ -416,16 +413,10 @@ type fakeCreditGranterCNCall struct {
 	input        CreditGrantInput
 }
 
-func (f *fakeCreditGranter) Grant(_ context.Context, _ string, in CreditGrantInput) error {
-	f.calls = append(f.calls, in)
-	return nil
-}
-
-// GrantForCreditNote mirrors the production dedup contract: if the
-// same CN id is granted twice, the second call returns nil silently
-// (representing "ErrAlreadyExists handled by GrantForCreditNote's
-// fetch-and-return path"), but only ONE Grant call is recorded.
-func (f *fakeCreditGranter) GrantForCreditNote(_ context.Context, _, creditNoteID string, in CreditGrantInput) error {
+// GrantForCreditNoteTx ignores the (nil) coordinator tx and records one call
+// per credit-note id; a repeat id is ignored. Real in-tx atomicity is covered
+// by the PG test.
+func (f *fakeCreditGranter) GrantForCreditNoteTx(_ context.Context, _ *sql.Tx, _, creditNoteID string, in CreditGrantInput) error {
 	if f.seenCNIDs == nil {
 		f.seenCNIDs = make(map[string]bool)
 	}
@@ -437,8 +428,6 @@ func (f *fakeCreditGranter) GrantForCreditNote(_ context.Context, _, creditNoteI
 	return nil
 }
 
-// GrantForCreditNoteTx ignores the (nil) coordinator tx and delegates — the
-// fake records the same way; real in-tx atomicity is covered by the PG test.
 // Relief-pair stubs: unit doubles carry a configurable commit grant so the
 // relief coordinator's math is unit-testable; lock semantics are proven on
 // real Postgres.
@@ -452,10 +441,6 @@ func (f *fakeCreditGranter) RetireCommitSliceForReliefTx(_ context.Context, _ *s
 	f.commitConsumed += slice
 	f.commitCNRetired += slice
 	return f.commitGranted - f.commitConsumed, nil
-}
-
-func (f *fakeCreditGranter) GrantForCreditNoteTx(ctx context.Context, _ *sql.Tx, _, creditNoteID string, in CreditGrantInput) error {
-	return f.GrantForCreditNote(ctx, "", creditNoteID, in)
 }
 
 // TestRetryPendingCreditNoteTaxReversal_ZeroTaxOrphanDoesNotRewriteItself pins

@@ -155,12 +155,13 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		return domain.CreditLedgerEntry{}, fmt.Errorf("acquire credit ledger lock: %w", err)
 	}
 	// A second entry for the same source (credit note, invoice reversal,
-	// commit funding, proration) is refused by the dedup indexes, and callers
-	// treat that refusal as "already done". That is only true when the amount
-	// matches: a different amount for the same source means some code path
-	// computed it differently, and swallowing it hides the bug (P06). Checked
-	// here, under the customer lock and before the INSERT — a unique violation
-	// would abort the tx, so it cannot be compared afterwards.
+	// commit funding, proration) is refused by the dedup indexes; the INSERT
+	// fails, the tx is aborted, and every caller returns the error. A
+	// different amount for the same source is a worse fault: some code path
+	// computed it differently (P06). This check names it and logs it at
+	// ERROR. It runs here, under the customer lock and before the INSERT,
+	// because after a unique violation the tx is aborted and nothing more
+	// can be read.
 	if err := checkSameSourceAmount(ctx, tx, tenantID, entry); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
@@ -224,15 +225,12 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
-			// Route by constraint name so callers can distinguish a
-			// proration-dedup replay (idempotent: re-fetch and return
-			// the prior entry) from a credit-note-dedup replay (same
-			// shape, different semantic — caller's responsibility to
-			// handle). Pre-2026-05-28 every unique violation collapsed
-			// into a generic ErrAlreadyExists and the caller assumed it
-			// was proration — silent misroute when the credit-note
-			// dedup index fired instead. ADR-030 cross-flow audit
-			// 2026-05-28 / feedback_no_silent_fallbacks memory.
+			// Route by constraint name so the error says which source
+			// was already taken. The violation has aborted the tx, so no
+			// caller can recover inside it: each one returns the error
+			// and its tx rolls back. Pre-2026-05-28 every unique
+			// violation collapsed into a generic ErrAlreadyExists and the
+			// caller assumed it was proration (ADR-030 cross-flow audit).
 			switch postgres.UniqueViolationConstraint(err) {
 			case "idx_credit_ledger_proration_dedup":
 				return domain.CreditLedgerEntry{}, errs.AlreadyExists("proration_source",
@@ -723,8 +721,9 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 	}
 	switch domain.InvoiceStatus(invStatus) {
 	case domain.InvoiceDraft, domain.InvoiceFinalized:
-		// Payable — draft stays eligible: billOnePeriod applies credits to
-		// tax-pending drafts at build time.
+		// Payable. A draft is admitted, but no caller applies credits to
+		// one: processAutoCharge, the dunning retry and ApplyCreditBalance
+		// each act on a finalized invoice.
 	default:
 		// Paid / voided / uncollectible: nothing to cover — uncollectible
 		// lands here since ADR-113 (no charge path admits it, so credit
@@ -1145,84 +1144,6 @@ func (s *PostgresStore) RetireCommitSliceForReliefTx(ctx context.Context, tx *sq
 // operator's read). The caller surfaces the LIVE remaining so the operator
 // re-decides — never a silent clamp of an approved money document.
 var ErrCommitInsufficientRemaining = errors.New("commit grant has insufficient remaining credits")
-
-// GetByProrationSource returns the credit ledger entry previously written
-// for a specific (subscription, item, change_type, change_at) event, if any.
-// Callers use this after AppendEntry returns ErrAlreadyExists to complete an
-// idempotent retry — the proration dedup partial index ensures uniqueness.
-// change_type disambiguates plan-vs-qty-vs-remove events on the same item at
-// the same wall-clock instant; the item id keeps cross-item changes distinct.
-func (s *PostgresStore) GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var e domain.CreditLedgerEntry
-	var metaJSON []byte
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, customer_id, entry_type, amount_cents, balance_after,
-			description, COALESCE(invoice_id,''), expires_at, metadata, created_at,
-			COALESCE(source_subscription_id,''), COALESCE(source_subscription_item_id,''),
-			source_plan_changed_at, COALESCE(source_change_type,'')
-		FROM customer_credit_ledger
-		WHERE tenant_id = $1 AND source_subscription_id = $2 AND source_subscription_item_id = $3 AND source_change_type = $4 AND source_plan_changed_at = $5
-	`, tenantID, subscriptionID, subscriptionItemID, string(changeType), changeAt,
-	).Scan(&e.ID, &e.TenantID, &e.CustomerID, &e.EntryType,
-		&e.AmountCents, &e.BalanceAfter, &e.Description, &e.InvoiceID,
-		&e.ExpiresAt, &metaJSON, &e.CreatedAt,
-		&e.SourceSubscriptionID, &e.SourceSubscriptionItemID, &e.SourcePlanChangedAt,
-		(*string)(&e.SourceChangeType))
-	if err == sql.ErrNoRows {
-		return domain.CreditLedgerEntry{}, errs.ErrNotFound
-	}
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	_ = json.Unmarshal(metaJSON, &e.Metadata)
-	return e, nil
-}
-
-// GetByCreditNoteSource fetches the grant row tied to a specific
-// credit-note Issue(). Used by credit.Service.GrantForCreditNote to
-// recover from ErrAlreadyExists on retry — the partial unique index
-// idx_credit_ledger_credit_note_dedup (migration 0093) enforces one
-// grant per (tenant, CN), so a retry that hits this lookup confirms
-// the grant already exists and returns it for the caller to use.
-func (s *PostgresStore) GetByCreditNoteSource(ctx context.Context, tenantID, creditNoteID string) (domain.CreditLedgerEntry, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var e domain.CreditLedgerEntry
-	var metaJSON []byte
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, customer_id, entry_type, amount_cents, balance_after,
-			description, COALESCE(invoice_id,''), expires_at, metadata, created_at,
-			COALESCE(source_subscription_id,''), COALESCE(source_subscription_item_id,''),
-			source_plan_changed_at, COALESCE(source_change_type,''),
-			COALESCE(source_credit_note_id,'')
-		FROM customer_credit_ledger
-		WHERE tenant_id = $1 AND source_credit_note_id = $2
-	`, tenantID, creditNoteID,
-	).Scan(&e.ID, &e.TenantID, &e.CustomerID, &e.EntryType,
-		&e.AmountCents, &e.BalanceAfter, &e.Description, &e.InvoiceID,
-		&e.ExpiresAt, &metaJSON, &e.CreatedAt,
-		&e.SourceSubscriptionID, &e.SourceSubscriptionItemID, &e.SourcePlanChangedAt,
-		(*string)(&e.SourceChangeType),
-		&e.SourceCreditNoteID)
-	if err == sql.ErrNoRows {
-		return domain.CreditLedgerEntry{}, errs.ErrNotFound
-	}
-	if err != nil {
-		return domain.CreditLedgerEntry{}, err
-	}
-	_ = json.Unmarshal(metaJSON, &e.Metadata)
-	return e, nil
-}
 
 // balanceWriteOffColumns are the CreditBalance totals that take credit away
 // without an invoice using it: expiry, commit retires and operator

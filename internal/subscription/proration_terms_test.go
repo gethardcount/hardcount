@@ -62,7 +62,7 @@ func driveUpgradeProration(t *testing.T, configure func(*Handler)) (*httptest.Re
 	}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	if configure != nil {
 		configure(h)
 	}

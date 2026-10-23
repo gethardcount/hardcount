@@ -2,31 +2,28 @@ package credit_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
-// TestGrantForCreditNote_IdempotentNoDoubleCredit asserts the real
+// TestGrantForCreditNoteTx_IdempotentNoDoubleCredit asserts the real
 // migration-0093 partial unique index idx_credit_ledger_credit_note_dedup
-// makes GrantForCreditNote exactly-once.
+// makes the credit-note grant exactly-once.
 //
-// The paid-CN clawback path (creditnote.Issue → GrantForCreditNote) can be
-// retried after a downstream-step failure (tax reversal / UpdateStatus). The
-// retry calls GrantForCreditNote again with the SAME credit-note id. Without
-// the DB-enforced unique index, the second Grant() appends a SECOND grant row
-// and double-credits the customer. The index makes the second insert violate
-// idx_credit_ledger_credit_note_dedup → store returns ErrAlreadyExists
-// (code "credit_note_source_taken") → service fetches the existing grant via
-// GetByCreditNoteSource and returns it as an idempotent no-op.
-//
-// A mem-store emulation guards this today; this test exercises the actual
-// Postgres constraint + the real route in appendEntryInTx.
-func TestGrantForCreditNote_IdempotentNoDoubleCredit(t *testing.T) {
+// creditnote.Issue grants through GrantForCreditNoteTx on its coordinator tx,
+// behind the draft→issued CAS, so a second grant for the same credit note is
+// not expected. If one ever comes, the index refuses the second INSERT and the
+// store returns ErrAlreadyExists (code "credit_note_source_taken"). The Tx
+// variant surfaces it rather than swallowing it, because the conflict aborts
+// the shared tx; the customer is still credited once.
+func TestGrantForCreditNoteTx_IdempotentNoDoubleCredit(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
@@ -49,10 +46,18 @@ func TestGrantForCreditNote_IdempotentNoDoubleCredit(t *testing.T) {
 		Description: "Credit note CN-001 — duplicate_charge",
 	}
 
-	// First grant: restores $40 to the customer's balance.
-	first, err := svc.GrantForCreditNote(ctx, tenantID, creditNoteID, input)
+	// First grant, on its own committed tx: restores $40 to the balance.
+	tx1, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		t.Fatalf("first GrantForCreditNote: %v", err)
+		t.Fatalf("begin first tx: %v", err)
+	}
+	first, err := svc.GrantForCreditNoteTx(ctx, tx1, tenantID, creditNoteID, input)
+	if err != nil {
+		_ = tx1.Rollback()
+		t.Fatalf("first GrantForCreditNoteTx: %v", err)
+	}
+	if err := tx1.Commit(); err != nil {
+		t.Fatalf("commit first tx: %v", err)
 	}
 	if first.AmountCents != 4000 {
 		t.Fatalf("first grant amount: got %d, want 4000", first.AmountCents)
@@ -66,19 +71,16 @@ func TestGrantForCreditNote_IdempotentNoDoubleCredit(t *testing.T) {
 		t.Fatalf("balance after first grant: got %d, want 4000", balAfterFirst.BalanceCents)
 	}
 
-	// Second grant: retry of Issue() after a downstream-step failure. Pre-index
-	// this appended a SECOND $40 grant → balance $80. Post-index the insert hits
-	// idx_credit_ledger_credit_note_dedup; GrantForCreditNote returns the
-	// EXISTING grant with no error and no second row.
-	second, err := svc.GrantForCreditNote(ctx, tenantID, creditNoteID, input)
+	// Second grant for the same credit note: the insert hits
+	// idx_credit_ledger_credit_note_dedup and is refused as already-exists.
+	tx2, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		t.Fatalf("second GrantForCreditNote: %v", err)
+		t.Fatalf("begin second tx: %v", err)
 	}
-	if second.ID != first.ID {
-		t.Errorf("second grant should return the existing row: got id %q, want %q", second.ID, first.ID)
-	}
-	if second.AmountCents != 4000 {
-		t.Errorf("second grant amount: got %d, want 4000 (existing grant)", second.AmountCents)
+	_, err = svc.GrantForCreditNoteTx(ctx, tx2, tenantID, creditNoteID, input)
+	_ = tx2.Rollback()
+	if !errors.Is(err, errs.ErrAlreadyExists) || errs.Code(err) != "credit_note_source_taken" {
+		t.Fatalf("second GrantForCreditNoteTx: err = %v (code %q), want already-exists credit_note_source_taken", err, errs.Code(err))
 	}
 
 	// Balance reflects a SINGLE grant, not doubled.

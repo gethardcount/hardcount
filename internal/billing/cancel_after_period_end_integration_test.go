@@ -72,7 +72,6 @@ func newCancelRig(t *testing.T, name string) *cancelRig {
 	// The cancel's collaborators, as internal/api/router.go wires them.
 	creditNoteSvc := creditnote.NewService(creditnote.NewPostgresStore(f.db), f.invStore, nil, &cnGrantAdapter{r.credit})
 	creditNoteSvc.SetNumberGenerator(f.settings)
-	f.engine.SetCreditGranter(r.credit)
 	f.engine.SetInvoiceVoider(invoice.NewService(f.invStore, clock.Real(), f.settings))
 	f.engine.SetCreditNoteAdjuster(creditNoteSvc)
 	f.engine.SetCreditHeadroomReader(creditNoteSvc)

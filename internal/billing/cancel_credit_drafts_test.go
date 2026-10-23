@@ -46,7 +46,6 @@ func paidBaseInvoice() (domain.Invoice, domain.InvoiceLineItem) {
 
 func wireCancelEngine(inv *mockInvoices, pricing *mockPricing, adjuster *fakeCreditNoteAdjuster) *Engine {
 	e := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, pricing, inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-	e.SetCreditGranter(&fakeCreditGranter{})
 	e.SetCreditNoteAdjuster(adjuster)
 	e.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 	e.SetInvoiceVoider(&fakeInvoiceVoider{})

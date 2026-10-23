@@ -123,7 +123,7 @@ func prorationHandler(t *testing.T) (*Handler, *blipOnceStore, string, string) {
 	h.SetProrationDeps(&plansMock{plans: map[string]domain.Plan{
 		"plan_existing": {ID: "plan_existing", Name: "Basic", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 		"plan_new":      {ID: "plan_new", Name: "Add-on", BaseAmountCents: 2000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
-	}}, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}, &creditsMock{})
+	}}, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}})
 	return h, store, subID, itemID
 }
 

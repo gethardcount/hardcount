@@ -65,7 +65,7 @@ func newProrationFinalizeRig(t *testing.T) *prorationFinalizeRig {
 	}}
 	rec := &finalizeRecorderMock{}
 	h := NewHandler(NewService(store, nil))
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetInvoiceFinalizeRecorder(rec)
 	return &prorationFinalizeRig{h: h, invoices: invoices, rec: rec, subID: subID, itemID: itemID}
 }

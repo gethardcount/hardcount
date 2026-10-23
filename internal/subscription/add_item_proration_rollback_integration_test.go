@@ -88,11 +88,10 @@ func TestAddItem_ProrationInvoiceCreateFailure_RollsBackItemAdd(t *testing.T) {
 		},
 		createInvoiceErr: errors.New("simulated proration invoice write failure"),
 	}
-	credits := &creditsMock{}
 
 	h := NewHandler(svcWithStore(store))
 	h.SetDB(db)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 
 	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
 	body, _ := json.Marshal(AddItemInput{PlanID: addPlan.ID, Quantity: 1})
@@ -170,7 +169,7 @@ func TestAddItem_EnrollAutoChargeFailure_RollsBackItemAdd(t *testing.T) {
 	}
 	h := NewHandler(svcWithStore(store))
 	h.SetDB(db)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 
 	reqCtx := clock.WithEffectiveNow(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), proNow)
 	body, _ := json.Marshal(AddItemInput{PlanID: addPlan.ID, Quantity: 1})

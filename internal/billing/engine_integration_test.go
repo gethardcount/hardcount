@@ -492,7 +492,6 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 	settingsStore := tenant.NewSettingsStore(db)
 	fakeClk := clock.NewFake(periodStart.Add(time.Hour))
 	engine := newRealEngine(db, fakeClk)
-	engine.SetCreditGranter(creditSvc)
 	// Issuers are REQUIRED post-#442: the paid-source cancel credit routes
 	// through the real creditnote.Service (Issue grants the balance via the
 	// cnGrantAdapter), matching production wiring.
@@ -680,14 +679,6 @@ type reliefLedgerGranter struct{ svc *credit.Service }
 func (g reliefLedgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
 	return credit.GrantInput{CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
 }
-func (g reliefLedgerGranter) Grant(ctx context.Context, tenantID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.Grant(ctx, tenantID, g.in(i))
-	return err
-}
-func (g reliefLedgerGranter) GrantForCreditNote(ctx context.Context, tenantID, cnID string, i creditnote.CreditGrantInput) error {
-	_, err := g.svc.GrantForCreditNote(ctx, tenantID, cnID, g.in(i))
-	return err
-}
 func (g reliefLedgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
 	return err
@@ -734,7 +725,6 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 
 	newEngine := func() *billing.Engine {
 		e := newRealEngine(db, clock.NewFake(periodStart.Add(time.Hour)))
-		e.SetCreditGranter(creditSvc)
 		e.SetInvoiceVoider(invoiceSvc)
 		e.SetCreditNoteAdjuster(creditNoteSvc)
 		e.SetCreditHeadroomReader(creditNoteSvc)

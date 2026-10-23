@@ -46,7 +46,7 @@ func TestAppendEntry_SameSourceDifferentAmountIsRefused(t *testing.T) {
 		t.Fatalf("different amount: err = %v (code %q), want credit_source_amount_mismatch", err, errs.Code(err))
 	}
 	if errors.Is(err, errs.ErrAlreadyExists) {
-		t.Fatal("a mismatch must not look like an already-exists replay — GrantForCreditNote would swallow it")
+		t.Fatal("a mismatch must not look like an already-exists replay — a caller that treats a replay as done would swallow it")
 	}
 	bal, err := store.GetBalance(ctx, tenantID, cust.ID)
 	if err != nil {

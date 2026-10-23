@@ -181,7 +181,6 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
 	e.SetDunningStarter(testDunningStarter{})
 	e.SetDunningResolver(&testDunningResolver{})
-	e.SetCreditGranter(r.creditSvc)
 	e.SetInvoiceVoider(invoice.NewService(r.invStore, clock.Real(), settings))
 	e.SetCreditNoteAdjuster(r.cnSvc)
 	e.SetCreditHeadroomReader(r.cnSvc)

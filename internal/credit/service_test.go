@@ -152,27 +152,6 @@ func (m *memStore) AppendEntry(_ context.Context, tenantID string, entry domain.
 	return entry, nil
 }
 
-func (m *memStore) GetByCreditNoteSource(_ context.Context, tenantID, creditNoteID string) (domain.CreditLedgerEntry, error) {
-	for _, e := range m.entries {
-		if e.TenantID == tenantID && e.SourceCreditNoteID == creditNoteID {
-			return e, nil
-		}
-	}
-	return domain.CreditLedgerEntry{}, errs.ErrNotFound
-}
-
-func (m *memStore) GetByProrationSource(_ context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error) {
-	for _, e := range m.entries {
-		if e.TenantID == tenantID && e.SourceSubscriptionID == subscriptionID &&
-			e.SourceSubscriptionItemID == subscriptionItemID &&
-			e.SourceChangeType == changeType &&
-			e.SourcePlanChangedAt != nil && e.SourcePlanChangedAt.Equal(changeAt) {
-			return e, nil
-		}
-	}
-	return domain.CreditLedgerEntry{}, errs.ErrNotFound
-}
-
 func (m *memStore) GetSpendableBalance(_ context.Context, _, customerID string, at time.Time) (int64, error) {
 	var spendable int64
 	for _, e := range m.entries {

@@ -41,10 +41,9 @@ func TestUpdateItem_PlanUpgrade_RendersTwoLines(t *testing.T) {
 		"plan_pro":     {ID: "plan_pro", Name: "Pro", BaseAmountCents: 5000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 	}}
 	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
-	credits := &creditsMock{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits) // no tax applier → zero tax
+	h.SetProrationDeps(plans, invoices) // no tax applier → zero tax
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
 	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
@@ -107,12 +106,11 @@ func TestUpdateItem_PlanUpgrade_TwoLineTaxApportionsAndTiesOut(t *testing.T) {
 		"plan_pro":     {ID: "plan_pro", Name: "Pro", BaseAmountCents: 5000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 	}}
 	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
-	credits := &creditsMock{}
 	// 10% tax on the 1500 net = 150.
 	taxMock := &prorationTaxApplierMock{result: ProrationTaxResult{TaxFacts: domain.TaxFacts{TaxAmountCents: 150, TaxRate: 10, TaxName: "VAT"}}}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetProrationTaxApplier(taxMock)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
@@ -181,7 +179,7 @@ func TestUpdateItem_QuantityIncrease_RendersTwoLines(t *testing.T) {
 	}}
 	invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 
 	newQty := int64(3)
 	body, _ := json.Marshal(UpdateItemInput{Quantity: &newQty})
@@ -250,7 +248,7 @@ func TestUpdateItem_ItemAdd_KeepsSingleLine(t *testing.T) {
 		}}
 		invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
 		h := NewHandler(svc)
-		h.SetProrationDeps(plans, invoices, &creditsMock{})
+		h.SetProrationDeps(plans, invoices)
 
 		body, _ := json.Marshal(AddItemInput{PlanID: "plan_addon", Quantity: 1})
 		req := addItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, body)

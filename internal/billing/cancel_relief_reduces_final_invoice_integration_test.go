@@ -171,7 +171,6 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	e.SetNoPaymentMethodNotifier(noPM)
 	e.SetDunningStarter(testDunningStarter{})
 	e.SetDunningResolver(&testDunningResolver{})
-	e.SetCreditGranter(creditSvc)
 	e.SetInvoiceVoider(invoice.NewService(invStore, clock.Real(), settings))
 	e.SetCreditNoteAdjuster(cnSvc)
 	e.SetCreditHeadroomReader(cnSvc)

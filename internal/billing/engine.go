@@ -19,7 +19,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/payment"
@@ -60,12 +59,11 @@ type SettingsReader interface {
 // It coordinates across domain boundaries (subscription, usage, pricing, invoice)
 // without those domains knowing about each other.
 type Engine struct {
-	subs          SubscriptionReader
-	usage         UsageAggregator
-	pricing       PricingReader
-	invoices      InvoiceWriter
-	credits       CreditApplier
-	creditGranter CreditGranter
+	subs     SubscriptionReader
+	usage    UsageAggregator
+	pricing  PricingReader
+	invoices InvoiceWriter
+	credits  CreditApplier
 	// #22: settle an UNPAID in_advance prebill at mid-period cancel.
 	invoiceVoider      InvoiceVoider
 	creditNoteAdjuster CreditNoteAdjuster
@@ -265,12 +263,6 @@ func (e *Engine) DispatchInvoiceFinalized(ctx context.Context, tenantID string, 
 	}
 }
 
-// SetCreditGranter wires the credit-grant issuer (ADR-031). Required by the
-// boot wiring check.
-func (e *Engine) SetCreditGranter(g CreditGranter) {
-	e.creditGranter = g
-}
-
 // SetInvoiceVoider / SetCreditNoteAdjuster wire the two issuers the cancel and
 // plan-swap relief writes through (#22, ADR-118): a void when an unpaid
 // invoice's period was not used at all, an adjustment credit note otherwise. Both REQUIRED — boot fails closed if
@@ -404,14 +396,6 @@ type TestClockReader interface {
 // frozen_time during catchup.
 type CreditApplier interface {
 	ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, invoiceID string, amountCents int64, at time.Time, invoiceNumber ...string) (int64, error)
-}
-
-// CreditGranter issues a new credit grant. Wired by boot
-// (ADR-031 slice 3); the cancel relief credits the balance through
-// credit notes (CreditNoteAdjuster), not through this.
-// Implemented by *credit.Service.
-type CreditGranter interface {
-	Grant(ctx context.Context, tenantID string, input credit.GrantInput) (domain.CreditLedgerEntry, error)
 }
 
 // InvoiceVoider annuls a finalized, unpaid invoice inside a cancel or plan-swap
@@ -727,9 +711,8 @@ type InvoiceWriter interface {
 // after the last Set* — so a production boot with a missing collaborator
 // fails closed at startup instead of silently changing money math at 3am
 // (the 2026-07-10 design review found ~10 prod paths whose nil-collaborator
-// arms diverge on money: a nil creditGranter silently skips a cancel refund,
-// a nil creditNoteAdjuster skips a tax reversal, a nil creditHeadroom
-// disables the #276-#278 overcharge cap).
+// arms diverge on money: a nil creditNoteAdjuster skips a tax reversal, a
+// nil creditHeadroom disables the #276-#278 overcharge cap).
 //
 // Why boot-time and not construction-time: the engine and its peer services
 // are mutually referential (invoiceSvc needs the engine as clock resolver;
@@ -739,7 +722,7 @@ type InvoiceWriter interface {
 // minimal complete mechanism: same guarantee, no restructuring. Tests that
 // construct partial engines deliberately do not call this.
 //
-// Reflection walks the struct's interface fields so a future 26th
+// Reflection walks the struct's interface fields so a future 27th
 // collaborator cannot be forgotten here (drift-guarded by
 // TestMustValidate_CoversEveryCollaborator).
 func (e *Engine) MustValidate() {

@@ -90,11 +90,10 @@ func TestUpdateItem_Downgrade_RoutesGrossTaxReversingCreditNote(t *testing.T) {
 			SubtotalCents: 6000, TaxFacts: domain.TaxFacts{TaxAmountCents: 600}, TotalAmountCents: 6600,
 		},
 	}
-	credits := &creditsMock{}
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
@@ -123,10 +122,6 @@ func TestUpdateItem_Downgrade_RoutesGrossTaxReversingCreditNote(t *testing.T) {
 	}
 	if call.desc == "" {
 		t.Error("CN description (memo) is empty")
-	}
-	// The bare net ledger grant must NOT also fire — that would double-credit.
-	if len(credits.grantCalls) != 0 {
-		t.Errorf("GrantProration calls: got %d, want 0 — the CN replaces the bare net grant", len(credits.grantCalls))
 	}
 
 	var resp ItemChangeResult
@@ -174,11 +169,10 @@ func TestUpdateItem_Downgrade_LIFOAcrossFundingInvoices(t *testing.T) {
 		sourceInvoice:   baseInv, // FindBaseInvoiceForPeriod (paid-check gate)
 		fundingInvoices: []domain.Invoice{baseInv, upInv},
 	}
-	credits := &creditsMock{}
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
@@ -240,11 +234,10 @@ func TestUpdateItem_Downgrade_LIFOTiebreak_SameInstantFunding(t *testing.T) {
 		sourceInvoice:   baseInv,
 		fundingInvoices: []domain.Invoice{baseInv, upInv},
 	}
-	credits := &creditsMock{}
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
@@ -288,11 +281,10 @@ func TestUpdateItem_QuantityDecrease_RoutesGrossCreditNote(t *testing.T) {
 			SubtotalCents: 3000, TaxFacts: domain.TaxFacts{TaxAmountCents: 300}, TotalAmountCents: 3300,
 		},
 	}
-	credits := &creditsMock{}
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	// Decrease 3 → 1 seats: delta -2 × $10 = -2000/full period, 15/30 → net 1000.
@@ -315,9 +307,6 @@ func TestUpdateItem_QuantityDecrease_RoutesGrossCreditNote(t *testing.T) {
 	}
 	if got := cn.calls[0].reason; got != "subscription_quantity_decrease" {
 		t.Errorf("CN reason: got %q, want %q", got, "subscription_quantity_decrease")
-	}
-	if len(credits.grantCalls) != 0 {
-		t.Errorf("GrantProration calls: got %d, want 0", len(credits.grantCalls))
 	}
 }
 
@@ -367,7 +356,7 @@ func TestUpdateItem_Downgrade_InFlightSource_DraftsInsteadOfDroppingCredit(t *te
 		cn := &fakeCNIssuer{}
 
 		h := NewHandler(svc)
-		h.SetProrationDeps(plans, invoices, &creditsMock{})
+		h.SetProrationDeps(plans, invoices)
 		h.SetCreditNoteIssuer(cn)
 
 		body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})

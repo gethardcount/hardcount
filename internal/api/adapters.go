@@ -231,28 +231,6 @@ type creditGrantAdapter struct {
 	svc *credit.Service
 }
 
-func (a *creditGrantAdapter) Grant(ctx context.Context, tenantID string, input creditnote.CreditGrantInput) error {
-	_, err := a.svc.Grant(ctx, tenantID, credit.GrantInput{
-		CustomerID:  input.CustomerID,
-		AmountCents: input.AmountCents,
-		Description: input.Description,
-		InvoiceID:   input.InvoiceID,
-	})
-	return err
-}
-
-// GrantForCreditNote bridges to credit.Service.GrantForCreditNote so
-// CN Issue() retries dedup via migration 0093's partial unique index.
-func (a *creditGrantAdapter) GrantForCreditNote(ctx context.Context, tenantID, creditNoteID string, input creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNote(ctx, tenantID, creditNoteID, credit.GrantInput{
-		CustomerID:  input.CustomerID,
-		AmountCents: input.AmountCents,
-		Description: input.Description,
-		InvoiceID:   input.InvoiceID,
-	})
-	return err
-}
-
 // GrantForCreditNoteTx bridges to credit.Service.GrantForCreditNoteTx so the
 // grant rides CN Issue()'s coordinator tx (ADR-061): the credit ledger entry
 // commits atomically with the draft→issued CAS.
@@ -963,46 +941,6 @@ func (a *noPaymentMethodNotifierAdapter) NotifyNoPaymentMethod(ctx context.Conte
 		})
 	}
 	return domain.NotifySent, nil
-}
-
-// prorationCreditGranterAdapter bridges credit.Service → subscription.ProrationCreditGranter.
-type prorationCreditGranterAdapter struct {
-	svc *credit.Service
-}
-
-func (a *prorationCreditGranterAdapter) GrantProration(ctx context.Context, tenantID string, input subscription.ProrationGrantInput) error {
-	planChangedAt := input.SourcePlanChangedAt
-	_, err := a.svc.Grant(ctx, tenantID, credit.GrantInput{
-		CustomerID:               input.CustomerID,
-		AmountCents:              input.AmountCents,
-		Description:              input.Description,
-		SourceSubscriptionID:     input.SourceSubscriptionID,
-		SourceSubscriptionItemID: input.SourceSubscriptionItemID,
-		SourcePlanChangedAt:      &planChangedAt,
-		SourceChangeType:         input.SourceChangeType,
-	})
-	return err
-}
-
-func (a *prorationCreditGranterAdapter) GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error) {
-	return a.svc.GetByProrationSource(ctx, tenantID, subscriptionID, subscriptionItemID, changeType, changeAt)
-}
-
-// GrantProrationTx is the in-transaction variant. The caller owns the
-// tx; this adapter forwards to the credit service's tx-aware grant
-// path. ADR-030 atomic-proration follow-through (2026-05-29).
-func (a *prorationCreditGranterAdapter) GrantProrationTx(ctx context.Context, tx *sql.Tx, tenantID string, input subscription.ProrationGrantInput) error {
-	planChangedAt := input.SourcePlanChangedAt
-	_, err := a.svc.GrantTx(ctx, tx, tenantID, credit.GrantInput{
-		CustomerID:               input.CustomerID,
-		AmountCents:              input.AmountCents,
-		Description:              input.Description,
-		SourceSubscriptionID:     input.SourceSubscriptionID,
-		SourceSubscriptionItemID: input.SourceSubscriptionItemID,
-		SourcePlanChangedAt:      &planChangedAt,
-		SourceChangeType:         input.SourceChangeType,
-	})
-	return err
 }
 
 // prorationInvoiceCreatorAdapter bridges invoice.PostgresStore + tenant.SettingsStore → subscription.ProrationInvoiceCreator.

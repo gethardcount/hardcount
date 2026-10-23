@@ -24,7 +24,7 @@ func TestMustValidate_NamesEveryNilCollaborator(t *testing.T) {
 		}
 		msg, _ := r.(string)
 		// The deliberately-unwired deps must ALL be named.
-		for _, want := range []string{"credits", "paymentSetups", "charger", "events", "auditLogger", "creditGranter"} {
+		for _, want := range []string{"credits", "paymentSetups", "charger", "events", "auditLogger"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("panic must name nil collaborator %q, got: %s", want, msg)
 			}
@@ -65,7 +65,9 @@ func TestMustValidate_CoversEveryCollaborator(t *testing.T) {
 		// owns the period closer's tx (SubscriptionReader.WithTenantTx).
 		// 27 at issue #1019: CreditBalanceReader + CustomerSubscriptionLister,
 		// the two reads behind LiveCreditBalance.
-		const collaborators = 27
+		// Back to 26 at #970 PR-A: the dead CreditGranter is gone (the
+		// cancel relief credits through CreditNoteAdjuster).
+		const collaborators = 26
 		if nilCount != collaborators {
 			t.Errorf("zero engine names %d nil collaborators, expected %d — Engine's dep set changed; update router wiring + this count deliberately", nilCount, collaborators)
 		}
