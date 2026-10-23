@@ -553,6 +553,43 @@ func TestMeterEditGuard_ASubscriptionWaitsForAnEditInProgress(t *testing.T) {
 	}
 }
 
+// A PATCH writes every meter column from its own earlier read. When another
+// write changed the meter after that read, the PATCH must refuse rather than
+// put the old aggregation back: a rename would otherwise revert a pricing
+// change past the guard. The other write is held open on the meter row so it
+// commits between the rename's read and its write.
+func TestMeterEditGuard_RenameDoesNotRevertAConcurrentChange(t *testing.T) {
+	f := newMeterEditFixture(t)
+	pm := f.pricedMeter(t, "stale_rename")
+
+	other := f.begin(t)
+	defer postgres.Rollback(other)
+	if _, err := other.ExecContext(f.ctx, `UPDATE meters SET aggregation = 'max' WHERE id = $1`, pm.meter.ID); err != nil {
+		t.Fatalf("hold meter update: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.svc.UpdateMeter(f.ctx, f.tenantID, pm.meter.ID, pricing.UpdateMeterInput{Name: ptr("Renamed")})
+		done <- err
+	}()
+	time.Sleep(500 * time.Millisecond) // the rename has read the meter and waits on its row
+	if err := other.Commit(); err != nil {
+		t.Fatalf("commit other write: %v", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, errs.ErrInvalidState) || !strings.Contains(err.Error(), "changed while the request was running") {
+			t.Fatalf("want the meter-changed refusal, got %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the rename never finished")
+	}
+	if got := f.getMeter(t, pm.meter.ID); got.Aggregation != "max" || got.Name == "Renamed" {
+		t.Errorf("the other write must stand and the rename must not land: aggregation=%q name=%q", got.Aggregation, got.Name)
+	}
+}
+
 // TestMeterEditGuard_HTTP pins what an API caller sees: 409, code
 // meter_in_use, and a message naming the count.
 func TestMeterEditGuard_HTTP(t *testing.T) {

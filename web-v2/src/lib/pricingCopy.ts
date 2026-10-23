@@ -36,3 +36,16 @@ export function deleteMatchedPriceSentence(match: string, hasDefaultPrice: boole
     ? `${what} move to another matching price or the default price from the next invoice. Finalized invoices don't change.`
     : `${what} go unbilled from the next invoice unless another price below matches them. Finalized invoices don't change.`
 }
+
+export const METER_IN_USE_TITLE = 'Meter in use'
+
+// The meter lock (D05): while subscriptions use a meter, the server refuses a
+// change to its prices or aggregation that would reprice the period already
+// open, with code meter_in_use. Its message names the count and what to do
+// instead, so the dialog shows it as it is. null for any other error.
+export function meterInUseMessage(err: unknown): string | null {
+  if (typeof err !== 'object' || err === null) return null
+  const { code, message } = err as { code?: unknown; message?: unknown }
+  if (code !== 'meter_in_use' || typeof message !== 'string' || !message.trim()) return null
+  return message.trim()
+}

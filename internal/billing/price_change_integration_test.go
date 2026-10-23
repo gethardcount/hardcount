@@ -209,14 +209,14 @@ func TestPriceChange_OverrideSurvivesPublish_MultiDim(t *testing.T) {
 
 	v1 := f.seededRule(t, ctx)
 	backdateRuleVersion(t, f, ctx, v1.ID, f.cycleStart.Add(-2*time.Hour))
-	// Catch-all pricing rule flips the meter onto the multi-dim path.
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
+	// Catch-all pricing rule flips the meter onto the multi-dim path. Seeded
+	// past the meter-in-use guard (the fixture's subscription exists): it
+	// stands for a rule in place before the period opened.
+	seedPricingRule(t, f.db, ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID:             f.meterID,
 		RatingRuleVersionID: v1.ID,
 		AggregationMode:     domain.AggSum,
-	}); err != nil {
-		t.Fatalf("upsert meter pricing rule: %v", err)
-	}
+	})
 	createBackdatedOverride(t, f, ctx, v1.ID, 5)
 
 	if _, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{

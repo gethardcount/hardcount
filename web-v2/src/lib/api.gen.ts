@@ -1021,11 +1021,16 @@ export interface paths {
          *     the meter's DEFAULT rating rule — the rate applied to usage no
          *     dimension pricing rule claims (the remedy for silently-unbilled
          *     unmatched usage); pass an empty string to clear it. The rule must
-         *     exist on the tenant. Clearing it is refused with 409 when the meter
-         *     has no pricing rule either and a plan with a live (draft, trialing
-         *     or active) subscription uses the meter: that usage would be left off
-         *     every invoice. Add a pricing rule first, or move the subscriptions
-         *     to a plan without this meter.
+         *     exist on the tenant.
+         *
+         *     While a draft, trialing or active subscription uses the meter,
+         *     changing `aggregation`, pointing the default at another rating
+         *     rule, or clearing it is refused with 409 `meter_in_use`: the
+         *     change would reprice the billing period already open. A first
+         *     default, or another version of the same rating rule, is allowed. To
+         *     change a rate, publish a new version of the rating rule; it applies
+         *     from each subscription's next period. `name` and `unit` can always
+         *     change.
          */
         patch: {
             parameters: {
@@ -1075,16 +1080,19 @@ export interface paths {
                     content?: never;
                 };
                 /**
-                 * @description `invalid_state`. The new default's currency conflicts with the
-                 *     meter's other prices or with a plan that uses the meter, or
-                 *     clearing the default would leave the meter with no price while a
-                 *     live subscription's plan uses it. The message names the plans.
+                 * @description `meter_in_use`: subscriptions use the meter and the change would
+                 *     reprice their current period. The message gives the number of
+                 *     subscriptions. `invalid_state`: the new default's currency
+                 *     conflicts with the meter's other prices or with a plan that uses
+                 *     the meter, or another write changed the meter during this one.
                  */
                 409: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
                 };
                 /** @description Validation failure (unknown rule id, bad aggregation) */
                 422: {
@@ -1120,6 +1128,15 @@ export interface paths {
          *     `dimension_match`, `aggregation_mode` and `priority` on the existing
          *     rule and keeps its id. Both cases return 201. The meter id in the
          *     path is used; a `meter_id` in the body is ignored.
+         *
+         *     While a draft, trialing or active subscription uses the meter, the
+         *     change must not reprice the billing period already open, or it is
+         *     refused with 409 `meter_in_use`. Updating a rule is refused, unless
+         *     nothing changes. A new rule is allowed only when the meter has no
+         *     default rating rule and every rule that could match the same events
+         *     has a higher priority: then it prices only usage no rule prices
+         *     now. To change a rate, publish a new version of the rating rule; it
+         *     applies from each subscription's next period.
          */
         post: operations["upsertMeterPricingRule"];
         delete?: never;
@@ -1147,9 +1164,9 @@ export interface paths {
          * @description Removes the rule. Usage already invoiced is not changed; the next
          *     invoices bill the meter's usage without this rule. The rule is
          *     looked up by `id` alone; `meter_id` is not checked against it.
-         *     Deleting the meter's last price (no other rule and no default
-         *     rating rule on the meter) is refused while a plan with a draft,
-         *     trialing or active subscription uses the meter.
+         *     Refused with 409 `meter_in_use` while a draft, trialing or active
+         *     subscription uses the meter: the rule's usage would move to another
+         *     price, or to none, in the billing period already open.
          */
         delete: operations["deleteMeterPricingRule"];
         options?: never;
@@ -11725,9 +11742,11 @@ export interface operations {
                 };
             };
             /**
-             * @description `invalid_state`: the rating rule's currency differs from the
-             *     meter's other prices or from a plan that uses the meter, or the
-             *     rule has versions in more than one currency.
+             * @description `meter_in_use`: subscriptions use the meter and the rule would
+             *     reprice their current period. The message gives the number of
+             *     subscriptions. `invalid_state`: the rating rule's currency
+             *     differs from the meter's other prices or from a plan that uses
+             *     the meter, or the rule has versions in more than one currency.
              */
             409: {
                 headers: {
@@ -11813,8 +11832,8 @@ export interface operations {
                 };
             };
             /**
-             * @description `invalid_state`: this is the meter's last price and a live
-             *     subscription's plan uses the meter. The message names the plans.
+             * @description `meter_in_use`: subscriptions use the meter. The message gives
+             *     the number of subscriptions.
              */
             409: {
                 headers: {
@@ -15306,7 +15325,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description An existing meter with the same key diverges from the recipe (aggregation mismatch) — reconcile the meter before instantiating. */
+            /** @description An existing meter with the same key diverges from the recipe (aggregation mismatch) — reconcile the meter before instantiating. Or `meter_in_use`: subscriptions use that meter, and a recipe pricing rule would reprice their current period (the meter has a default rating rule, or the rule outranks one that matches the same events). Nothing is installed. */
             409: {
                 headers: {
                     [name: string]: unknown;

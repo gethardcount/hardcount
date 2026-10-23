@@ -58,7 +58,11 @@ curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER" -H "Author
 1. **Add a price so later invoices bill it:** a pricing rule for the new
    value (`POST /v1/meters/{id}/pricing-rules`), or a default price for the
    meter (`PATCH /v1/meters/{id}` with `rating_rule_version_id`). Usage in
-   a period whose invoice is not built yet is then billed on it.
+   a period whose invoice is not built yet is then billed on it. While
+   subscriptions use the meter, a first default price is accepted, and a
+   new rule only if no default price is set and every rule that could match
+   the same events has a higher priority. Anything else is refused with 409
+   `meter_in_use` ([Change a price](../../ai-pricing.md#change-a-price)).
 2. **Bill usage from periods already invoiced** with a one-off invoice:
    `POST /v1/invoices`, then `POST /v1/invoices/{id}/line-items`, then
    `POST /v1/invoices/{id}/finalize`. Take the quantity from the WARN, not

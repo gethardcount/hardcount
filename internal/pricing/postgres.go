@@ -329,7 +329,7 @@ func (s *PostgresStore) ListMeters(ctx context.Context, tenantID string) ([]doma
 }
 
 func (s *PostgresStore) UpdateMeter(ctx context.Context, tenantID string, m domain.Meter) (domain.Meter, error) {
-	return s.UpdateMeterAudited(ctx, tenantID, m, nil)
+	return s.UpdateMeterAudited(ctx, tenantID, m, nil, nil)
 }
 
 // UpdateMeterAudited patches the meter and runs the caller-supplied audit
@@ -339,13 +339,19 @@ func (s *PostgresStore) UpdateMeter(ctx context.Context, tenantID string, m doma
 // that doesn't exist (or lives on the other livemode plane / another tenant
 // under RLS) returns ErrNotFound with no audit row, so the log can never
 // assert a change to a meter that was never touched. An emit error aborts
-// the patch.
-func (s *PostgresStore) UpdateMeterAudited(ctx context.Context, tenantID string, m domain.Meter, emit func(tx *sql.Tx, out domain.Meter) error) (domain.Meter, error) {
+// the patch. A non-nil guard runs first on the same tx; its error aborts the
+// patch before anything is written.
+func (s *PostgresStore) UpdateMeterAudited(ctx context.Context, tenantID string, m domain.Meter, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, out domain.Meter) error) (domain.Meter, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Meter{}, err
 	}
 	defer postgres.Rollback(tx)
+	if guard != nil {
+		if err := guard(tx); err != nil {
+			return domain.Meter{}, err
+		}
+	}
 
 	now := time.Now().UTC()
 	err = tx.QueryRowContext(ctx, `
@@ -601,12 +607,19 @@ func joinClauses(parts []string) string {
 // the same point-pair with new dimension_match / mode / priority
 // updates the existing row. ON CONFLICT keeps the original id and
 // created_at, and bumps updated_at.
-func (s *PostgresStore) UpsertMeterPricingRule(ctx context.Context, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error) {
+//
+// A non-nil guard runs first on the same tx; its error aborts the write.
+func (s *PostgresStore) UpsertMeterPricingRule(ctx context.Context, tenantID string, rule domain.MeterPricingRule, guard func(tx *sql.Tx) error) (domain.MeterPricingRule, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.MeterPricingRule{}, err
 	}
 	defer postgres.Rollback(tx)
+	if guard != nil {
+		if err := guard(tx); err != nil {
+			return domain.MeterPricingRule{}, err
+		}
+	}
 
 	stored, err := s.upsertMeterPricingRuleTx(ctx, tx, tenantID, rule)
 	if err != nil {
@@ -780,7 +793,7 @@ func (s *PostgresStore) ListMeterPricingRulesByMeter(ctx context.Context, tenant
 }
 
 func (s *PostgresStore) DeleteMeterPricingRule(ctx context.Context, tenantID, id string) error {
-	return s.DeleteMeterPricingRuleAudited(ctx, tenantID, id, nil)
+	return s.DeleteMeterPricingRuleAudited(ctx, tenantID, id, nil, nil)
 }
 
 // DeleteMeterPricingRuleAudited deletes the rule and runs the caller-supplied
@@ -797,13 +810,19 @@ func (s *PostgresStore) DeleteMeterPricingRule(ctx context.Context, tenantID, id
 // tx — not the {meter_id} URL segment, which the router never checks against
 // the rule (a caller can pass any meter id and still delete the rule; see the
 // note in the final report). A DELETE that removes no row yields ErrNoRows →
-// ErrNotFound (the handler's 404) and emits NOTHING.
-func (s *PostgresStore) DeleteMeterPricingRuleAudited(ctx context.Context, tenantID, id string, emit func(tx *sql.Tx, deleted domain.MeterPricingRule) error) error {
+// ErrNotFound (the handler's 404) and emits NOTHING. A non-nil guard runs
+// first on the same tx; its error aborts the delete.
+func (s *PostgresStore) DeleteMeterPricingRuleAudited(ctx context.Context, tenantID, id string, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, deleted domain.MeterPricingRule) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
+	if guard != nil {
+		if err := guard(tx); err != nil {
+			return err
+		}
+	}
 
 	deleted, err := scanMeterPricingRule(tx.QueryRowContext(ctx, `
 		DELETE FROM meter_pricing_rules
@@ -942,31 +961,129 @@ func (s *PostgresStore) PlanCurrenciesWiringMeters(ctx context.Context, tenantID
 	return out, rows.Err()
 }
 
-func (s *PostgresStore) PlansWiringMeter(ctx context.Context, tenantID, meterID string) ([]planRef, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
+// LockMeterTx locks the meter row and returns it as committed now. After
+// waiting on a concurrent edit, FOR UPDATE returns the row that edit wrote.
+func (s *PostgresStore) LockMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (domain.Meter, error) {
+	var m domain.Meter
+	err := tx.QueryRowContext(ctx, `
+		SELECT id, tenant_id, key, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
+		FROM meters WHERE id = $1
+		FOR UPDATE
+	`, meterID).Scan(&m.ID, &m.TenantID, &m.Key, &m.Name, &m.Unit, &m.Aggregation,
+		&m.RatingRuleVersionID, &m.CreatedAt, &m.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return domain.Meter{}, errs.ErrNotFound
 	}
-	defer postgres.Rollback(tx)
+	if err != nil {
+		return domain.Meter{}, fmt.Errorf("lock meter %s: %w", meterID, err)
+	}
+	return m, nil
+}
+
+// CountSubsUsingMeterTx locks the plans wiring the meter, in id order so two
+// edits never take them in opposite orders, then counts the subscriptions
+// that bill the meter. The count is a new statement, so under READ COMMITTED
+// it sees a subscription whose insert the lock waited for.
+//
+// Draft, trialing and active are the statuses that can still be billed for a
+// period: the engine bills active and trialing (BillSubscription), and
+// Activate starts billing a draft's period, which can begin before the
+// activation (day-snapped, or a period the draft already carries). Canceled
+// is out: an immediate cancel bills its final partial period inside the
+// cancel transaction. It is the same set the plan lock counts
+// (CountLiveSubsByPlan, ADR-034).
+//
+// The item-change branch counts a subscription that moved off the meter's
+// plan this period: the close still bills the meter up to the move
+// (meterUsageIntervals). A change at the period start itself belongs to the
+// period before, as in ListItemChangesInPeriod.
+func (s *PostgresStore) CountSubsUsingMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (int, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT p.id, p.code
-		FROM plans p
-		WHERE p.tenant_id = $1 AND p.meter_ids @> to_jsonb(ARRAY[$2::text])
-		ORDER BY p.code
-	`, tenantID, meterID)
+		SELECT id FROM plans
+		WHERE meter_ids @> to_jsonb(ARRAY[$1::text])
+		ORDER BY id
+		FOR UPDATE
+	`, meterID)
 	if err != nil {
-		return nil, err
+		return 0, fmt.Errorf("lock plans wiring meter %s: %w", meterID, err)
 	}
-	defer func() { _ = rows.Close() }()
-	var out []planRef
 	for rows.Next() {
-		var p planRef
-		if err := rows.Scan(&p.ID, &p.Code); err != nil {
-			return nil, err
+		var planID string
+		if err := rows.Scan(&planID); err != nil {
+			_ = rows.Close()
+			return 0, err
 		}
-		out = append(out, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, fmt.Errorf("lock plans wiring meter %s: %w", meterID, err)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	var n int
+	err = tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM subscriptions s
+		WHERE s.status IN ('draft', 'trialing', 'active')
+		  AND (
+		    EXISTS (
+		      SELECT 1 FROM subscription_items si
+		      JOIN plans p ON p.id = si.plan_id
+		      WHERE si.subscription_id = s.id
+		        AND si.deleted_at IS NULL
+		        AND p.meter_ids @> to_jsonb(ARRAY[$1::text]))
+		    OR EXISTS (
+		      SELECT 1 FROM subscription_item_changes c
+		      JOIN plans p ON p.id IN (c.from_plan_id, c.to_plan_id)
+		      WHERE c.subscription_id = s.id
+		        AND c.changed_at > s.current_billing_period_start
+		        AND p.meter_ids @> to_jsonb(ARRAY[$1::text]))
+		  )
+	`, meterID).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count subscriptions using meter %s: %w", meterID, err)
+	}
+	return n, nil
+}
+
+func (s *PostgresStore) GetMeterPricingRuleByPairTx(ctx context.Context, tx *sql.Tx, meterID, ratingRuleVersionID string) (domain.MeterPricingRule, error) {
+	return scanMeterPricingRule(tx.QueryRowContext(ctx, `
+		SELECT id, tenant_id, meter_id, rating_rule_version_id,
+		       dimension_match, aggregation_mode, priority,
+		       created_at, updated_at
+		  FROM meter_pricing_rules
+		 WHERE meter_id = $1 AND rating_rule_version_id = $2
+	`, meterID, ratingRuleVersionID))
+}
+
+// CountRulesOutrankedTx uses jsonb equality for the shared keys, the same
+// equality the claim's @> applies to scalar values (1 and 1.0 are equal).
+func (s *PostgresStore) CountRulesOutrankedTx(ctx context.Context, tx *sql.Tx, meterID string, match map[string]any, priority int) (int, error) {
+	if match == nil {
+		match = map[string]any{}
+	}
+	matchJSON, err := json.Marshal(match)
+	if err != nil {
+		return 0, fmt.Errorf("marshal dimension_match: %w", err)
+	}
+	var n int
+	err = tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM meter_pricing_rules r
+		WHERE r.meter_id = $1
+		  AND r.priority <= $3
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM jsonb_each(r.dimension_match) a
+		    JOIN jsonb_each($2::jsonb) b ON b.key = a.key
+		    WHERE a.value <> b.value)
+	`, meterID, matchJSON, priority).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count rules a new rule outranks on meter %s: %w", meterID, err)
+	}
+	return n, nil
 }
 
 func (s *PostgresStore) MeterBoundKeyCurrencies(ctx context.Context, tenantID string, meterIDs []string) ([]keyCurrency, error) {

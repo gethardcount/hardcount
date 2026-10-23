@@ -134,6 +134,10 @@ func (rt *recipeTenant) spend(id, model string, prompt, cached, output int64) st
 }
 
 // priceRule makes a new rating rule and a pricing rule on the tokens meter.
+// The pricing rule is seeded past the meter-in-use guard: these tests check
+// which rule claims an event, and the tenant's subscription already exists.
+// A model_raw rule at 101 outranks the model rules, so the guard would refuse
+// it on a live meter (pricing/meter_edit_guard.go).
 func (rt *recipeTenant) priceRule(key, cents string, match map[string]any, priority int) {
 	rt.t.Helper()
 	rr, err := rt.pricingSvc.CreateRatingRule(rt.ctx, rt.tenantID, pricing.CreateRatingRuleInput{
@@ -143,12 +147,10 @@ func (rt *recipeTenant) priceRule(key, cents string, match map[string]any, prior
 	if err != nil {
 		rt.t.Fatalf("create rating rule %s: %v", key, err)
 	}
-	if _, err := rt.pricingSvc.UpsertMeterPricingRule(rt.ctx, rt.tenantID, pricing.UpsertMeterPricingRuleInput{
+	seedPricingRule(rt.t, rt.db, rt.ctx, rt.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: rt.meterID, RatingRuleVersionID: rr.ID, DimensionMatch: match,
 		AggregationMode: domain.AggSum, Priority: priority,
-	}); err != nil {
-		rt.t.Fatalf("pricing rule %s: %v", key, err)
-	}
+	})
 }
 
 // storeOldRow writes one event as the release before this change stored it.

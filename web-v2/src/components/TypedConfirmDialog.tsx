@@ -32,6 +32,8 @@ export interface TypedConfirmDialogProps {
    * dialog.
    */
   children?: ReactNode
+  /** A refusal from the last confirm, shown under the description so the reason stays on screen. */
+  notice?: ReactNode
 }
 
 /**
@@ -51,6 +53,7 @@ export function TypedConfirmDialog({
   onConfirm,
   loading = false,
   children,
+  notice,
 }: TypedConfirmDialogProps) {
   const [typed, setTyped] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -76,6 +79,8 @@ export function TypedConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
+
+        {notice}
 
         {children}
 

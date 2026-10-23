@@ -140,6 +140,13 @@ events it prices.
 Every plan that charges for the `tokens` meter now prices `my-model` input
 tokens. Add one rule for each kind of token you sell.
 
+**While subscriptions use the meter,** Velox accepts a new rule only if it
+takes no usage that a price bills now. The meter must have no default
+price, and every rule that could match the same events must have a higher
+priority. A rule for a new model at priority 100 passes when the other
+rules at 100 or below each name a model, as the recipes' rules do.
+Otherwise the answer is 409 `meter_in_use`. See [Change a price](#change-a-price).
+
 ## How Velox picks the price for an event
 
 - **One price for each event.** Each event is priced by at most one pricing
@@ -169,9 +176,26 @@ see it in four places:
 
 To bill it, add a rule or a default price. Invoices not made yet then
 include it. For a period that is already invoiced, bill it with a one-off
-invoice ([runbook](ops/runbook/usage-with-no-price.md)). Velox refuses
-(409) to remove a meter's last price while a plan with a live subscription
-uses the meter.
+invoice ([runbook](ops/runbook/usage-with-no-price.md)). A first default
+price is accepted while subscriptions use the meter. A new rule is accepted while subscriptions use the
+meter only as described above.
+
+## Change a price
+
+Usage is priced when its invoice is made, from the meter as it is then. So
+while a draft, trialing or active subscription uses the meter, Velox refuses
+(409 `meter_in_use`) any change that would reprice the current period:
+
+- editing or deleting a pricing rule;
+- a new rule that could take usage from a price that bills it now;
+- pointing the default price at another price, or removing it;
+- changing the meter's aggregation.
+
+The message says how many subscriptions use the meter. To change a rate,
+publish a new version of the rating rule (`POST /v1/rating-rules` with the
+same `rule_key`). It applies from each subscription's next billing period,
+and the current period keeps the old rate. On the dashboard, that is **New
+version** on the Prices tab.
 
 ## Price a Claude model Velox does not know
 
@@ -198,6 +222,14 @@ jq -n --arg rate "$RATE_ID" \
 
 Usage not invoiced yet bills at that price, including usage that arrived
 before you added it.
+
+While subscriptions use the meter, Velox refuses this rule (409
+`meter_in_use`). At priority 101 it ranks above the model rules of the same
+`token_type`, and Velox cannot tell that no event matches both. Then price
+the name on `model` instead, at priority 100: `{"model": "claude-opus-4-9",
+"token_type": "input"}`. If a later release learns the model and renames it,
+that rule stops matching, and the usage shows as not billed until you price
+the new name.
 
 ## Claude models added after you installed
 
