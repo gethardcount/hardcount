@@ -123,3 +123,45 @@ func TestIngest_EdgeQuantitiesAndEmptyProperties(t *testing.T) {
 		t.Errorf("1e-12 stored as %s", stored)
 	}
 }
+
+// TestIngest_ZeroWithAHugeExponentIsCheap sends 0e9999999 to all three doors
+// through the full router to real Postgres. It is a zero, so it is taken. Kept
+// as written, printing it for the INSERT and the answer builds 10^9999999,
+// about a second of CPU each (and 40 s for 0e99999999). Stored as plain 0, each
+// request takes milliseconds.
+func TestIngest_ZeroWithAHugeExponentIsCheap(t *testing.T) {
+	skipShort(t)
+	r := newLagRig(t, "in_arrears", false)
+	ts := lagP0.Add(24 * time.Hour)
+	at := lagP0.Add(48 * time.Hour)
+	for i, door := range []string{"/v1/usage-events", "/v1/usage-events/backfill", "/v1/usage-events/batch"} {
+		var body any = map[string]any{
+			"external_customer_id": r.custExt, "event_name": "calls", "quantity": json.Number("0e9999999"),
+			"timestamp": ts.Format(time.RFC3339), "idempotency_key": fmt.Sprintf("zero-%d", i),
+		}
+		if strings.HasSuffix(door, "batch") {
+			body = []any{body}
+		}
+		start := time.Now()
+		code, raw := r.do(http.MethodPost, door, at, body)
+		if took := time.Since(start); took > 500*time.Millisecond {
+			t.Errorf("%s: took %v, want under 500ms", door, took)
+		}
+		if code != http.StatusCreated {
+			t.Errorf("%s: status %d, want 201; body %s", door, code, raw)
+		}
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var zeros int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM usage_events WHERE tenant_id = $1 AND quantity = 0`, r.tenantID).Scan(&zeros); err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if zeros != 3 {
+		t.Errorf("%d zero events stored, want 3", zeros)
+	}
+}

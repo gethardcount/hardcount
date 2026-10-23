@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/shopspring/decimal"
+
+	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
 // The ingest body follows the spec exactly (B5):
@@ -277,6 +279,78 @@ func TestUsageIngest_DimensionsStored(t *testing.T) {
 	for _, e := range store.events {
 		if e.Dimensions["model"] != "gpt-4o" {
 			t.Errorf("dimensions = %v, want model=gpt-4o", e.Dimensions)
+		}
+	}
+}
+
+// A zero is stored as plain 0 (exponent 0), whatever exponent it was written
+// with. shopspring keeps 0e9999999 as coefficient 0 and exponent 9999999, and
+// printing it (the INSERT bind and the response both do) builds 10^9999999:
+// about 1 s of CPU, and 40 s for 0e99999999. The size and scale checks pass a
+// zero, so before B5 review round 2 any zero was stored as written.
+//
+// Mutation-verify: drop the zero normalisation in checkQuantity → every case
+// here goes red.
+func TestUsageIngest_ZeroIsStoredAsPlainZero(t *testing.T) {
+	for _, raw := range []string{`0e9999999`, `"0e9999999"`, `-0e9999999`, `"0e-9999999"`, `0.000`} {
+		for _, door := range []string{"single", "batch", "backfill"} {
+			t.Run(door+"/"+raw, func(t *testing.T) {
+				store := newMemStore()
+				h := NewHandler(NewService(store), &stubCustomers{}, &stubMeters{})
+				code, body := quantityDoors(t, h)[door](quantityBody(raw, "evt_zero"))
+				if code != http.StatusCreated {
+					t.Fatalf("status %d, want 201; body %s", code, body)
+				}
+				if len(store.events) != 1 {
+					t.Fatalf("%d events stored, want 1", len(store.events))
+				}
+				for _, e := range store.events {
+					if !e.Quantity.IsZero() || e.Quantity.Exponent() != 0 {
+						t.Errorf("stored quantity has exponent %d, want plain 0", e.Quantity.Exponent())
+					}
+				}
+			})
+		}
+	}
+	// A held row takes the same check, so it is stored as plain 0 too.
+	ev, err := heldEvent(HoldInput{
+		ExternalCustomerID: "acme", MeterKey: "api_call", IdempotencyKey: "evt_held_zero",
+		Quantity: decimal.RequireFromString("0e99999999"), Reason: domain.HeldReasonCustomerNotFound,
+	})
+	if err != nil {
+		t.Fatalf("held zero refused: %v", err)
+	}
+	if !ev.Quantity.IsZero() || ev.Quantity.Exponent() != 0 {
+		t.Errorf("held quantity has exponent %d, want plain 0", ev.Quantity.Exponent())
+	}
+}
+
+// A JSON number whose exponent does not fit shopspring's int32 is a number,
+// so the 422 says the exponent is out of range, not that it is not a number.
+func TestUsageIngest_ExponentOutOfRangeIsNamed(t *testing.T) {
+	for _, raw := range []string{`1e9999999999`, `"1e-9999999999"`, `0e9999999999`, `1e99999999999999999999`} {
+		store := newMemStore()
+		h := NewHandler(NewService(store), &stubCustomers{}, &stubMeters{})
+		for door, send := range quantityDoors(t, h) {
+			t.Run(door+"/"+raw, func(t *testing.T) {
+				code, body := send(quantityBody(raw, "evt_exp_"+door))
+				if code != http.StatusUnprocessableEntity {
+					t.Fatalf("status %d, want 422; body %s", code, body)
+				}
+				if !strings.Contains(body, "exponent is out of range") || strings.Contains(body, "must be a JSON number") {
+					t.Errorf("body %s, want the exponent named", body)
+				}
+			})
+		}
+		if len(store.events) != 0 {
+			t.Errorf("%s: %d events stored, want 0", raw, len(store.events))
+		}
+	}
+	// Not a JSON number: the old text stays.
+	h := NewHandler(NewService(newMemStore()), &stubCustomers{}, &stubMeters{})
+	for _, raw := range []string{`"abc"`, `" 5"`, `"1e"`} {
+		if rr := usageReq(t, h.ingest, quantityBody(raw, "evt_nan")); !strings.Contains(rr.Body.String(), "must be a JSON number") {
+			t.Errorf("%s: body %s, want the JSON-number text", raw, rr.Body.String())
 		}
 	}
 }
