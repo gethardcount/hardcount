@@ -11,12 +11,14 @@
 /**
  * Leave it out and the subscription starts now. Without
  * `trial_days` it is `active`, its first period starts
- * today in the account's billing time zone, and a plan
- * billed in advance is invoiced now. With `trial_days` it
- * is `trialing` from now. Send `draft` to create it
+ * today in the account's billing time zone (the clock's
+ * day for a customer on a test clock), and a non-zero base
+ * fee billed in advance is invoiced now. With `trial_days`
+ * it is `trialing` from now. Send `draft` to create it
  * without starting it: it bills nothing until you activate
  * it with `POST /v1/subscriptions/{id}/activate`. A draft
- * cannot have `trial_days`.
+ * cannot have a trial (`trial_days` above 0). An empty or
+ * null `status` is refused.
  */
 export type PostV1SubscriptionsBodyStatus = typeof PostV1SubscriptionsBodyStatus[keyof typeof PostV1SubscriptionsBodyStatus];
 

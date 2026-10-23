@@ -697,6 +697,10 @@ type CreateInput struct {
 	Status domain.SubscriptionStatus `json:"status,omitempty"`
 }
 
+// createStatusMessage is the 422 for a create's status other than "draft",
+// including one sent empty or null (the handler refuses those).
+const createStatusMessage = `must be "draft" or left out; a subscription starts now unless it is created as a draft`
+
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
 	displayName := strings.TrimSpace(input.DisplayName)
@@ -759,7 +763,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	case domain.SubscriptionDraft:
 		draft = true
 	default:
-		return domain.Subscription{}, errs.Invalid("status", `must be "draft" or left out; a subscription starts now unless it is created as a draft`)
+		return domain.Subscription{}, errs.Invalid("status", createStatusMessage)
 	}
 	// A draft does not start, so it has no trial to start; Activate starts
 	// billing at once. Refused, not ignored.

@@ -15,8 +15,8 @@ Billing period boundaries snap to midnight in the tenant timezone, so a subscrip
 
 ## Context
 
-A subscription created at `May 1, 2026 14:00 IST` with `start_now=true`
-and calendar-monthly billing was producing an invoice with "prorated
+A subscription started on create at `May 1, 2026 14:00 IST`, with
+calendar-monthly billing, was producing an invoice with "prorated
 30/31 days" — even though the dashboard's "Period" column displayed
 the full month `May 1 → Jun 1`. The math and the UI disagreed because
 they were anchored on different precisions:
