@@ -38,9 +38,8 @@ type SubscriptionLister interface {
 // the actual line generation.
 //
 // We deliberately compose against Engine (rather than reimplementing the
-// per-(meter, rule) walk here) so the create_preview surface and the
-// in-app debug route /v1/billing/preview/{subscription_id} share one code
-// path — preview math == invoice math by construction.
+// per-(meter, rule) walk here) so create_preview rates usage with the
+// engine's own code — preview math == invoice math by construction.
 type PreviewService struct {
 	engine        *Engine
 	customers     CustomerLookup
@@ -91,9 +90,8 @@ type CreatePreviewRequest struct {
 //  4. Defer to the engine: previewCycle (mirrors the cycle close) for the
 //     default window, previewWithWindow for an explicit one.
 //
-// Returns a PreviewResult with the same wire shape produced by
-// Engine.Preview so the cost dashboard can consume both surfaces with one
-// TS type set.
+// Returns a PreviewResult, the one wire shape the subscription page and the
+// cost dashboard both read.
 func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req CreatePreviewRequest) (PreviewResult, error) {
 	customerID := strings.TrimSpace(req.CustomerID)
 	if customerID == "" {

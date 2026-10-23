@@ -338,7 +338,7 @@ test('the next-invoice preview prorates a mid-month calendar start', async ({ pa
     billing_time: 'calendar',
     start_now: true,
   })
-  const preview = await api<{ lines: { description: string; amount_cents: number }[] }>('GET', `/billing/preview/${sub.id}`)
+  const preview = await api<{ lines: { description: string; amount_cents: number }[] }>('POST', '/invoices/create_preview', { customer_id: customer.id, subscription_id: sub.id })
   expect(preview.lines).toHaveLength(1)
   const [base] = preview.lines
   expect(base.description).toBe(`${plan.name} - base fee (qty 1, prorated 19/31 days)`)
@@ -381,7 +381,7 @@ test('the next-invoice preview says why a trial set to cancel has no invoice', a
     trial_days: 14,
   })
   await api('POST', `/subscriptions/${sub.id}/schedule-cancel`, { at_period_end: true })
-  const preview = await api<{ lines: unknown[]; warnings: string[] }>('GET', `/billing/preview/${sub.id}`)
+  const preview = await api<{ lines: unknown[]; warnings: string[] }>('POST', '/invoices/create_preview', { customer_id: customer.id, subscription_id: sub.id })
   expect(preview.lines).toHaveLength(0)
   expect(preview.warnings).toContain('A cancel is scheduled for the end of the trial, so no invoice will be issued.')
 

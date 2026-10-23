@@ -1015,8 +1015,8 @@ func TestHandleWebhook_SetupIntentSucceeded(t *testing.T) {
 	if attacher.actorType != "system" {
 		t.Errorf("purpose-less attach must resolve to system actor, got %q/%q", attacher.actorType, attacher.actorID)
 	}
-	// velox_customer_id on the SetupIntent: Velox created it (legacy
-	// POST /v1/checkout/setup sets no purpose), so its card becomes the default.
+	// velox_customer_id on the SetupIntent: Velox created it (the inline
+	// SetupIntent path sets no purpose), so its card becomes the default.
 	if !attacher.makeDefault {
 		t.Error("a SetupIntent carrying velox_customer_id must attach its card as the default")
 	}

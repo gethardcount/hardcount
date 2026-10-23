@@ -184,10 +184,11 @@ failed"
 ([Automate payment retries, payment method ordering](https://docs.stripe.com/billing/revenue-recovery/smart-retries#payment-method-ordering), read 2026-10-22).
 
 **Decision.** A card saved by a SetupIntent Velox created becomes the
-customer's default. Velox's three Checkout setup sessions stamp
+customer's default. Velox's Checkout setup sessions stamp
 `velox_customer_id` on the SetupIntent (`setup_intent_data.metadata`): the
-operator's **Add payment method** link (email or copy), the customer's
-payment-update link, and legacy `POST /v1/checkout/setup`. The
+operator's **Add payment method** link (email or copy) and the customer's
+payment-update link. (A third, legacy `POST /v1/checkout/setup`, was removed
+on 2026-10-23, [#1368](https://github.com/getvelox/velox/pull/1368).) The
 `setup_intent.succeeded` handler reads that before any other lookup and asks
 the attach to make the card the default. The store clears the old default
 and sets the new one in the attach's transaction, on its insert path and on

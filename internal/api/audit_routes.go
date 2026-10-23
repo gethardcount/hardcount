@@ -298,7 +298,6 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               explicit("webhook.Handler.updateEndpoint → Log(update, webhook_endpoint)."),
 	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              explicit("webhook.Handler.deleteEndpoint → Log(delete, webhook_endpoint)."),
 	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  explicit("webhook.Handler.rotateSecret → Log(rotate, webhook_endpoint) — never records the secret."),
-	{"POST", "/v1/webhook-endpoints/events/{id}/replay"}:                            explicit("webhook.Handler.replayEvent → Log(update, webhook_event: replayed)."),
 	{"POST", "/v1/webhook_events/{id}/replay"}:                                      explicit("webhook.Handler.replayEventV2 → Log(update, webhook_event: replayed)."),
 	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: explicit("webhook.Handler.replayDelivery → Log(update, webhook_delivery: replayed_to_endpoint) — records target endpoint + replay clone ids."),
 
@@ -322,7 +321,6 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"DELETE", "/v1/test-clocks/{id}"}:             explicit("testclock.Handler.delete → Log(delete, test_clock: teardown), reading the clock BEFORE the teardown so the row carries its name + final frozen instant. ADR-086: the audit row is the simulation's ONLY surviving record after teardown."),
 
 	// --- checkout / public payment surfaces --------------------------------
-	{"POST", "/v1/checkout/setup"}:                          explicit("payment.CheckoutHandler.createSetupSession → persistStripeMapping → LogInTx(update, customer; metadata action=checkout_setup_started) on the STRIPE-CUSTOMER-MAPPING write. There is no 'session-claim' tx. Emits only when the UPDATE touched a row, so a setup against a customer that is not on this tenant/livemode plane fabricates nothing."),
 	{"POST", "/v1/public/invoices/{token}/checkout"}:        explicit("hostedInvoiceStripeAdapter (api/adapters.go) → LogInTx on the checkout-claim tx; actor is the CUSTOMER (auth.WithCustomerActor). Outside the old catch-all entirely."),
 	{"POST", "/v1/public/payment-updates/{token}/checkout"}: explicit("payment.PublicPaymentHandler.createCheckoutSession → LogInTx on the token consume/restore txs; customer actor."),
 }

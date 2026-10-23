@@ -48,9 +48,6 @@ type Handler struct {
 	customers  CustomerResolver
 	meters     MeterResolver
 	meterModes MeterLister
-	// summaryCustomers is the by-id customer read the usage summary runs
-	// first; see SetSummaryCustomerLookup.
-	summaryCustomers CustomerLookup
 	// Held-usage routes only (#1044); see SetHeldDeps.
 	heldCustomers CustomerLookup
 }
@@ -59,11 +56,6 @@ type Handler struct {
 // from. Unwired, every by_meter value is the plain sum with an empty
 // aggregation.
 func (h *Handler) SetMeterLister(l MeterLister) { h.meterModes = l }
-
-// SetSummaryCustomerLookup wires the customer read the usage summary runs
-// before it adds anything up. The events table holds nothing for an unknown
-// id, so without it a typo'd or other-mode id answered 200 with zero totals.
-func (h *Handler) SetSummaryCustomerLookup(c CustomerLookup) { h.summaryCustomers = c }
 
 func NewHandler(svc *Service, customers CustomerResolver, meters MeterResolver) *Handler {
 	return &Handler{svc: svc, customers: customers, meters: meters}

@@ -322,8 +322,7 @@ func (s *PostgresStore) GetMany(ctx context.Context, tenantID string, ids []stri
 // Single writer for customers.stripe_customer_id since the
 // customer_payment_setups summary table was retired (migration
 // 0097). Called by paymentmethods.StripeAdapter.EnsureStripeCustomer
-// on the lazy-create path and by the legacy /v1/checkout/setup
-// operator flow on initial bootstrap.
+// on the lazy-create path.
 func (s *PostgresStore) SetStripeCustomerID(ctx context.Context, tenantID, customerID, stripeCustomerID string) error {
 	return s.SetStripeCustomerIDAudited(ctx, tenantID, customerID, stripeCustomerID, nil)
 }

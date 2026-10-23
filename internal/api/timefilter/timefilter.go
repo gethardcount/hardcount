@@ -23,8 +23,8 @@
 //   - inclusive (`<= to`): invoice list and invoices.csv, customers.csv,
 //     subscriptions.csv, usage-events.csv, the audit log and
 //     audit-log.csv (both created_at and sim_effective_at).
-//   - exclusive (`< to`): the usage summary (/v1/usage-summary), the usage
-//     event list and aggregate (/v1/usage-events, /v1/usage-events/aggregate),
+//   - exclusive (`< to`): the usage event list and aggregate
+//     (/v1/usage-events, /v1/usage-events/aggregate),
 //     all via usage.buildUsageWhere, and customer usage
 //     (/v1/customers/{id}/usage, via usage.AggregateByPricingRules).
 //

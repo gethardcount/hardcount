@@ -36,8 +36,8 @@ import (
 
 // compositePaymentSetupStore implements payment.PaymentSetupStore on
 // top of the canonical sources — customers.stripe_customer_id +
-// payment_methods. Lets payment/checkout.go and payment/stripe.go
-// keep their existing PaymentSetupStore-shaped wiring while the
+// payment_methods. Lets payment/stripe.go keep its existing
+// PaymentSetupStore-shaped wiring while the
 // deprecated customer_payment_setups table is read-only on its way
 // out. Compose the CustomerPaymentSetup wire shape from canonical
 // state on read; write only the parts the new architecture owns

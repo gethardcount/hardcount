@@ -67,9 +67,7 @@ type PreviewTotal struct {
 	AmountCents int64  `json:"amount_cents"`
 }
 
-// PreviewResult is the response shape for both the in-app
-// GET /v1/billing/preview/{subscription_id} debug route and the public
-// POST /v1/invoices/create_preview surface. PlanName is a comma-separated
+// PreviewResult is the response shape of POST /v1/invoices/create_preview. PlanName is a comma-separated
 // list of the item plans the estimate reads (after any change due at the
 // close), then, in the cycle estimate, each plan only a segment of the
 // period still bills (a pre-swap plan, a removed item).
@@ -92,21 +90,6 @@ type PreviewResult struct {
 	// for the threshold fire: it stamps each usage line with its meter's
 	// window start and counts item thresholds over the same windows.
 	floors usageFloors
-}
-
-// Preview generates a dry-run invoice for a subscription without persisting
-// anything. Walks every item, resolves its plan, and emits a base_fee line
-// per item plus per-(meter, rule) usage lines via the priority+claim
-// LATERAL JOIN — same code path the cycle scan uses, so preview math ==
-// invoice math.
-func (e *Engine) Preview(ctx context.Context, sub domain.Subscription) (PreviewResult, error) {
-	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return PreviewResult{}, fmt.Errorf("subscription has no billing period set")
-	}
-	if len(sub.Items) == 0 {
-		return PreviewResult{}, fmt.Errorf("subscription has no items")
-	}
-	return e.previewCycle(ctx, sub)
 }
 
 // previewCycle estimates the invoice the cycle close will issue for the

@@ -120,7 +120,8 @@ function renewsOn(sub: Sub, zone: string): string {
 // The Upcoming invoice card lists the lines the API previews for the
 // subscription, in order, with their amounts and the total.
 async function expectUpcomingInvoiceMatchesAPI(page: Page, subscriptionId: string) {
-  const preview = await api<Preview>('GET', `/billing/preview/${subscriptionId}`)
+  const { customer_id } = await api<{ customer_id: string }>('GET', `/subscriptions/${subscriptionId}`)
+  const preview = await api<Preview>('POST', '/invoices/create_preview', { customer_id, subscription_id: subscriptionId })
   expect(preview.totals).toHaveLength(1)
   const upcoming = card(page, 'Upcoming invoice')
   await expect(upcoming.getByRole('row')).toHaveText([

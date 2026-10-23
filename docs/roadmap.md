@@ -24,6 +24,8 @@ first. Every shipped change, with its date, is in the
   - a new rule that could take usage from a price that bills it now;
   - pointing the default price at another price, or removing it;
   - changing the meter's aggregation.
+- **Done:** eight API operations that another operation already did are
+  removed. The [CHANGELOG](../CHANGELOG.md) names the replacement for each.
 - **Planned:** public names change once, before the release: API key
   prefixes, header names, environment variables and the session cookie.
   Publishable keys are removed. Code that calls the API or checks webhook

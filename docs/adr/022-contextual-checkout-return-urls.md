@@ -7,6 +7,8 @@
 
 Stripe Checkout started from the operator's `/checkout/setup` returns to the page the operator came from, not a fixed URL. The dashboard sends that page as `return_url`, and the server adds `?payment=success` or `?payment=cancel` so the page can show the result. `STRIPE_CHECKOUT_SUCCESS_URL` and `STRIPE_CHECKOUT_CANCEL_URL` were removed, so every Checkout flow now uses a contextual return URL. The webhook, not the redirect, records the saved card. Status: active.
 
+**2026-10-23:** `POST /v1/checkout/setup` was removed ([#1368](https://github.com/getvelox/velox/pull/1368)), and with it the `?payment=success` / `?payment=cancel` return. The operator's setup session (`POST /v1/customers/{id}/payment-methods/setup-session`) still takes a `return_url`; without one, it and the payment-update link return to `/payment-method-added?status=success` or `?status=cancel`.
+
 ## Context
 
 Operator-reported bug: setting up a payment method from the customer

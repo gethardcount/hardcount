@@ -58,7 +58,7 @@ const EVENT = __ENV.EVENT || 'bench_tokens'
 // per request rather than using one for the whole run is what makes this a
 // benchmark and not a pathological case: one customer means the resolve cache
 // never misses, the btrees append to a single hot edge, and the probe's
-// usage-summary aggregates the entire table for that one customer.
+// usage aggregate reads the entire table for that one customer.
 function pad3(n) { return String(n).padStart(3, '0') }
 function pickCustomer() { return Math.floor(Math.random() * CUSTOMERS) }
 const BATCH = parseInt(__ENV.BATCH || '1', 10)
@@ -180,7 +180,7 @@ export const options = {
     ...(PROBE_RATE > 0
       ? {
           'http_req_duration{scenario:probe}': [`p(99)<${PROBE_P99_MS}`],
-          'http_req_duration{scenario:probe,name:usage-summary}': ['p(99)>=0'],
+          'http_req_duration{scenario:probe,name:usage-aggregate}': ['p(99)>=0'],
           'http_req_duration{scenario:probe,name:invoices}': ['p(99)>=0'],
           'http_req_duration{scenario:probe,name:customers}': ['p(99)>=0'],
         }
@@ -258,9 +258,9 @@ export default function () {
   if (ok) { eventsIngested.add(BATCH); quantitySent.add(qtyTotal) }
 }
 
-// The reads a human actually waits on. usage-summary is deliberately first and
-// weighted heaviest: it AGGREGATES the very table ingest is writing to, so it
-// is where write load shows up first.
+// The reads a human actually waits on. The per-customer usage aggregate is
+// deliberately first and weighted heaviest: it AGGREGATES the very table
+// ingest is writing to, so it is where write load shows up first.
 export function probe() {
   const now = new Date()
   const from = new Date(now.getTime() - 30 * 24 * 3600 * 1000).toISOString()
@@ -272,12 +272,12 @@ export function probe() {
   // the raw samples to learn it was usage-summary at ~475 ms with the two list
   // endpoints at ~3 ms.
   const tagged = (n) => Object.assign({}, params, { tags: { name: n } })
-  const r1 = http.get(`${BASE}/v1/usage-summary/${cid}?from=${from}&to=${to}`, tagged('usage-summary'))
+  const r1 = http.get(`${BASE}/v1/usage-events/aggregate?customer_id=${cid}&from=${from}&to=${to}`, tagged('usage-aggregate'))
   const r2 = http.get(`${BASE}/v1/invoices?limit=20`, tagged('invoices'))
   const r3 = http.get(`${BASE}/v1/customers?limit=20`, tagged('customers'))
   // A read that errors is a failed probe, not a fast one. http_req_failed
   // already covers 4xx/5xx globally; the check makes it visible per endpoint.
-  check(r1, { 'usage-summary 200': (r) => r.status === 200 })
+  check(r1, { 'usage-aggregate 200': (r) => r.status === 200 })
   check(r2, { 'invoices 200': (r) => r.status === 200 })
   check(r3, { 'customers 200': (r) => r.status === 200 })
 }
@@ -333,12 +333,12 @@ export function handleSummary(data) {
     const pd = (m['http_req_duration{scenario:probe}'] || {}).values || {}
     lines.push('')
     lines.push(`READ PROBE (concurrent, ${PROBE_RATE}/s)`)
-    lines.push(`  p50/p99        ${(pd['p(50)'] || 0).toFixed(1)}ms / ${(pd['p(99)'] || 0).toFixed(1)}ms  (budget p99 < ${PROBE_P99_MS}ms)`)
-    for (const n of ['usage-summary', 'invoices', 'customers']) {
+    lines.push(`  p50/p99          ${(pd['p(50)'] || 0).toFixed(1)}ms / ${(pd['p(99)'] || 0).toFixed(1)}ms  (budget p99 < ${PROBE_P99_MS}ms)`)
+    for (const n of ['usage-aggregate', 'invoices', 'customers']) {
       const e = (m[`http_req_duration{scenario:probe,name:${n}}`] || {}).values || {}
-      lines.push(`  ${n.padEnd(14)} p50 ${(e['p(50)'] || 0).toFixed(1)}ms  p99 ${(e['p(99)'] || 0).toFixed(1)}ms  (n=${e.count || 0})`)
+      lines.push(`  ${n.padEnd(16)} p50 ${(e['p(50)'] || 0).toFixed(1)}ms  p99 ${(e['p(99)'] || 0).toFixed(1)}ms  (n=${e.count || 0})`)
     }
-    lines.push(`  verdict        ${(pd['p(99)'] || 0) < PROBE_P99_MS ? 'RESPONSIVE under load' : 'DEGRADED — read path missed its budget'}`)
+    lines.push(`  verdict          ${(pd['p(99)'] || 0) < PROBE_P99_MS ? 'RESPONSIVE under load' : 'DEGRADED — read path missed its budget'}`)
   }
   lines.push('')
 

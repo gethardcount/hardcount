@@ -364,7 +364,7 @@ func TestHardDecline_OrdinaryDeclineIsRetriedOnTheSameCard_RealStore(t *testing.
 // declining card, and every retry charged the old card again. Driven through
 // the real setup_intent.succeeded handler, once per setup flow: the
 // operator's Add payment method link, the customer's payment-update link,
-// and legacy POST /v1/checkout/setup (no purpose).
+// and a SetupIntent with no purpose (the inline SetupIntent path).
 func TestSetupLinkCard_AfterOrdinaryDecline_NextRetryChargesIt_RealStore(t *testing.T) {
 	for _, purpose := range []string{"portal_add_payment_method", "payment_update_token", ""} {
 		name := purpose

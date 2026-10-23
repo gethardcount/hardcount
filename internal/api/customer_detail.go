@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -17,8 +16,9 @@ import (
 )
 
 // customerDetailHandler provides the operator dashboard's per-customer
-// composed views (overview / invoices / subscriptions on the Customer
-// Detail page). Lives in the API package because it crosses domain
+// overview on the Customer Detail page. The page lists a customer's invoices
+// and subscriptions through GET /v1/invoices?customer_id= and
+// GET /v1/subscriptions?customer_id=. Lives in the API package because it crosses domain
 // boundaries — domain packages stay independent.
 //
 // History: born as "customerPortalHandler" at /v1/customer-portal — a
@@ -39,7 +39,7 @@ func newCustomerDetailHandler(customers *customer.PostgresStore, subs *subscript
 }
 
 // requireCustomer resolves the path's customer id to an existing row and
-// writes the 404 itself when there is none. Every route here composes
+// writes the 404 itself when there is none. The overview composes
 // tenant-scoped sub-queries that all legally return empty for an unknown
 // id — so without this lookup a typo'd or cross-tenant id read as "this
 // customer has nothing" (200, empty shell) instead of "no such customer".
@@ -57,52 +57,6 @@ func (h *customerDetailHandler) requireCustomer(w http.ResponseWriter, r *http.R
 		return "", "", false
 	}
 	return tenantID, customerID, true
-}
-
-func (h *customerDetailHandler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
-	tenantID, customerID, ok := h.requireCustomer(w, r)
-	if !ok {
-		return
-	}
-
-	subs, _, err := h.subs.List(r.Context(), subscription.ListFilter{
-		TenantID:   tenantID,
-		CustomerID: customerID,
-	})
-	if err != nil {
-		respond.InternalError(w, r)
-		return
-	}
-	if subs == nil {
-		subs = []domain.Subscription{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": subs})
-}
-
-func (h *customerDetailHandler) listInvoices(w http.ResponseWriter, r *http.Request) {
-	tenantID, customerID, ok := h.requireCustomer(w, r)
-	if !ok {
-		return
-	}
-
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 25
-	}
-
-	invoices, total, err := h.invoices.List(r.Context(), invoice.ListFilter{
-		TenantID:   tenantID,
-		CustomerID: customerID,
-		Limit:      limit,
-	})
-	if err != nil {
-		respond.InternalError(w, r)
-		return
-	}
-	if invoices == nil {
-		invoices = []domain.Invoice{}
-	}
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": invoices, "total": total})
 }
 
 // overview returns a consolidated view of a customer: active subscriptions,

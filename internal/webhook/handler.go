@@ -49,8 +49,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/endpoints/{id}/deliveries", h.listEndpointDeliveries)
 	r.Post("/endpoints/{id}/deliveries/{deliveryID}/replay", h.replayDelivery)
 	r.Get("/events", h.listEvents)
-	r.Get("/events/{id}/deliveries", h.listDeliveries)
-	r.Post("/events/{id}/replay", h.replayEvent)
 	return r
 }
 
@@ -234,56 +232,6 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]any{"data": events})
 }
 
-func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	eventID := chi.URLParam(r, "id")
-
-	deliveries, err := h.svc.ListDeliveries(r.Context(), tenantID, eventID)
-	if err != nil {
-		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "list webhook deliveries", "error", err)
-		return
-	}
-	if deliveries == nil {
-		deliveries = []domain.WebhookDelivery{}
-	}
-
-	respond.JSON(w, r, http.StatusOK, map[string]any{"data": deliveries})
-}
-
-func (h *Handler) replayEvent(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	eventID := chi.URLParam(r, "id")
-
-	res, err := h.svc.Replay(r.Context(), tenantID, eventID)
-	if errors.Is(err, errs.ErrNotFound) {
-		respond.NotFound(w, r, "webhook event")
-		return
-	}
-	if err != nil {
-		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "replay webhook event", "error", err)
-		return
-	}
-
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "webhook_event", res.EventID, "", map[string]any{
-			"action":    "replayed",
-			"replay_of": res.ReplayOf,
-		})
-	}
-
-	// Legacy path (under /v1/webhook-endpoints/events/{id}/replay): the
-	// existing dashboard expects a flat {status: "replayed"} envelope
-	// for backwards compatibility. The new Week 6 path returns the
-	// richer {event_id, replay_of, status} struct via replayEventV2.
-	respond.JSON(w, r, http.StatusOK, map[string]any{
-		"status":    "replayed",
-		"event_id":  res.EventID,
-		"replay_of": res.ReplayOf,
-	})
-}
-
 // replayEventV2 is the Week 6 dashboard-facing replay handler. Returns
 // the full ReplayResult ({event_id, replay_of, status: "queued"}) so
 // the dashboard can highlight the new clone in its live tail and toast
@@ -447,11 +395,9 @@ type DeliveriesResponse struct {
 }
 
 // listDeliveriesEnriched is the Week 6 deliveries endpoint at GET
-// /v1/webhook_events/{id}/deliveries. Differs from the legacy
-// /v1/webhook-endpoints/events/{id}/deliveries by returning the
-// enriched view shape (attempt_no, request_payload_sha256, etc.) and
-// stitching the original event + every replay clone into one ordered
-// timeline.
+// /v1/webhook_events/{id}/deliveries. It returns the enriched view shape
+// (attempt_no, request_payload_sha256, etc.) and stitches the original
+// event + every replay clone into one ordered timeline.
 func (h *Handler) listDeliveriesEnriched(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	eventID := chi.URLParam(r, "id")

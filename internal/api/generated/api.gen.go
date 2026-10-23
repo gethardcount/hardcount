@@ -515,27 +515,6 @@ func (e CustomerBillingProfileInputTaxStatus) Valid() bool {
 	}
 }
 
-// Defines values for CustomerPaymentSetupSetupStatus.
-const (
-	CustomerPaymentSetupSetupStatusMissing CustomerPaymentSetupSetupStatus = "missing"
-	CustomerPaymentSetupSetupStatusPending CustomerPaymentSetupSetupStatus = "pending"
-	CustomerPaymentSetupSetupStatusReady   CustomerPaymentSetupSetupStatus = "ready"
-)
-
-// Valid indicates whether the value is a known member of the CustomerPaymentSetupSetupStatus enum.
-func (e CustomerPaymentSetupSetupStatus) Valid() bool {
-	switch e {
-	case CustomerPaymentSetupSetupStatusMissing:
-		return true
-	case CustomerPaymentSetupSetupStatusPending:
-		return true
-	case CustomerPaymentSetupSetupStatusReady:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for CustomerPriceOverrideMode.
 const (
 	CustomerPriceOverrideModeFlat      CustomerPriceOverrideMode = "flat"
@@ -1918,19 +1897,19 @@ func (e TenantSettingsInputTaxProvider) Valid() bool {
 
 // Defines values for TestClockStatus.
 const (
-	Advancing       TestClockStatus = "advancing"
-	InternalFailure TestClockStatus = "internal_failure"
-	Ready           TestClockStatus = "ready"
+	TestClockStatusAdvancing       TestClockStatus = "advancing"
+	TestClockStatusInternalFailure TestClockStatus = "internal_failure"
+	TestClockStatusReady           TestClockStatus = "ready"
 )
 
 // Valid indicates whether the value is a known member of the TestClockStatus enum.
 func (e TestClockStatus) Valid() bool {
 	switch e {
-	case Advancing:
+	case TestClockStatusAdvancing:
 		return true
-	case InternalFailure:
+	case TestClockStatusInternalFailure:
 		return true
-	case Ready:
+	case TestClockStatusReady:
 		return true
 	default:
 		return false
@@ -1991,27 +1970,6 @@ func (e UsageEventProviderCostSource) Valid() bool {
 	}
 }
 
-// Defines values for WebhookDeliveryStatus.
-const (
-	WebhookDeliveryStatusFailed    WebhookDeliveryStatus = "failed"
-	WebhookDeliveryStatusPending   WebhookDeliveryStatus = "pending"
-	WebhookDeliveryStatusSucceeded WebhookDeliveryStatus = "succeeded"
-)
-
-// Valid indicates whether the value is a known member of the WebhookDeliveryStatus enum.
-func (e WebhookDeliveryStatus) Valid() bool {
-	switch e {
-	case WebhookDeliveryStatusFailed:
-		return true
-	case WebhookDeliveryStatusPending:
-		return true
-	case WebhookDeliveryStatusSucceeded:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for WebhookDeliveryReplayResultStatus.
 const (
 	WebhookDeliveryReplayResultStatusQueued WebhookDeliveryReplayResultStatus = "queued"
@@ -2050,19 +2008,19 @@ func (e WebhookEndpointDeliveryStatus) Valid() bool {
 
 // Defines values for WebhookEventDeliveryAttemptStatus.
 const (
-	WebhookEventDeliveryAttemptStatusFailed    WebhookEventDeliveryAttemptStatus = "failed"
-	WebhookEventDeliveryAttemptStatusPending   WebhookEventDeliveryAttemptStatus = "pending"
-	WebhookEventDeliveryAttemptStatusSucceeded WebhookEventDeliveryAttemptStatus = "succeeded"
+	Failed    WebhookEventDeliveryAttemptStatus = "failed"
+	Pending   WebhookEventDeliveryAttemptStatus = "pending"
+	Succeeded WebhookEventDeliveryAttemptStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the WebhookEventDeliveryAttemptStatus enum.
 func (e WebhookEventDeliveryAttemptStatus) Valid() bool {
 	switch e {
-	case WebhookEventDeliveryAttemptStatusFailed:
+	case Failed:
 		return true
-	case WebhookEventDeliveryAttemptStatusPending:
+	case Pending:
 		return true
-	case WebhookEventDeliveryAttemptStatusSucceeded:
+	case Succeeded:
 		return true
 	default:
 		return false
@@ -3086,21 +3044,6 @@ func (e DeleteV1TestClocksId200JSONResponseBodyStatus) Valid() bool {
 	}
 }
 
-// Defines values for GetUsageSummary500JSONResponseBodyError.
-const (
-	InternalError GetUsageSummary500JSONResponseBodyError = "internal_error"
-)
-
-// Valid indicates whether the value is a known member of the GetUsageSummary500JSONResponseBodyError enum.
-func (e GetUsageSummary500JSONResponseBodyError) Valid() bool {
-	switch e {
-	case InternalError:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus.
 const (
 	DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatusDeleted DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus = "deleted"
@@ -3110,21 +3053,6 @@ const (
 func (e DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatus) Valid() bool {
 	switch e {
 	case DeleteV1WebhookEndpointsEndpointsId200JSONResponseBodyStatusDeleted:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ReplayWebhookEventLegacy200JSONResponseBodyStatus.
-const (
-	Replayed ReplayWebhookEventLegacy200JSONResponseBodyStatus = "replayed"
-)
-
-// Valid indicates whether the value is a known member of the ReplayWebhookEventLegacy200JSONResponseBodyStatus enum.
-func (e ReplayWebhookEventLegacy200JSONResponseBodyStatus) Valid() bool {
-	switch e {
-	case Replayed:
 		return true
 	default:
 		return false
@@ -4228,32 +4156,6 @@ type CustomerOverview struct {
 	// RecentInvoices The 5 newest invoices.
 	RecentInvoices []Invoice `json:"recent_invoices"`
 }
-
-// CustomerPaymentSetup defines model for CustomerPaymentSetup.
-type CustomerPaymentSetup struct {
-	CardBrand                   string    `json:"card_brand,omitempty"`
-	CardExpMonth                int       `json:"card_exp_month,omitempty"`
-	CardExpYear                 int       `json:"card_exp_year,omitempty"`
-	CardLast4                   string    `json:"card_last4,omitempty"`
-	CreatedAt                   time.Time `json:"created_at"`
-	CustomerId                  string    `json:"customer_id"`
-	DefaultPaymentMethodPresent bool      `json:"default_payment_method_present"`
-	PaymentMethodType           string    `json:"payment_method_type,omitempty"`
-
-	// SetupStatus `ready`: the customer has a default payment method. `pending`:
-	// a Stripe customer exists but there is no default payment method
-	// yet. `missing`: there is no Stripe customer.
-	SetupStatus           CustomerPaymentSetupSetupStatus `json:"setup_status"`
-	StripeCustomerId      string                          `json:"stripe_customer_id,omitempty"`
-	StripePaymentMethodId string                          `json:"stripe_payment_method_id,omitempty"`
-	TenantId              string                          `json:"tenant_id,omitempty"`
-	UpdatedAt             time.Time                       `json:"updated_at"`
-}
-
-// CustomerPaymentSetupSetupStatus `ready`: the customer has a default payment method. `pending`:
-// a Stripe customer exists but there is no default payment method
-// yet. `missing`: there is no Stripe customer.
-type CustomerPaymentSetupSetupStatus string
 
 // CustomerPriceOverride defines model for CustomerPriceOverride.
 type CustomerPriceOverride struct {
@@ -6701,45 +6603,6 @@ type UsageEventOrigin string
 // the cost is unknown.
 type UsageEventProviderCostSource string
 
-// UsageSummary defines model for UsageSummary.
-type UsageSummary struct {
-	CustomerId string `json:"customer_id"`
-
-	// Meters Meter id to the sum of its quantities, as a decimal string.
-	Meters      map[string]string `json:"meters"`
-	PeriodFrom  time.Time         `json:"period_from"`
-	PeriodTo    time.Time         `json:"period_to"`
-	TotalEvents int               `json:"total_events"`
-}
-
-// WebhookDelivery One delivery of an event to one endpoint, as the older events routes return it.
-type WebhookDelivery struct {
-	AttemptCount        int       `json:"attempt_count"`
-	CompletedAt         time.Time `json:"completed_at,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	EndpointDescription string    `json:"endpoint_description,omitempty"`
-
-	// EndpointUrl The endpoint's URL, kept after the endpoint is deleted.
-	EndpointUrl  string `json:"endpoint_url,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
-
-	// HttpStatusCode HTTP status from the receiver. Left out when there was no response.
-	HttpStatusCode    int                   `json:"http_status_code,omitempty"`
-	Id                string                `json:"id"`
-	Livemode          bool                  `json:"livemode"`
-	NextRetryAt       time.Time             `json:"next_retry_at,omitempty"`
-	ResponseBody      string                `json:"response_body,omitempty"`
-	Status            WebhookDeliveryStatus `json:"status"`
-	TenantId          string                `json:"tenant_id,omitempty"`
-	WebhookEndpointId string                `json:"webhook_endpoint_id"`
-
-	// WebhookEventId The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`.
-	WebhookEventId string `json:"webhook_event_id"`
-}
-
-// WebhookDeliveryStatus defines model for WebhookDelivery.Status.
-type WebhookDeliveryStatus string
-
 // WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
 type WebhookDeliveryReplayResult struct {
 	// DeliveryId The new delivery to this endpoint.
@@ -7103,31 +6966,6 @@ type BootstrapJSONBody struct {
 	Token string `json:"token,omitempty"`
 }
 
-// CreateCheckoutSetupSessionJSONBody defines parameters for CreateCheckoutSetupSession.
-type CreateCheckoutSetupSessionJSONBody struct {
-	AddressCity       string `json:"address_city,omitempty"`
-	AddressCountry    string `json:"address_country,omitempty"`
-	AddressLine1      string `json:"address_line1,omitempty"`
-	AddressPostalCode string `json:"address_postal_code,omitempty"`
-	AddressState      string `json:"address_state,omitempty"`
-	CustomerId        string `json:"customer_id"`
-	CustomerName      string `json:"customer_name,omitempty"`
-	Email             string `json:"email,omitempty"`
-
-	// ReturnUrl The page Stripe sends the customer back to. Always send it, because the default works only in local development.
-	ReturnUrl string `json:"return_url,omitempty"`
-}
-
-// CreateCheckoutSetupSessionParams defines parameters for CreateCheckoutSetupSession.
-type CreateCheckoutSetupSessionParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
 // ListCreditNotesParams defines parameters for ListCreditNotes.
 type ListCreditNotesParams struct {
 	InvoiceId  string                      `form:"invoice_id,omitempty" json:"invoice_id,omitempty"`
@@ -7403,12 +7241,6 @@ type PostV1CustomersParams struct {
 	// `Idempotent-Replayed: true` header, instead of running again. The
 	// error cases are in docs/api-surface.md.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// ListCustomerInvoicesParams defines parameters for ListCustomerInvoices.
-type ListCustomerInvoicesParams struct {
-	// Limit Default 25, at most 100.
-	Limit int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // SendCustomerPaymentSetupEmailJSONBody defines parameters for SendCustomerPaymentSetupEmail.
@@ -8849,18 +8681,6 @@ type ReleaseHeldUsageParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// GetUsageSummaryParams defines parameters for GetUsageSummary.
-type GetUsageSummaryParams struct {
-	// From Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
-	From string `form:"from,omitempty" json:"from,omitempty"`
-
-	// To Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
-	To string `form:"to,omitempty" json:"to,omitempty"`
-}
-
-// GetUsageSummary500JSONResponseBodyError defines parameters for GetUsageSummary.
-type GetUsageSummary500JSONResponseBodyError string
-
 // PostV1WebhookEndpointsEndpointsJSONBody defines parameters for PostV1WebhookEndpointsEndpoints.
 type PostV1WebhookEndpointsEndpointsJSONBody struct {
 	Description string   `json:"description,omitempty"`
@@ -8919,19 +8739,6 @@ type PostV1WebhookEndpointsEndpointsIdRotateSecretParams struct {
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
-// ReplayWebhookEventLegacyParams defines parameters for ReplayWebhookEventLegacy.
-type ReplayWebhookEventLegacyParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
-// ReplayWebhookEventLegacy200JSONResponseBodyStatus defines parameters for ReplayWebhookEventLegacy.
-type ReplayWebhookEventLegacy200JSONResponseBodyStatus string
-
 // ReplayWebhookEventParams defines parameters for ReplayWebhookEvent.
 type ReplayWebhookEventParams struct {
 	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
@@ -8985,9 +8792,6 @@ type PostV1AuthPasswordResetRequestJSONRequestBody PostV1AuthPasswordResetReques
 
 // BootstrapJSONRequestBody defines body for Bootstrap for application/json ContentType.
 type BootstrapJSONRequestBody BootstrapJSONBody
-
-// CreateCheckoutSetupSessionJSONRequestBody defines body for CreateCheckoutSetupSession for application/json ContentType.
-type CreateCheckoutSetupSessionJSONRequestBody CreateCheckoutSetupSessionJSONBody
 
 // PostV1CreditNotesJSONRequestBody defines body for PostV1CreditNotes for application/json ContentType.
 type PostV1CreditNotesJSONRequestBody PostV1CreditNotesJSONBody
@@ -9484,21 +9288,12 @@ type ServerInterface interface {
 	// Request a password reset link
 	// (POST /v1/auth/password-reset/request)
 	PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *http.Request)
-	// Invoice preview (dry run)
-	// (GET /v1/billing/preview/{subscription_id})
-	GetV1BillingPreviewSubscriptionId(w http.ResponseWriter, r *http.Request, subscriptionId string)
 	// Trigger billing cycle
 	// (POST /v1/billing/run)
 	PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams)
 	// Set up a new installation
 	// (POST /v1/bootstrap)
 	Bootstrap(w http.ResponseWriter, r *http.Request)
-	// Start a card setup in Stripe Checkout (older route)
-	// (POST /v1/checkout/setup)
-	CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request, params CreateCheckoutSetupSessionParams)
-	// Get a customer's card setup status (older route)
-	// (GET /v1/checkout/status/{customerID})
-	GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request, customerID string)
 	// List credit notes
 	// (GET /v1/credit-notes)
 	ListCreditNotes(w http.ResponseWriter, r *http.Request, params ListCreditNotesParams)
@@ -9553,9 +9348,6 @@ type ServerInterface interface {
 	// Create customer
 	// (POST /v1/customers)
 	PostV1Customers(w http.ResponseWriter, r *http.Request, params PostV1CustomersParams)
-	// List the customer's invoices
-	// (GET /v1/customers/{customer_id}/invoices)
-	ListCustomerInvoices(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerInvoicesParams)
 	// Get a customer overview
 	// (GET /v1/customers/{customer_id}/overview)
 	GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string)
@@ -9574,9 +9366,6 @@ type ServerInterface interface {
 	// Make a payment method the default
 	// (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
 	SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string, params SetCustomerDefaultPaymentMethodParams)
-	// List the customer's subscriptions
-	// (GET /v1/customers/{customer_id}/subscriptions)
-	ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request, customerId string)
 	// Get customer
 	// (GET /v1/customers/{id})
 	GetCustomer(w http.ResponseWriter, r *http.Request, id string)
@@ -9952,9 +9741,6 @@ type ServerInterface interface {
 	// Release held usage
 	// (POST /v1/usage-events/held/release)
 	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request, params ReleaseHeldUsageParams)
-	// Customer usage summary
-	// (GET /v1/usage-summary/{customer_id})
-	GetUsageSummary(w http.ResponseWriter, r *http.Request, customerId string, params GetUsageSummaryParams)
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
 	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request)
@@ -9982,12 +9768,6 @@ type ServerInterface interface {
 	// List recent outbound events (newest 50)
 	// (GET /v1/webhook-endpoints/events)
 	GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request)
-	// List an event's deliveries (older route)
-	// (GET /v1/webhook-endpoints/events/{id}/deliveries)
-	ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request, id string)
-	// Replay an event to all matching endpoints (older route)
-	// (POST /v1/webhook-endpoints/events/{id}/replay)
-	ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request, id string, params ReplayWebhookEventLegacyParams)
 	// Stream webhook events live (Server-Sent Events)
 	// (GET /v1/webhook_events/stream)
 	StreamWebhookEvents(w http.ResponseWriter, r *http.Request)
@@ -10138,12 +9918,6 @@ func (_ Unimplemented) PostV1AuthPasswordResetRequest(w http.ResponseWriter, r *
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Invoice preview (dry run)
-// (GET /v1/billing/preview/{subscription_id})
-func (_ Unimplemented) GetV1BillingPreviewSubscriptionId(w http.ResponseWriter, r *http.Request, subscriptionId string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // Trigger billing cycle
 // (POST /v1/billing/run)
 func (_ Unimplemented) PostV1BillingRun(w http.ResponseWriter, r *http.Request, params PostV1BillingRunParams) {
@@ -10153,18 +9927,6 @@ func (_ Unimplemented) PostV1BillingRun(w http.ResponseWriter, r *http.Request, 
 // Set up a new installation
 // (POST /v1/bootstrap)
 func (_ Unimplemented) Bootstrap(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Start a card setup in Stripe Checkout (older route)
-// (POST /v1/checkout/setup)
-func (_ Unimplemented) CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request, params CreateCheckoutSetupSessionParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Get a customer's card setup status (older route)
-// (GET /v1/checkout/status/{customerID})
-func (_ Unimplemented) GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request, customerID string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10276,12 +10038,6 @@ func (_ Unimplemented) PostV1Customers(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// List the customer's invoices
-// (GET /v1/customers/{customer_id}/invoices)
-func (_ Unimplemented) ListCustomerInvoices(w http.ResponseWriter, r *http.Request, customerId string, params ListCustomerInvoicesParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // Get a customer overview
 // (GET /v1/customers/{customer_id}/overview)
 func (_ Unimplemented) GetCustomerOverview(w http.ResponseWriter, r *http.Request, customerId string) {
@@ -10315,12 +10071,6 @@ func (_ Unimplemented) DetachCustomerPaymentMethod(w http.ResponseWriter, r *htt
 // Make a payment method the default
 // (POST /v1/customers/{customer_id}/payment-methods/{pmID}/default)
 func (_ Unimplemented) SetCustomerDefaultPaymentMethod(w http.ResponseWriter, r *http.Request, customerId string, pmid string, params SetCustomerDefaultPaymentMethodParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List the customer's subscriptions
-// (GET /v1/customers/{customer_id}/subscriptions)
-func (_ Unimplemented) ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request, customerId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11074,12 +10824,6 @@ func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// Customer usage summary
-// (GET /v1/usage-summary/{customer_id})
-func (_ Unimplemented) GetUsageSummary(w http.ResponseWriter, r *http.Request, customerId string, params GetUsageSummaryParams) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
 // List webhook endpoints
 // (GET /v1/webhook-endpoints/endpoints)
 func (_ Unimplemented) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
@@ -11131,18 +10875,6 @@ func (_ Unimplemented) PostV1WebhookEndpointsEndpointsIdRotateSecret(w http.Resp
 // List recent outbound events (newest 50)
 // (GET /v1/webhook-endpoints/events)
 func (_ Unimplemented) GetV1WebhookEndpointsEvents(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// List an event's deliveries (older route)
-// (GET /v1/webhook-endpoints/events/{id}/deliveries)
-func (_ Unimplemented) ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request, id string) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// Replay an event to all matching endpoints (older route)
-// (POST /v1/webhook-endpoints/events/{id}/replay)
-func (_ Unimplemented) ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request, id string, params ReplayWebhookEventLegacyParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11920,38 +11652,6 @@ func (siw *ServerInterfaceWrapper) PostV1AuthPasswordResetRequest(w http.Respons
 	handler.ServeHTTP(w, r)
 }
 
-// GetV1BillingPreviewSubscriptionId operation middleware
-func (siw *ServerInterfaceWrapper) GetV1BillingPreviewSubscriptionId(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "subscription_id" -------------
-	var subscriptionId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "subscription_id", chi.URLParam(r, "subscription_id"), &subscriptionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscription_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetV1BillingPreviewSubscriptionId(w, r, subscriptionId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // PostV1BillingRun operation middleware
 func (siw *ServerInterfaceWrapper) PostV1BillingRun(w http.ResponseWriter, r *http.Request) {
 
@@ -12004,85 +11704,6 @@ func (siw *ServerInterfaceWrapper) Bootstrap(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Bootstrap(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// CreateCheckoutSetupSession operation middleware
-func (siw *ServerInterfaceWrapper) CreateCheckoutSetupSession(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params CreateCheckoutSetupSessionParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateCheckoutSetupSession(w, r, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetCheckoutSetupStatus operation middleware
-func (siw *ServerInterfaceWrapper) GetCheckoutSetupStatus(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customerID" -------------
-	var customerID string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customerID", chi.URLParam(r, "customerID"), &customerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customerID", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetCheckoutSetupStatus(w, r, customerID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13080,54 +12701,6 @@ func (siw *ServerInterfaceWrapper) PostV1Customers(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
-// ListCustomerInvoices operation middleware
-func (siw *ServerInterfaceWrapper) ListCustomerInvoices(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customer_id" -------------
-	var customerId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ListCustomerInvoicesParams
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListCustomerInvoices(w, r, customerId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetCustomerOverview operation middleware
 func (siw *ServerInterfaceWrapper) GetCustomerOverview(w http.ResponseWriter, r *http.Request) {
 
@@ -13401,38 +12974,6 @@ func (siw *ServerInterfaceWrapper) SetCustomerDefaultPaymentMethod(w http.Respon
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetCustomerDefaultPaymentMethod(w, r, customerId, pmid, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListCustomerSubscriptions operation middleware
-func (siw *ServerInterfaceWrapper) ListCustomerSubscriptions(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customer_id" -------------
-	var customerId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListCustomerSubscriptions(w, r, customerId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19262,67 +18803,6 @@ func (siw *ServerInterfaceWrapper) ReleaseHeldUsage(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
-// GetUsageSummary operation middleware
-func (siw *ServerInterfaceWrapper) GetUsageSummary(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "customer_id" -------------
-	var customerId string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "customer_id", chi.URLParam(r, "customer_id"), &customerId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "customer_id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetUsageSummaryParams
-
-	// ------------- Optional query parameter "from" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
-		}
-		return
-	}
-
-	// ------------- Optional query parameter "to" -------------
-
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
-	if err != nil {
-		var requiredError *runtime.RequiredParameterError
-		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
-		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
-		}
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetUsageSummary(w, r, customerId, params)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // GetV1WebhookEndpointsEndpoints operation middleware
 func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request) {
 
@@ -19662,94 +19142,6 @@ func (siw *ServerInterfaceWrapper) GetV1WebhookEndpointsEvents(w http.ResponseWr
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetV1WebhookEndpointsEvents(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ListWebhookEventDeliveriesLegacy operation middleware
-func (siw *ServerInterfaceWrapper) ListWebhookEventDeliveriesLegacy(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListWebhookEventDeliveriesLegacy(w, r, id)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// ReplayWebhookEventLegacy operation middleware
-func (siw *ServerInterfaceWrapper) ReplayWebhookEventLegacy(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "id" -------------
-	var id string
-
-	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
-		return
-	}
-
-	ctx := r.Context()
-
-	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
-
-	r = r.WithContext(ctx)
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ReplayWebhookEventLegacyParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ReplayWebhookEventLegacy(w, r, id, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20138,19 +19530,10 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/auth/password-reset/request", wrapper.PostV1AuthPasswordResetRequest)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/billing/preview/{subscription_id}", wrapper.GetV1BillingPreviewSubscriptionId)
-	})
-	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/billing/run", wrapper.PostV1BillingRun)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/bootstrap", wrapper.Bootstrap)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/checkout/setup", wrapper.CreateCheckoutSetupSession)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/checkout/status/{customerID}", wrapper.GetCheckoutSetupStatus)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/credit-notes", wrapper.ListCreditNotes)
@@ -20207,9 +19590,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/customers", wrapper.PostV1Customers)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers/{customer_id}/invoices", wrapper.ListCustomerInvoices)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{customer_id}/overview", wrapper.GetCustomerOverview)
 	})
 	r.Group(func(r chi.Router) {
@@ -20226,9 +19606,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/v1/customers/{customer_id}/payment-methods/{pmID}/default", wrapper.SetCustomerDefaultPaymentMethod)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/customers/{customer_id}/subscriptions", wrapper.ListCustomerSubscriptions)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/customers/{id}", wrapper.GetCustomer)
@@ -20606,9 +19983,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/v1/usage-events/held/release", wrapper.ReleaseHeldUsage)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/usage-summary/{customer_id}", wrapper.GetUsageSummary)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/endpoints", wrapper.GetV1WebhookEndpointsEndpoints)
 	})
 	r.Group(func(r chi.Router) {
@@ -20634,12 +20008,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook-endpoints/events", wrapper.GetV1WebhookEndpointsEvents)
-	})
-	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/v1/webhook-endpoints/events/{id}/deliveries", wrapper.ListWebhookEventDeliveriesLegacy)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/v1/webhook-endpoints/events/{id}/replay", wrapper.ReplayWebhookEventLegacy)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/v1/webhook_events/stream", wrapper.StreamWebhookEvents)

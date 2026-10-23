@@ -305,11 +305,6 @@ export const api = {
   getSubscriptionTimeline: (subscriptionId: string) =>
     apiRequest<{ events: TimelineEvent[]; truncated?: boolean }>('GET', `/subscriptions/${subscriptionId}/timeline`),
 
-  // Legacy `setupPayment` (/checkout/setup) and `getPaymentStatus`
-  // (/checkout/status) were removed in the unified-PM-paths cleanup.
-  // All "add a payment method" flows now go through
-  // `createCustomerSetupSession` / `sendCustomerSetupEmail` below.
-
   // Operator-side payment-method management (PCI SAQ-A; card capture
   // stays in Stripe-hosted iframe via setup-session, never on operator's
   // dashboard). Industry parity: Chargebee, Lago, Orb.
@@ -361,13 +356,6 @@ export const api = {
     apiRequest<CustomerOverview>('GET', `/customers/${customerId}/overview`),
 
   // Usage
-  usageSummary: (customerId: string, from?: string, to?: string) => {
-    const params = new URLSearchParams()
-    if (from) params.set('from', from)
-    if (to) params.set('to', to)
-    const qs = params.toString()
-    return apiRequest<UsageSummary>('GET', `/usage-summary/${customerId}${qs ? '?' + qs : ''}`)
-  },
   listUsageEvents: (params?: string) =>
     apiRequest<{ data: UsageEvent[]; total: number }>('GET', `/usage-events${params ? '?' + params : ''}`),
   // Server-side aggregate that powers the /usage page's stat cards +
@@ -436,10 +424,8 @@ export const api = {
     apiRequest<{ status: string }>('DELETE', `/subscriptions/${id}/items/${itemID}`),
   cancelPendingItemChange: (id: string, itemID: string) =>
     apiRequest<SubscriptionItem>('DELETE', `/subscriptions/${id}/items/${itemID}/pending-change`),
-  invoicePreview: (subscriptionId: string) =>
-    apiRequest<InvoicePreview>('GET', `/billing/preview/${subscriptionId}`),
-  // Stripe Tier 1 parity for Invoice.upcoming. Same shape as the debug
-  // route above; composes against customer + subscription + period.
+  // Stripe Tier 1 parity for Invoice.upcoming. Composes against
+  // customer + subscription + period.
   // Pass {customer_id} and the server picks the primary active sub +
   // current cycle. Pass {customer_id, subscription_id} to preview a
   // specific sub. Pass {customer_id, period: {from, to}} to preview an
@@ -1388,12 +1374,6 @@ export interface CustomerUsageRule {
   unmatched?: boolean
 }
 
-export interface UsageSummary {
-  customer_id: string
-  meters: Record<string, number>
-  total_events: number
-}
-
 export type CustomerTaxStatus = 'standard' | 'exempt' | 'reverse_charge'
 
 export interface BillingProfile {
@@ -1477,9 +1457,8 @@ export interface StripeProviderCredentials {
   retries_queued?: number
 }
 
-// InvoicePreview is the response shape for both /v1/billing/preview/{id}
-// (in-app debug route) and /v1/invoices/create_preview (Stripe Tier 1
-// surface). Per-(meter, rule) lines mean multi-dim meters render one row
+// InvoicePreview is the response shape of /v1/invoices/create_preview
+// (Stripe Tier 1 surface). Per-(meter, rule) lines mean multi-dim meters render one row
 // per rule with dimension_match echoed; totals[] is always-array (one
 // entry per distinct currency, even when there's only one) so a single
 // reader handles both shapes. quantity is a decimal STRING per ADR-005

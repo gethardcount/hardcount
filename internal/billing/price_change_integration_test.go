@@ -375,14 +375,7 @@ func TestPriceChange_PreviewMatchesCloseAcrossPublish(t *testing.T) {
 
 	f.ingestUsage(t, ctx, 100, 10) // 1000 calls
 
-	sub, err := f.subStore.Get(ctx, f.tenantID, f.subID)
-	if err != nil {
-		t.Fatalf("get sub: %v", err)
-	}
-	preview, err := f.engine.Preview(ctx, sub)
-	if err != nil {
-		t.Fatalf("preview: %v", err)
-	}
+	preview := f.createPreview(t, ctx, f.customerID, f.subID)
 	if len(preview.Totals) != 1 {
 		t.Fatalf("preview totals: got %d entries (%v), want 1 — overridden lines must carry the rule's currency", len(preview.Totals), preview.Totals)
 	}

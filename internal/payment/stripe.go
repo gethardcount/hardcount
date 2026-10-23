@@ -1637,11 +1637,10 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 
 	customerID := parsed.Data.Object.Metadata["velox_customer_id"]
 	pmID := parsed.Data.Object.PaymentMethod
-	// A SetupIntent Velox created (all three of its Checkout setup sessions
-	// stamp velox_customer_id in setup_intent_data.metadata: the operator's
-	// Add payment method link, the customer's payment-update link, legacy
-	// POST /v1/checkout/setup) saved a card to be charged: it becomes the
-	// default (ADR-021). Read before the resolver fallback below, which also
+	// A SetupIntent Velox created (both of its Checkout setup sessions stamp
+	// velox_customer_id in setup_intent_data.metadata: the operator's Add
+	// payment method link and the customer's payment-update link) saved a
+	// card to be charged: it becomes the default (ADR-021). Read before the resolver fallback below, which also
 	// lets in SetupIntents Velox did not create; their card is added beside.
 	fromVeloxSetup := customerID != ""
 
