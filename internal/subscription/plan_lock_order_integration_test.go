@@ -3,6 +3,8 @@ package subscription
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -19,6 +21,8 @@ import (
 // plan takes them in ascending id, in one statement, right after its
 // subscription row. The cross-interval swap, which numbers a credit note in
 // between, is raced in internal/billing (swap_plan_lock_order_integration_test.go).
+// Quantity change and item removal, which take no explicit lock, are raced
+// over HTTP in internal/api (item_change_plan_lock_order_e2e_test.go).
 //
 // The meter-in-use guard (D05) locks the meter, then every plan that lists it
 // FOR UPDATE in ascending id. A subscription writer's foreign-key checks take
@@ -162,6 +166,12 @@ func (r *lockOrderRig) holdPlan(t *testing.T, id string) *sql.Tx {
 // held by a backend whose statement contains blockerLike.
 func waitBlockedBy(t *testing.T, ctx context.Context, admin *sql.DB, blockerLike string) {
 	t.Helper()
+	waitBlockedByN(t, ctx, admin, blockerLike, 1)
+}
+
+// waitBlockedByN is waitBlockedBy for n waiting backends.
+func waitBlockedByN(t *testing.T, ctx context.Context, admin *sql.DB, blockerLike string, want int) {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var n int
@@ -174,11 +184,11 @@ func waitBlockedBy(t *testing.T, ctx context.Context, admin *sql.DB, blockerLike
 		`, "%"+blockerLike+"%").Scan(&n); err != nil {
 			t.Fatalf("read pg_stat_activity: %v", err)
 		}
-		if n > 0 {
+		if n >= want {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("no backend blocked by a statement matching %q within 15s", blockerLike)
+			t.Fatalf("%d of %d backends blocked by a statement matching %q within 15s", n, want, blockerLike)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -240,6 +250,35 @@ var lockOrderWriters = []lockOrderWriter{
 			return err
 		}
 	}},
+	{"billing-interval backfill", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
+		// A subscription that moved from hi to lo, with its intervals erased
+		// as on a database from before billing_intervals: the backfill
+		// writes the hi segment, then the lo one.
+		sub := r.sub(t, "backfill", domain.SubscriptionActive, hi)
+		if _, err := r.store.ApplyItemPlanImmediately(r.ctx, r.tenantID, sub.Items[0].ID, lo.ID, lockOrderPS.Add(5*24*time.Hour)); err != nil {
+			t.Fatalf("swap: %v", err)
+		}
+		if _, err := r.admin.ExecContext(r.ctx, `DELETE FROM billing_intervals WHERE subscription_id = $1`, sub.ID); err != nil {
+			t.Fatalf("erase intervals: %v", err)
+		}
+		return func(ctx context.Context) error {
+			n, err := r.store.BackfillBillingIntervals(ctx)
+			if err == nil && n != 2 {
+				t.Errorf("the backfill must write 2 segments, wrote %d", n)
+			}
+			return err
+		}
+	}},
+}
+
+// twoMeterWriters reference two plans in a fixture the API accepts: their
+// plans bill different meters. Velox refuses one subscription whose plans
+// both bill one meter (rejectMeterOverlap), so these writers cannot deadlock
+// with one meter edit alone. They can with two:
+// TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits. lo and hi are the plans
+// the writer references; it reaches hi first when nothing orders its plan
+// locks.
+var twoMeterWriters = []lockOrderWriter{
 	{"create with two items", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
 		return func(ctx context.Context) error {
 			_, err := r.store.Create(clock.WithEffectiveNow(ctx, lockOrderPS), r.tenantID, domain.Subscription{
@@ -274,25 +313,6 @@ var lockOrderWriters = []lockOrderWriter{
 		return func(ctx context.Context) error {
 			at := lockOrderPS.Add(2 * time.Hour)
 			_, err := r.store.EndTrialEarly(ctx, r.tenantID, sub.ID, at, at, lockOrderPE, lockOrderPE, 1)
-			return err
-		}
-	}},
-	{"billing-interval backfill", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
-		// A subscription that moved from hi to lo, with its intervals erased
-		// as on a database from before billing_intervals: the backfill
-		// writes the hi segment, then the lo one.
-		sub := r.sub(t, "backfill", domain.SubscriptionActive, hi)
-		if _, err := r.store.ApplyItemPlanImmediately(r.ctx, r.tenantID, sub.Items[0].ID, lo.ID, lockOrderPS.Add(5*24*time.Hour)); err != nil {
-			t.Fatalf("swap: %v", err)
-		}
-		if _, err := r.admin.ExecContext(r.ctx, `DELETE FROM billing_intervals WHERE subscription_id = $1`, sub.ID); err != nil {
-			t.Fatalf("erase intervals: %v", err)
-		}
-		return func(ctx context.Context) error {
-			n, err := r.store.BackfillBillingIntervals(ctx)
-			if err == nil && n != 2 {
-				t.Errorf("the backfill must write 2 segments, wrote %d", n)
-			}
 			return err
 		}
 	}},
@@ -346,6 +366,138 @@ func TestPlanLockOrder_NoDeadlockWithMeterEdit(t *testing.T) {
 			}
 			if editErr != nil && errs.Code(editErr) != errs.CodeMeterInUse {
 				t.Fatalf("meter edit: want success or meter_in_use, got %v", editErr)
+			}
+		})
+	}
+}
+
+// twoMeterPlans creates meters m1 and m2 and three plans p < mid < q in the
+// database's order: p bills m1, mid bills both, q bills m2. A subscription
+// on p and q bills each meter once, so the API accepts it.
+func (r *lockOrderRig) twoMeterPlans(t *testing.T, key string) (m1, m2 string, p, mid, q domain.Plan) {
+	t.Helper()
+	var meters []string
+	for _, k := range []string{key + "-m1", key + "-m2"} {
+		m, err := r.pricing.CreateMeter(r.ctx, r.tenantID, pricing.CreateMeterInput{
+			Key: k, Name: k, Unit: "tokens", Aggregation: "sum",
+		})
+		if err != nil {
+			t.Fatalf("create meter %s: %v", k, err)
+		}
+		meters = append(meters, m.ID)
+	}
+	ps := pricing.NewPostgresStore(r.db)
+	byID := map[string]domain.Plan{}
+	var ids []string
+	for i := range 3 {
+		code := fmt.Sprintf("%s-%d", key, i)
+		pl, err := ps.CreatePlan(r.ctx, r.tenantID, domain.Plan{
+			Code: code, Name: code, Currency: "USD",
+			BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
+			BaseAmountCents: 1000, Status: domain.PlanActive,
+		})
+		if err != nil {
+			t.Fatalf("create plan %s: %v", code, err)
+		}
+		byID[pl.ID] = pl
+		ids = append(ids, pl.ID)
+	}
+	rows, err := r.admin.QueryContext(r.ctx, `SELECT id FROM plans WHERE id = ANY($1) ORDER BY id`, postgres.StringArray(ids))
+	if err != nil {
+		t.Fatalf("order plans: %v", err)
+	}
+	var ordered []domain.Plan
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan plan id: %v", err)
+		}
+		ordered = append(ordered, byID[id])
+	}
+	if err := rows.Close(); err != nil || len(ordered) != 3 {
+		t.Fatalf("order plans: %d plans, err %v", len(ordered), err)
+	}
+	for i, ms := range [][]string{{meters[0]}, {meters[0], meters[1]}, {meters[1]}} {
+		raw, _ := json.Marshal(ms)
+		if _, err := r.admin.ExecContext(r.ctx, `UPDATE plans SET meter_ids = $2::jsonb WHERE id = $1`, ordered[i].ID, string(raw)); err != nil {
+			t.Fatalf("set meters of %s: %v", ordered[i].Code, err)
+		}
+	}
+	return meters[0], meters[1], ordered[0], ordered[1], ordered[2]
+}
+
+// TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits is C10 for the writers
+// whose two plans the API lets onto one subscription only when they bill
+// different meters: create, draft activation, trial conversion and early
+// trial end. Plans p < mid < q; p bills m1, mid bills m1 and m2, q bills m2.
+// The writer references p and q, and reaches q first when nothing orders its
+// plan locks. Three transactions can then wait on each other:
+//
+//   - the edit of m2 holds mid and waits for q;
+//   - the edit of m1 holds p and waits for mid;
+//   - the writer holds q and waits for p.
+//
+// A plan edit held open on q stops the m2 edit after mid, as in
+// TestPlanLockOrder_NoDeadlockWithMeterEdit.
+func TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits(t *testing.T) {
+	r := newLockOrderRig(t)
+	svc := NewService(r.store, nil)
+	svc.SetPlanReader(r.pricing)
+	for i, w := range twoMeterWriters {
+		t.Run(w.name, func(t *testing.T) {
+			m1, m2, p, _, q := r.twoMeterPlans(t, "lockord2-"+string(rune('a'+i)))
+			// The API accepts these two plans on one subscription.
+			if err := svc.rejectMeterOverlap(r.ctx, r.tenantID, r.custID, "", "", []string{q.ID, p.ID}); err != nil {
+				t.Fatalf("fixture refused by the meter-overlap guard: %v", err)
+			}
+			write := w.setup(t, r, p, q)
+
+			hold := r.holdPlan(t, q.ID)
+			defer postgres.Rollback(hold)
+
+			edit := func(meterID string, done chan<- error) {
+				agg := "max"
+				_, err := r.pricing.UpdateMeter(r.ctx, r.tenantID, meterID, pricing.UpdateMeterInput{Aggregation: &agg})
+				done <- err
+			}
+			// The m2 edit holds mid and waits for q.
+			edit2Done := make(chan error, 1)
+			go edit(m2, edit2Done)
+			testutil.WaitForLockWaiters(t, r.ctx, r.admin, d05Statement, 1)
+			// The m1 edit holds p and waits for mid.
+			edit1Done := make(chan error, 1)
+			go edit(m1, edit1Done)
+			testutil.WaitForLockWaiters(t, r.ctx, r.admin, d05Statement, 2)
+
+			writeDone := make(chan error, 1)
+			go func() { writeDone <- write(r.ctx) }()
+			// The m1 edit waits on the m2 edit; the writer waits for p.
+			waitBlockedByN(t, r.ctx, r.admin, d05Statement, 2)
+
+			if err := hold.Rollback(); err != nil {
+				t.Fatalf("release the plan edit: %v", err)
+			}
+
+			var edit1Err, edit2Err, writeErr error
+			for range 3 {
+				select {
+				case edit1Err = <-edit1Done:
+				case edit2Err = <-edit2Done:
+				case writeErr = <-writeDone:
+				case <-time.After(20 * time.Second):
+					t.Fatal("a meter edit or the writer never finished")
+				}
+			}
+			if postgres.IsDeadlock(edit1Err) || postgres.IsDeadlock(edit2Err) || postgres.IsDeadlock(writeErr) {
+				t.Fatalf("deadlock (40P01): m1 edit err=%v, m2 edit err=%v, writer err=%v", edit1Err, edit2Err, writeErr)
+			}
+			if writeErr != nil {
+				t.Fatalf("writer: %v", writeErr)
+			}
+			for _, err := range []error{edit1Err, edit2Err} {
+				if err != nil && errs.Code(err) != errs.CodeMeterInUse {
+					t.Fatalf("meter edit: want success or meter_in_use, got %v", err)
+				}
 			}
 		})
 	}
