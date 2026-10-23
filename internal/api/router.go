@@ -301,7 +301,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	}
 
 	// Wire proration dependencies for plan change invoicing
-	subH.SetProrationDeps(pricingSvc, &prorationInvoiceCreatorAdapter{PostgresStore: invoiceStore, numberer: settingsStore}, &prorationCreditGranterAdapter{svc: creditSvc})
+	subH.SetProrationDeps(pricingSvc, &prorationInvoiceCreatorAdapter{PostgresStore: invoiceStore, numberer: settingsStore})
 
 	// Payment / webhook / checkout / refund handlers
 	stripeRefunder := payment.NewStripeRefunder(stripeClients)
@@ -956,7 +956,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Dunning's final pause and cancel wait for the same grace as the
 	// billing runs (ADR-120 amendment 2026-10-22); operator writes do not.
 	subSvc.SetInvoiceGrace(o.invoiceGrace)
-	engine.SetCreditGranter(creditSvc)
 	// ADR-031 / #22 / ADR-118: the cancel and plan-swap relief for the unused
 	// part of an in_advance period, written in the change's transaction —
 	// a credit note crediting the balance (paid invoice), a credit note

@@ -116,9 +116,9 @@ type GrantInput struct {
 	SourceChangeType         domain.ItemChangeType `json:"source_change_type,omitempty"`
 
 	// SourceCreditNoteID dedups grants created by credit-note Issue()
-	// — a retry after partial-failure hits the unique partial index
-	// (migration 0093) and the store returns ErrAlreadyExists. Service
-	// callers use GrantOrFetch (below) to handle the retry path.
+	// (GrantForCreditNoteTx sets it): a second grant for the same credit
+	// note hits the unique partial index (migration 0093) and the store
+	// returns ErrAlreadyExists.
 	SourceCreditNoteID string `json:"source_credit_note_id,omitempty"`
 
 	// At is the simulated instant the grant was earned (cancel time
@@ -399,50 +399,21 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 	return out, nil
 }
 
-// GrantForCreditNote is the retry-safe Grant variant used by
-// credit-note Issue(). Sets SourceCreditNoteID so the partial unique
-// index (migration 0093) dedups retries. On ErrAlreadyExists the
-// existing grant is fetched and returned — caller continues without
-// double-crediting.
-func (s *Service) GrantForCreditNote(ctx context.Context, tenantID, creditNoteID string, input GrantInput) (domain.CreditLedgerEntry, error) {
-	if creditNoteID == "" {
-		return domain.CreditLedgerEntry{}, errs.Required("credit_note_id")
-	}
-	input.SourceCreditNoteID = creditNoteID
-	entry, err := s.Grant(ctx, tenantID, input)
-	if errors.Is(err, errs.ErrAlreadyExists) {
-		existing, fetchErr := s.store.GetByCreditNoteSource(ctx, tenantID, creditNoteID)
-		if fetchErr != nil {
-			return domain.CreditLedgerEntry{}, fmt.Errorf("dedup hit but fetch failed: %w", fetchErr)
-		}
-		return existing, nil
-	}
-	return entry, err
-}
-
-// GrantForCreditNoteTx is GrantForCreditNote on the caller's coordinator tx: the
-// ledger entry is appended via GrantTx so it commits atomically with the credit
-// note's draft→issued CAS (ADR-061, creditnote.Issue). The 0093 (tenant, CN)
-// dedup index still backs uniqueness, but the issue CAS makes a duplicate
-// UNREACHABLE — exactly one Issue() reaches the grant per credit note. Unlike
-// the non-tx GrantForCreditNote (whose own tx can be discarded on a dedup hit
-// and the existing grant re-fetched), a conflict here would ABORT the shared
+// GrantForCreditNoteTx is the credit-note grant, on the caller's coordinator
+// tx: it sets SourceCreditNoteID and appends via GrantTx, so the ledger entry
+// commits atomically with the credit note's draft→issued CAS (ADR-061,
+// creditnote.Issue). The 0093 (tenant, CN) dedup index still backs uniqueness,
+// but the issue CAS makes a duplicate UNREACHABLE — exactly one Issue() reaches
+// the grant per credit note. A conflict here would ABORT the shared
 // coordinator tx, so we do NOT swallow ErrAlreadyExists: surfacing it correctly
 // fails the whole Issue() rather than committing a poisoned tx. Given the CAS
-// invariant it is dead code; if it ever fires, the invariant is broken.
+// invariant it never fires; if it does, the invariant is broken.
 func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input GrantInput) (domain.CreditLedgerEntry, error) {
 	if creditNoteID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("credit_note_id")
 	}
 	input.SourceCreditNoteID = creditNoteID
 	return s.GrantTx(ctx, tx, tenantID, input)
-}
-
-// GetByProrationSource exposes the store-level source lookup. Used by the
-// subscription proration path to complete an idempotent retry after
-// AppendEntry returns ErrAlreadyExists.
-func (s *Service) GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error) {
-	return s.store.GetByProrationSource(ctx, tenantID, subscriptionID, subscriptionItemID, changeType, changeAt)
 }
 
 // ApplyToInvoice deducts credits from a customer's balance AND reduces the
@@ -471,38 +442,24 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 	return s.store.ApplyToInvoiceAtomic(ctx, tenantID, customerID, invoiceID, desc, invoiceAmountCents, at)
 }
 
-func (s *Service) ReverseForInvoice(ctx context.Context, tenantID, customerID, invoiceID, invoiceNumber string) (int64, error) {
-	return s.reverseForInvoice(ctx, tenantID, customerID, invoiceID, invoiceNumber,
-		func(entry domain.CreditLedgerEntry) error {
-			_, err := s.store.AppendEntry(ctx, tenantID, entry)
-			return err
-		})
-}
-
-// ReverseForInvoiceTx is the in-transaction variant: the reversal grant is
-// appended on the caller's *sql.Tx so it commits (or rolls back) atomically
-// with the invoice status flip that drives the void. invoice.Service.Void
+// ReverseForInvoiceTx hands back the credits applied to a voided invoice. The
+// reversal grant is appended on the caller's *sql.Tx so it commits (or rolls
+// back) atomically with the invoice status flip that drives the void. invoice.Service.Void
 // threads its coordinator tx through here — a reversal failure rolls the void
 // back, so the invoice never lands voided with the customer's applied credits
 // still consumed. The reading of usage entries runs on its own conn (those
 // rows were committed when the credit was applied); only the grant INSERT
-// rides the tx, and the 0106 dedup index keeps it exactly-once.
+// rides the tx.
+//
+// The 0106 dedup index allows one reversal per invoice. The void refuses an
+// invoice that is already voided, on the locked row, so a second reversal is
+// not expected. If one comes, the index refuses the INSERT, which aborts the
+// caller's tx, so the error (code credit_reversal_source_taken) is returned,
+// not swallowed: the caller must fail, not carry on with a dead tx.
+//
+// bindForCustomer stamps the grant in simulated time when the customer is
+// clock-pinned.
 func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (int64, error) {
-	return s.reverseForInvoice(ctx, tenantID, customerID, invoiceID, invoiceNumber,
-		func(entry domain.CreditLedgerEntry) error {
-			_, err := s.store.AppendEntryTx(ctx, tx, tenantID, entry)
-			return err
-		})
-}
-
-// reverseForInvoice is the shared body: sum the usage entries applied to the
-// invoice and append a matching grant via the supplied appender (own tx vs
-// caller's tx). bindForCustomer stamps the grant in simulated time when the
-// customer is clock-pinned.
-func (s *Service) reverseForInvoice(ctx context.Context, tenantID, customerID, invoiceID, invoiceNumber string, appendFn func(domain.CreditLedgerEntry) error) (int64, error) {
-	// Bind ctx clock to the customer pin so the reversal grant entry's
-	// created_at stamps in simulated time when called from the void /
-	// dunning-writeoff flow on a clock-pinned customer.
 	ctx = s.bindForCustomer(ctx, tenantID, customerID)
 	entries, err := s.store.ListEntries(ctx, ListFilter{
 		TenantID:   tenantID,
@@ -544,22 +501,14 @@ func (s *Service) reverseForInvoice(ctx context.Context, tenantID, customerID, i
 		desc = fmt.Sprintf("Reversed — invoice %s voided", invoiceID)
 	}
 
-	err = appendFn(domain.CreditLedgerEntry{
+	if _, err := s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:              customerID,
 		EntryType:               domain.CreditGrant,
 		AmountCents:             totalUsed,
 		Description:             desc,
 		InvoiceID:               invoiceID,
 		SourceInvoiceReversalID: invoiceID,
-	})
-	if err != nil {
-		// A second void / dunning manual-resolve of the same invoice hits the
-		// partial unique index (migration 0106) and the store returns
-		// ErrAlreadyExists with this code — the reversal already happened, so
-		// this is an idempotent no-op rather than a double-credit.
-		if errs.Code(err) == "credit_reversal_source_taken" {
-			return 0, nil
-		}
+	}); err != nil {
 		return 0, err
 	}
 

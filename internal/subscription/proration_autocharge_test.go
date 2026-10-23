@@ -40,7 +40,7 @@ func TestUpdateItem_Upgrade_EnrollsProrationInvoiceForAutoCharge(t *testing.T) {
 	}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
 	req := updateItemURL(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID), subID, itemID, body)
@@ -83,7 +83,7 @@ func TestUpdateItem_Downgrade_DoesNotEnrollForAutoCharge(t *testing.T) {
 	}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(&fakeCNIssuer{})
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})

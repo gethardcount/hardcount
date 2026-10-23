@@ -9,10 +9,6 @@ Think of a taxi meter. It counts the distance, the fare card says what each
 kilometre costs, and at the end you get a receipt and pay by card. Velox
 does the same for usage, such as AI tokens or API calls.
 
-**Who it is for:** anyone who wants the big picture before reading the API
-or running Velox. Each word is explained where it first appears, and again
-in the [glossary](glossary.md).
-
 ```mermaid
 flowchart LR
     A["Your app"] -->|"usage event"| B["Meter<br/>counts it"]
@@ -67,10 +63,9 @@ flowchart LR
    `invoice.finalized` webhook shows the amount before credit. If credit
    covers it all, the invoice is marked paid with no charge. Otherwise, if
    the customer has a saved card and your Stripe account is connected,
-   Velox asks Stripe to charge that card for what is left. Velox, not
-   Stripe Billing, keeps the invoice, so Stripe Billing's fee does not
-   apply. With no saved card, Velox can email the customer a link to add
-   one, once email is set up.
+   Velox asks Stripe to charge that card for what is left. With no saved
+   card, Velox can email the customer a link to add one, once email is set
+   up.
 
    **You see:** the invoice reads **Paid**, with a "Credits applied" line
    if credit paid part of it. The payment shows in your Stripe dashboard.
@@ -91,13 +86,9 @@ flowchart LR
 
 ## See it without waiting a month
 
-A test clock is a pretend clock for test customers. Move it forward a
-month, and steps 4 to 6 happen in seconds. The [quick start](quick-start.md)
-does this for a demo customer, up to the invoice: it connects no Stripe
-account, so nothing is charged. To rehearse a dunning policy that pauses
-or cancels, move the clock in two steps instead, as the
-[glossary's catch-up entry](glossary.md#testing-with-simulated-time) says.
+Move a customer's [test clock](glossary.md#testing-with-simulated-time)
+forward a month, and steps 4 to 6 happen in seconds. The quick start does
+this for a demo customer, up to the invoice: it connects no Stripe account,
+so nothing is charged.
 
-## Related
-
-[Architecture](architecture.md): how the code is laid out.
+**Next:** see these six steps run on your computer: [quick start](quick-start.md).

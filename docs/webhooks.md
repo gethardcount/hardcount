@@ -5,16 +5,10 @@ happens, such as an invoice paid, a payment failed or a credit balance
 running low. Your app can then react: send a receipt, pause a service,
 remind a customer to top up.
 
-Think of a doorbell. You do not keep checking the door; it rings when
-someone arrives. Webhooks ring your app when billing changes.
-
-**Who it is for:** developers building the endpoint in their app that
-receives these messages. No earlier Velox knowledge is needed.
-
 ## Receive your first event
 
-This takes about five minutes. You run a small test receiver, register it
-with Velox, make something happen, and check the message.
+You run a small test receiver, register it with Velox, make something
+happen, and check the message.
 
 **Before you start:** Velox is running, and you have a test API key (see
 [API keys](api-keys.md)). Open a terminal in the `velox` folder and set:
@@ -108,11 +102,12 @@ retries on the schedule below.
 2. **Events can arrive out of order.** Do not work out the current state
    from the order they arrive. Read the event's data, or fetch the
    invoice or subscription from the API.
-3. **Money events are never lost; a few others can be.** The events marked
-   *(always sent)* in the [catalog](#event-catalog) are saved together with
-   the change that caused them. If the change is saved, the event will be
-   sent, even after a crash. Other events are queued just after the change
-   is saved, and a crash at that moment can drop one.
+3. **Events marked *(always sent)* are never lost; others can be.** Those
+   events in the [catalog](#event-catalog) are saved together with the
+   change that caused them. If the change is saved, the event will be sent,
+   even after a crash. Other events, including `invoice.finalized`, are
+   queued just after the change is saved, and a crash at that moment can
+   drop one.
 
 ## What a message looks like
 
@@ -138,7 +133,7 @@ Headers:
 
 | Header | Value |
 |---|---|
-| `Velox-Signature` | `t=<unix-seconds>,v1=<hex hmac>`. It has two `v1=` entries while a secret is being rotated. |
+| `Velox-Signature` | `t=<unix-seconds>,v1=<hex hmac>` |
 | `Velox-Event-Type` | The event type, so you can route the message before you read the body |
 
 ## Verifying signatures
@@ -201,8 +196,7 @@ when you rotate it.
    **You see:** the new secret. For the next 72 hours, Velox signs each
    message with both the old and the new secret.
 2. Update your receiver to use the new secret within those 72 hours.
-   **You see:** messages keep passing your check, because one of the two
-   `v1=` entries matches.
+   **You see:** messages keep passing your check.
 
 Changing an endpoint with `PATCH` (its URL, events, or whether it is
 active) never changes the secret.
@@ -259,15 +253,8 @@ lists the newest 50 events; it has no filters.
 
 ## Event catalog
 
-Two words used below:
-
-- **Dunning** is Velox retrying a failed payment on a schedule and emailing
-  the customer, until the invoice is paid or written off.
-- **Your account** is your business in Velox (a "tenant" in the API), as
-  opposed to the customers you bill.
-
-Events marked *(always sent)* are saved together with the change that
-caused them, so a crash cannot drop them (rule 3).
+*(always sent)*: see [rule 3](#three-rules-for-your-receiver). Terms:
+[glossary](glossary.md).
 
 ### Invoices and payments
 
@@ -288,16 +275,12 @@ caused them, so a crash cannot drop them (rule 3).
 | `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Velox recorded it against the invoice. Sent once per dispute. Carries `stripe_dispute_id`, `status`, `reason`, `amount_cents` and `evidence_due_by`, the deadline to respond in Stripe. *(always sent)* |
 | `payment.dispute_closed` | A recorded dispute closed. `status` is `won`, `lost`, `warning_closed` (an inquiry that never became a chargeback) or `prevented`. Sent again if Stripe turns a loss into a win. *(always sent)* |
 
-A dispute changes nothing else in Velox: the invoice stays paid and no money
-moves. Respond to it in Stripe; if it is lost, decide what the invoice should
-say ([Card disputes](ops/runbook/card-disputes.md)). Both events carry
-`invoice_id`, `invoice_number`, `customer_id`, `dispute_id`,
-`payment_intent_id`, `stripe_charge_id`, `currency` and `opened_at`, and
-`closed_at` once the dispute is closed. When the first Stripe event Velox
-receives is already the close, both events are sent with the closed status,
-in either order. Velox hears of a dispute only when Stripe's
-`charge.dispute.created`, `charge.dispute.updated` and `charge.dispute.closed`
-events are turned on for its Stripe webhook endpoint.
+Both dispute events carry `invoice_id`, `invoice_number`, `customer_id`,
+`dispute_id`, `payment_intent_id`, `stripe_charge_id`, `currency` and
+`opened_at`, and `closed_at` once the dispute is closed. When the first
+Stripe event Velox receives is already the close, both events are sent with
+the closed status, in either order. What a dispute does and how to turn on
+Stripe's dispute events: [Card disputes](ops/runbook/card-disputes.md).
 
 ### `invoice.finalized` shows the amount before credit
 
@@ -306,9 +289,7 @@ after it sends `invoice.finalized`, usually within seconds. Then it charges
 the card for what is left. So in this event:
 
 - `amount_due_cents` is the amount before credit.
-- `credits_applied_cents` is the credit on the invoice when it was
-  finalized. It is 0, except on a draft made by a Velox version before
-  0.4.0, which could already carry credit.
+- `credits_applied_cents` is 0: credit is used after this event.
 
 Credit is used again each time Velox tries to collect an unpaid invoice,
 such as a payment retry. So credit the customer gets later can pay an older
@@ -367,3 +348,5 @@ subtracts the usage not yet invoiced. See
 A typical receiver for prepaid customers subscribes to `credit.balance_low`
 (remind the customer to top up), `credit.balance_recovered` (a top-up
 landed), and `subscription.canceled` (turn off their service).
+
+**Next:** gate usage on the live credit balance: [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md).

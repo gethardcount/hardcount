@@ -21,14 +21,6 @@ import (
 // ADR-080 relief pair (the production adapter is package-private).
 type reliefGranterAdapter struct{ svc *credit.Service }
 
-func (a reliefGranterAdapter) Grant(ctx context.Context, tenantID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
-	return err
-}
-func (a reliefGranterAdapter) GrantForCreditNote(ctx context.Context, tenantID, cnID string, in creditnote.CreditGrantInput) error {
-	_, err := a.svc.GrantForCreditNote(ctx, tenantID, cnID, credit.GrantInput{CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
-	return err
-}
 func (a reliefGranterAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, in creditnote.CreditGrantInput) error {
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, credit.GrantInput{CustomerID: in.CustomerID, AmountCents: in.AmountCents, Description: in.Description, InvoiceID: in.InvoiceID})
 	return err

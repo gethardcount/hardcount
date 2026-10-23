@@ -157,16 +157,8 @@ func afterRefundCall(ctx context.Context) (context.Context, context.CancelFunc) 
 	return context.WithTimeout(context.WithoutCancel(ctx), refundOutcomeWriteTimeout)
 }
 
-// CreditGranter adds credits to a customer's balance.
-//
-// `GrantForCreditNote` is the retry-safe variant used by Issue(): the
-// implementation MUST dedup on (tenant, creditNoteID) so a retry after
-// partial-failure of Issue() doesn't append a duplicate grant.
-// Migration 0093 backs this via a partial unique index. On dedup hit
-// the existing grant is returned silently.
+// CreditGranter is the credit ledger as Issue() and the commit relief use it.
 type CreditGranter interface {
-	Grant(ctx context.Context, tenantID string, input CreditGrantInput) error
-	GrantForCreditNote(ctx context.Context, tenantID, creditNoteID string, input CreditGrantInput) error
 	// GrantForCreditNoteTx grants on the caller's coordinator tx, so the credit
 	// ledger entry commits atomically with Issue()'s draft→issued CAS (ADR-061).
 	// The 0093 dedup index still backs it, but the CAS makes it unreachable: a
@@ -1086,7 +1078,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		return domain.CreditNote{}, fmt.Errorf("credit-note number generator not wired (call SetNumberGenerator)")
 	}
 	if s.credits == nil {
-		return domain.CreditNote{}, fmt.Errorf("credit granter not wired (call SetCreditGranter)")
+		return domain.CreditNote{}, fmt.Errorf("credit granter not wired (pass it to NewService)")
 	}
 
 	// ADR-030: relief rows belong to the source invoice's time domain.
@@ -1599,7 +1591,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	// impossible without a second CAS win, which cannot happen. (This is why
 	// PR2 carries NO source-dedup row; ADR-061 records it as the deferred first
 	// brick of the amount_due-derived-ledger. A reviewer adding a second caller
-	// of ApplyCreditNote/GrantForCreditNote MUST reintroduce the dedup.)
+	// of ApplyCreditNote/GrantForCreditNoteTx MUST reintroduce the dedup.)
 	// External effects (Stripe refund, upstream tax reversal) cannot share a DB
 	// tx, so they run POST-commit, idempotency-keyed and recoverable.
 	tx, err := s.store.BeginTx(ctx, tenantID)

@@ -135,7 +135,7 @@ for rate in \
   '{"provider": "anthropic", "model": "claude-haiku-4.5",  "token_type": "output",     "cost_per_token": "0.000004"}' ; do
   req PUT "/v1/provider-costs" "$rate" >/dev/null
 done
-green "✓ Saved 5 costs for two models. Velox now records your cost on each new usage record."
+green "✓ Saved 5 costs for two models. Velox now records your cost on each new usage event."
 
 step "6. Send token usage, the way a LiteLLM proxy sends it"
 # One LiteLLM StandardLoggingPayload = one API call by ACME's end user.
@@ -172,7 +172,7 @@ for i in 1 2 3 4 5; do
 done
 EVENTS=$(req GET "/v1/usage-events?customer_id=$CUST_ID&limit=100" | jq '.data | length')
 [ "$EVENTS" -ge 25 ] || { echo "✗ expected ≥25 token events (5 Sonnet calls × 3 + 5 Haiku calls × 2), got $EVENTS"; exit 1; }
-green "✓ 10 AI calls became $EVENTS usage records, one for each token type in each call"
+green "✓ 10 AI calls became $EVENTS usage events, one for each token type in each call"
 
 step "7. Move the test clock forward one month"
 ADV_TO=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
@@ -229,8 +229,8 @@ echo ""
 blue "━━━ Done: every step above ran and was checked ━━━"
 echo ""
 echo "  ✓ One call loaded a price for each model and token type"
-echo "  ✓ LiteLLM-shaped calls to two models became usage records, with no SDK"
-echo "  ✓ Velox recorded what each usage record cost you"
+echo "  ✓ LiteLLM-shaped calls to two models became usage events, with no SDK"
+echo "  ✓ Velox recorded what each usage event cost you"
 echo "  ✓ A test clock moved one month, and Velox made the invoice and its PDF"
 echo "  ✓ Your margin on this customer, by model"
 echo ""

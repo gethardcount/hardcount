@@ -81,10 +81,9 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 			SubtotalCents: 6000, TotalAmountCents: 6000, CreatedAt: proPeriodStart,
 		},
 	}
-	credits := &creditsMock{}
 	h := NewHandler(svc)
 	h.SetDB(db)
-	h.SetProrationDeps(ps, invoices, credits)
+	h.SetProrationDeps(ps, invoices)
 
 	trialPeriodEnd := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	activeSub, err := store.Create(ctx, tenantID, domain.Subscription{
@@ -156,7 +155,6 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			invoicesBefore := len(invoices.createdInvoices)
-			grantsBefore := len(credits.grantCalls)
 			before := snapshot(t, tc.sub.ID)
 
 			rr := addItem(tc.sub.ID, archPlan.ID)
@@ -178,7 +176,7 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 			}
 
 			// Nothing changed: no item row, no interval, no change-history
-			// row, no proration invoice or credit.
+			// row, no proration invoice.
 			after := snapshot(t, tc.sub.ID)
 			for _, tbl := range tables {
 				if after[tbl] != before[tbl] {
@@ -187,9 +185,6 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 			}
 			if n := len(invoices.createdInvoices) - invoicesBefore; n != 0 {
 				t.Errorf("refused add cut %d proration invoice(s), want 0", n)
-			}
-			if n := len(credits.grantCalls) - grantsBefore; n != 0 {
-				t.Errorf("refused add granted %d credit(s), want 0", n)
 			}
 
 			// Control: an active plan is added on the same path.

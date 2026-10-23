@@ -94,17 +94,6 @@ type InvoiceFinalizeRecorder interface {
 	DispatchInvoiceFinalized(ctx context.Context, tenantID string, inv domain.Invoice)
 }
 
-// ProrationCreditGranter grants credits for downgrade proration. Dedup key is
-// (subscription, item, plan_changed_at) — see ProrationInvoiceCreator comment.
-type ProrationCreditGranter interface {
-	GrantProration(ctx context.Context, tenantID string, input ProrationGrantInput) error
-	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.CreditLedgerEntry, error)
-	// Tx variant — append the credit-ledger entry inside a caller-owned
-	// transaction. Same atomicity story as the invoice creator's Tx
-	// methods above.
-	GrantProrationTx(ctx context.Context, tx *sql.Tx, tenantID string, input ProrationGrantInput) error
-}
-
 // ProrationTaxResult is what ApplyTaxToLineItems returns: invoice-level tax
 // totals plus per-line mutations to the supplied line-item slice. Duplicates
 // billing.TaxApplication so subscription package doesn't import billing.
@@ -184,20 +173,6 @@ type NetTermsReader interface {
 	NetPaymentTermDays(ctx context.Context, tenantID string) (int, error)
 }
 
-// ProrationGrantInput carries the downgrade/removal/reduction credit payload
-// plus the provenance fields required for dedup. SourceChangeType
-// distinguishes plan-downgrade from qty-reduction from item-remove when the
-// same item is mutated multiple ways within the same billing period.
-type ProrationGrantInput struct {
-	CustomerID               string
-	AmountCents              int64
-	Description              string
-	SourceSubscriptionID     string
-	SourceSubscriptionItemID string
-	SourcePlanChangedAt      time.Time
-	SourceChangeType         domain.ItemChangeType
-}
-
 // auditRecorder is the narrow audit interface the subscription handler uses:
 // Log to write operator-action rows and Query to read them back for the
 // activity timeline. *audit.Logger satisfies it. Declared as an interface (vs
@@ -213,7 +188,6 @@ type Handler struct {
 	svc         *Service
 	plans       PlanReader
 	invoices    ProrationInvoiceCreator
-	credits     ProrationCreditGranter
 	creditNotes CreditNoteIssuer
 	tzLocator   TenantLocator
 	netTerms    NetTermsReader
@@ -330,11 +304,12 @@ func planIDsForAudit(sub domain.Subscription) []string {
 // right behavior in narrow unit tests.
 func (h *Handler) SetEventDispatcher(d domain.EventDispatcher) { h.events = d }
 
-// SetProrationDeps sets optional dependencies for proration invoice generation.
-func (h *Handler) SetProrationDeps(plans PlanReader, invoices ProrationInvoiceCreator, credits ProrationCreditGranter) {
+// SetProrationDeps sets optional dependencies for proration: the plan reader
+// and the invoice side. A proration credit is a credit note
+// (SetCreditNoteIssuer).
+func (h *Handler) SetProrationDeps(plans PlanReader, invoices ProrationInvoiceCreator) {
 	h.plans = plans
 	h.invoices = invoices
-	h.credits = credits
 }
 
 // SetProrationTaxApplier configures tax resolution on proration invoices.
@@ -1526,7 +1501,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	var removedQuantity int64
 	var subBefore domain.Subscription
 	var prorationRemainingDays, prorationTotalDays int64
-	if h.plans != nil && h.credits != nil {
+	if h.plans != nil && h.invoices != nil {
 		// Read errors fail the remove: it is a hard delete, so carrying on
 		// would lose the unused-portion credit and the data to compute it.
 		item, gerr := h.svc.store.GetItem(ctx, tenantID, itemID)
@@ -1549,11 +1524,11 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Atomic RemoveItem-with-proration: delete + credit grant in one
-	// tx so a failed credit grant rolls back the delete. Falls back to
+	// Atomic RemoveItem-with-proration: delete + credit-note draft in one
+	// tx so a failed draft rolls back the delete. Falls back to
 	// the legacy non-atomic flow when db isn't wired or no proration
 	// emission is needed.
-	wantProration := prorationRemainingDays > 0 && removedPlanID != "" && h.credits != nil
+	wantProration := prorationRemainingDays > 0 && removedPlanID != "" && h.invoices != nil
 	atomic := h.db != nil && wantProration
 	var removeProration *ProrationDetail
 	if atomic {

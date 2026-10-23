@@ -15,7 +15,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/payment"
@@ -1320,18 +1319,6 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 	inv.AmountDueCents = due
 	m.invoices[idx] = inv
 	return inv, nil
-}
-
-// fakeCreditGranter records Grant calls. Backs the BillOnCancel
-// paid-check unit tests — they assert the grant fires (or doesn't)
-// based on the source invoice's payment_status.
-type fakeCreditGranter struct {
-	grants []credit.GrantInput
-}
-
-func (g *fakeCreditGranter) Grant(_ context.Context, _ string, in credit.GrantInput) (domain.CreditLedgerEntry, error) {
-	g.grants = append(g.grants, in)
-	return domain.CreditLedgerEntry{ID: fmt.Sprintf("vlx_cle_%d", len(g.grants))}, nil
 }
 
 // fakeInvoiceVoider / fakeCreditNoteAdjuster back the #22 unpaid-prebill-relief
@@ -3496,11 +3483,9 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 			BillingPeriodStart: &paidStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{paid}, lineItems: []domain.InvoiceLineItem{paidLine}}
-		granter := &fakeCreditGranter{}
 		adjuster := &fakeCreditNoteAdjuster{}
 
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -3518,9 +3503,6 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		if cents != 3290 {
 			t.Errorf("return cents = %d, want 3290 — timeline detail depends on this match", cents)
 		}
-		if len(granter.grants) != 0 {
-			t.Errorf("engine must not double-credit via the ledger (grant happens inside CN Issue), got %d grants", len(granter.grants))
-		}
 	})
 
 	t.Run("source invoice UNPAID → credit suppressed", func(t *testing.T) {
@@ -3535,12 +3517,10 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 			BillingPeriodStart: &unpaidStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{unpaid}, lineItems: []domain.InvoiceLineItem{unpaidLine}}
-		granter := &fakeCreditGranter{}
 		voider := &fakeInvoiceVoider{}
 		adjuster := &fakeCreditNoteAdjuster{}
 
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetInvoiceVoider(voider)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
@@ -3549,8 +3529,8 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
 		}
-		if cents != 0 || len(granter.grants) != 0 {
-			t.Errorf("unpaid source: cents=%d grants=%d, want 0/0 (would have credited customer for unpaid period)", cents, len(granter.grants))
+		if cents != 0 {
+			t.Errorf("unpaid source: cents=%d, want 0 (would have credited customer for unpaid period)", cents)
 		}
 		// Suppressed ≠ silent: the unpaid receivable is settled in place —
 		// partially consumed (17/31 days) → amount_due reduced via adjustment
@@ -3567,16 +3547,11 @@ func TestBillOnCancel_PaidCheck(t *testing.T) {
 		// e.g. tenant manually deleted invoice, or cancel fires before any
 		// invoice was emitted for this period. Safest default: don't grant.
 		inv := &mockInvoices{}
-		granter := &fakeCreditGranter{}
 
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 
 		if _, err := billOnCancel(engine, context.Background(), makeSub()); err != nil {
 			t.Fatalf("BillOnCancel: %v", err)
-		}
-		if len(granter.grants) != 0 {
-			t.Errorf("expected no credit grant when source invoice missing, got %d", len(granter.grants))
 		}
 	})
 }
@@ -3628,21 +3603,19 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 			}},
 		}
 	}
-	newEngine := func(inv *mockInvoices) (*Engine, *fakeCreditGranter, *fakeInvoiceVoider, *fakeCreditNoteAdjuster) {
+	newEngine := func(inv *mockInvoices) (*Engine, *fakeInvoiceVoider, *fakeCreditNoteAdjuster) {
 		e := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		g := &fakeCreditGranter{}
 		v := &fakeInvoiceVoider{}
 		a := &fakeCreditNoteAdjuster{}
-		e.SetCreditGranter(g)
 		e.SetInvoiceVoider(v)
 		e.SetCreditNoteAdjuster(a)
 		e.SetCreditHeadroomReader(&fakeCreditHeadroom{})
-		return e, g, v, a
+		return e, v, a
 	}
 
 	t.Run("partially consumed, no tax → adjustment CN reduces to consumed, no void, no grant", func(t *testing.T) {
 		inv := seedInvoices(6000, 0, 6000, 6000, 0)
-		e, g, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC) // 17 unused / 31 days
 
 		cents, err := billOnCancel(e, context.Background(), makeSub(cancelAt))
@@ -3651,9 +3624,6 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("return cents = %d, want 0 (no balance credit on unpaid path)", cents)
-		}
-		if len(g.grants) != 0 {
-			t.Errorf("credit grants = %d, want 0 (unfunded — must not gift balance credit)", len(g.grants))
 		}
 		if len(v.voided) != 0 {
 			t.Errorf("voids = %d, want 0 (partial consumption must reduce, not void)", len(v.voided))
@@ -3670,7 +3640,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 	t.Run("partially consumed WITH tax → CN amount grossed up so unused tax is reversed too", func(t *testing.T) {
 		// 10% tax: subtotal 6000, tax 600, total 6600, all unpaid.
 		inv := seedInvoices(6000, 600, 6600, 6600, 0)
-		e, _, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
 
 		if _, err := billOnCancel(e, context.Background(), makeSub(cancelAt)); err != nil {
@@ -3690,7 +3660,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 
 	t.Run("nothing consumed (cancel at period start) → void whole invoice, no CN, no grant", func(t *testing.T) {
 		inv := seedInvoices(6000, 0, 6000, 6000, 0)
-		e, g, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := periodStart.Add(time.Hour) // ~whole period unused → unusedDays rounds to full cycle
 
 		cents, err := billOnCancel(e, context.Background(), makeSub(cancelAt))
@@ -3699,9 +3669,6 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("return cents = %d, want 0", cents)
-		}
-		if len(g.grants) != 0 {
-			t.Errorf("credit grants = %d, want 0", len(g.grants))
 		}
 		if len(a.calls) != 0 {
 			t.Errorf("adjustment CN calls = %d, want 0 (fully unused → void)", len(a.calls))
@@ -3715,7 +3682,7 @@ func TestBillOnCancel_UnpaidPrebillRelief(t *testing.T) {
 		// Whole period unused but $20 already paid: must NOT void, must reduce
 		// amount_due (clamped) so the collected slice is preserved.
 		inv := seedInvoices(6000, 0, 6000, 4000, 2000) // 2000 paid, 4000 still due
-		e, _, v, a := newEngine(inv)
+		e, v, a := newEngine(inv)
 		cancelAt := periodStart.Add(time.Hour)
 
 		if _, err := billOnCancel(e, context.Background(), makeSub(cancelAt)); err != nil {
@@ -3792,10 +3759,8 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 	}
 
 	t.Run("in_advance + paid source → refund credit issued via credit note", func(t *testing.T) {
-		granter := &fakeCreditGranter{}
 		adjuster := &fakeCreditNoteAdjuster{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -3813,15 +3778,10 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		if cents != 3097 {
 			t.Errorf("unused refund cents: got %d, want 3097 ($60 × 16/31, banker's)", cents)
 		}
-		if len(granter.grants) != 0 {
-			t.Errorf("engine must not double-credit via the ledger (grant happens inside CN Issue), got %d grants", len(granter.grants))
-		}
 	})
 
 	t.Run("in_arrears → no-op (nothing prebilled)", func(t *testing.T) {
-		granter := &fakeCreditGranter{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 
 		cents, err := billOnPlanSwap(engine, context.Background(), makeArrearsSub(), swapAt)
 		if err != nil {
@@ -3829,9 +3789,6 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("in_arrears refund cents: got %d, want 0", cents)
-		}
-		if len(granter.grants) != 0 {
-			t.Errorf("in_arrears expected no credit grants, got %d", len(granter.grants))
 		}
 	})
 
@@ -3850,11 +3807,9 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 			BillingPeriodStart: &periodStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{unpaid}, lineItems: []domain.InvoiceLineItem{unpaidLine}}
-		granter := &fakeCreditGranter{}
 		voider := &fakeInvoiceVoider{}
 		adjuster := &fakeCreditNoteAdjuster{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetInvoiceVoider(voider)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
@@ -3863,8 +3818,8 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BillOnPlanSwapImmediate: %v", err)
 		}
-		if cents != 0 || len(granter.grants) != 0 {
-			t.Errorf("unpaid swap: cents=%d grants=%d, want 0/0 (no refundable credit)", cents, len(granter.grants))
+		if cents != 0 {
+			t.Errorf("unpaid swap: cents=%d, want 0 (no refundable credit)", cents)
 		}
 		if len(voider.voided) != 0 {
 			t.Errorf("voids = %d, want 0 (partial consumption → reduce, not void)", len(voider.voided))
@@ -3904,10 +3859,8 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 			BillingPeriodStart: &stubStart,
 		}
 		inv := &mockInvoices{invoices: []domain.Invoice{paid}, lineItems: []domain.InvoiceLineItem{paidLine}}
-		granter := &fakeCreditGranter{}
 		adjuster := &fakeCreditNoteAdjuster{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 		engine.SetCreditNoteAdjuster(adjuster)
 		engine.SetCreditHeadroomReader(&fakeCreditHeadroom{})
 
@@ -3928,9 +3881,7 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 	})
 
 	t.Run("at >= periodEnd → no-op (clean swap at boundary)", func(t *testing.T) {
-		granter := &fakeCreditGranter{}
 		engine := wireBaseTax(NewEngine(&mockSubs{}, &mockUsage{}, makePricing(), paidInvoices(), nil, &mockSettings{}, nil, nil, billingTestClock()))
-		engine.SetCreditGranter(granter)
 
 		cents, err := billOnPlanSwap(engine, context.Background(), makeAdvanceSub(), periodEnd)
 		if err != nil {
@@ -3938,9 +3889,6 @@ func TestBillOnPlanSwapImmediate(t *testing.T) {
 		}
 		if cents != 0 {
 			t.Errorf("at=periodEnd refund: got %d cents, want 0", cents)
-		}
-		if len(granter.grants) != 0 {
-			t.Errorf("at=periodEnd expected no credit grants, got %d", len(granter.grants))
 		}
 	})
 }

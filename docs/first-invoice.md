@@ -1,29 +1,19 @@
 # Send usage and get your first invoice
 
 This page bills one test customer for AI tokens, using the API from your
-terminal. It takes about ten minutes. At the end, you open the invoice in
-the dashboard.
-
-Think of a taxi meter. Your app reports what the customer used, Velox
-counts it and multiplies it by the price, and the total goes on the
-invoice. Stripe charges the card at the end, once you connect it.
-
-**Who it is for:** developers who want to connect their own product to
-Velox. If you only want to see Velox work, the
-[quick start](quick-start.md) demo does all of this for you.
+terminal. At the end, you open the invoice in the dashboard.
 
 ## Words on this page
 
 | Word | Meaning |
 |---|---|
-| Recipe | A ready-made pricing setup that Velox creates in one call. |
-| Meter | A counter for one kind of usage, here AI tokens. |
 | Plan | What you sell: a currency, a billing period such as monthly, and the meters it charges for. |
 | Customer | A person or company you bill. Its external ID is your own ID for it, such as the user ID in your database. |
 | Subscription | Puts a customer on a plan, and says when each billing month starts. |
 | Usage event | One "this customer used this much" record that your app sends. |
 | Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Velox counts it once. |
-| Test clock | A pretend clock for test customers. Moving it forward makes a month pass in seconds. |
+
+Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
 ## Before you start
 
@@ -184,10 +174,10 @@ variable into the JSON for you.
        -d @-
    ```
 
-   **You see:** `{"accepted":2,"deduplicated":0,"held":0,"skipped":0}`. That is two
+   **You see:** `"accepted":2`, and every other count is 0. That is two
    new events: input and output.
 
-   Did 5a first? Then you see `{"accepted":0,"deduplicated":2,"held":0,"skipped":0}`.
+   Did 5a first? Then you see `"accepted":0,"deduplicated":2`.
    Both ways use the same idempotency keys, so Velox counts the tokens once.
 
    In the dashboard, the **Usage** page lists both events.
@@ -217,17 +207,8 @@ variable into the JSON for you.
 
    **You see:** `ready`
 
-   **Testing failed payments later?** When the clock moves, Velox bills
-   every skipped period first, and only then retries failed payments.
-   (Retrying an unpaid invoice on a schedule is called dunning.) If your
-   dunning policy cancels or pauses the subscription when the retries run
-   out, move the clock in two steps. First move it to the time of the
-   invoice's last retry. That is the time the payment failed, plus the
-   policy's grace days and the gaps between its retries. Then move it to
-   the next billing date. Velox dates the cancel or pause at the time you
-   move the clock to, so a move past the last retry dates it late. One
-   longer move also bills a period a real clock would not
-   ([#1276](https://github.com/getvelox/velox/issues/1276)).
+   Testing a dunning policy that pauses or cancels? Move the clock in two
+   steps: see [catch-up](glossary.md#testing-with-simulated-time).
 
 7. **Read the invoice.**
 
@@ -288,11 +269,5 @@ That is expected: open the customer from **Customers** instead.
 | `customer with external_id "acme-1" already exists` | You ran this page before. In step 3, change `acme-1` to `acme-2`, then run steps 2 to 8 again. |
 | `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the clock moved. Run steps 2 to 8 again with a new name in step 3. |
 
-## Next steps
-
-- **Price a model the recipe does not cover, sell prepaid credit, or see
-  your margin:** [AI pricing reference](ai-pricing.md).
-- **Send usage from a LiteLLM proxy:** [LiteLLM integration](integrations/litellm.md).
-- **Let your app react when an invoice is paid or a payment fails:**
-  [Webhooks](webhooks.md).
-- **Every route:** [API surface](api-surface.md).
+**Next:** price your own models, sell prepaid credit and see your margin:
+[AI pricing](ai-pricing.md).

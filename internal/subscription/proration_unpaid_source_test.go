@@ -38,11 +38,10 @@ func TestUpdateItem_Downgrade_UnpaidSource_AdjustsNotRefundableCredit(t *testing
 			AmountDueCents: 6600,
 		},
 	}
-	credits := &creditsMock{}
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, credits)
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
@@ -64,10 +63,6 @@ func TestUpdateItem_Downgrade_UnpaidSource_AdjustsNotRefundableCredit(t *testing
 	}
 	if cn.calls[0].reason != "subscription_downgrade" {
 		t.Errorf("CN reason: got %q, want subscription_downgrade", cn.calls[0].reason)
-	}
-	// The refundable balance grant must NOT fire — the customer never funded this.
-	if len(credits.grantCalls) != 0 {
-		t.Errorf("GrantProration calls: got %d, want 0 (unpaid source → adjustment, not refundable credit)", len(credits.grantCalls))
 	}
 
 	var resp ItemChangeResult
@@ -110,7 +105,7 @@ func TestUpdateItem_Downgrade_UnpaidSource_CapsAtAmountDue(t *testing.T) {
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
@@ -152,7 +147,7 @@ func TestUpdateItem_Downgrade_UnpaidSource_CoversAppliedCredits(t *testing.T) {
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_basic", Immediate: true})
@@ -193,7 +188,7 @@ func TestUpdateItem_Upgrade_UnpaidSource_Blocked(t *testing.T) {
 	cn := &fakeCNIssuer{}
 
 	h := NewHandler(svc)
-	h.SetProrationDeps(plans, invoices, &creditsMock{})
+	h.SetProrationDeps(plans, invoices)
 	h.SetCreditNoteIssuer(cn)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})

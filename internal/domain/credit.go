@@ -51,18 +51,19 @@ type CreditLedgerEntry struct {
 	// SourceCreditNoteID dedups grants created by credit-note Issue().
 	// Set on every grant the CN refund-routing path appends; the
 	// partial unique index idx_credit_ledger_credit_note_dedup
-	// (migration 0093) enforces one grant per (tenant, CN). A retry
-	// after partial-failure of CN Issue() hits the index, store
-	// returns ErrAlreadyExists, service fetches the existing grant.
+	// (migration 0093) enforces one grant per (tenant, CN). A second
+	// grant for the same CN hits the index and the store returns
+	// ErrAlreadyExists.
 	SourceCreditNoteID string `json:"source_credit_note_id,omitempty"`
 
-	// SourceInvoiceReversalID dedups invoice-void credit reversals. credit.
-	// ReverseForInvoice (invoice void / dunning manual-resolve) stamps the
-	// voided invoice's id here; the partial unique index
-	// idx_credit_ledger_reversal_dedup (migration 0106) enforces one reversal
-	// grant per (tenant, invoice). A second void/resolve of the same invoice
-	// hits the index, the store returns ErrAlreadyExists, and ReverseForInvoice
-	// treats it as an idempotent no-op instead of double-crediting.
+	// SourceInvoiceReversalID dedups invoice-void credit reversals.
+	// credit.ReverseForInvoiceTx (invoice void) stamps the voided invoice's
+	// id here; the partial unique index idx_credit_ledger_reversal_dedup
+	// (migration 0106) enforces one reversal grant per (tenant, invoice). A
+	// second reversal of the same invoice hits the index, the store returns
+	// ErrAlreadyExists, and ReverseForInvoiceTx returns that error: the
+	// conflict aborts the caller's tx, so the void fails instead of
+	// crediting twice.
 	SourceInvoiceReversalID string `json:"source_invoice_reversal_id,omitempty"`
 
 	// GrantKind classifies a grant's cost basis (ADR-078). 'commit' =

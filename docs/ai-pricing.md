@@ -1,30 +1,18 @@
 # AI pricing reference
 
-This page is the reference for pricing AI usage in Velox. It lists the
-models each ready-made recipe prices. It shows how to price another model,
-how Velox picks the price for each usage event, how to sell prepaid
-credit, and how to read your margin.
-
 **New to Velox?** Start with [Send usage and get your first
 invoice](first-invoice.md). It runs every call in order. This page assumes
 you did it, so `VELOX`, `VELOX_KEY` and `CUSTOMER_ID` are set in your
 terminal.
 
-Think of one `tokens` meter as a single counter with a price list beside
-it. Each line on the list is a price for one model and one kind of token.
-
 ## Words on this page
 
 | Word | Meaning |
 |---|---|
-| Meter | A counter for one kind of usage, such as AI tokens. |
 | Dimensions | Labels on a usage event, such as `model` and `token_type`. |
 | Rating rule | A price: an amount per unit, tiers, or packages. |
 | Pricing rule | A line on a meter that says which events a rating rule prices, by their dimensions. |
 | Default price | The price a meter uses for events that no pricing rule picks. |
-| Prepaid commit | Usage credit the customer pays for up front, often at a discount. Later invoices draw it down. |
-| Provider cost | What your AI provider charges you per token. |
-| Margin | The price of a customer's usage rated in the window, invoiced or not, minus what that usage cost you, as a percent of that price. |
 
 ## Ready-made recipes
 
@@ -168,8 +156,8 @@ tokens. Add one rule for each kind of token you sell.
 name. If the meter has a default price, or a broader rule such as
 `{"token_type": "input"}` matches it, that price bills it, with no notice. To set one,
 send `PATCH /v1/meters/{id}` with `rating_rule_version_id`. If the meter has
-no default price, Velox makes and sends the invoice without that usage, as
-Lago, Metronome and Orb do. You see it in four places:
+no default price, Velox makes and sends the invoice without that usage. You
+see it in four places:
 
 - the "not billed" row of the customer's usage, on the customer page and
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
@@ -421,8 +409,7 @@ out](stop-usage-when-credit-runs-out.md).
 ### Tax on prepaid credit
 
 With a tax provider on, Velox charges tax once: on the usage, not on the
-credit purchase. It treats buying credit as an advance payment, as Lago
-does. The usage the credit pays for is taxed when it is invoiced.
+credit purchase. It treats buying credit as an advance payment. The usage the credit pays for is taxed when it is invoiced.
 
 At 10% tax, the commit above is invoiced at $9,000 with no tax. A later
 usage invoice of $1,000 carries $100 of tax, and the credit pays all $1,100
@@ -434,10 +421,11 @@ the $10,000 of credit pays for about $9,091 of usage and $909 of tax.
   taxed", and the PDF says why there is no tax.
 - **Refunds:** refunding unused credit
   ([ADR-080](adr/080-paid-commit-cn-relief.md)) reverses no tax, because the
-  purchase carried none. A commit invoiced before this change carried tax,
-  and its refund still reverses that tax.
+  purchase carried none. A commit whose purchase was taxed (invoiced before
+  [#1288](https://github.com/getvelox/velox/pull/1288)) still reverses that
+  tax when refunded.
 - **Free (promotional) credit** pays usage invoices the same way, tax
-  included. This change does not affect it.
+  included.
 
 Tax rules for prepayments differ by country. Some tax a prepayment when it
 is received, others when the service is used. Before you sell commits with
@@ -528,19 +516,24 @@ the customer.
    Billed $6.00, cost $2.10 (`cost_micros` is in millionths of a dollar),
    and a 65% margin (`margin_bps` is in hundredths of a percent).
 
+The margin covers usage only: base fees, credits and taxes are left out.
+Revenue Velox cannot match to a model is shown apart, in
+`unattributed_revenue_cents`. A token event that names its `provider`,
+`token_type` and `model` but matches no cost rate is counted in
+`unresolved_events`, and while any such event is in the window,
+`margin_bps` is left out. An event sent through the usage API without one
+of those three labels, such as usage on a meter that is not for tokens,
+gets no cost and is not counted. Its price is still in `revenue_cents`, so
+`margin_bps` reads higher than your real margin.
+
 Without `from` and `to`, the margin covers the last 30 days of the
 customer's time. On a test clock, that is the clock's time. The
 **Margin** card on the customer page starts on the current billing period.
 
 ## Usage from a LiteLLM proxy
 
-A LiteLLM proxy can send each AI call to Velox for you, with no code. Each
-call becomes token events on the `tokens` meter: chat completions,
-embeddings, `/v1/messages` (Claude Code), `/v1/responses` and Gemini
-calls. LiteLLM's `user` must be the customer's external ID. Anthropic
-cache writes become `cache_write_5m` and `cache_write_1h` events, priced
-by your cache-write rules. Failed calls, LiteLLM response-cache hits, and
-calls such as images and audio are not billed. See
-[LiteLLM integration](integrations/litellm.md).
+A LiteLLM proxy can send each AI call to Velox as token events on the
+`tokens` meter. Setup, the `user` field, which calls are billed and how
+cache tokens are billed: [LiteLLM integration](integrations/litellm.md).
 
 Next: [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md).

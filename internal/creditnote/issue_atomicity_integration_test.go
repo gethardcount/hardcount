@@ -20,12 +20,6 @@ import (
 // Issue() coordinator tx must roll the draft→issued CAS back from (ADR-061).
 type failingGranterTx struct{}
 
-func (failingGranterTx) Grant(context.Context, string, creditnote.CreditGrantInput) error {
-	return nil
-}
-func (failingGranterTx) GrantForCreditNote(context.Context, string, string, creditnote.CreditGrantInput) error {
-	return nil
-}
 func (failingGranterTx) GrantForCreditNoteTx(context.Context, *sql.Tx, string, string, creditnote.CreditGrantInput) error {
 	return errors.New("injected in-tx grant failure")
 }
@@ -127,10 +121,6 @@ func TestIssue_GrantFailure_RollsBackCAS(t *testing.T) {
 // okGranterTx is the working-granter counterpart used by the recovery leg.
 type okGranterTx struct{}
 
-func (okGranterTx) Grant(context.Context, string, creditnote.CreditGrantInput) error { return nil }
-func (okGranterTx) GrantForCreditNote(context.Context, string, string, creditnote.CreditGrantInput) error {
-	return nil
-}
 func (okGranterTx) GrantForCreditNoteTx(context.Context, *sql.Tx, string, string, creditnote.CreditGrantInput) error {
 	return nil
 }
