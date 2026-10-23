@@ -148,7 +148,10 @@ is a break. v0.9.0 is also a clean break: there is no upgrade from Velox
   ingest takes. The aggregation PATCH takes the meter `FOR UPDATE` before
   it reads whether the meter has events. So a PATCH and a release run one
   after the other: the PATCH sees the released events and refuses, or the
-  release waits and its events bill under the new aggregation.
+  release waits and its events are counted under the new aggregation.
+- The release's counts (`in_open_period` and the rest) read the meter's
+  aggregation in the release's transaction, after its inserts, so they
+  follow the aggregation its events are counted under.
 - A hold takes no meter lock any more, which also removes the race #1376
   listed between a hold and a meter created during it.
 

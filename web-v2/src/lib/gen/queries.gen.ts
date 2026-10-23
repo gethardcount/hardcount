@@ -2757,8 +2757,8 @@ export const getPatchV1MetersIdUrl = (id: string,) => {
  * it is fixed: a change is refused with 409 `meter_has_usage`. Usage
  * events are counted under the aggregation the meter has; to count
  * differently, make a new meter with another event name. Held usage
- * for its `event_name` does not fix it: it bills under the meter's
- * aggregation when it is released.
+ * for its `event_name` does not fix it: it is counted under the
+ * meter's aggregation once released.
  *
  * While a draft, trialing or active subscription uses the meter,
  * pointing the default at another rating rule, or clearing it, is

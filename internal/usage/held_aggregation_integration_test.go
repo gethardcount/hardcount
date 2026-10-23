@@ -164,7 +164,7 @@ func TestHeldRows_DoNotFixTheAggregation(t *testing.T) {
 	}
 	wantMeterHasUsage(t, "PATCH after the release", f.patch("sum"))
 	if got := f.aggregation(t); got != "max" {
-		t.Errorf("aggregation = %q, want max: the released events bill under it", got)
+		t.Errorf("aggregation = %q, want max: the released events are counted under it", got)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestRelease_AgainstAnAggregationPatch(t *testing.T) {
 		}
 	})
 
-	t.Run("the PATCH reads first: the release waits, then bills under the new aggregation", func(t *testing.T) {
+	t.Run("the PATCH reads first: the release waits, then its events are counted under the new aggregation", func(t *testing.T) {
 		f := newHeldAggFixture(t, "Held agg patch first", "tokens_patch_first")
 		customerID := insertTestCustomer(t, f.db, f.tenantID, "ext_"+f.eventName)
 
@@ -312,7 +312,8 @@ func (r *racingPeriods) MeterBuckets(ctx context.Context, tenantID, meterID stri
 //
 // Mutation-verify: read the meter's buckets before the release's write
 // again → the PATCH commits between that read and the write, and the counts
-// follow the old aggregation.
+// follow the old aggregation. Drop the usage_events → meters foreign key →
+// the PATCH no longer waits for the release, and the same.
 func TestRelease_CountsFollowTheAggregationItsEventsAreCountedUnder(t *testing.T) {
 	for _, tc := range []struct{ from, to string }{{"sum", "max"}, {"max", "sum"}} {
 		t.Run(tc.from+" to "+tc.to, func(t *testing.T) {
