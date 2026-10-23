@@ -2,6 +2,7 @@ package usage
 
 import (
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"strings"
 	"testing"
@@ -70,8 +71,13 @@ func TestUsageIngest_QuantityRefusedAsTheSpecSays(t *testing.T) {
 		"13 decimals string": `"0.1234567890123"`,
 		"float artifact":     `0.30000000000000004`,
 		"10^26":              `"100000000000000000000000000"`,
-		"huge exponent":      `1e999999999`,
-		"tiny exponent":      `"1e-999999999"`,
+		// shopspring's NumDigits counts 10^15..10^15+2 as 15 digits (a float
+		// log10), so a size check built on it let these through to the column.
+		"over 10^26, exponent number": `1.000000000000001e26`,
+		"over 10^26, exponent string": `"1.000000000000001e26"`,
+		"10^26 as 10^15 × 10^11":      `1000000000000000e11`,
+		"huge exponent":               `1e999999999`,
+		"tiny exponent":               `"1e-999999999"`,
 	}
 	for name, raw := range refused {
 		store := newMemStore()
@@ -99,17 +105,19 @@ func TestUsageIngest_QuantityRefusedAsTheSpecSays(t *testing.T) {
 
 func TestUsageIngest_QuantityAcceptedAsTheSpecSays(t *testing.T) {
 	accepted := map[string]string{
-		"integer":                    `5`,
-		"integer string":             `"5"`,
-		"decimal string":             `"5.5"`,
-		"decimal number":             `2.25`,
-		"zero":                       `0`,
-		"negative correction":        `-3`,
-		"negative decimal string":    `"-2.5"`,
-		"12 decimals":                `"0.123456789012"`,
-		"trailing zeros past 12":     `"1.5000000000000"`,
-		"exponent":                   `1e3`,
-		"largest integer under 1e26": `"99999999999999999999999999"`,
+		"integer":                     `5`,
+		"integer string":              `"5"`,
+		"decimal string":              `"5.5"`,
+		"decimal number":              `2.25`,
+		"zero":                        `0`,
+		"negative correction":         `-3`,
+		"negative decimal string":     `"-2.5"`,
+		"12 decimals":                 `"0.123456789012"`,
+		"trailing zeros past 12":      `"1.5000000000000"`,
+		"trailing zeros to 27 places": `"0.000000000001000000000000000"`,
+		"just under 10^26, exponent":  `9.99999999999999e25`,
+		"exponent":                    `1e3`,
+		"largest integer under 1e26":  `"99999999999999999999999999"`,
 	}
 	for name, raw := range accepted {
 		want, err := decimal.NewFromString(strings.Trim(raw, `"`))
@@ -188,6 +196,71 @@ func TestUsageIngest_PropertiesIsRefused(t *testing.T) {
 		}
 		if len(store.events) != 0 {
 			t.Errorf("%d events stored, want 0", len(store.events))
+		}
+	}
+}
+
+// A null or empty properties carries no dimensions, so nothing would be
+// priced by the wrong rule: the event is taken as if properties were absent.
+// Clients generated from the old spec may send either.
+func TestUsageIngest_EmptyPropertiesIsAccepted(t *testing.T) {
+	for _, extra := range []string{
+		`"properties":null`,
+		`"properties":{}`,
+		`"properties": { } `,
+		`"properties":{},"dimensions":{"model":"gpt-4o"}`,
+	} {
+		for _, door := range []string{"single", "backfill", "batch"} {
+			t.Run(door+"/"+extra, func(t *testing.T) {
+				store := newMemStore()
+				h := NewHandler(NewService(store), &stubCustomers{}, &stubMeters{})
+				event := strings.Replace(quantityBody(`1`, "evt_pe"), `{`, `{`+extra+`,`, 1)
+				code, body := quantityDoors(t, h)[door](event)
+				if code != http.StatusCreated {
+					t.Fatalf("status %d, want 201; body %s", code, body)
+				}
+				if len(store.events) != 1 {
+					t.Fatalf("%d events stored, want 1", len(store.events))
+				}
+				if strings.Contains(extra, "dimensions") {
+					for _, e := range store.events {
+						if e.Dimensions["model"] != "gpt-4o" {
+							t.Errorf("dimensions = %v, want model=gpt-4o", e.Dimensions)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+// validateQuantity decides both limits from the coefficient's digit count and
+// the exponent. This sweeps every coefficient length up to 40 digits with the
+// coefficients at the edges of each length (10^(n-1), +1, +2, 10^n-1), where
+// a float digit count goes wrong.
+func TestValidateQuantity_ExactAtEveryDigitCount(t *testing.T) {
+	ten := big.NewInt(10)
+	for n := int64(1); n <= 40; n++ {
+		lo := new(big.Int).Exp(ten, big.NewInt(n-1), nil)
+		hi := new(big.Int).Sub(new(big.Int).Exp(ten, big.NewInt(n), nil), big.NewInt(1))
+		for _, c := range []*big.Int{lo, new(big.Int).Add(lo, big.NewInt(1)), new(big.Int).Add(lo, big.NewInt(2)), hi} {
+			for _, sign := range []int64{1, -1} {
+				c := new(big.Int).Mul(c, big.NewInt(sign))
+				// |c| × 10^(27-n) >= 10^26: refused. |c| × 10^(26-n) < 10^26:
+				// taken, while it has at most 12 places (n <= 38).
+				if err := validateQuantity(decimal.NewFromBigInt(c, int32(27-n))); err == nil {
+					t.Errorf("%s e%d (>= 10^26) accepted", c, 27-n)
+				}
+				if err := validateQuantity(decimal.NewFromBigInt(c, int32(26-n))); n <= 38 && err != nil {
+					t.Errorf("%s e%d (< 10^26) refused: %v", c, 26-n, err)
+				}
+				// c × 10^(-11-n) has 11+n written places; it fits 12 only when
+				// the trailing zeros bring it down, which they do for 10^(n-1).
+				err := validateQuantity(decimal.NewFromBigInt(c, int32(-11-n)))
+				if fits := new(big.Int).Abs(c).Cmp(lo) == 0 || n == 1; fits != (err == nil) {
+					t.Errorf("%s e%d: fits=%v, err=%v", c, -11-n, fits, err)
+				}
+			}
 		}
 	}
 }
