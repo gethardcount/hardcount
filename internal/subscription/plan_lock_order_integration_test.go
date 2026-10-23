@@ -187,7 +187,9 @@ const d05Statement = "meter_ids @>"
 
 // lockOrderWriter is one subscription writer under test. setup builds its
 // fixture on a fresh meter and returns the write, which must reference both
-// plans and reach hi before lo when nothing orders its plan locks.
+// plans. Most reach hi before lo when nothing orders their plan locks. The two
+// downgrades reach lo first; they fail when a writer locks only some of its
+// plans up front, such as the item's current one.
 type lockOrderWriter struct {
 	name  string
 	setup func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(ctx context.Context) error
@@ -198,6 +200,28 @@ var lockOrderWriters = []lockOrderWriter{
 		sub := r.sub(t, "swap", domain.SubscriptionActive, lo)
 		return func(ctx context.Context) error {
 			_, err := r.store.ApplyItemPlanImmediately(ctx, r.tenantID, sub.Items[0].ID, hi.ID, lockOrderPS.Add(10*24*time.Hour))
+			return err
+		}
+	}},
+	// A downgrade reaches lo first. Its case fails if the swap locks only
+	// the item's current plan.
+	{"immediate plan change to the lower plan", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
+		sub := r.sub(t, "swap-down", domain.SubscriptionActive, hi)
+		return func(ctx context.Context) error {
+			_, err := r.store.ApplyItemPlanImmediately(ctx, r.tenantID, sub.Items[0].ID, lo.ID, lockOrderPS.Add(10*24*time.Hour))
+			return err
+		}
+	}},
+	{"scheduled plan change to the lower plan applied at the period end", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
+		sub := r.sub(t, "scheduled-down", domain.SubscriptionActive, hi)
+		if _, err := r.store.SetItemPendingPlan(r.ctx, r.tenantID, sub.Items[0].ID, lo.ID, lockOrderPE); err != nil {
+			t.Fatalf("schedule: %v", err)
+		}
+		return func(ctx context.Context) error {
+			applied, err := r.store.ApplyDuePendingItemPlansAtomic(ctx, r.tenantID, sub.ID, lockOrderPE)
+			if err == nil && len(applied) != 1 {
+				t.Errorf("the scheduled change must apply to 1 item, applied %d", len(applied))
+			}
 			return err
 		}
 	}},
