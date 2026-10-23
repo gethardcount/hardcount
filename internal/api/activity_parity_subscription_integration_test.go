@@ -152,7 +152,7 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 		"Scheduled cancellation cleared | by API key",
 		"Collection paused | Invoices are created but not charged until collection resumes · by API key",
 		"Collection resumed | by API key",
-		"Spend thresholds set | $500.00 total · by API key",
+		"Spend thresholds set | $500.00 usage total · by API key",
 		"Spend thresholds removed | by API key",
 		"Item added | Parity Extra · Quantity 2 · by API key",
 		"Quantity changed | Parity Extra · 2 → 3 · by API key",
