@@ -142,7 +142,7 @@ func usageLineTotal(t *testing.T, f *thresholdFixture, ctx context.Context, invo
 // reverted to list price for the whole period.
 //
 // Mutation-verify: key the override lookup by version id (pass rule.ID
-// instead of rule.RuleKey in resolveRatedRule) — this test fails.
+// instead of rule.RuleKey in rulePrices.Price, rate.go) — this test fails.
 func TestPriceChange_OverrideSurvivesPublish_SingleRule(t *testing.T) {
 	f := newThresholdFixture(t, "P4 Detach SingleRule")
 	ctx := postgres.WithLivemode(context.Background(), false)
