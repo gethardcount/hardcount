@@ -60,7 +60,7 @@ func refusedCardInvoice() Invoice {
 
 func TestClassifyAttention_RefusedCard_AsksForADifferentCard(t *testing.T) {
 	att := ClassifyInvoiceAttention(refusedCardInvoice(), AttentionContext{
-		HasPaymentMethod: true, RefusedCardDeclineCode: "lost_card",
+		HasPaymentMethod: true, RetryBlockingDeclineCode: "lost_card",
 	})
 	if att == nil {
 		t.Fatal("no attention on a failed invoice")

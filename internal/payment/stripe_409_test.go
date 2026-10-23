@@ -180,7 +180,7 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 		},
 		{
 			// A hard-decline code on a 409 must not reach the attempt row:
-			// HardDeclineOnCard reads it whatever the outcome, and dunning
+			// RetryBlockingDecline reads it whatever the outcome, and dunning
 			// would stop charging the card.
 			name:     "dunning retry: network error, then a 409 card_error carrying lost_card",
 			purpose:  piPurposeDunningRetry,

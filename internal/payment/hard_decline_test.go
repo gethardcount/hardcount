@@ -141,6 +141,19 @@ func TestRefusedCardCustomerMessage_DoesNotNameTheReason(t *testing.T) {
 	}
 }
 
+// Nor does it say the card won't be tried again: only dunning retries skip
+// it. Collect payment on the same invoice and the customer's next invoice
+// still charge it (review of #1360, round 2; the real-Postgres repro is
+// TestHardDecline_PaymentFailedEmailDoesNotPromiseTheCardIsNotChargedAgain_RealStore).
+func TestRefusedCardCustomerMessage_PromisesNoMoreThanItDoes(t *testing.T) {
+	if strings.Contains(strings.ToLower(refusedCardCustomerMessage), "again") {
+		t.Errorf("customer message %q says the card won't be tried again", refusedCardCustomerMessage)
+	}
+	if !strings.Contains(refusedCardCustomerMessage, "different card") {
+		t.Errorf("customer message %q does not ask for a different card", refusedCardCustomerMessage)
+	}
+}
+
 // paymentFailedEventBody is a payment_intent.payment_failed event as Stripe
 // posts it: the PaymentIntent with its last_payment_error.
 func paymentFailedEventBody(lastPaymentError string) string {

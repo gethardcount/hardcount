@@ -19,14 +19,13 @@ import (
 // Two codes on Stripe's list are left out:
 //   - authentication_required asks for the customer to confirm the payment
 //     (3-D Secure), not for a new card, and the "use a different card" copy
-//     would tell them the wrong thing.
+//     would tell them the wrong thing. It is not retried either, with its
+//     own copy (IsAuthenticationRequired, ErrCardNeedsConfirmation).
 //   - highest_risk_level is not a decline code at all. It is Stripe Radar's
 //     reason for blocking a charge (the charge's outcome.reason, with
 //     network_status not_sent_to_network:
 //     https://docs.stripe.com/declines#blocked-payments), so no bank refused
 //     the card and Velox never sees it as a decline code.
-//
-// Both keep the ordinary retry schedule, as they did before.
 //
 // Not on the list, so still retried on schedule: fraudulent and
 // merchant_blacklist (Stripe Radar's decisions, not the bank's),

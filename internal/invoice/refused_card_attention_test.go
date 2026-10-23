@@ -9,11 +9,11 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// refusedCards is the refused-card lookup (HardDeclinesOnDefaultCards) keyed
+// refusedCards is the refused-card lookup (RetryBlockingDeclinesOnDefaultCards) keyed
 // by invoice id.
 type refusedCards map[string]string
 
-func (r refusedCards) HardDeclinesOnDefaultCards(_ context.Context, _ string, ids []string) (map[string]string, error) {
+func (r refusedCards) RetryBlockingDeclinesOnDefaultCards(_ context.Context, _ string, ids []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, id := range ids {
 		if code, ok := r[id]; ok {
