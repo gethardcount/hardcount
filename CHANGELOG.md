@@ -90,10 +90,10 @@ original text.
 
 ### Changed
 
-- **New page: what can break before 1.0, and where each break is announced (2026-10-23).** See [Versioning before 1.0](docs/versioning.md). `SECURITY.md` now says only the latest release gets security fixes.
-- **The roadmap is now Now, Next, Later and Not building (2026-10-23).** Next: usage prices set per plan (v0.10.0), spend alerts, and generated Go and TypeScript SDKs ([roadmap](docs/roadmap.md)).
-- **Twenty claims about Lago, OpenMeter, Flexprice and Kill Bill are corrected against their code (2026-10-23).** [How Velox compares](docs/comparison.md) names the commits read. ADRs keep their text and gain a dated correction.
-- **Docs no longer overstate Velox (2026-10-23).** Row-level security covers API request paths; background jobs filter by account in code. Grant entries in the credit ledger are updated in place. There is no `volume` pricing mode. [Scale](docs/scale.md) says how dedup stays permanent if the usage table is split by month.
+- **New page: what can break before 1.0, and where each break is announced (2026-10-23).** See [Versioning before 1.0](docs/versioning.md). `SECURITY.md` now says only the latest release gets security fixes. ([#1363](https://github.com/getvelox/velox/pull/1363))
+- **The roadmap is now Now, Next, Later and Not building (2026-10-23).** Next: usage prices set per plan (v0.10.0), spend alerts, and generated Go and TypeScript SDKs ([roadmap](docs/roadmap.md)). ([#1363](https://github.com/getvelox/velox/pull/1363))
+- **Twenty claims about Lago, OpenMeter, Flexprice and Kill Bill are corrected against their code (2026-10-23).** [How Velox compares](docs/comparison.md) names the commits read. ADRs keep their text and gain a dated correction. ([#1363](https://github.com/getvelox/velox/pull/1363))
+- **Docs no longer overstate Velox (2026-10-23).** Row-level security covers API request paths; background jobs filter by account in code. Grant entries in the credit ledger are updated in place. There is no `volume` pricing mode. [Scale](docs/scale.md) says how dedup stays permanent if the usage table is split by month. ([#1363](https://github.com/getvelox/velox/pull/1363))
 - Docs: internal records, audits and design notes moved to docs/dev/; overlapping pages merged; two runbook steps corrected.
 - Docs: the self-host, ops, benchmark and runbook pages lead with the short path, with repeats and analogies cut. Claims corrected include the email rate, the shutdown worst case and the parked-invoice gauge.
 - Docs: the front-door pages and guides lead with the short path, with repeats, analogies and padding cut. Claims corrected include tenant isolation, which webhooks are never lost, and what the LiteLLM integration stores.
