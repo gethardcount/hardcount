@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -44,10 +45,12 @@ INSERT INTO meters (id, tenant_id, key, name) VALUES ('mtr_dc', 'ten_dc', 'dc', 
 `
 
 // TestDeadContract_RefusesRowsHoldingRemovedValues: 00201 removes values,
-// columns and tables that no Velox code writes. It never rewrites an
-// invoice or anything else to make room: when a row still holds a removed
-// value, the upgrade stops before changing anything, and the error names
-// every kind of row it found and how many. Once those rows are gone, it runs.
+// columns and tables that no Velox release since v0.2.0 writes. It does not
+// rewrite stored history to make room: when a row still holds a removed
+// value, the upgrade stops before changing anything (a draft plan stays
+// draft too), and the error names every kind of row it found and how many.
+// Its hint does not send the operator to delete rows. Once those rows are
+// gone, it runs.
 func TestDeadContract_RefusesRowsHoldingRemovedValues(t *testing.T) {
 	dsn, db := scratchDB(t, "velox_test_deadc_b_migrate_refuse")
 	ctx := context.Background()
@@ -64,8 +67,6 @@ func TestDeadContract_RefusesRowsHoldingRemovedValues(t *testing.T) {
 	exec(`INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status) VALUES ('sub_arch', 'ten_dc', 'arch', 'A', 'cus_dc', 'archived')`)
 	exec(`INSERT INTO plans (id, tenant_id, code, name, currency, billing_interval, status) VALUES ('pln_draft', 'ten_dc', 'draft', 'D', 'USD', 'monthly', 'draft')`)
 	exec(`UPDATE invoices SET tax_status = 'failed', stripe_invoice_id = 'in_dc' WHERE id = 'inv_dc'`)
-	exec(`INSERT INTO invoice_line_items (id, tenant_id, invoice_id, line_type, description) VALUES
-		('li_disc', 'ten_dc', 'inv_dc', 'discount', 'd'), ('li_tax', 'ten_dc', 'inv_dc', 'tax', 't')`)
 	exec(`UPDATE invoice_dunning_runs SET state = 'paused', resolution = 'manually_resolved' WHERE id = 'drun_dc'`)
 	exec(`INSERT INTO invoice_dunning_events (id, run_id, tenant_id, invoice_id, event_type, state) VALUES
 		('devt_sched', 'drun_dc', 'ten_dc', 'inv_dc', 'retry_scheduled', 'paused')`)
@@ -81,10 +82,8 @@ func TestDeadContract_RefusesRowsHoldingRemovedValues(t *testing.T) {
 	t.Logf("the refusal: %v", err)
 	for _, want := range []string{
 		"1 subscription(s) with status archived",
-		"1 plan(s) with status draft",
 		"1 invoice(s) with tax_status failed",
 		"1 invoice(s) with a stripe_invoice_id",
-		"2 invoice line(s) with line_type discount or tax",
 		"1 payment recovery run(s) with state paused",
 		"1 payment recovery run(s) with resolution manually_resolved",
 		"1 payment recovery event(s) with event_type retry_scheduled, retry_succeeded, retry_failed, paused or resumed",
@@ -98,26 +97,99 @@ func TestDeadContract_RefusesRowsHoldingRemovedValues(t *testing.T) {
 			t.Errorf("the refusal does not say %q:\n%v", want, err)
 		}
 	}
+	for _, notWant := range []string{"plan(s)", "invoice line(s)", "remove the rows"} {
+		if strings.Contains(err.Error(), notWant) {
+			t.Errorf("the refusal says %q; a draft plan and a discount or tax line are not refused, and the hint must not send the operator to delete rows:\n%v", notWant, err)
+		}
+	}
 	if !tableExists(t, db, "public.coupons") {
 		t.Fatal("the refused Up dropped coupons")
 	}
-	var desc string
-	if err := db.QueryRow(`SELECT line_type || '/' || description FROM invoice_line_items WHERE id = 'li_disc'`).Scan(&desc); err != nil || desc != "discount/d" {
-		t.Fatalf("the refused Up changed an invoice line: %q, %v", desc, err)
+	var planStatus string
+	if err := db.QueryRow(`SELECT status FROM plans WHERE id = 'pln_draft'`).Scan(&planStatus); err != nil || planStatus != "draft" {
+		t.Fatalf("the refused Up changed a plan: %q, %v", planStatus, err)
 	}
 
 	exec(`DELETE FROM invoice_dunning_events WHERE id = 'devt_sched'`)
 	exec(`UPDATE invoice_dunning_runs SET state = 'active', resolution = NULL WHERE id = 'drun_dc'`)
-	exec(`DELETE FROM invoice_line_items WHERE id IN ('li_disc', 'li_tax')`)
 	exec(`UPDATE invoices SET tax_status = 'pending', stripe_invoice_id = NULL WHERE id = 'inv_dc'`)
 	exec(`DELETE FROM subscriptions WHERE id = 'sub_arch'`)
-	exec(`DELETE FROM plans WHERE id = 'pln_draft'`)
 	exec(`DELETE FROM billed_entries`)
 	exec(`DELETE FROM customer_discounts`)
 	exec(`DELETE FROM coupon_redemptions`)
 	exec(`DELETE FROM coupons`)
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up with no rows holding removed values: %v", err)
+	}
+	if err := db.QueryRow(`SELECT status FROM plans WHERE id = 'pln_draft'`).Scan(&planStatus); err != nil || planStatus != "active" {
+		t.Fatalf("after Up the draft plan is %q (%v), want active", planStatus, err)
+	}
+}
+
+// TestDeadContract_KeepsIssuedInvoiceLinesAndActivatesDraftPlans: until
+// #1324 the API added discount and tax lines, and until this release a plan
+// PATCH could set status draft. 00201 must upgrade such a database without
+// touching an issued invoice: a paid invoice's discount line and a
+// finalized invoice's tax line stay as they were, so its lines still add up
+// to its subtotal. A draft plan was sold and billed like an active one, so
+// it becomes active.
+func TestDeadContract_KeepsIssuedInvoiceLinesAndActivatesDraftPlans(t *testing.T) {
+	dsn, db := scratchDB(t, "velox_test_deadc_b_migrate_keep")
+	ctx := context.Background()
+	if err := up(ctx, dsn, filesBefore(t, deadContractVersion)); err != nil {
+		t.Fatalf("Up to before %d: %v", deadContractVersion, err)
+	}
+	exec := func(q string) {
+		t.Helper()
+		if err := deadContractExec(ctx, db, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(deadContractSeed)
+	exec(`INSERT INTO plans (id, tenant_id, code, name, currency, billing_interval, status) VALUES ('pln_draft', 'ten_dc', 'draft', 'D', 'USD', 'monthly', 'draft')`)
+	exec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status, currency,
+			subtotal_cents, total_amount_cents, amount_due_cents, amount_paid_cents, paid_at, billing_period_start, billing_period_end)
+		VALUES ('inv_paid', 'ten_dc', 'cus_dc', 'DC-2', 'paid', 'succeeded', 'USD', 900, 900, 0, 900, now(), now() - interval '30 days', now())`)
+	exec(`INSERT INTO invoice_line_items (id, tenant_id, invoice_id, line_type, description, amount_cents, total_amount_cents) VALUES
+		('li_base', 'ten_dc', 'inv_paid', 'base_fee', 'Base', 1000, 1000),
+		('li_disc', 'ten_dc', 'inv_paid', 'discount', 'Discount', -100, -100),
+		('li_tax', 'ten_dc', 'inv_dc', 'tax', 'Tax', 0, 0)`)
+
+	if err := up(ctx, dsn, migrationFiles()); err != nil {
+		t.Fatalf("Up over a paid invoice's discount line, a tax line and a draft plan: %v", err)
+	}
+
+	rows, err := db.Query(`SELECT id, line_type, amount_cents FROM invoice_line_items WHERE id IN ('li_base', 'li_disc', 'li_tax') ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for rows.Next() {
+		var id, lt string
+		var amt int64
+		if err := rows.Scan(&id, &lt, &amt); err != nil {
+			t.Fatal(err)
+		}
+		got[id] = lt + "/" + strconv.FormatInt(amt, 10)
+	}
+	_ = rows.Close()
+	want := map[string]string{"li_base": "base_fee/1000", "li_disc": "discount/-100", "li_tax": "tax/0"}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("after Up line %s is %q, want %q (an issued invoice's lines are not changed)", id, got[id], w)
+		}
+	}
+	var lineSum, subtotal int64
+	if err := db.QueryRow(`SELECT (SELECT COALESCE(sum(amount_cents), 0) FROM invoice_line_items WHERE invoice_id = 'inv_paid'), subtotal_cents
+		FROM invoices WHERE id = 'inv_paid'`).Scan(&lineSum, &subtotal); err != nil {
+		t.Fatal(err)
+	}
+	if lineSum != subtotal {
+		t.Errorf("after Up the paid invoice's lines add up to %d against a subtotal of %d", lineSum, subtotal)
+	}
+	var planStatus string
+	if err := db.QueryRow(`SELECT status FROM plans WHERE id = 'pln_draft'`).Scan(&planStatus); err != nil || planStatus != "active" {
+		t.Errorf("after Up the draft plan is %q (%v), want active", planStatus, err)
 	}
 }
 
@@ -141,8 +213,6 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 		{"subscription archived", `UPDATE subscriptions SET status = 'archived' WHERE id = 'sub_dc'`},
 		{"plan draft", `UPDATE plans SET status = 'draft' WHERE id = 'pln_dc'`},
 		{"tax_status failed", `UPDATE invoices SET tax_status = 'failed' WHERE id = 'inv_dc'`},
-		{"line_type discount", `INSERT INTO invoice_line_items (tenant_id, invoice_id, line_type, description) VALUES ('ten_dc', 'inv_dc', 'discount', 'd')`},
-		{"line_type tax", `INSERT INTO invoice_line_items (tenant_id, invoice_id, line_type, description) VALUES ('ten_dc', 'inv_dc', 'tax', 't')`},
 		{"run state paused", `UPDATE invoice_dunning_runs SET state = 'paused' WHERE id = 'drun_dc'`},
 		{"run resolution manually_resolved", `UPDATE invoice_dunning_runs SET state = 'resolved', resolution = 'manually_resolved', resolved_at = now() WHERE id = 'drun_dc'`},
 		{"event state paused", `INSERT INTO invoice_dunning_events (run_id, tenant_id, invoice_id, event_type, state) VALUES ('drun_dc', 'ten_dc', 'inv_dc', 'resolved', 'paused')`},
@@ -164,6 +234,10 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 		{"tax_status ok and pending", `UPDATE invoices SET tax_status = 'pending' WHERE id = 'inv_dc'; UPDATE invoices SET tax_status = 'ok' WHERE id = 'inv_dc'`},
 		{"line types", `INSERT INTO invoice_line_items (tenant_id, invoice_id, line_type, description) VALUES
 			('ten_dc', 'inv_dc', 'base_fee', 'b'), ('ten_dc', 'inv_dc', 'usage', 'u'), ('ten_dc', 'inv_dc', 'add_on', 'a')`},
+		// Lines added before #1324 keep these types; the API refuses them
+		// on a new line.
+		{"line types discount and tax", `INSERT INTO invoice_line_items (tenant_id, invoice_id, line_type, description) VALUES
+			('ten_dc', 'inv_dc', 'discount', 'd'), ('ten_dc', 'inv_dc', 'tax', 't')`},
 		{"events", `INSERT INTO invoice_dunning_events (run_id, tenant_id, invoice_id, event_type, state) VALUES
 			('drun_dc', 'ten_dc', 'inv_dc', 'dunning_started', 'active'), ('drun_dc', 'ten_dc', 'inv_dc', 'retry_attempted', 'active'),
 			('drun_dc', 'ten_dc', 'inv_dc', 'escalated', 'escalated'), ('drun_dc', 'ten_dc', 'inv_dc', 'resolved', 'resolved')`},
@@ -200,7 +274,7 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 	}
 	for _, c := range []string{
 		"subscriptions_status_check", "plans_status_check", "invoices_tax_status_check",
-		"invoice_line_items_line_type_check", "invoice_dunning_runs_resolution_check",
+		"invoice_dunning_runs_resolution_check",
 		"invoice_dunning_runs_state_check", "invoice_dunning_events_event_type_check", "invoice_dunning_events_state_check",
 	} {
 		var validated bool
