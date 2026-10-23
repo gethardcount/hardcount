@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -219,5 +221,73 @@ func TestRetryDays_RefusesWhatCannotConvertExactly(t *testing.T) {
 	exec(`DELETE FROM dunning_policies WHERE id <> 'dpol_fine'`)
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up after fixing the rows: %v", err)
+	}
+}
+
+// TestRetryDays_RunbookFixConverts: the runbook's fix for a refused 00206,
+// run as written on a three-retry policy whose entry 1 is "36h", lets the
+// upgrade run and keeps the policy's other waits. Neither the runbook nor
+// the error offers deleting the policy: a policy with runs cannot be
+// deleted, and deleting the account's default stops dunning for every
+// customer without a policy of their own.
+func TestRetryDays_RunbookFixConverts(t *testing.T) {
+	dsn, db := scratchDB(t, "velox_test_dunsched_f2_migrate_runbook")
+	ctx := context.Background()
+	if err := up(ctx, dsn, filesBefore(t, retryDaysVersion)); err != nil {
+		t.Fatalf("Up to before %d: %v", retryDaysVersion, err)
+	}
+	for _, q := range []string{
+		`INSERT INTO tenants (id, name) VALUES ('ten_rd', 'Retry days')`,
+		oldPolicySQL("dpol_36h", 3, 3, `["36h","120h"]`),
+	} {
+		if err := retryDaysExec(ctx, db, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	err := up(ctx, dsn, migrationFiles())
+	if err == nil {
+		t.Fatal("Up converted a 36h wait")
+	}
+	offersDelete := regexp.MustCompile(`(?i)or delete`)
+	if offersDelete.MatchString(err.Error()) {
+		t.Errorf("the error offers deleting the policy:\n%v", err)
+	}
+
+	doc, rerr := os.ReadFile("../../../docs/ops/runbook/migration-failed-midway.md")
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	_, section, ok := strings.Cut(string(doc), "\n## 00206: a dunning schedule is not whole days\n")
+	if !ok {
+		t.Fatal("the runbook has no 00206 section")
+	}
+	section, _, _ = strings.Cut(section, "\n## ")
+	if offersDelete.MatchString(section) {
+		t.Errorf("the runbook offers deleting the policy:\n%s", section)
+	}
+	_, fix, ok := strings.Cut(section, "```sql\n")
+	if !ok {
+		t.Fatal("the runbook's 00206 section has no sql block")
+	}
+	fix, _, _ = strings.Cut(fix, "```")
+	fix = strings.ReplaceAll(fix, "<policy id>", "dpol_36h")
+	conn, cerr := db.Conn(ctx)
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, fix); err != nil {
+		t.Fatalf("the runbook's fix:\n%s\n%v", fix, err)
+	}
+
+	if err := up(ctx, dsn, migrationFiles()); err != nil {
+		t.Fatalf("Up after the runbook's fix: %v", err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT retry_days::text FROM dunning_policies WHERE id = 'dpol_36h'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != `[3, 3, 5]` {
+		t.Errorf("retry_days %s, want [3, 3, 5]: the fix changes entry 1 to 72h and keeps entry 2 (120h)", got)
 	}
 }
