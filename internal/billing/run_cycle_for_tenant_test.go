@@ -98,7 +98,7 @@ func TestRunCycleForTenant_FailingSubDoesNotLoopForever(t *testing.T) {
 // scheduler-only.
 func TestTriggerCycle_ForbidsUnscopedKey(t *testing.T) {
 	subs := &mockSubs{subs: map[string]domain.Subscription{}, cycleUpdated: make(map[string]bool)}
-	h := NewHandler(tenantRunEngine(subs), subs)
+	h := NewHandler(tenantRunEngine(subs))
 
 	req := httptest.NewRequest(http.MethodPost, "/run", nil) // no tenant in ctx
 	rec := httptest.NewRecorder()
@@ -119,7 +119,7 @@ func TestTriggerCycle_SanitizesErrorDetail(t *testing.T) {
 		cycleUpdated:   make(map[string]bool),
 		closePeriodErr: errors.New(secret),
 	}
-	h := NewHandler(tenantRunEngine(subs), subs)
+	h := NewHandler(tenantRunEngine(subs))
 
 	ctx := auth.WithTenantID(context.Background(), "t1")
 	req := httptest.NewRequest(http.MethodPost, "/run", nil).WithContext(ctx)

@@ -353,7 +353,7 @@ not a rounding error; it is a row the clock filter cannot see):
   and bind at the handler; the axis then follows from ctx with NO further audit
   change.**
 - **Payment-method routes** and **public checkout rows** (hosted-invoice Pay
-  click, payment-update link, checkout setup) emit no sim axis. Neither
+  click, payment-update link) emit no sim axis. Neither
   path binds a pin: both stamp wall-clock and drive REAL Stripe, so their rows are
   wall-clock facts about a real-world effect. (Note what is NOT the reason:
   "payment methods are outside the clock domain" is false — payment_methods is

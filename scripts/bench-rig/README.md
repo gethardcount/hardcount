@@ -171,7 +171,7 @@ checks corresponds to a bug that actually shipped in this rig once.
 - **Two gates, reported separately.** "Ingest sustained?" and "reads within
   budget?" are different questions; `PROBE_GATE=0` reports the read probe
   without failing ingest on it, and the probe is broken down per endpoint.
-  On the real rig `usage-summary` cost ~2.7 µs for each event the queried
+  On the real rig the per-customer usage read cost ~2.7 µs for each event the queried
   customer already holds (#819) — so the budget it meets depends on customer
   size, not write rate.
 - **Watch the read side of the database.** A tail that rises within a run

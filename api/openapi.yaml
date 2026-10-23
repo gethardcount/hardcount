@@ -2214,45 +2214,6 @@ components:
           type: string
           format: date-time
 
-    CustomerPaymentSetup:
-      type: object
-      required: [customer_id, setup_status, default_payment_method_present, created_at, updated_at]
-      properties:
-        customer_id:
-          type: string
-        tenant_id:
-          type: string
-        setup_status:
-          type: string
-          enum: [missing, pending, ready]
-          description: |
-            `ready`: the customer has a default payment method. `pending`:
-            a Stripe customer exists but there is no default payment method
-            yet. `missing`: there is no Stripe customer.
-        default_payment_method_present:
-          type: boolean
-        payment_method_type:
-          type: string
-          example: card
-        stripe_customer_id:
-          type: string
-        stripe_payment_method_id:
-          type: string
-        card_brand:
-          type: string
-        card_last4:
-          type: string
-        card_exp_month:
-          type: integer
-        card_exp_year:
-          type: integer
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
     CreditLedgerEntry:
       type: object
       required: [id, customer_id, entry_type, currency, amount_cents, balance_after, description, created_at]
@@ -3790,26 +3751,6 @@ components:
                       type: string
                       description: The day's usage under the meter's aggregation.
 
-    UsageSummary:
-      type: object
-      required: [customer_id, period_from, period_to, meters, total_events]
-      properties:
-        customer_id:
-          type: string
-        period_from:
-          type: string
-          format: date-time
-        period_to:
-          type: string
-          format: date-time
-        meters:
-          type: object
-          additionalProperties:
-            type: string
-          description: Meter id to the sum of its quantities, as a decimal string.
-        total_events:
-          type: integer
-
     LitellmSpendLog:
       type: object
       description: |
@@ -4666,49 +4607,6 @@ components:
         replay_of_event_id:
           type: string
           nullable: true
-
-    WebhookDelivery:
-      type: object
-      description: One delivery of an event to one endpoint, as the older events routes return it.
-      required: [id, livemode, webhook_endpoint_id, webhook_event_id, status, attempt_count, created_at]
-      properties:
-        id:
-          type: string
-        tenant_id:
-          type: string
-        livemode:
-          type: boolean
-        webhook_endpoint_id:
-          type: string
-        webhook_event_id:
-          type: string
-          description: The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`.
-        status:
-          type: string
-          enum: [pending, succeeded, failed]
-        http_status_code:
-          type: integer
-          description: HTTP status from the receiver. Left out when there was no response.
-        response_body:
-          type: string
-        error_message:
-          type: string
-        attempt_count:
-          type: integer
-        next_retry_at:
-          type: string
-          format: date-time
-        created_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: string
-          format: date-time
-        endpoint_url:
-          type: string
-          description: The endpoint's URL, kept after the endpoint is deleted.
-        endpoint_description:
-          type: string
 
     HostedInvoice:
       type: object
@@ -5762,82 +5660,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/customers/{customer_id}/invoices:
-    get:
-      tags: [Customers]
-      summary: List the customer's invoices
-      description: |
-        Newest first. Returns the first `limit` invoices only; there is
-        no `offset`. For paging and filters use
-        `GET /v1/invoices?customer_id=`.
-      operationId: listCustomerInvoices
-      parameters:
-        - name: customer_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: limit
-          in: query
-          description: Default 25, at most 100.
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Invoices. `total` counts all of the customer's invoices.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, total]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Invoice"
-                  total:
-                    type: integer
-        "404":
-          description: Customer not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/customers/{customer_id}/subscriptions:
-    get:
-      tags: [Customers]
-      summary: List the customer's subscriptions
-      description: |
-        All statuses, newest first, up to 50. There is no paging and no
-        `total`; for more use `GET /v1/subscriptions?customer_id=`.
-      operationId: listCustomerSubscriptions
-      parameters:
-        - name: customer_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Subscriptions.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Subscription"
-        "404":
-          description: Customer not found.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
   /v1/customers/{customer_id}/payment-methods:
     get:
       tags: [Customers]
@@ -6109,124 +5931,6 @@ paths:
                 $ref: "#/components/schemas/PaymentMethod"
         "404":
           description: No such active payment method for this customer.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/checkout/setup:
-    post:
-      tags: [Customers]
-      summary: Start a card setup in Stripe Checkout (older route)
-      operationId: createCheckoutSetupSession
-      description: |
-        An older route the dashboard no longer uses. Prefer
-        `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
-
-        Creates the Stripe customer if there is none, or copies
-        `customer_name`, `email` and the address to the existing one. It
-        then returns a Stripe Checkout URL in setup mode (card only, no
-        charge). Stripe sends the customer back to `return_url` with
-        `?payment=success` or `?payment=cancel` added. Without
-        `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
-        which works only in local development. Writes an audit row. Needs
-        the `customer:write` permission.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [customer_id]
-              properties:
-                customer_id:
-                  type: string
-                customer_name:
-                  type: string
-                email:
-                  type: string
-                address_line1:
-                  type: string
-                address_city:
-                  type: string
-                address_state:
-                  type: string
-                address_postal_code:
-                  type: string
-                address_country:
-                  type: string
-                return_url:
-                  type: string
-                  description: The page Stripe sends the customer back to. Always send it, because the default works only in local development.
-      responses:
-        "201":
-          description: Setup session created.
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [session_id, url, stripe_customer_id]
-                properties:
-                  session_id:
-                    type: string
-                    description: Stripe Checkout Session ID.
-                  url:
-                    type: string
-                    description: Stripe Checkout URL.
-                  stripe_customer_id:
-                    type: string
-        "400":
-          description: The body is not valid JSON.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "404":
-          description: No such customer in this mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: "`customer_id` is missing."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "502":
-          description: Stripe is not connected for this mode, or a Stripe call failed. Code `stripe_error`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/checkout/status/{customerID}:
-    get:
-      tags: [Customers]
-      summary: Get a customer's card setup status (older route)
-      operationId: getCheckoutSetupStatus
-      description: |
-        An older route the dashboard no longer uses. Prefer
-        `GET /v1/customers/{customer_id}/payment-methods`.
-
-        An unknown customer is 404. Needs the `customer:write` permission.
-      parameters:
-        - name: customerID
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Setup status.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CustomerPaymentSetup"
-        "404":
-          description: No customer with this ID in this tenant and mode.
           content:
             application/json:
               schema:
@@ -7567,83 +7271,6 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/WebhookEvent"
-
-  /v1/webhook-endpoints/events/{id}/deliveries:
-    get:
-      tags: [Webhooks]
-      summary: List an event's deliveries (older route)
-      operationId: listWebhookEventDeliveriesLegacy
-      description: |
-        An older route the dashboard no longer uses. Prefer
-        `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
-        an unknown event.
-
-        Returns the deliveries of the event and of its replays, oldest
-        first. An unknown id returns 200 with an empty list. Needs the
-        `apikey:write` permission.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Deliveries
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/WebhookDelivery"
-
-  /v1/webhook-endpoints/events/{id}/replay:
-    post:
-      tags: [Webhooks]
-      summary: Replay an event to all matching endpoints (older route)
-      operationId: replayWebhookEventLegacy
-      description: |
-        An older route the dashboard no longer uses. Prefer
-        `POST /v1/webhook_events/{id}/replay`.
-
-        Does the same replay. The response always says `replayed`, even
-        when no endpoint will receive the copy. Writes an audit row. Needs
-        the `apikey:write` permission.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Replay created
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [status, event_id, replay_of]
-                properties:
-                  status:
-                    type: string
-                    enum: [replayed]
-                  event_id:
-                    type: string
-                    description: The new event created by the replay.
-                  replay_of:
-                    type: string
-                    description: The original event.
-        "404":
-          description: No such event in this mode
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
 
   /v1/webhook_events/{id}/deliveries:
     get:
@@ -9942,65 +9569,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/usage-summary/{customer_id}:
-    get:
-      tags: [Usage]
-      summary: Customer usage summary
-      description: |
-        Per-meter quantity totals and the event count for one customer over
-        a window. Without `from` and `to` the window is the current calendar
-        month in UTC (the test clock's month when the customer is on one).
-        Quantities are plain sums, whatever the meter's aggregation.
-      operationId: getUsageSummary
-      parameters:
-        - name: customer_id
-          in: path
-          required: true
-          description: Internal customer id (vlx_cus_...).
-          schema:
-            type: string
-        - name: from
-          in: query
-          description: Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC.
-          schema:
-            type: string
-        - name: to
-          in: query
-          description: Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included.
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Summary
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UsageSummary"
-        "404":
-          description: No customer with this ID in this tenant and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: "`validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field)."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          description: |
-            The totals could not be read. The body is `{"error": "internal_error"}`,
-            not the usual error object.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    enum: [internal_error]
-
   /v1/invoices:
     get:
       tags: [Invoices]
@@ -11878,24 +11446,6 @@ paths:
                     type: array
                     items:
                       type: string
-
-  /v1/billing/preview/{subscription_id}:
-    get:
-      tags: [Billing]
-      summary: Invoice preview (dry run)
-      parameters:
-        - name: subscription_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Invoice preview
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/InvoicePreview"
 
   /v1/provider-costs:
     get:

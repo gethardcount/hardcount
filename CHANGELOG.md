@@ -126,6 +126,15 @@ original text.
 
 ### Removed
 
+- **Breaking for API callers: 8 operations that another operation already does (2026-10-23, [#1368](https://github.com/getvelox/velox/pull/1368)).** They now answer 404. Use the replacement; some response shapes differ, so check the [API reference](api/openapi.yaml). The kept invoice, subscription and usage reads answer 200 with no rows for an unknown customer id, where the removed routes answered 404. Other differences are on each line. The replacements:
+  - `POST /v1/checkout/setup` → `POST /v1/customers/{id}/payment-methods/setup-session`, which takes the name, email and address from the customer's record;
+  - `GET /v1/checkout/status/{customerID}` → `GET /v1/customers/{id}/payment-methods`;
+  - `GET /v1/webhook-endpoints/events/{id}/deliveries` → `GET /v1/webhook_events/{id}/deliveries`, which answers 404 for an unknown event id, not 200 with no rows, and for a replay's id lists the deliveries of the original event and of every replay;
+  - `POST /v1/webhook-endpoints/events/{id}/replay` → `POST /v1/webhook_events/{id}/replay`, whose `status` is `queued` or `no_matching_endpoints`, not `replayed`;
+  - `GET /v1/customers/{id}/invoices` → `GET /v1/invoices?customer_id=`;
+  - `GET /v1/customers/{id}/subscriptions` → `GET /v1/subscriptions?customer_id=`;
+  - `GET /v1/usage-summary/{customer_id}` → `GET /v1/usage-events/aggregate?customer_id=`, with `from` and `to` (there is no default window);
+  - `GET /v1/billing/preview/{subscription_id}` → `POST /v1/invoices/create_preview` with `customer_id` and `subscription_id`.
 - **Breaking for API callers: values no Velox code writes any more (2026-10-23, [#1365](https://github.com/getvelox/velox/pull/1365)).** Code that lists these values can drop them:
   - subscription `status` `archived`; `GET /v1/subscriptions?status=archived` is a 400;
   - plan `status` `draft`; a `PATCH` that sends it is a 422, and a draft plan is now `active` (it already billed like one);

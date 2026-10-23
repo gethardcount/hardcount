@@ -101,7 +101,7 @@ p99 means 99 of every 100 requests finished within that time.
 - **Two problems the runs found in Velox itself.** The first runs found one
   database row that every request updated (the API key's last-used time)
   ([#818](https://github.com/getvelox/velox/issues/818)). It was fixed before
-  the `db.m7g.4xlarge` rows above. The per-customer usage summary reads every
+  the `db.m7g.4xlarge` rows above. The per-customer usage totals read every
   event one by one ([#819](https://github.com/getvelox/velox/issues/819)). It
   is still open.
 - **What was not tested:** traffic spikes (the load was steady), runs longer

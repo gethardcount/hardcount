@@ -442,49 +442,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/customers/{customer_id}/invoices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the customer's invoices
-         * @description Newest first. Returns the first `limit` invoices only; there is
-         *     no `offset`. For paging and filters use
-         *     `GET /v1/invoices?customer_id=`.
-         */
-        get: operations["listCustomerInvoices"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/customers/{customer_id}/subscriptions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the customer's subscriptions
-         * @description All statuses, newest first, up to 50. There is no paging and no
-         *     `total`; for more use `GET /v1/subscriptions?customer_id=`.
-         */
-        get: operations["listCustomerSubscriptions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/customers/{customer_id}/payment-methods": {
         parameters: {
             query?: never;
@@ -607,59 +564,6 @@ export interface paths {
          *     the call).
          */
         post: operations["setCustomerDefaultPaymentMethod"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/checkout/setup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start a card setup in Stripe Checkout (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `POST /v1/customers/{customer_id}/payment-methods/setup-session`.
-         *
-         *     Creates the Stripe customer if there is none, or copies
-         *     `customer_name`, `email` and the address to the existing one. It
-         *     then returns a Stripe Checkout URL in setup mode (card only, no
-         *     charge). Stripe sends the customer back to `return_url` with
-         *     `?payment=success` or `?payment=cancel` added. Without
-         *     `return_url` it uses `http://localhost:5173/customers/{customer_id}`,
-         *     which works only in local development. Writes an audit row. Needs
-         *     the `customer:write` permission.
-         */
-        post: operations["createCheckoutSetupSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/checkout/status/{customerID}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get a customer's card setup status (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `GET /v1/customers/{customer_id}/payment-methods`.
-         *
-         *     An unknown customer is 404. Needs the `customer:write` permission.
-         */
-        get: operations["getCheckoutSetupStatus"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1799,57 +1703,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/webhook-endpoints/events/{id}/deliveries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List an event's deliveries (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `GET /v1/webhook_events/{id}/deliveries`, which also answers 404 for
-         *     an unknown event.
-         *
-         *     Returns the deliveries of the event and of its replays, oldest
-         *     first. An unknown id returns 200 with an empty list. Needs the
-         *     `apikey:write` permission.
-         */
-        get: operations["listWebhookEventDeliveriesLegacy"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/webhook-endpoints/events/{id}/replay": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Replay an event to all matching endpoints (older route)
-         * @description An older route the dashboard no longer uses. Prefer
-         *     `POST /v1/webhook_events/{id}/replay`.
-         *
-         *     Does the same replay. The response always says `replayed`, even
-         *     when no endpoint will receive the copy. Writes an audit row. Needs
-         *     the `apikey:write` permission.
-         */
-        post: operations["replayWebhookEventLegacy"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3405,29 +3258,6 @@ export interface paths {
          *     for compatibility only.
          */
         get: operations["aggregateUsageEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/usage-summary/{customer_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Customer usage summary
-         * @description Per-meter quantity totals and the event count for one customer over
-         *     a window. Without `from` and `to` the window is the current calendar
-         *     month in UTC (the test clock's month when the customer is on one).
-         *     Quantities are plain sums, whatever the meter's aggregation.
-         */
-        get: operations["getUsageSummary"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5176,44 +5006,6 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/billing/preview/{subscription_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Invoice preview (dry run) */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    subscription_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Invoice preview */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["InvoicePreview"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8458,30 +8250,6 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        CustomerPaymentSetup: {
-            customer_id: string;
-            tenant_id?: string;
-            /**
-             * @description `ready`: the customer has a default payment method. `pending`:
-             *     a Stripe customer exists but there is no default payment method
-             *     yet. `missing`: there is no Stripe customer.
-             * @enum {string}
-             */
-            setup_status: "missing" | "pending" | "ready";
-            default_payment_method_present: boolean;
-            /** @example card */
-            payment_method_type?: string;
-            stripe_customer_id?: string;
-            stripe_payment_method_id?: string;
-            card_brand?: string;
-            card_last4?: string;
-            card_exp_month?: number;
-            card_exp_year?: number;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
         CreditLedgerEntry: {
             id: string;
             tenant_id?: string;
@@ -9552,18 +9320,6 @@ export interface components {
                 }[];
             }[];
         };
-        UsageSummary: {
-            customer_id: string;
-            /** Format: date-time */
-            period_from: string;
-            /** Format: date-time */
-            period_to: string;
-            /** @description Meter id to the sum of its quantities, as a decimal string. */
-            meters: {
-                [key: string]: string;
-            };
-            total_events: number;
-        };
         /**
          * @description The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
          *     Other fields are accepted and ignored.
@@ -10156,31 +9912,6 @@ export interface components {
             created_at: string;
             livemode: boolean;
             replay_of_event_id: string | null;
-        };
-        /** @description One delivery of an event to one endpoint, as the older events routes return it. */
-        WebhookDelivery: {
-            id: string;
-            tenant_id?: string;
-            livemode: boolean;
-            webhook_endpoint_id: string;
-            /** @description The event this delivery belongs to. For a replay's delivery, the replay's own id; the message it sent carries the original event's `id`. */
-            webhook_event_id: string;
-            /** @enum {string} */
-            status: "pending" | "succeeded" | "failed";
-            /** @description HTTP status from the receiver. Left out when there was no response. */
-            http_status_code?: number;
-            response_body?: string;
-            error_message?: string;
-            attempt_count: number;
-            /** Format: date-time */
-            next_retry_at?: string;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            completed_at?: string;
-            /** @description The endpoint's URL, kept after the endpoint is deleted. */
-            endpoint_url?: string;
-            endpoint_description?: string;
         };
         /**
          * @description What the hosted invoice page shows. It leaves out internal ids and
@@ -10945,76 +10676,6 @@ export interface operations {
             };
         };
     };
-    listCustomerInvoices: {
-        parameters: {
-            query?: {
-                /** @description Default 25, at most 100. */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Invoices. `total` counts all of the customer's invoices. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["Invoice"][];
-                        total: number;
-                    };
-                };
-            };
-            /** @description Customer not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    listCustomerSubscriptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Subscriptions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["Subscription"][];
-                    };
-                };
-            };
-            /** @description Customer not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     listCustomerPaymentMethods: {
         parameters: {
             query?: never;
@@ -11293,123 +10954,6 @@ export interface operations {
                 };
             };
             /** @description No such active payment method for this customer. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    createCheckoutSetupSession: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    customer_id: string;
-                    customer_name?: string;
-                    email?: string;
-                    address_line1?: string;
-                    address_city?: string;
-                    address_state?: string;
-                    address_postal_code?: string;
-                    address_country?: string;
-                    /** @description The page Stripe sends the customer back to. Always send it, because the default works only in local development. */
-                    return_url?: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Setup session created. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description Stripe Checkout Session ID. */
-                        session_id: string;
-                        /** @description Stripe Checkout URL. */
-                        url: string;
-                        stripe_customer_id: string;
-                    };
-                };
-            };
-            /** @description The body is not valid JSON. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description No such customer in this mode. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description `customer_id` is missing. */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Stripe is not connected for this mode, or a Stripe call failed. Code `stripe_error`. */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getCheckoutSetupStatus: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                customerID: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Setup status. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CustomerPaymentSetup"];
-                };
-            };
-            /** @description No customer with this ID in this tenant and mode. */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -12206,77 +11750,6 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["WebhookEndpointStats"][];
                     };
-                };
-            };
-        };
-    };
-    listWebhookEventDeliveriesLegacy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Deliveries */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data: components["schemas"]["WebhookDelivery"][];
-                    };
-                };
-            };
-        };
-    };
-    replayWebhookEventLegacy: {
-        parameters: {
-            query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Replay created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        status: "replayed";
-                        /** @description The new event created by the replay. */
-                        event_id: string;
-                        /** @description The original event. */
-                        replay_of: string;
-                    };
-                };
-            };
-            /** @description No such event in this mode */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -13935,67 +13408,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    getUsageSummary: {
-        parameters: {
-            query?: {
-                /** @description Window start. RFC 3339, or a date (YYYY-MM-DD) meaning 00:00:00 UTC. */
-                from?: string;
-                /** @description Window end, exclusive. RFC 3339, or a date (YYYY-MM-DD) meaning 23:59:59.999999 UTC that day, so the day is included. */
-                to?: string;
-            };
-            header?: never;
-            path: {
-                /** @description Internal customer id (vlx_cus_...). */
-                customer_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Summary */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UsageSummary"];
-                };
-            };
-            /** @description No customer with this ID in this tenant and mode. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description `validation_error`: `from` or `to` cannot be parsed, or `to` is before `from` (param names the field). */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /**
-             * @description The totals could not be read. The body is `{"error": "internal_error"}`,
-             *     not the usual error object.
-             */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        error?: "internal_error";
-                    };
                 };
             };
         };

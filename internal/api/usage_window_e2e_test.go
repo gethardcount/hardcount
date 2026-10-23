@@ -131,7 +131,8 @@ func (r *lagRig) scanThresholds(at time.Time) int {
 // previewUsage is the usage total of the subscription's preview at `at`.
 func (r *lagRig) previewUsage(at time.Time) int64 {
 	r.t.Helper()
-	out := r.must(http.MethodGet, "/v1/billing/preview/"+r.subID, at, nil, http.StatusOK)
+	out := r.must(http.MethodPost, "/v1/invoices/create_preview", at,
+		map[string]any{"customer_id": r.custID, "subscription_id": r.subID}, http.StatusOK)
 	lines, _ := out["lines"].([]any)
 	var n int64
 	for _, raw := range lines {

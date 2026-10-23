@@ -257,6 +257,11 @@ untested, because it was not needed at this rate.
 
 ### What the read probe found: the per-customer usage summary is a linear scan
 
+These runs probed `GET /v1/usage-summary/{customer_id}`, removed on 2026-10-23
+([#1368](https://github.com/getvelox/velox/pull/1368)). The rig now probes
+`GET /v1/usage-events/aggregate?customer_id=`, which runs the same aggregate
+query.
+
 While ingest ran, a second k6 scenario read what a finance user reads:
 `usage-summary` for a random customer over 30 days, the invoice list, and the
 customer list. It ran at 5 requests/s with a p99 budget of 500 ms. The two
@@ -327,7 +332,7 @@ ev/s ingest held and the summary missed its budget, and both are true.
   did: see footnote ¹ in [the run journal](../dev/records/sustained-throughput-runs-2026-08.md#the-headline-2026-08-16-measured-under-the-protocol-below), and the third run). It is not long enough for
   multi-hour effects.
 - **The read probe is one budget over three endpoints**, reported per endpoint.
-  Its `usage-summary` result scales with events-per-customer, so the budget it
+  Its `usage-aggregate` result scales with events-per-customer, so the budget it
   meets depends on how big your customers are.
 - **No nginx** in front (deploy/compose puts one there). **Single-AZ**, no
   pooler, no replica, and on-demand pricing. Storage and the load generator
@@ -360,8 +365,8 @@ k6 run -e BASE=http://<app-private-ip>:8080 -e API_KEY=... -e CUSTOMER_ID=... \
 ```
 
 `PROBE_RATE` adds a second, concurrent scenario that reads what a human waits
-on: `usage-summary` for a random customer, the invoice list, and the customer
-list. (`usage-summary` aggregates that customer's rows in the very table being
+on: the usage aggregate for a random customer, the invoice list, and the customer
+list. (The aggregate reads that customer's rows in the very table being
 written.) `PROBE_P99_MS` (default 500) is a **threshold**. So a run whose read
 path degrades under write load **exits non-zero**, instead of publishing a
 throughput figure beside an unusable product. Ingest latency is reported from

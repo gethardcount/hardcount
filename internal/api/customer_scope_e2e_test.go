@@ -650,11 +650,12 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		}
 	})
 
-	// Checkout setup: fixed. It already answered 404 and wrote no row, but
-	// only after creating a Stripe customer for the id it was given. It now
-	// stops before calling Stripe. Runs last: connecting Stripe changes what
-	// other endpoints do. Stripe is replaced by a stub that counts calls.
-	t.Run("fixed: checkout setup [customer_id]", func(t *testing.T) {
+	// Card setup session with Stripe connected: a customer outside the
+	// caller's tenant and mode gets 404 before any Stripe call. (The removed
+	// POST /v1/checkout/setup once created a Stripe customer first.) Runs
+	// last: connecting Stripe changes what other endpoints do. Stripe is
+	// replaced by a stub that counts calls.
+	t.Run("payment method setup session with stripe [path customer]", func(t *testing.T) {
 		if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
 			TenantID: tenantA, Livemode: true, SecretKey: "sk_live_stub", PublishableKey: "pk_live_stub",
 		}); err != nil {
@@ -678,7 +679,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		for _, f := range foreign {
 			t.Run(f.name, func(t *testing.T) {
 				stripeCalls = 0
-				refuse(t, "POST", "/v1/checkout/setup", aLive, map[string]any{"customer_id": f.refs.cus, "customer_name": "x"}, f.refs.ids(), 404, "customer not found", false)
+				refuse(t, "POST", "/v1/customers/"+f.refs.cus+"/payment-methods/setup-session", aLive, map[string]any{}, f.refs.ids(), 404, "", false)
 				if stripeCalls != 0 {
 					t.Errorf("made %d Stripe call(s) for a customer outside the caller's tenant and mode, want 0", stripeCalls)
 				}
@@ -686,7 +687,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		}
 		t.Run("own", func(t *testing.T) {
 			stripeCalls = 0
-			if code, out := call("POST", "/v1/checkout/setup", aLive, map[string]any{"customer_id": own.cus, "customer_name": "x"}); code != 201 {
+			if code, out := call("POST", "/v1/customers/"+own.cus+"/payment-methods/setup-session", aLive, map[string]any{}); code != 201 {
 				t.Fatalf("status = %d, want 201; body: %v", code, out)
 			}
 			if stripeCalls != 2 {

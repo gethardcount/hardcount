@@ -26,6 +26,8 @@ first. Every shipped change, with its date, is in the
   - changing the meter's aggregation.
 
   Per-plan usage prices (below) replace this check before the release.
+- **Done:** eight API operations that another operation already did are
+  removed. The [CHANGELOG](../CHANGELOG.md) names the replacement for each.
 - **Planned:** public names change once, before the release: API key
   prefixes, header names, environment variables and the session cookie.
   Publishable keys are removed. Code that calls the API or checks webhook

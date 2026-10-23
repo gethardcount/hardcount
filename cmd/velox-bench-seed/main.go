@@ -23,7 +23,7 @@
 // the difference between a benchmark and a pathological case: with a single
 // customer every event lands on one customer_id, so the resolve cache never
 // misses, the btrees append to one hot edge, and — worst — the responsiveness
-// probe's usage-summary aggregates EVERY row in the table for its one customer,
+// probe's per-customer usage aggregate reads EVERY row in the table for its one customer,
 // which at 1.1M rows already costs ~180ms on a warm laptop and would report the
 // product as DEGRADED on the AWS rig for a reason no real tenant would hit.
 // Customers are numbered NNN so the load generator can pick one arithmetically.
@@ -119,7 +119,7 @@ func main() {
 		"customer_id_prefix":          benchCustomerIDPrefix,
 		"external_customer_id_prefix": benchCustomerExternalPrefix,
 		// The first customer, for callers that only need one (bringup's smoke
-		// test). The INTERNAL id is what /v1/usage-summary/{id} is keyed by.
+		// test). The INTERNAL id is what /v1/usage-events/aggregate?customer_id= takes.
 		"external_customer_id": fmt.Sprintf("%s%03d", benchCustomerExternalPrefix, 0),
 		"customer_id":          fmt.Sprintf("%s%03d", benchCustomerIDPrefix, 0),
 	}

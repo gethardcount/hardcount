@@ -275,14 +275,7 @@ func TestUnpricedUsage_CycleClose_CountsBothPaths(t *testing.T) {
 	ingestUnpricedAt(t, ctx, f, custID, tok.ID, 25, f.cycleStart.Add(2*time.Minute), map[string]any{"model": "b"})
 	ingestUnpricedAt(t, ctx, f, custID, single.ID, 7, f.cycleStart.Add(3*time.Minute), nil)
 
-	sub, err := f.subStore.Get(ctx, f.tenantID, subID)
-	if err != nil {
-		t.Fatalf("get sub: %v", err)
-	}
-	preview, err := f.engine.Preview(ctx, sub)
-	if err != nil {
-		t.Fatalf("preview: %v", err)
-	}
+	preview := f.createPreview(t, ctx, custID, subID)
 	joined := strings.Join(preview.Warnings, "\n")
 	if !strings.Contains(joined, `meter "tok_cyc": 25 `) || !strings.Contains(joined, `meter "seats_cyc": 7 `) {
 		t.Errorf("preview warnings must carry each unpriced quantity, got:\n%s", joined)

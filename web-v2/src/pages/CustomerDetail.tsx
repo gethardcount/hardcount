@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
-import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
+import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -381,36 +381,6 @@ export default function CustomerDetailPage() {
   const effectiveDunningPolicy = assignedDunningPolicy ?? defaultDunningPolicy
 
   const isArchived = customer?.status === 'archived'
-
-  // After a Stripe Checkout return, the URL carries `?payment=success`
-  // or `?payment=cancel`. Toast appropriately, refetch the payment
-  // setup so the card details flip from pending → ready, and strip
-  // the query string so a refresh doesn't re-toast. The webhook is
-  // the authoritative path that flips the row; the toast is a UX
-  // hint that the customer's redirect landed.
-  //
-  // The ref-guard is required: React StrictMode (dev) double-invokes
-  // useEffect, and `setSearchParams` batches across both invocations
-  // — both pass `payment` is still 'success' and would fire the toast
-  // twice. Marking the param as handled on first run dedupes deterministic-
-  // ally without relying on render order.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const handledPaymentParam = useRef<string | null>(null)
-  useEffect(() => {
-    const payment = searchParams.get('payment')
-    if (!payment) return
-    if (handledPaymentParam.current === payment) return
-    handledPaymentParam.current = payment
-    if (payment === 'success') {
-      toast.success('Payment method saved')
-      queryClient.invalidateQueries({ queryKey: ['customer-payment-methods', id] })
-    } else if (payment === 'cancel') {
-      toast.info('Setup canceled — no changes were made')
-    }
-    const next = new URLSearchParams(searchParams)
-    next.delete('payment')
-    setSearchParams(next, { replace: true })
-  }, [searchParams, setSearchParams, queryClient, id])
 
   const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ['customer', id] })

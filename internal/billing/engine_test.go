@@ -2061,12 +2061,12 @@ func TestPreview_OverrideLookupTransientError_Aborts(t *testing.T) {
 	engine, subs, _, pricing, _ := setupEngine()
 	pricing.overrideErr = fmt.Errorf("connection reset by peer")
 
-	if _, err := engine.Preview(context.Background(), subs.subs["sub_1"]); err == nil {
+	if _, err := engine.previewCycle(context.Background(), subs.subs["sub_1"]); err == nil {
 		t.Fatal("preview succeeded despite override-lookup failure; want abort (a partial preview persisted by a threshold fire under-bills permanently)")
 	}
 
 	pricing.overrideErr = nil
-	preview, err := engine.Preview(context.Background(), subs.subs["sub_1"])
+	preview, err := engine.previewCycle(context.Background(), subs.subs["sub_1"])
 	if err != nil {
 		t.Fatalf("healed preview: %v", err)
 	}

@@ -99,6 +99,18 @@ func (f *parityFixture) engine(t *testing.T, now time.Time) *billing.Engine {
 	return newRealEngine(f.db, clock.NewFake(now))
 }
 
+// createPreview asks POST /v1/invoices/create_preview's service, on an engine
+// whose clock reads now, for the subscription's next invoice.
+func (f *parityFixture) createPreview(t *testing.T, now time.Time, sub domain.Subscription) billing.PreviewResult {
+	t.Helper()
+	svc := billing.NewPreviewService(f.engine(t, now), customer.NewPostgresStore(f.db), f.subs)
+	pv, err := svc.CreatePreview(f.ctx, f.tenantID, billing.CreatePreviewRequest{CustomerID: sub.CustomerID, SubscriptionID: sub.ID})
+	if err != nil {
+		t.Fatalf("create preview: %v", err)
+	}
+	return pv
+}
+
 // lineFingerprint is the golden unit: everything about a base-fee line
 // except IDs and invoice linkage. Plan codes are per-scenario constants
 // so the fingerprints are stable across runs.

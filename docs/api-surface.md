@@ -99,7 +99,7 @@ the call returns `409` with code `unbilled_period`.
 | `GET` | `/v1/invoices` | List invoices |
 | `GET` | `/v1/invoices/{id}/pdf` | Download an invoice as a PDF |
 | `POST` | `/v1/billing/run` | Bill this account's subscriptions that are due now |
-| `GET` | `/v1/billing/preview/{sub_id}` | Preview the next invoice without creating it |
+| `POST` | `/v1/invoices/create_preview` | Preview the next invoice without creating it |
 
 `/v1/billing/run` skips subscriptions that are waiting after a failed
 attempt, and ones set aside after too many failed attempts (`retry-billing`
@@ -279,7 +279,6 @@ specific status for a body that is too large.
   - a request too malformed for the server to parse, such as bad syntax or headers that are too large (400 or 431 from the HTTP server itself, with no `Velox-Request-Id` header).
 - **Other JSON shapes:**
   - `GET /health/ready` returns 503 with `{"status", "checks"}`.
-  - `GET /v1/usage-summary/{customer_id}` returns 500 with `{"error": "internal_error"}`.
   - A rejected usage batch returns 422 with code `batch_rejected`. Its `error` object has no `request_id`, and the body also has `errors` (one entry per failing event), `ingested: 0` and `total`.
   - `GET /v1/auth/password-reset/check` returns 422 with `{"valid": false, "reason": "invalid_or_expired"}`.
   - The Postmark webhook returns `{"error": "<reason>"}` with 401 or 500. A payload that is too large or is not valid JSON is accepted with 200 and `{"status": "skipped", "reason": "<reason>"}`.
@@ -296,9 +295,5 @@ The OpenAPI file lists these too, but your code does not need them:
   link instead.
 - The inbound webhooks that Stripe and Postmark call
   (`/v1/webhooks/stripe/{endpoint_id}`, `/v1/webhooks/postmark`).
-- Older routes the dashboard no longer uses: `/v1/checkout/setup`,
-  `/v1/checkout/status/{customerID}`, and
-  `/v1/webhook-endpoints/events/{id}/deliveries` and `/replay` (use
-  `/v1/webhook_events/{id}/...`).
 
 **Next:** let your app react when an invoice is paid or a payment fails: [Webhooks](webhooks.md).

@@ -69,7 +69,6 @@ func TestReadRoutesHonest(t *testing.T) {
 			{"/v1/credits/balance/" + missing, "/v1/credits/balance/" + customerID},
 			{"/v1/credits/ledger/" + missing, "/v1/credits/ledger/" + customerID},
 			{"/v1/credits/grants/" + missing, "/v1/credits/grants/" + customerID},
-			{"/v1/usage-summary/" + missing, "/v1/usage-summary/" + customerID},
 			{"/v1/customers/" + missing + "/sent-emails", "/v1/customers/" + customerID + "/sent-emails"},
 			{"/v1/customers/" + missing + "/margin", "/v1/customers/" + customerID + "/margin"},
 			{"/v1/meters/vlx_mtr_does_not_exist/pricing-rules", "/v1/meters/" + meterID + "/pricing-rules"},

@@ -157,9 +157,9 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		}
 	})
 
-	// 8. Usage summary — query the billing period where events were ingested
-	t.Run("usage summary", func(t *testing.T) {
-		url := fmt.Sprintf("/v1/usage-summary/%s?from=%s&to=%s",
+	// 8. Usage totals — query the billing period where events were ingested
+	t.Run("usage totals", func(t *testing.T) {
+		url := fmt.Sprintf("/v1/usage-events/aggregate?customer_id=%s&from=%s&to=%s",
 			customerID,
 			periodStart.Format(time.RFC3339),
 			periodEnd.Format(time.RFC3339))

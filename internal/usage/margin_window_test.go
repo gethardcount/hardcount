@@ -12,8 +12,8 @@ import (
 // A bare GET /v1/customers/{id}/margin defaulted to the WALL-CLOCK last 30
 // days. For a customer on a test clock advanced to 2027-03-01 that window
 // (2026-09-16..2026-10-16) predates every simulated event, so revenue and
-// cost both read 0 while the usage summary and customer usage follow the
-// clock. The default must end at the customer's effective now.
+// cost both read 0 while customer usage follows the clock. The default
+// must end at the customer's effective now.
 func TestMarginDefaultWindow_FollowsCustomerTestClock(t *testing.T) {
 	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	resolver := &fakeResolver{frozen: map[string]time.Time{"cus_pinned": frozen}}

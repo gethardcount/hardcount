@@ -21,7 +21,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/invoice"
-	"github.com/sagarsuperuser/velox/internal/payment"
 	"github.com/sagarsuperuser/velox/internal/paymentmethods"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/recipe"
@@ -66,7 +65,6 @@ var requestBodies = map[string]requestBody{
 	"PUT /v1/customers/{id}/billing-profile":                            {body: domain.CustomerBillingProfile{}, undocumented: readOnly("customer_id", "tenant_id", "profile_status", "created_at", "updated_at")},
 	"POST /v1/customers/{customer_id}/payment-methods/send-setup-email": {body: paymentmethods.SendSetupEmailRequest{}},
 	"POST /v1/customers/{customer_id}/payment-methods/setup-session":    {body: paymentmethods.SetupSessionRequest{}},
-	"POST /v1/checkout/setup":                                           {body: payment.SetupRequest{}},
 	"POST /v1/meters":                                                   {body: pricing.CreateMeterInput{}},
 	"PATCH /v1/meters/{id}":                                             {body: pricing.UpdateMeterInput{}},
 	"POST /v1/meters/{meter_id}/pricing-rules":                          {body: pricing.UpsertMeterPricingRuleInput{}, undocumented: map[string]string{"meter_id": "The URL's meter_id wins over the body's."}},

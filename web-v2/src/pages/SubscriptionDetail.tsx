@@ -144,11 +144,11 @@ export default function SubscriptionDetailPage() {
   })
 
   // Only a subscription with a current period and items has a next invoice
-  // to preview; asking for any other is a server error, not a load failure.
+  // to preview, so the page asks only for those.
   const previewable = !!sub && !!sub.current_billing_period_start && !!sub.current_billing_period_end && (sub.items?.length ?? 0) > 0
   const { data: preview, error: previewError, refetch: refetchPreview, isFetching: previewFetching } = useQuery({
     queryKey: ['subscription-preview', id],
-    queryFn: () => api.invoicePreview(id!),
+    queryFn: () => api.createInvoicePreview({ customer_id: sub!.customer_id, subscription_id: id! }),
     enabled: !!id && previewable,
     retry: false,
   })

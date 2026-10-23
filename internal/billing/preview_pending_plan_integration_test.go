@@ -146,10 +146,7 @@ func TestPreview_ScheduledPlanChangeMatchesCycleClose(t *testing.T) {
 				t.Fatalf("reload sub: %v", err)
 			}
 
-			pv, err := f.engine(t, previewAt).Preview(f.ctx, sub)
-			if err != nil {
-				t.Fatalf("preview: %v", err)
-			}
+			pv := f.createPreview(t, previewAt, sub)
 			var got []string
 			for _, l := range pv.Lines {
 				got = append(got, previewFingerprint(l.LineType, l.Description, l.Quantity, l.AmountCents))

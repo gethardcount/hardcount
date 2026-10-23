@@ -328,9 +328,8 @@ func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *M
 }
 
 // effectiveNow is the customer's current time for the default margin
-// window: the usage Service's effectiveNow, the same resolution the
-// usage summary's default month uses (test-clock frozen_time when the
-// customer is pinned, wall-clock otherwise).
+// window: the usage Service's effectiveNow (test-clock frozen_time when
+// the customer is pinned, wall-clock otherwise).
 func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID string) time.Time {
 	if a != nil && a.usageSvc != nil && a.usageSvc.usage != nil {
 		return a.usageSvc.usage.effectiveNow(ctx, tenantID, customerID)
@@ -613,7 +612,7 @@ func (h *ProviderCostHandler) marginWindow(r *http.Request, tenantID, customerID
 // last 30 days ending at now(). now is the CUSTOMER's effective now —
 // frozen_time for a customer pinned to a test clock — so a bare request
 // for a clock-pinned customer covers the simulated last 30 days, the
-// same timeline the usage summary and customer usage follow. It is
+// same timeline customer usage follows. It is
 // called only when a bound is missing, so an explicit window costs no
 // clock lookup.
 func parseWindow(r *http.Request, now func() time.Time) (time.Time, time.Time, error) {

@@ -89,10 +89,10 @@ func (m *memStore) GetByIdempotencyKey(_ context.Context, tenantID, key string) 
 }
 
 // listClamp mirrors the PostgresStore.List cap (it silently clamps the
-// requested limit to 1000). GetSummary must NOT read its totals from
+// requested limit to 1000). Aggregate must NOT read its totals from
 // List, or any customer with more events than this in the window is
 // under-counted. Keeping the fake honest about the clamp is what makes
-// the GetSummary regression test meaningful.
+// the aggregate regression test meaningful.
 const listClamp = 1000
 
 func (m *memStore) matching(filter ListFilter) []domain.UsageEvent {
@@ -335,13 +335,14 @@ func TestAggregateByPricingRules_DefaultModeValidation(t *testing.T) {
 	})
 }
 
-// TestGetSummaryServerSideAggregate is the regression guard for the
-// under-count bug: GetSummary used List(Limit:10000), but List clamps to
-// 1000, so a customer with >1000 events in the window reported a truncated
-// total_events AND truncated per-meter quantities. The fix reads from
-// store.Aggregate (full COUNT(*) + GROUP BY SUM). This test ingests more
-// than the clamp and asserts the summary reflects the full set.
-func TestGetSummaryServerSideAggregate(t *testing.T) {
+// TestAggregateServerSide is the regression guard for an under-count bug
+// first found in the removed usage summary: it used List(Limit:10000), but
+// List clamps to 1000, so a customer with >1000 events in the window
+// reported a truncated total_events AND truncated per-meter quantities.
+// Aggregate reads from store.Aggregate (full COUNT(*) + GROUP BY SUM). This
+// test ingests more than the clamp and asserts the totals reflect the full
+// set.
+func TestAggregateServerSide(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store)
 	ctx := context.Background()
@@ -357,16 +358,18 @@ func TestGetSummaryServerSideAggregate(t *testing.T) {
 
 	from := time.Now().Add(-1 * time.Hour)
 	to := time.Now().Add(1 * time.Hour)
-	summary, err := svc.GetSummary(ctx, "t1", "cus_big", from, to)
+	agg, err := svc.Aggregate(ctx, ListFilter{TenantID: "t1", CustomerID: "cus_big", From: &from, To: &to}, nil)
 	if err != nil {
-		t.Fatalf("GetSummary: %v", err)
+		t.Fatalf("Aggregate: %v", err)
 	}
 
-	if summary.TotalEvents != n {
-		t.Errorf("total_events: got %d, want %d (List-clamped under-count regressed)", summary.TotalEvents, n)
+	if agg.TotalEvents != n {
+		t.Errorf("total_events: got %d, want %d (List-clamped under-count regressed)", agg.TotalEvents, n)
 	}
-	got := summary.Meters["mtr_tokens"]
-	if !got.Equal(dec(int64(n))) {
+	if len(agg.ByMeter) != 1 || agg.ByMeter[0].MeterID != "mtr_tokens" {
+		t.Fatalf("by_meter: got %+v, want one row for mtr_tokens", agg.ByMeter)
+	}
+	if got := agg.ByMeter[0].Total; !got.Equal(dec(int64(n))) {
 		t.Errorf("meter total: got %s, want %d (per-meter quantity truncated)", got.String(), n)
 	}
 }

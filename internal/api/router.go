@@ -243,8 +243,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentMethodsSvc.SetPortalBaseURL(customerPortalURL)
 	// compositePaymentSetupStore presents the customer_payment_setups
 	// wire shape (domain.CustomerPaymentSetup) on top of canonical
-	// sources. Lets payment/checkout.go + payment/stripe.go +
-	// dunning retrier keep their existing PaymentSetupStore-shaped
+	// sources. Lets payment/stripe.go + the dunning retrier keep
+	// their existing PaymentSetupStore-shaped
 	// wiring while structurally not reading the deprecated table.
 	paymentSetupStore := &compositePaymentSetupStore{customers: customerStore, pms: paymentMethodsSvc}
 
@@ -265,7 +265,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	usageH := usage.NewHandler(usageSvc, customerStore, pricingSvc)
 	usageH.SetMeterLister(pricingSvc)
 	usageH.SetHeldDeps(customerStore)
-	usageH.SetSummaryCustomerLookup(customerStore)
 	customerUsageSvc := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
 	customerUsageH := usage.NewCustomerUsageHandler(customerUsageSvc)
 	// Provider cost rates + margin (ADR-079).
@@ -531,12 +530,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		DunningTimeline: &dunningTimelineAdapter{store: dunningStore},
 		RefundIssuer:    &refundIssuerAdapter{svc: creditNoteSvc},
 	})
-	// Return URLs are passed per-request now (return_url body field)
-	// instead of read from env — every Checkout flow in the codebase
-	// is contextual, not global. STRIPE_CHECKOUT_{SUCCESS,CANCEL}_URL
-	// were a pre-portal anti-pattern.
-	checkoutH := payment.NewCheckoutHandler(stripeClients, paymentSetupStore)
-
 	// Token service for public payment update links. Used by the
 	// no-PM-at-finalize email (noPaymentMethodNotifierAdapter) and
 	// the public token-authenticated payment-update SPA flow. The
@@ -1104,11 +1097,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// keys; when it exists, its emitter must be wired.
 		audit.MustWired(publicPaymentH)
 	}
-	if checkoutH != nil {
-		// Same guard: nil when Stripe isn't configured.
-		checkoutH.SetAuditLogger(auditLogger)
-		audit.MustWired(checkoutH)
-	}
 
 	// Invoice finalize commits the upstream Stripe Tax calculation into a
 	// tax_transaction so the tenant's Stripe Tax reports reflect the final
@@ -1176,7 +1164,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// *creditnote.Service satisfies CreditNoteIssuer directly.
 	subH.SetCreditNoteIssuer(creditNoteSvc)
 
-	billingH := billing.NewHandler(engine, subStore)
+	billingH := billing.NewHandler(engine)
 	// create_preview composes customer / subscription resolution on top of
 	// the engine's preview path. Mounted at /v1/invoices/create_preview
 	// (Stripe-equivalent), gated by PermInvoiceRead — read-only, no DB
@@ -1832,12 +1820,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// 30s middleware.Timeout would kill long-lived streams). Uses
 		// underscore (webhook_events) on purpose so the shape matches
 		// Stripe's /v1/events convention and doesn't collide with the
-		// legacy /webhook-endpoints/events path.
+		// /webhook-endpoints/events list.
 		//
 		// PermAPIKeyRead is sufficient for both read (deliveries) and
 		// replay — replay is state-mutating but is functionally a
-		// re-issue of an already-emitted event, the same posture the
-		// legacy /webhook-endpoints/events/{id}/replay surface takes.
+		// re-issue of an already-emitted event.
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", webhookOutH.EventRoutes())
 		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", auditH.Routes())
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", settingsH.Routes())
@@ -1845,10 +1832,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", emailSettingsH.Routes())
 		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", analyticsH.Routes())
 		r.With(auth.Require(auth.PermTestClockWrite)).Mount("/test-clocks", testClockH.Routes())
-		r.With(auth.Require(auth.PermUsageRead)).Mount("/usage-summary", usageH.SummaryRoutes())
-		if checkoutH != nil {
-			r.With(auth.Require(auth.PermCustomerWrite)).Mount("/checkout", checkoutH.Routes())
-		}
 
 		// Customer Detail — the dashboard's per-customer composed views,
 		// registered in the same /customers/{...} namespace as usage /
@@ -1857,13 +1840,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// (ADR-051); renamed so that name means only the removed feature.
 		customerDetail := newCustomerDetailHandler(customerStore, subStore, invoiceStore)
 		r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/overview", customerDetail.overview)
-		r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/invoices", customerDetail.listInvoices)
-		r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/subscriptions", customerDetail.listSubscriptions)
-		// Legacy /v1/payment-portal/{id}/update-payment-method removed:
-		// all "add a payment method" flows now go through
-		// paymentmethods.Service.CreateSetupSession (single path).
-		// Operator dashboard uses POST /v1/customers/{id}/payment-methods/send-setup-email
-		// (email) or POST /v1/customers/{id}/payment-methods/setup-session (copy-link).
+		// A card is added through one of two Stripe Checkout setup sessions.
+		// The operator's goes through paymentmethods.Service.CreateSetupSession:
+		// POST /v1/customers/{id}/payment-methods/send-setup-email (email) or
+		// POST /v1/customers/{id}/payment-methods/setup-session (copy-link).
+		// The customer's comes from the payment-update email link:
+		// POST /v1/public/payment-updates/{token}/checkout.
 	})
 
 	s.router = r

@@ -300,8 +300,8 @@ type Entry struct {
 //     is real: a clock-scoped view will not show "operator attached a card
 //     mid-simulation." Closure trigger: the same one as the checkout rows below —
 //     auditing the settle path, at which point these breadcrumbs join it.
-//   - PUBLIC CHECKOUT rows (hosted-invoice Pay click, payment-update link,
-//     checkout setup). These paths never bind a pin — they stamp wall-clock and
+//   - PUBLIC CHECKOUT rows (hosted-invoice Pay click, payment-update
+//     link). These paths never bind a pin — they stamp wall-clock and
 //     talk to real Stripe — so their rows are wall-clock rows about an entity
 //     that happens to be pinned. This is consistent with what the clock view
 //     already cannot show: the SETTLEMENT those clicks lead to is a Stripe

@@ -225,6 +225,18 @@ func (f *thresholdFixture) listInvoices(t *testing.T, ctx context.Context) []dom
 	return invoices
 }
 
+// createPreview asks POST /v1/invoices/create_preview's service for the
+// subscription's next invoice, the estimate the dashboard shows.
+func (f *thresholdFixture) createPreview(t *testing.T, ctx context.Context, customerID, subID string) billing.PreviewResult {
+	t.Helper()
+	svc := billing.NewPreviewService(f.engine, customer.NewPostgresStore(f.db), f.subStore)
+	preview, err := svc.CreatePreview(ctx, f.tenantID, billing.CreatePreviewRequest{CustomerID: customerID, SubscriptionID: subID})
+	if err != nil {
+		t.Fatalf("create preview: %v", err)
+	}
+	return preview
+}
+
 // TestThresholdScan_AmountCrossFiresEarly is the headline test: usage drives
 // the running subtotal past AmountGTE, the scan emits a threshold-billed
 // invoice, the cycle resets, and a second scan against the new (empty) cycle

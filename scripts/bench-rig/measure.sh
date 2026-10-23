@@ -203,7 +203,7 @@ one_run() {
     local breached
     # Split on the QUOTED separator k6 prints between names ("', '"), never on a
     # bare comma — metric names carry commas inside their braces
-    # ({scenario:probe,name:usage-summary}) and a bare split severed those.
+    # ({scenario:probe,name:usage-aggregate}) and a bare split severed those.
     breached=$(grep -o "thresholds on metrics .* have been crossed" "$RESULTS/$tag.txt" | sed "s/thresholds on metrics //; s/ have been crossed//")
     breached=${breached//"', '"/$'\n'}
     breached=$(printf '%s\n' "$breached" | tr -d "'" | grep -v '^$')
@@ -233,14 +233,14 @@ one_run() {
   drift=$(printf '%s' "$out"   | sed -n 's/^drift p99 first\/last .*(x\([0-9.na\/]*\)).*/\1/p' | head -1)
   probe="n/a"; usum="-"
   if [ "$PROBE_RATE" -gt 0 ]; then
-    usum=$(printf '%s' "$out" | sed -n 's/^  usage-summary *p50 [0-9.]*ms *p99 \([0-9.]*\)ms.*/\1/p' | head -1)
+    usum=$(printf '%s' "$out" | sed -n 's/^  usage-aggregate *p50 [0-9.]*ms *p99 \([0-9.]*\)ms.*/\1/p' | head -1)
     printf '%s' "$out" | grep -q "RESPONSIVE under load" && probe="RESPONSIVE"
     printf '%s' "$out" | grep -q "DEGRADED" && probe="DEGRADED"
     # NO SPACES in this token: one_run's result is consumed with `set --`, which
     # word-splits. A space here shifted every following field — the first ladder
     # rung on the 4xlarge rig failed on "qty!=written(p99/310.9ms)" with a
     # drift of x180523269 while ingest was in fact clean.
-    [ -n "$usum" ] && probe="$probe(usage-summary_p99=${usum}ms)"
+    [ -n "$usum" ] && probe="$probe(usage-aggregate_p99=${usum}ms)"
   fi
   printf '%s %s %s %s %s %s %s %s %s %s %s %s %s' "${claimed:-0}" "$((after - before))" "${evs:-0}" "${p50:-0}" "${p99:-0}" "${dropped:-0}" "$rc" "${failed:-0}" "${samples:-0}" "$probe" "${qsent:-0}" "$((qafter - qbefore))" "${drift:-n/a}"
 }

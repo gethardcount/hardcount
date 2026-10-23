@@ -163,10 +163,7 @@ func TestPreview_MatchesCycleClose(t *testing.T) {
 			}
 
 			// Preview mid-period, after every change has landed.
-			pv, err := f.engine(t, parityPS.AddDate(0, 0, 25)).Preview(f.ctx, sub)
-			if err != nil {
-				t.Fatalf("preview: %v", err)
-			}
+			pv := f.createPreview(t, parityPS.AddDate(0, 0, 25), sub)
 			var got []string
 			for _, l := range pv.Lines {
 				got = append(got, previewFingerprint(l.LineType, l.Description, l.Quantity, l.AmountCents))
@@ -254,10 +251,7 @@ func TestPreview_TrialEndingOn30thMatchesFirstInvoice(t *testing.T) {
 				t.Fatalf("reload sub: %v", err)
 			}
 
-			pv, err := f.engine(t, time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)).Preview(f.ctx, sub)
-			if err != nil {
-				t.Fatalf("preview: %v", err)
-			}
+			pv := f.createPreview(t, time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC), sub)
 			var got []string
 			for _, l := range pv.Lines {
 				got = append(got, previewFingerprint(l.LineType, l.Description, l.Quantity, l.AmountCents))
