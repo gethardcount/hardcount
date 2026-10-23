@@ -36,9 +36,8 @@ test('hasCardPayment: only a real PaymentIntent counts', () => {
   assert.equal(hasCardPayment('pi_3TynLT'), true)
   assert.equal(hasCardPayment(''), false)
   assert.equal(hasCardPayment(undefined), false)
-  assert.equal(hasCardPayment('out_of_band:2026-08-02T15:22:52Z'), false)
-  // Guards the prefix test against a contains/suffix rewrite.
-  assert.equal(hasCardPayment('pi_out_of_band_lookalike'), true)
+  // An offline payment has no PaymentIntent (the API omits the field).
+  assert.equal(hasCardPayment(null), false)
 })
 
 test('the refund ceiling is the BINDING rule, not the card rule alone', () => {
@@ -111,7 +110,7 @@ test('no card payment means no refund ceiling at all', () => {
   const offline = creditNoteCeilings({
     invoiceTotalCents: 5362,
     amountPaidCents: 5362,
-    stripePaymentIntentId: 'out_of_band:2026-08-02T15:22:52Z',
+    stripePaymentIntentId: undefined,
     creditNotes: [],
     amountCents: 1000,
   })

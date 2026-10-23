@@ -74,9 +74,10 @@ type Store interface {
 	// collection produces the same invoice end-state as a successful
 	// engine charge.
 	MarkPaid(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time) (domain.Invoice, error)
-	// MarkPaidOffline is MarkPaid for Record Offline Payment: check runs on
-	// the row under the lock and can refuse. Never for a card settlement.
-	MarkPaidOffline(ctx context.Context, tenantID, id string, stripePaymentIntentID string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
+	// MarkPaidOffline is MarkPaid for Record Offline Payment: it sets
+	// paid_out_of_band and writes no PaymentIntent, and check runs on the
+	// row under the lock and can refuse. Never for a card settlement.
+	MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error)
 	// ChargeHeldTx: the charge hold — none, live or stale (ADR-127) — and
 	// its value. Caller holds the row lock on tx.
 	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (domain.ChargeHoldState, domain.ChargeHold, error)

@@ -23,7 +23,7 @@ func paidMidCharge() (*mockInvoiceUpdater, domain.Invoice) {
 	base.invoices["inv_1"] = domain.Invoice{
 		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
 		Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
-		StripePaymentIntentID: "out_of_band:2026-10-10T09:00:00Z", PaidAt: &paidAt,
+		PaidOutOfBand: true, PaidAt: &paidAt,
 		Currency: "USD", ChargeAttemptSeq: 1,
 	}
 	return base, pendingSnapshot()
@@ -67,7 +67,7 @@ func TestChargeInvoice_DeclineAfterMidChargePayment_NoDunning(t *testing.T) {
 	if _, err := stripe.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test"); err == nil {
 		t.Fatal("want the decline returned: it is the truth about this attempt")
 	}
-	if got := invoices.invoices["inv_1"]; got.Status != domain.InvoicePaid || got.StripePaymentIntentID != "out_of_band:2026-10-10T09:00:00Z" {
+	if got := invoices.invoices["inv_1"]; got.Status != domain.InvoicePaid || got.StripePaymentIntentID != "" || !got.PaidOutOfBand {
 		t.Fatalf("paid row overwritten: %s/%s/%q", got.Status, got.PaymentStatus, got.StripePaymentIntentID)
 	}
 	if len(dunning.calls) != 0 {
@@ -87,9 +87,9 @@ func TestChargeInvoice_ProcessingAfterMidChargePayment_ReturnsPaidRow(t *testing
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
 	if got.Status != domain.InvoicePaid || got.PaymentStatus != domain.PaymentSucceeded ||
-		got.StripePaymentIntentID != "out_of_band:2026-10-10T09:00:00Z" {
-		t.Fatalf("returned %s/%s/%s; want the paid row with the offline payment's id",
-			got.Status, got.PaymentStatus, got.StripePaymentIntentID)
+		got.StripePaymentIntentID != "" || !got.PaidOutOfBand {
+		t.Fatalf("returned %s/%s/%q out-of-band %v; want the offline payment's paid row, with no PaymentIntent",
+			got.Status, got.PaymentStatus, got.StripePaymentIntentID, got.PaidOutOfBand)
 	}
 }
 

@@ -3943,6 +3943,8 @@ export interface paths {
          * @description Marks a `finalized` or `uncollectible` invoice as paid for money
          *     received another way, such as a bank transfer, cheque or cash. The
          *     full amount due is recorded; partial payments are not supported.
+         *     The invoice gets `paid_out_of_band: true` and no
+         *     `stripe_payment_intent_id`.
          *
          *     Resolves any active dunning run with `payment_recovered`. Fires the
          *     `invoice.payment_recorded` webhook event. The optional `note` is
@@ -7822,7 +7824,21 @@ export interface components {
              * @description When the invoice was marked uncollectible.
              */
             uncollectible_at?: string;
+            /**
+             * @description The Stripe PaymentIntent of the invoice's latest card charge.
+             *     Absent when no charge was sent to Stripe: an invoice paid by
+             *     credits, with nothing due, or paid outside Velox
+             *     (`paid_out_of_band`).
+             */
             stripe_payment_intent_id?: string;
+            /**
+             * @description True when the payment was recorded as made outside Velox, such as
+             *     a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
+             *     or a payment recovery run resolved as `payment_recovered`). Such
+             *     an invoice has no `stripe_payment_intent_id`, so there is no card
+             *     to refund.
+             */
+            paid_out_of_band?: boolean;
             last_payment_error?: string;
             auto_charge_pending?: boolean;
             /**

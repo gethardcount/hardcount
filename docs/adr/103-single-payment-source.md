@@ -51,6 +51,10 @@ Two supports make that safe:
    invoice with no succeeded attempt (and no `out_of_band:` marker)
    logs a warning naming the missing fact, rather than quietly
    substituting a webhook row.
+   *(Amended 2026-10-23, #1370: an offline payment no longer writes the
+   `out_of_band:` marker, nor the succeeded attempt row the settle used to
+   upsert under it. It sets `invoices.paid_out_of_band` and leaves the
+   PaymentIntent empty, so "card-paid" is simply "has a PaymentIntent".)*
 
 Rendering keeps exactly two suppressions, both **exact-keyed**:
 

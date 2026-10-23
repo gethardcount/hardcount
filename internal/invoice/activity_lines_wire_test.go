@@ -489,7 +489,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 
 	t.Run("offline payment names the reference and who entered it", func(t *testing.T) {
 		events := fetchWire(t, wireCase{
-			inv: domain.Invoice{Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, AmountPaidCents: 3900, PaidAt: &at, StripePaymentIntentID: "out_of_band:abc"},
+			inv: domain.Invoice{Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded, AmountPaidCents: 3900, PaidAt: &at, PaidOutOfBand: true},
 			audit: map[string][]domain.AuditEntry{"invoice:{inv}": {
 				{Action: domain.AuditActionUpdate, ActorType: "user", ActorName: "alice@example.com", CreatedAt: at,
 					Metadata: map[string]any{"action": "payment_recorded", "note": "Wire 1042"}},

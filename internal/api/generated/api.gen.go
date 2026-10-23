@@ -4953,6 +4953,13 @@ type Invoice struct {
 	NoPmNotifiedAt time.Time `json:"no_pm_notified_at,omitempty"`
 	PaidAt         time.Time `json:"paid_at,omitempty"`
 
+	// PaidOutOfBand True when the payment was recorded as made outside Velox, such as
+	// a bank transfer or cheque (`POST /v1/invoices/{id}/record-payment`,
+	// or a payment recovery run resolved as `payment_recovered`). Such
+	// an invoice has no `stripe_payment_intent_id`, so there is no card
+	// to refund.
+	PaidOutOfBand bool `json:"paid_out_of_band,omitempty"`
+
 	// PaymentAnomalyCapturedCents The amount Stripe took in that unexpected payment.
 	PaymentAnomalyCapturedCents int64 `json:"payment_anomaly_captured_cents,omitempty"`
 
@@ -5023,7 +5030,12 @@ type Invoice struct {
 	// StripeInvoiceId Source Stripe invoice id (`in_xxx`). Set only on invoices the
 	// Stripe importer wrote before it was removed on 2026-04-29.
 	// Empty on every other invoice.
-	StripeInvoiceId       string `json:"stripe_invoice_id,omitempty"`
+	StripeInvoiceId string `json:"stripe_invoice_id,omitempty"`
+
+	// StripePaymentIntentId The Stripe PaymentIntent of the invoice's latest card charge.
+	// Absent when no charge was sent to Stripe: an invoice paid by
+	// credits, with nothing due, or paid outside Velox
+	// (`paid_out_of_band`).
 	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
 	// SubscriptionId Empty for one-off invoices not tied to a subscription.

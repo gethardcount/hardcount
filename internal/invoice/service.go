@@ -2176,20 +2176,18 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 			"amount_cents", inv.AmountDueCents, "currency", inv.Currency)
 	}
 	now := s.clock.Now(ctx)
-	// Use a synthetic out-of-band marker in the PaymentIntent field so
-	// reports and the PaymentIntent column can distinguish engine-
-	// collected charges from operator-recorded ones. Stripe encodes the
-	// same distinction via paid_out_of_band; we use a string prefix
-	// rather than a dedicated column to keep the schema small.
-	// MarkPaid atomically flips status='paid', payment_status='succeeded',
-	// amount_paid=amount_due, amount_due=0 — same end-state as a
-	// successful engine charge, so downstream reports / customer
-	// balance / dunning scans treat the recovery identically.
+	// MarkPaidOffline atomically flips status='paid',
+	// payment_status='succeeded', amount_paid=amount_due, amount_due=0 — the
+	// same end state as a successful engine charge, so reports, the customer
+	// balance and dunning scans treat the recovery identically — and records
+	// how the money came: paid_out_of_band, with no PaymentIntent (Stripe's
+	// paid_out_of_band). Nothing was charged at Stripe, so there is no
+	// PaymentIntent to record, and no card to refund.
 	//
 	// The payment refusal runs again under MarkPaidOffline's row lock, with
 	// the charge hold: a charge claimed after the read above would otherwise
 	// collect the same invoice a second time (#975).
-	updated, err := s.store.MarkPaidOffline(ctx, tenantID, id, "out_of_band:"+now.UTC().Format(time.RFC3339), now,
+	updated, err := s.store.MarkPaidOffline(ctx, tenantID, id, now,
 		func(tx *sql.Tx, locked domain.Invoice) error {
 			// A charge that settled after the read above leaves the row paid;
 			// the paid transition would then be a quiet no-op, and the audit
