@@ -70,8 +70,9 @@ does move late usage onto a later invoice (see
 `internal/temporal/models/workflow.go:28-32`.
 
 One fact shapes the value of a release. In Velox a subscription cannot start
-in the past (`subscription.CreateInput` has only `StartNow`), and an invoice
-adds up only the usage inside its own period. So rows that arrived before the
+in the past (`subscription.CreateInput` has no start date: a subscription
+starts now or is a draft), and an invoice adds up only the usage inside its
+own period. So rows that arrived before the
 customer existed usually fall before any billing period, and a release stores
 them without billing them. The value is: never lose the row, show it, and
 release it once with an honest statement of what it will bill.

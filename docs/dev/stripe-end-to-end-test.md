@@ -257,8 +257,7 @@ shipped with Velox.
        \"display_name\": \"Stripe E2E Smoke\",
        \"customer_id\": \"<vlx_cus_...>\",
        \"items\": [{\"plan_id\": \"$PLAN_ID\", \"quantity\": 1}],
-       \"billing_time\": \"anniversary\",
-       \"start_now\": true
+       \"billing_time\": \"anniversary\"
      }"
    ```
 

@@ -67,7 +67,7 @@ func TestMeterOverlapGuard(t *testing.T) {
 		}
 		return svc.Create(ctx, tenantID, CreateInput{
 			Code: code, DisplayName: code, CustomerID: cust.ID,
-			Items: items, BillingTime: domain.BillingTimeAnniversary, StartNow: true,
+			Items: items, BillingTime: domain.BillingTimeAnniversary,
 		})
 	}
 	wantConflict := func(err error, wantSub string) {

@@ -17,7 +17,7 @@ Velox versions look like `0.MINOR.PATCH`, for example `0.8.2`.
 ## What can break before 1.0
 
 - **API requests and answers.** A field can be renamed, removed or made
-  required, and a route can answer with a new error.
+  required, a default can change, and a route can answer with a new error.
 - **New values.** A field can get a new value, such as `unknown` for a
   credit note's `refund_status`. Webhooks can gain new event types.
 - **Settings.** A setting Velox used to ignore when it could not read it can

@@ -33,7 +33,6 @@ func newSwapWiringSvc(t *testing.T, fb *fakeBiller) (*Service, domain.Subscripti
 		Code: "s-swapwire", DisplayName: "n", CustomerID: "c",
 		Items:       []CreateItemInput{{PlanID: "p_yearly_adv"}},
 		BillingTime: domain.BillingTimeAnniversary,
-		StartNow:    true,
 	})
 	if err != nil {
 		t.Fatalf("seed create: %v", err)

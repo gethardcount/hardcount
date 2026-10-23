@@ -49,7 +49,7 @@ const schema = z.object({
     (items) => new Set(items.map(i => i.plan_id)).size === items.length,
     { message: 'Each plan can only appear once per subscription' },
   ),
-  start_now: z.boolean(),
+  draft: z.boolean(),
   billing_time: z.string(),
   trial_days: z.string(),
 })
@@ -62,7 +62,7 @@ function emptyDefaults(customerId: string): FormData {
     display_name: '',
     customer_id: customerId,
     items: [{ plan_id: '', quantity: '1' }],
-    start_now: true,
+    draft: false,
     billing_time: 'calendar',
     trial_days: '',
   }
@@ -113,7 +113,8 @@ export function CreateSubscriptionDialog({
         plan_id: it.plan_id,
         ...(it.quantity ? { quantity: parseInt(it.quantity) } : {}),
       })),
-      start_now: data.start_now,
+      // A subscription starts now unless it is created as a draft.
+      ...(data.draft ? { status: 'draft' as const } : {}),
       billing_time: data.billing_time,
       ...(data.trial_days ? { trial_days: parseInt(data.trial_days) } : {}),
     }),
@@ -123,11 +124,11 @@ export function CreateSubscriptionDialog({
       // subscription with no card on file will try to auto-charge a
       // card that isn't there. Non-blocking — the sub IS created (we
       // never gate creation on a card, matching every reference
-      // platform). Gated on start_now: a scheduled sub isn't billing
-      // yet. A started trial still gets the nudge — the card is due
-      // before trial end, and the customer/subscription pages warn on
-      // trialing subs for the same reason.
-      if (vars.start_now) {
+      // platform). Skipped for a draft: it isn't billing yet. A started
+      // trial still gets the nudge — the card is due before trial end,
+      // and the customer/subscription pages warn on trialing subs for the
+      // same reason.
+      if (!vars.draft) {
         void api.listCustomerPaymentMethods(created.customer_id)
           .then(res => {
             if (!hasUsableCard(res.data ?? [])) {
@@ -147,6 +148,7 @@ export function CreateSubscriptionDialog({
   const onSubmit = form.handleSubmit((data) => mutation.mutate(data))
 
   const watchedCustomerId = form.watch('customer_id')
+  const watchedDraft = form.watch('draft')
   // The clock-inherit hint needs the selected customer's test_clock_id.
   // With the server-searched picker there is no local customers list, so
   // fetch the picked customer directly (cheap ids= point read).
@@ -167,7 +169,7 @@ export function CreateSubscriptionDialog({
         <DialogHeader>
           <DialogTitle>Create subscription</DialogTitle>
           <DialogDescription>
-            Add a new subscription to start billing a customer.
+            Put a customer on a plan. It starts now unless you create it as a draft.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -358,7 +360,7 @@ export function CreateSubscriptionDialog({
                   <FormItem>
                     <FormLabel>Trial period</FormLabel>
                     <FormControl>
-                      <Input type="number" min={0} max={730} placeholder="0 days" {...field} />
+                      <Input type="number" min={0} max={730} placeholder="0 days" disabled={watchedDraft} {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -368,18 +370,22 @@ export function CreateSubscriptionDialog({
 
             <FormField
               control={form.control}
-              name="start_now"
+              name="draft"
               render={({ field }) => (
                 <FormItem className="flex flex-row items-center gap-2 rounded-md border border-input px-3 py-2.5">
                   <FormControl>
                     <Checkbox
                       checked={field.value}
-                      onCheckedChange={field.onChange}
+                      onCheckedChange={(checked) => {
+                        field.onChange(checked)
+                        // A draft has no trial (the API refuses one).
+                        if (checked) form.setValue('trial_days', '')
+                      }}
                     />
                   </FormControl>
                   <div>
-                    <FormLabel className="text-sm font-medium">Start immediately</FormLabel>
-                    <p className="text-xs text-muted-foreground">Activate and set the first billing period now</p>
+                    <FormLabel className="text-sm font-medium">Create as draft</FormLabel>
+                    <p className="text-xs text-muted-foreground">Bills nothing until you activate it. A draft has no trial.</p>
                   </div>
                 </FormItem>
               )}
