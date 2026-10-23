@@ -691,3 +691,51 @@ func TestMeterEditGuard_HTTP(t *testing.T) {
 		`{"rating_rule_version_id":"`+pm.rule.RatingRuleVersionID+`","dimension_match":{"model":"z"},"priority":100}`))
 	check(t, "DELETE rule", do(http.MethodDelete, "/v1/meters/"+pm.meter.ID+"/pricing-rules/"+pm.rule.ID, ""))
 }
+
+// TestMeterEditGuard_TestClockException: the refusal points to a new
+// version, which "applies from each subscription's next period". A version
+// is stamped with real time, and a period on a test clock moved forward
+// starts in simulated time, after it, so the version resolves for that open
+// period. In test mode, where test clocks exist, the refusal says so; in
+// live mode it does not.
+func TestMeterEditGuard_TestClockException(t *testing.T) {
+	f := newMeterEditFixture(t)
+	const exception = "For a subscription on a test clock, it can apply to the current simulated period."
+
+	t.Run("a version published now resolves for a period that starts later", func(t *testing.T) {
+		v1 := f.rule(t, "tc_rate", 1)
+		v2 := f.rule(t, "tc_rate", 2)
+		store := pricing.NewPostgresStore(f.db)
+		got, err := store.GetRuleByKeyAsOf(f.ctx, f.tenantID, "tc_rate", v1.CreatedAt)
+		if err != nil || got.ID != v1.ID {
+			t.Fatalf("as of v1's stamp: want v1, got %v (%v)", got.ID, err)
+		}
+		simPeriodStart := time.Now().UTC().AddDate(0, 1, 0)
+		got, err = store.GetRuleByKeyAsOf(f.ctx, f.tenantID, "tc_rate", simPeriodStart)
+		if err != nil || got.ID != v2.ID {
+			t.Fatalf("as of a simulated period start a month ahead: want v2, got %v (%v)", got.ID, err)
+		}
+	})
+
+	t.Run("test mode names the exception", func(t *testing.T) {
+		pm := f.pricedMeter(t, "tc_test")
+		f.sub(t, pm.plan.ID, "active")
+		err := f.svc.DeleteMeterPricingRule(f.ctx, f.tenantID, pm.rule.ID)
+		wantInUse(t, "delete rule", err, "1 subscription")
+		if !strings.Contains(err.Error(), exception) {
+			t.Errorf("test-mode refusal must name the test-clock exception, got %q", err.Error())
+		}
+	})
+
+	t.Run("live mode does not", func(t *testing.T) {
+		live := f
+		live.ctx = postgres.WithLivemode(context.Background(), true)
+		pm := live.pricedMeter(t, "tc_live")
+		live.sub(t, pm.plan.ID, "active")
+		err := live.svc.DeleteMeterPricingRule(live.ctx, live.tenantID, pm.rule.ID)
+		wantInUse(t, "delete rule", err, "1 subscription")
+		if strings.Contains(err.Error(), "test clock") {
+			t.Errorf("live mode has no test clocks; the refusal must not mention them, got %q", err.Error())
+		}
+	})
+}

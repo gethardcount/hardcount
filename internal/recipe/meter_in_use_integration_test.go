@@ -28,6 +28,12 @@ import (
 // price; existingModel != "" adds a rule {model: existingModel}.
 func liveTokensMeter(t *testing.T, f *recipeIntegrationFixture, ctx context.Context, tenantID string, defaultCents int64, existingModel string) domain.Meter {
 	t.Helper()
+	return liveMeter(t, f, ctx, tenantID, "sum", defaultCents, existingModel)
+}
+
+// liveMeter is liveTokensMeter with the meter's aggregation.
+func liveMeter(t *testing.T, f *recipeIntegrationFixture, ctx context.Context, tenantID, aggregation string, defaultCents int64, existingModel string) domain.Meter {
+	t.Helper()
 	defaultID := ""
 	if defaultCents > 0 {
 		r, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
@@ -40,7 +46,7 @@ func liveTokensMeter(t *testing.T, f *recipeIntegrationFixture, ctx context.Cont
 		defaultID = r.ID
 	}
 	m, err := f.pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: defaultID,
+		Key: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: aggregation, RatingRuleVersionID: defaultID,
 	})
 	if err != nil {
 		t.Fatalf("meter: %v", err)
@@ -139,5 +145,28 @@ func TestService_Instantiate_AddsUnpricedModelsToAMeterInUse(t *testing.T) {
 	}
 	if len(rules) < 2 {
 		t.Errorf("recipe rules must be added beside the operator's, have %d", len(rules))
+	}
+}
+
+// TestService_Instantiate_AggregationConflictOnAMeterInUse: the recipe's
+// refusal for a meter that adds up usage another way must not offer the API
+// as a way out while subscriptions use the meter, because the API refuses
+// that change then (409 meter_in_use).
+func TestService_Instantiate_AggregationConflictOnAMeterInUse(t *testing.T) {
+	f := newRecipeFixture(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, f.db, "recipe meter aggregation in use")
+	m := liveMeter(t, f, ctx, tenantID, "max", 1, "")
+
+	_, err := f.svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{})
+	if !errors.Is(err, errs.ErrAlreadyExists) {
+		t.Fatalf("want ErrAlreadyExists (meter conflict), got %v", err)
+	}
+	if !strings.Contains(err.Error(), "only while no draft, trialing or active subscription uses the meter") {
+		t.Errorf("the refusal must say the API can change the aggregation only while no subscription uses the meter, got %q", err.Error())
+	}
+	sum := "sum"
+	if _, err := f.pricingSvc.UpdateMeter(ctx, tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: &sum}); errs.Code(err) != "meter_in_use" {
+		t.Fatalf("changing the aggregation of a meter in use: want meter_in_use, got %v", err)
 	}
 }
