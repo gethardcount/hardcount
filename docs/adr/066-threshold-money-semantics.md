@@ -429,7 +429,7 @@ re-read waits, no deadlock, the close bills the residual), and the
 
 A spend threshold always keeps the billing period. The option to start a
 new period at each fire is removed from the API, the dashboard and the
-database (migration 00203), approved by the product owner on 2026-10-23.
+database (migration 00205), approved by the product owner on 2026-10-23.
 Only Stripe has it; no open-source peer does.
 
 **The under-bill this ends.** §5's `{in_advance base × reset=true}`: on an

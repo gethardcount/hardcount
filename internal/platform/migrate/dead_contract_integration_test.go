@@ -322,7 +322,7 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 		t.Errorf("a plan inserted without a status is %q (%v), want active", planStatus, err)
 	}
 	// 00201's false default for billing_threshold_reset_cycle is checked by
-	// TestThresholdResetColumnDropped: 00203 drops the column, and its Down
+	// TestThresholdResetColumnDropped: 00205 drops the column, and its Down
 	// puts it back as 00201 left it.
 
 	if tableExists(t, db, "public.billed_entries") {

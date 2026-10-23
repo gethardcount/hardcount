@@ -9,7 +9,7 @@ import (
 
 // thresholdResetVersion is the migration that drops
 // subscriptions.billing_threshold_reset_cycle.
-const thresholdResetVersion = 203
+const thresholdResetVersion = 205
 
 // thresholdResetSeed is a subscription in each threshold shape the column
 // could describe, and an issued invoice. sub_amt asked for a new period at
