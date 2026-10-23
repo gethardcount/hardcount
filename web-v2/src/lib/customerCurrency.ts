@@ -96,6 +96,12 @@ export function settledCustomerCurrency(
 // default only suggest one. The New invoice dialog fixes the picker and
 // shows this line.
 export function invoiceCurrencyPin(c: CustomerCurrency): string | null {
-  void c
-  return null
+  switch (c.source) {
+    case 'billing_profile':
+      return `This customer is billed in ${c.currency} (billing profile), so the invoice is too.`
+    case 'subscription':
+      return `This customer is billed in ${c.currency} (subscription plan), so the invoice is too.`
+    default:
+      return null
+  }
 }

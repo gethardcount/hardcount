@@ -749,6 +749,12 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	if s.settings != nil {
 		ts, err = s.settings.Get(ctx, tenantID)
 		if err != nil {
+			// With no currency in the request this read may hold the one
+			// to use (the workspace default), so it is the documented,
+			// retryable 503 currency_unavailable.
+			if currency == "" {
+				return domain.Invoice{}, fmt.Errorf("%w: read tenant settings: %v", ErrCurrencyUnavailable, err)
+			}
 			return domain.Invoice{}, fmt.Errorf("read tenant settings: %w", err)
 		}
 	}

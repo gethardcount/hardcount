@@ -29,6 +29,7 @@ import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { invoiceCurrencyPin, type CustomerCurrency } from '@/lib/customerCurrency'
 import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
 import { statusBadgeVariant } from '@/lib/status'
@@ -1278,8 +1279,7 @@ export default function CustomerDetailPage() {
         <NewInvoiceDialog
           customerId={id}
           customer={customer}
-          billingProfile={billingProfile ?? null}
-          defaultCurrency={customerCurrency.currency}
+          customerCurrency={customerCurrency}
           onClose={() => setShowNewInvoice(false)}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
@@ -1769,17 +1769,18 @@ const blankLine = (): ComposerLine => ({
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrency, onClose, onCreated }: {
+function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onCreated }: {
   customerId: string
   customer: Customer
-  billingProfile: BillingProfile | null
-  defaultCurrency: string
+  customerCurrency: CustomerCurrency
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
 }) {
   // Default currency: the customer's currency (lib/customerCurrency), so a
-  // customer on a EUR plan opens in EUR. The operator can switch in one click.
-  const initialCurrency = defaultCurrency.toUpperCase()
+  // customer on a EUR plan opens in EUR. When the billing profile or a live
+  // plan sets it, the server refuses any other (409), so the picker is fixed.
+  const initialCurrency = customerCurrency.currency.toUpperCase()
+  const currencyPin = invoiceCurrencyPin(customerCurrency)
   const [currency, setCurrency] = useState(initialCurrency)
   const [memo, setMemo] = useState('')
   // Service period (optional) — the inclusive dates this invoice covers.
@@ -2016,6 +2017,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                 items={GEO_CURRENCIES.map(c => ({ value: c.code, label: `${c.symbol} ${c.code} — ${c.label}` }))}
                 value={currency}
                 onValueChange={(v) => setCurrency((v ?? 'USD').toUpperCase())}
+                disabled={currencyPin !== null}
               >
                 <SelectTrigger id="composer-currency" className="w-full">
                   <SelectValue />
@@ -2028,8 +2030,8 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                   ))}
                 </SelectContent>
               </Select>
-              {billingProfile?.currency && billingProfile.currency.toUpperCase() === currency && (
-                <p className="text-xs text-muted-foreground">From customer billing profile.</p>
+              {currencyPin && (
+                <p className="text-xs text-muted-foreground">{currencyPin}</p>
               )}
             </div>
 

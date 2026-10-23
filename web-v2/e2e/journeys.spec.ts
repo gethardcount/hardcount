@@ -641,6 +641,10 @@ test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => 
   await expect(balance).toContainText('€0.00')
   await newInvoice.click()
   await expect(page.getByRole('dialog').getByLabel('Currency')).toContainText('EUR')
+  // The plan fixes the currency: the server refuses any other (409), so the
+  // picker is fixed and says why.
+  await expect(page.getByRole('dialog').getByLabel('Currency')).toBeDisabled()
+  await expect(page.getByRole('dialog').getByText('This customer is billed in EUR (subscription plan), so the invoice is too.')).toBeVisible()
 })
 
 test("Margin shows no margin without a provider cost, and each model's margin with one", async ({ page }) => {

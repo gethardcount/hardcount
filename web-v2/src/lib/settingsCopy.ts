@@ -29,4 +29,4 @@ export function invoiceNumberPreview(prefix: string, nextSequence: number, livem
 // own units (ADR-129): 1000 cents fires at $10.00 of USD credit and at €10.00
 // of EUR credit. The field shows no currency symbol for that reason.
 export const CREDIT_LOW_THRESHOLD_HINT =
-  "Velox tells your app (by webhook) when a customer's credit balance drops below this amount. Leave blank to turn off. A balance that runs out always sends its own message."
+  "Velox tells your app (by webhook) when a customer's credit in one currency drops below this amount of that currency: 10 means $10 of USD credit and €10 of EUR credit. Leave blank to turn off. A balance that runs out always sends its own message."

@@ -6371,8 +6371,10 @@ type TenantSettings struct {
 	// CreatedAt Zero time when the tenant has never saved settings.
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
-	// `credit.balance_low` webhook fires. null turns it off.
+	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
+	// amount, in that currency's minor units, the `credit.balance_low`
+	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+	// credit. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
 	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
@@ -6468,8 +6470,10 @@ type TenantSettingsInput struct {
 	CompanyPostalCode string `json:"company_postal_code,omitempty"`
 	CompanyState      string `json:"company_state,omitempty"`
 
-	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
-	// `credit.balance_low` webhook fires. null turns it off.
+	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
+	// amount, in that currency's minor units, the `credit.balance_low`
+	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+	// credit. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
 	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change

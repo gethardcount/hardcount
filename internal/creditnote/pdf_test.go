@@ -181,7 +181,7 @@ func TestSettlementLines(t *testing.T) {
 		{
 			name:    "credit grant",
 			cn:      domain.CreditNote{CreditAmountCents: 1000, Currency: "USD"},
-			want:    "account credit",
+			want:    "credit balance",
 			wantAll: 1,
 		},
 		{
@@ -207,7 +207,7 @@ func TestSettlementLines(t *testing.T) {
 			// settled credit line.
 			name:    "mixed failed-card + credit describes both channels",
 			cn:      domain.CreditNote{RefundAmountCents: 1000, RefundStatus: domain.RefundFailed, CreditAmountCents: 2000, TotalCents: 3000, Currency: "USD"},
-			want:    "account credit",
+			want:    "credit balance",
 			wantAll: 3, // failed line + reach-out line + credit line
 		},
 	}
