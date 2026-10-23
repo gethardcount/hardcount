@@ -415,9 +415,10 @@ func (s *Stripe) SetBreaker(b *breaker.Breaker) {
 // The method name is AttachForWebhook (not AttachFromSetupIntent) so
 // paymentmethods.Service can keep its richer AttachFromSetupIntent
 // method — returning (PaymentMethod, error) — for tests and direct
-// callers, while this package imports nothing from paymentmethods.
+// callers, while this package imports nothing from paymentmethods. It
+// returns the card as the API shows it, which payment_method.* carries.
 type PaymentMethodAttacher interface {
-	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) error
+	AttachForWebhook(ctx context.Context, tenantID, customerID, stripePaymentMethodID string, makeDefault bool) (domain.PaymentMethodView, error)
 }
 
 // SetPaymentMethodAttacher configures the handler that processes
@@ -1701,7 +1702,8 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		ctx = veloxauth.WithCustomerActor(ctx, customerID)
 	}
 
-	if err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromVeloxSetup); err != nil {
+	pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, pmID, fromVeloxSetup)
+	if err != nil {
 		return fmt.Errorf("attach payment method: %w", err)
 	}
 
@@ -1711,10 +1713,9 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		"stripe_pm_id", pmID,
 	)
 
-	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodAttached, map[string]any{
-		"customer_id":              customerID,
+	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodAttached, domain.PaymentMethodWebhookData(pm, map[string]any{
 		"stripe_payment_method_id": pmID,
-	})
+	}))
 
 	return nil
 }
@@ -2213,10 +2214,13 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 	// the newest on the Stripe customer, so it never takes the default by
 	// itself: for a setup-mode session, setup_intent.succeeded carries the
 	// exact card and is the one writer that makes it the default.
+	var recorded *domain.PaymentMethodView
 	if s.pmAttacher != nil && card.PaymentMethodID != "" {
-		if err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID, false); err != nil {
+		pm, err := s.pmAttacher.AttachForWebhook(ctx, tenantID, customerID, card.PaymentMethodID, false)
+		if err != nil {
 			return fmt.Errorf("record the checkout's card: %w", err)
 		}
+		recorded = &pm
 	}
 
 	now := time.Now().UTC()
@@ -2290,12 +2294,18 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 		"card_last4", setup.CardLast4,
 	)
 
-	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodUpdated, map[string]any{
-		"customer_id":        customerID,
+	// payment_method.updated carries the card as recorded above (ADR-131).
+	// Every production wiring records one: the attacher is always wired, and
+	// Stripe names the card it lists. Without a recorded card there is no
+	// resource to send, so the event is left out, loudly.
+	if recorded == nil {
+		slog.ErrorContext(ctx, "payment_method.updated not sent: the checkout's card was not recorded as a payment method",
+			"customer_id", customerID, "stripe_customer_id", stripeCustomerID, "attacher_wired", s.pmAttacher != nil)
+		return nil
+	}
+	s.fireEvent(ctx, tenantID, domain.EventPaymentMethodUpdated, domain.PaymentMethodWebhookData(*recorded, map[string]any{
 		"stripe_customer_id": stripeCustomerID,
-		"card_brand":         setup.CardBrand,
-		"card_last4":         setup.CardLast4,
-	})
+	}))
 
 	return nil
 }

@@ -1605,22 +1605,11 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// reason as the audit row above: pre-fix the handler fired it, so the
 	// tax-retry auto-finalize chain (RetryTax → Finalize) silently never
 	// notified integrators that a tax-deferred invoice finalized.
-	// Same fields as the engine's sender (billing.DispatchInvoiceFinalized).
-	// The collector applies credit after this (ADR-116), so amount_due_cents
-	// is before that credit; credits_applied_cents is what the row already
-	// carries, so the two add up as they do on the invoice (#1281).
+	// It carries the finalized invoice (ADR-131), as the engine's sender does
+	// (billing.DispatchInvoiceFinalized). The collector applies credit after
+	// this (ADR-116), so its amount_due_cents is before that credit.
 	if s.events != nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, map[string]any{
-			"invoice_id":            finalized.ID,
-			"invoice_number":        finalized.InvoiceNumber,
-			"customer_id":           finalized.CustomerID,
-			"status":                string(finalized.Status),
-			"payment_status":        string(finalized.PaymentStatus),
-			"total_amount_cents":    finalized.TotalAmountCents,
-			"amount_due_cents":      finalized.AmountDueCents,
-			"credits_applied_cents": finalized.CreditsAppliedCents,
-			"currency":              finalized.Currency,
-		})
+		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, domain.InvoiceWebhookData(finalized, nil))
 	}
 	return finalized, nil
 }
@@ -1969,16 +1958,7 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 	// pattern as finalized/marked_uncollectible/payment_recorded), so
 	// engine-triggered voids notify integrators too.
 	if s.events != nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceVoided, map[string]any{
-			"invoice_id":         voided.ID,
-			"invoice_number":     voided.InvoiceNumber,
-			"customer_id":        voided.CustomerID,
-			"status":             string(voided.Status),
-			"payment_status":     string(voided.PaymentStatus),
-			"total_amount_cents": voided.TotalAmountCents,
-			"amount_due_cents":   voided.AmountDueCents,
-			"currency":           voided.Currency,
-		})
+		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceVoided, domain.InvoiceWebhookData(voided, nil))
 	}
 	if s.dunningResolver != nil {
 		if err := s.dunningResolver.ResolveByInvoice(ctx, tenantID, voided.ID, domain.ResolutionInvoiceVoided); err != nil {
@@ -2096,13 +2076,7 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 		})
 	}
 	if s.events != nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceMarkedUncollectible, map[string]any{
-			"invoice_id":       updated.ID,
-			"invoice_number":   updated.InvoiceNumber,
-			"customer_id":      updated.CustomerID,
-			"amount_due_cents": updated.AmountDueCents,
-			"currency":         updated.Currency,
-		})
+		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceMarkedUncollectible, domain.InvoiceWebhookData(updated, nil))
 	}
 
 	// Stop the invoice being payable on a Checkout page the customer still has
@@ -2236,15 +2210,12 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", updated.ID, updated.InvoiceNumber, meta)
 	}
 	if s.events != nil {
-		s.dispatchEvent(ctx, tenantID, domain.EventInvoicePaymentRecorded, map[string]any{
-			"invoice_id":     updated.ID,
-			"invoice_number": updated.InvoiceNumber,
-			"customer_id":    updated.CustomerID,
-			"amount_cents":   updated.AmountPaidCents,
-			"currency":       updated.Currency,
+		// The paid invoice holds the amount (amount_paid_cents) and the time
+		// (paid_at, which MarkPaidOffline set to now). The status it was paid
+		// from is gone from it, so it rides beside it.
+		s.dispatchEvent(ctx, tenantID, domain.EventInvoicePaymentRecorded, domain.InvoiceWebhookData(updated, map[string]any{
 			"recovered_from": string(inv.Status),
-			"recorded_at":    now.UTC(),
-		})
+		}))
 	}
 	return updated, nil
 }

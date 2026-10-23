@@ -196,10 +196,9 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		}}).want(t, 201, "create invoice: "+desc).body, "id")
 		call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(t, 200, "finalize: "+desc)
 		got := events.next("finalize "+desc, domain.EventInvoiceFinalized, domain.EventDunningStarted)
-		// Finalizing with no card on file emails the setup link after the
-		// event: the invoice records that it sent it.
+		// The collection that runs after the event touches the row.
 		checkEventResource(t, "invoice.finalized "+desc, got[domain.EventInvoiceFinalized], getInvoice(id),
-			"no_pm_notified_at", "updated_at")
+			"updated_at")
 		checkEventResource(t, "dunning.started "+desc, got[domain.EventDunningStarted], getRun(id))
 		return id
 	}
@@ -440,6 +439,9 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 		t.Errorf("subscription.item.removed item_id = %v, want %s", ev.Data["item_id"], addedID)
 	}
 
+	// A plan change still scheduled at the cancel: the cancel clears it, and
+	// the event shows the subscription without it, as the API does.
+	step("schedule plan change before cancel", domain.EventSubscriptionPendingChangeScheduled, "PATCH", base+"/items/"+itemID, map[string]any{"new_plan_id": pro, "immediate": false}, 200)
 	call("POST", base+"/cancel", flowReq{body: map[string]any{}}).want(t, 200, "cancel")
 	got := events.next("cancel", domain.EventSubscriptionCanceled)
 	ev = got[domain.EventSubscriptionCanceled]
@@ -620,7 +622,10 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	got = events.next("period end", domain.EventSubscriptionPendingChangeApplied,
 		domain.EventSubscriptionCollectionResumed, domain.EventSubscriptionCanceled)
 	ev = got[domain.EventSubscriptionPendingChangeApplied]
-	checkEventResource(t, "subscription.pending_change.applied", ev, getSub(flowStr(changing, "id")))
+	// The change applies at the period end, before the close that starts
+	// the next period: the event shows the period that just ended.
+	checkEventResource(t, "subscription.pending_change.applied", ev, getSub(flowStr(changing, "id")),
+		"current_billing_period_start", "current_billing_period_end", "next_billing_at", "updated_at")
 	if ev.Data["item_id"] != changeItem || ev.Data["old_plan_id"] != starter || flowStr(ev.Data, "applied_at") == "" {
 		t.Errorf("subscription.pending_change.applied extras = %v / %v / %v, want %s / %s / a time",
 			ev.Data["item_id"], ev.Data["old_plan_id"], ev.Data["applied_at"], changeItem, starter)
