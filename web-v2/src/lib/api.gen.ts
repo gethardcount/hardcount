@@ -2997,7 +2997,8 @@ export interface paths {
                  *     than 255 characters, `quantity` when it is missing or not as
                  *     described above, `external_customer_id` or `event_name` for an
                  *     unknown customer or meter, `timestamp` for a malformed one, and
-                 *     `properties` when it is sent (it was renamed `dimensions`).
+                 *     `properties` when it has a key (it was renamed `dimensions`;
+                 *     `null` or `{}` is ignored).
                  */
                 422: {
                     headers: {
@@ -13274,7 +13275,7 @@ export interface operations {
              *     formatted `timestamp`; more than 16 dimensions or a non-scalar
              *     dimension value; a missing or malformed `quantity`, one with
              *     more than 12 decimal places, or one of 10^26 or more; a
-             *     `properties` field (it was renamed `dimensions`).
+             *     `properties` field with a key (it was renamed `dimensions`).
              */
             422: {
                 headers: {

@@ -218,7 +218,7 @@ func validateQuantity(q decimal.Decimal) error {
 	if q.IsZero() {
 		return nil
 	}
-	digits, exp := int64(q.NumDigits()), int64(q.Exponent())
+	digits, exp := coefficientDigits(q), int64(q.Exponent())
 	// 10^(digits+exp-1) <= |q| < 10^(digits+exp), so |q| < 10^26 exactly
 	// when digits+exp <= 26.
 	if digits+exp > 26 {
@@ -231,6 +231,25 @@ func validateQuantity(q decimal.Decimal) error {
 		return errs.Invalid("quantity", "quantity has more than 12 decimal places")
 	}
 	return nil
+}
+
+// coefficientDigits counts the decimal digits of q's coefficient exactly.
+// shopspring's NumDigits takes a float log10 for a coefficient up to 2^53,
+// which counts 10^15, 10^15+1 and 10^15+2 as 15 digits. Its path for larger
+// coefficients checks its estimate against a power of ten, so it is exact.
+func coefficientDigits(q decimal.Decimal) int64 {
+	c := q.Coefficient()
+	if !c.IsInt64() || c.Int64() > 1<<53 || c.Int64() < -(1<<53) {
+		return int64(q.NumDigits())
+	}
+	v, n := c.Int64(), int64(1)
+	if v < 0 {
+		v = -v
+	}
+	for ; v >= 10; v /= 10 {
+		n++
+	}
+	return n
 }
 
 // validateDimensions enforces the v1 dimension contract: at most

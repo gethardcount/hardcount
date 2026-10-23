@@ -168,7 +168,8 @@ stored is answered as a replay (`200`, or counted in `deduplicated`).
 holding one (`"5.5"`, for exact decimals), with at most 12 decimal places.
 A negative value is a correction. An event without one, or with any other
 value, is refused with `422` and `param: quantity`. The event's
-`dimensions` pick its price; `properties`, the old name, is refused.
+`dimensions` pick its price; `properties`, the old name, is refused when
+it has a key (`null` or `{}` is ignored).
 
 ### Late usage
 

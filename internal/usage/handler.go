@@ -96,9 +96,9 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 // whole batch). The response side serializes it as a decimal string.
 //
 // Properties is not a field. It was the old name of Dimensions, removed
-// before 0.9.0, and is decoded only so an event that still sends it is
-// refused: stored without its dimensions it would be priced by the wrong
-// rule, silently.
+// before 0.9.0, and is decoded only so an event that still sends it with a
+// key is refused: stored without its dimensions it would be priced by the
+// wrong rule, silently. A null or empty properties is taken as absent.
 type APIEvent struct {
 	ExternalCustomerID string           `json:"external_customer_id"`
 	EventName          string           `json:"event_name"`
@@ -107,6 +107,18 @@ type APIEvent struct {
 	IdempotencyKey     string           `json:"idempotency_key,omitempty"`
 	Timestamp          *json.RawMessage `json:"timestamp,omitempty"`
 	Properties         json.RawMessage  `json:"properties,omitempty"`
+}
+
+// hasProperties reports whether an event sent a properties value that could
+// carry dimensions. null and {} carry none (null decodes to an empty map), so
+// they are taken as if absent: clients generated from the old spec may send
+// either for an unset field. Any other value is refused.
+func hasProperties(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var obj map[string]json.RawMessage
+	return json.Unmarshal(raw, &obj) != nil || len(obj) > 0
 }
 
 // quantityMessage is the 422 text for a quantity that is not a JSON number or
@@ -227,7 +239,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 		return IngestInput{}, errs.Invalid("idempotency_key", longKeyMessage)
 	}
 
-	if len(evt.Properties) > 0 {
+	if hasProperties(evt.Properties) {
 		return IngestInput{}, errs.Invalid("properties", "properties was renamed dimensions; send the event's dimensions as dimensions")
 	}
 	quantity, err := parseQuantity(evt.Quantity)
