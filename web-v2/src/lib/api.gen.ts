@@ -2236,9 +2236,9 @@ export interface paths {
                          */
                         billing_time?: "calendar" | "anniversary";
                         /**
-                         * @description Days of free trial. With a trial the subscription is
-                         *     `trialing` from now and its first paid period starts on
-                         *     the day the trial ends.
+                         * @description Days of free trial; 0 means no trial. Above 0, the
+                         *     subscription is `trialing` from now and its first paid
+                         *     period starts on the day the trial ends.
                          */
                         trial_days?: number;
                         /**
@@ -2247,7 +2247,7 @@ export interface paths {
                          *     today in the account's billing time zone (the clock's
                          *     day for a customer on a test clock), and a non-zero base
                          *     fee billed in advance is invoiced now. With `trial_days`
-                         *     it is `trialing` from now. Send `draft` to create it
+                         *     above 0 it is `trialing` from now. Send `draft` to create it
                          *     without starting it: it bills nothing until you activate
                          *     it with `POST /v1/subscriptions/{id}/activate`. A draft
                          *     cannot have a trial (`trial_days` above 0). An empty or

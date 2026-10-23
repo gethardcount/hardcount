@@ -98,7 +98,8 @@ variable into the JSON for you.
    the **Customers** page.
 
 4. **Put the customer on the plan.** This makes a subscription. It starts
-   when you create it: its first month starts at the clock's current time.
+   when you create it: its first month starts at 00:00 on the clock's day,
+   in your account's billing time zone.
    (To set one up that bills nothing yet, send `"status": "draft"` and
    activate it later.)
 

@@ -270,6 +270,37 @@ func TestCreateSubscription_TrialStartsNow(t *testing.T) {
 	}
 }
 
+// TestCreateSubscription_ZeroTrialDaysIsNoTrial: trial_days 0 is accepted and
+// means no trial. A form whose trial field defaults to 0 sends it, so the spec
+// says "trial_days above 0" makes a trialing subscription: with 0 the create
+// is active and bills day 1, and with status "draft" it is a plain draft.
+func TestCreateSubscription_ZeroTrialDaysIsNoTrial(t *testing.T) {
+	t.Run("start now", func(t *testing.T) {
+		r := newLagRigBare(t, "in_advance", 0)
+		out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("zero-trial", "calendar", map[string]any{"trial_days": 0}), http.StatusCreated)
+		if got := flowStr(out, "status"); got != string(domain.SubscriptionActive) {
+			t.Fatalf("status = %q, want active", got)
+		}
+		r.subID = flowStr(out, "id")
+		if s := r.sub(); s.TrialStartAt != nil || s.TrialEndAt != nil {
+			t.Fatalf("trial = [%v, %v), want none", s.TrialStartAt, s.TrialEndAt)
+		}
+		if subs, invs := r.customerCounts(); subs != 1 || invs != 1 {
+			t.Fatalf("%d subscriptions and %d invoices, want 1 and 1 (day-1 bill)", subs, invs)
+		}
+	})
+	t.Run("draft", func(t *testing.T) {
+		r := newLagRigBare(t, "in_advance", 0)
+		out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("zero-trial-draft", "calendar", map[string]any{"status": "draft", "trial_days": 0}), http.StatusCreated)
+		if got := flowStr(out, "status"); got != string(domain.SubscriptionDraft) {
+			t.Fatalf("status = %q, want draft", got)
+		}
+		if subs, invs := r.customerCounts(); subs != 1 || invs != 0 {
+			t.Fatalf("%d subscriptions and %d invoices, want 1 and 0", subs, invs)
+		}
+	})
+}
+
 // TestCreateSubscription_ExplicitDraftBillsNothingUntilActivated: status
 // "draft" is the one way to create a subscription that does not start. It has
 // no period, no billing run bills it, and activating it bills day 1 from the
