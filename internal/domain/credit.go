@@ -12,17 +12,22 @@ const (
 )
 
 type CreditLedgerEntry struct {
-	ID           string          `json:"id"`
-	TenantID     string          `json:"tenant_id,omitempty"`
-	CustomerID   string          `json:"customer_id"`
-	EntryType    CreditEntryType `json:"entry_type"`
-	AmountCents  int64           `json:"amount_cents"`
-	BalanceAfter int64           `json:"balance_after"`
-	Description  string          `json:"description"`
-	InvoiceID    string          `json:"invoice_id,omitempty"`
-	ExpiresAt    *time.Time      `json:"expires_at,omitempty"`
-	Metadata     map[string]any  `json:"metadata,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID         string          `json:"id"`
+	TenantID   string          `json:"tenant_id,omitempty"`
+	CustomerID string          `json:"customer_id"`
+	EntryType  CreditEntryType `json:"entry_type"`
+	// Currency is the row's own ISO-4217 code, uppercase (ADR-129). A credit
+	// pays only invoices in its currency.
+	Currency    string `json:"currency"`
+	AmountCents int64  `json:"amount_cents"`
+	// BalanceAfter is the customer's balance in this row's currency after
+	// the row.
+	BalanceAfter int64          `json:"balance_after"`
+	Description  string         `json:"description"`
+	InvoiceID    string         `json:"invoice_id,omitempty"`
+	ExpiresAt    *time.Time     `json:"expires_at,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	CreatedAt    time.Time      `json:"created_at"`
 	// ConsumedCents tracks how much of a positive block's amount has
 	// been RETIRED — drained by FIFO-attributed usage/clawback entries
 	// plus the portion written off by expiry (Orb's credit-block

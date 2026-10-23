@@ -98,7 +98,9 @@ func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID stri
 }
 
 type GrantInput struct {
-	CustomerID  string     `json:"customer_id"`
+	CustomerID string `json:"customer_id"`
+	// Currency is the grant's ISO-4217 code (ADR-129). Required.
+	Currency    string     `json:"currency"`
 	AmountCents int64      `json:"amount_cents"`
 	Description string     `json:"description"`
 	InvoiceID   string     `json:"invoice_id,omitempty"`
