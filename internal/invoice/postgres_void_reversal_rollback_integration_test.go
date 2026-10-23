@@ -75,6 +75,7 @@ func TestUpdateStatusWithReversal_Success_CommitsVoidAndCreditGrant(t *testing.T
 
 	voided, err := store.UpdateStatusWithReversal(ctx, tenantID, invID, domain.InvoiceVoided, func(tx *sql.Tx) error {
 		_, e := creditStore.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
+			Currency:                "USD",
 			CustomerID:              custID,
 			EntryType:               domain.CreditGrant,
 			AmountCents:             500,
@@ -100,7 +101,7 @@ func TestUpdateStatusWithReversal_Success_CommitsVoidAndCreditGrant(t *testing.T
 		t.Fatalf("invoice must be voided after commit; status=%q", after.Status)
 	}
 
-	bal, err := creditStore.GetBalance(ctx, tenantID, custID)
+	bal, err := testutil.BalanceUSD(creditStore.GetBalance(ctx, tenantID, custID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}

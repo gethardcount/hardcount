@@ -135,7 +135,7 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 	r.custID = cust["id"].(string)
 	if grantCents > 0 {
 		r.must(http.MethodPost, "/v1/credits/grant", lagP0, map[string]any{
-			"customer_id": r.custID, "amount_cents": grantCents, "description": "lag rig fixture",
+			"customer_id": r.custID, "currency": "USD", "amount_cents": grantCents, "description": "lag rig fixture",
 		}, http.StatusCreated)
 	}
 	return r
@@ -288,8 +288,13 @@ func (r *lagRig) cycleInvoice(invs []lagInvoice, start time.Time) lagInvoice {
 func (r *lagRig) creditBalance() int64 {
 	r.t.Helper()
 	out := r.must(http.MethodGet, "/v1/credits/balance/"+r.custID, r.clk.Now(context.Background()), nil, http.StatusOK)
-	n, _ := out["balance_cents"].(float64)
-	return int64(n)
+	// One balance per currency (ADR-129); the rig bills in USD.
+	for _, b := range flowList(out, "data") {
+		if flowStr(b, "currency") == "USD" {
+			return flowInt(b, "balance_cents")
+		}
+	}
+	return 0
 }
 
 // wantAPIError checks an error answer: its status, its error code and a part
@@ -536,7 +541,7 @@ func TestCloseLag_ItemWrites_InGap(t *testing.T) {
 			// against an unpaid invoice for the running period is refused
 			// (ADR-050), which is not what these cases test.
 			r.must(http.MethodPost, "/v1/credits/grant", at.Add(-time.Hour), map[string]any{
-				"customer_id": r.custID, "amount_cents": 20000, "description": "close lag fixture",
+				"customer_id": r.custID, "currency": "USD", "amount_cents": 20000, "description": "close lag fixture",
 			}, http.StatusCreated)
 			method, path, body := c.write(r)
 			code, raw := r.do(method, path, at, body)

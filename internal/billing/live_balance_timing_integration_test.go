@@ -100,8 +100,12 @@ func timeLiveRead(t *testing.T, events int) {
 			if err != nil {
 				t.Fatalf("%s: live read: %v", label, err)
 			}
-			if live.UnbilledUsageCents != want {
-				t.Fatalf("%s: unbilled usage = %d, want %d", label, live.UnbilledUsageCents, want)
+			var unbilled int64
+			for _, b := range live.Balances {
+				unbilled += b.UnbilledUsageCents // one currency in this fixture
+			}
+			if unbilled != want {
+				t.Fatalf("%s: unbilled usage = %d, want %d", label, unbilled, want)
 			}
 		}
 		dashTimes := make([]time.Duration, 0, runs)

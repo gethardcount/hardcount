@@ -49,6 +49,7 @@ func seedExpiredGrant(t *testing.T, db *postgres.DB, ctx context.Context, svc *c
 	t.Helper()
 	future := time.Now().UTC().Add(24 * time.Hour)
 	g, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: customerID, AmountCents: amountCents,
 		Description: "seed expiring grant", ExpiresAt: &future,
 	})
@@ -221,6 +222,7 @@ func TestExpireGrant_RetirementWinsOverBackdatedApply(t *testing.T) {
 
 	// Active second block: the backdated apply must draw ONLY from this.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 5000, Description: "active block",
 	}); err != nil {
 		t.Fatalf("grant active block: %v", err)
@@ -330,6 +332,7 @@ func TestExpireGrant_ConcurrentBackdatedApply(t *testing.T) {
 		// Second, active block so the apply has an eligible target when
 		// it loses the race for the expiring grant.
 		if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+			Currency:   "USD",
 			CustomerID: cust.ID, AmountCents: 5000, Description: "active block",
 		}); err != nil {
 			t.Fatalf("round %d: grant active block: %v", i, err)
@@ -392,6 +395,7 @@ func TestAdjustAtomic_ClawbackRequiresEligibleBlocks(t *testing.T) {
 	// Only headroom is expired-unswept: clawback must fail loudly, not
 	// book a deduction nothing drained.
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: -6000, Description: "clawback vs expired",
 	}); err == nil {
 		t.Fatal("clawback against expired-unswept headroom succeeded; want loud failure")
@@ -407,6 +411,7 @@ func TestAdjustAtomic_ClawbackRequiresEligibleBlocks(t *testing.T) {
 		t.Fatalf("sweep errors: %v", errs)
 	}
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: -6000, Description: "clawback vs zero",
 	}); err == nil {
 		t.Fatal("clawback against zero balance succeeded; want failure")
@@ -414,11 +419,13 @@ func TestAdjustAtomic_ClawbackRequiresEligibleBlocks(t *testing.T) {
 
 	// Positive control: an active block absorbs the clawback fully.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 8000, Description: "active block",
 	}); err != nil {
 		t.Fatalf("grant active block: %v", err)
 	}
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: -6000, Description: "clawback vs active",
 	}); err != nil {
 		t.Fatalf("clawback against active block: %v", err)
@@ -434,11 +441,13 @@ func TestAdjustAtomic_ClawbackRequiresEligibleBlocks(t *testing.T) {
 func TestAdjust_CapsPositiveAmount(t *testing.T) {
 	_, ctx, tenantID, cust, _, svc, _ := expirySetup(t, "AdjustCap")
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 100_000_001, Description: "fat finger",
 	}); err == nil {
 		t.Fatal("positive adjustment above $1M cap succeeded; want 422")
 	}
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 100_000_000, Description: "at cap",
 	}); err != nil {
 		t.Fatalf("positive adjustment at cap: %v", err)

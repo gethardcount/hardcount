@@ -160,6 +160,7 @@ func (x *expiryEnv) backdatedGrant(t *testing.T, custID string, amount int64, ex
 	t.Helper()
 	future := time.Now().UTC().Add(24 * time.Hour)
 	g, err := x.credits.Grant(x.ctx, x.tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: custID, AmountCents: amount, Description: "expiring commit", ExpiresAt: &future,
 	})
 	if err != nil {

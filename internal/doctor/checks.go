@@ -70,14 +70,34 @@ WHERE (amount_cents > 0 AND consumed_cents > amount_cents)
 	{
 		Name:   "balance_exceeds_block_capacity",
 		Domain: "credit-ledger",
-		Why:    "a customer's materialized balance can never exceed the open capacity of their live blocks",
-		SQL: `SELECT tenant_id, customer_id,
+		Why:    "a customer's materialized balance in a currency can never exceed the open capacity of their live blocks in that currency (ADR-129: a credit drains only in its own currency, so headroom in one cannot cover another)",
+		SQL: `SELECT tenant_id, customer_id, currency,
        SUM(amount_cents) AS balance_cents,
        SUM(CASE WHEN amount_cents > 0 THEN amount_cents - consumed_cents ELSE 0 END) AS block_remaining_cents,
        SUM(amount_cents) - SUM(CASE WHEN amount_cents > 0 THEN amount_cents - consumed_cents ELSE 0 END) AS phantom_cents
 FROM customer_credit_ledger
-GROUP BY tenant_id, customer_id
+GROUP BY tenant_id, customer_id, currency
 HAVING SUM(amount_cents) > SUM(CASE WHEN amount_cents > 0 THEN amount_cents - consumed_cents ELSE 0 END);`,
+	},
+	{
+		Name:   "ledger_currency_matches_invoice",
+		Domain: "credit-ledger",
+		Why:    "a ledger row tied to an invoice (usage, a credit-note grant or a void reversal by invoice_id; a commit grant by source_invoice_id) carries that invoice's currency (ADR-129). A mismatch is credit that moved across currencies. Dev data the 00199 backfill relabeled shows up here too",
+		SQL: `SELECT l.id, l.tenant_id, l.customer_id, l.entry_type, l.currency, i.id AS invoice_id, i.currency AS invoice_currency
+FROM customer_credit_ledger l
+JOIN invoices i ON i.id = COALESCE(l.invoice_id, l.source_invoice_id) AND i.tenant_id = l.tenant_id
+WHERE l.currency <> UPPER(i.currency);`,
+	},
+	{
+		Name:   "drained_block_currency_matches",
+		Domain: "credit-ledger",
+		Why:    "every block a drain names (metadata drained_blocks) has the draining entry's currency (ADR-129): the drain filters blocks by currency, so a mismatch is a block drained for another currency's invoice",
+		SQL: `SELECT e.id, e.tenant_id, e.customer_id, e.entry_type, e.currency, b.id AS block_id, b.currency AS block_currency
+FROM customer_credit_ledger e
+CROSS JOIN LATERAL jsonb_array_elements(
+  CASE WHEN jsonb_typeof(e.metadata->'drained_blocks') = 'array' THEN e.metadata->'drained_blocks' ELSE '[]'::jsonb END) AS d(value)
+JOIN customer_credit_ledger b ON b.id = d.value->>'block_id' AND b.tenant_id = e.tenant_id
+WHERE b.currency <> e.currency;`,
 	},
 	{
 		Name:   "expired_grant_headroom_reopened",

@@ -15,6 +15,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/tax"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
@@ -35,12 +36,16 @@ type liveFixture struct {
 // as internal/api does in production.
 type liveTestCredits struct{ svc *credit.Service }
 
-func (a liveTestCredits) CreditSummary(ctx context.Context, tenantID, customerID string) (usage.CostDashboardCredits, error) {
-	bal, err := a.svc.GetBalance(ctx, tenantID, customerID)
+func (a liveTestCredits) CreditSummary(ctx context.Context, tenantID, customerID string) ([]usage.CostDashboardCredits, error) {
+	balances, err := a.svc.GetBalance(ctx, tenantID, customerID)
 	if err != nil {
-		return usage.CostDashboardCredits{}, err
+		return nil, err
 	}
-	return usage.CostDashboardCredits{BalanceCents: bal.BalanceCents}, nil
+	out := make([]usage.CostDashboardCredits, 0, len(balances))
+	for _, b := range balances {
+		out = append(out, usage.CostDashboardCredits{Currency: b.Currency, BalanceCents: b.BalanceCents})
+	}
+	return out, nil
 }
 
 func newLiveFixture(t *testing.T, name string, grantCents int64) *liveFixture {
@@ -95,6 +100,7 @@ func wireLive(t *testing.T, f *thresholdFixture, ctx context.Context) *liveFixtu
 func (lf *liveFixture) grant(t *testing.T, cents int64) {
 	t.Helper()
 	if _, err := lf.creditSvc.Grant(lf.ctx, lf.tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: lf.customerID, AmountCents: cents, Description: "prepaid",
 	}); err != nil {
 		t.Fatalf("grant credit: %v", err)
@@ -104,21 +110,48 @@ func (lf *liveFixture) grant(t *testing.T, cents int64) {
 // balance is the settled ledger balance.
 func (lf *liveFixture) balance(t *testing.T) int64 {
 	t.Helper()
-	bal, err := lf.creditSvc.GetBalance(lf.ctx, lf.tenantID, lf.customerID)
+	bal, err := testutil.BalanceUSD(lf.creditSvc.GetBalance(lf.ctx, lf.tenantID, lf.customerID))
 	if err != nil {
 		t.Fatalf("read balance: %v", err)
 	}
 	return bal.BalanceCents
 }
 
-// live is the engine's read, the one GET /v1/credits/balance/{id}/live serves.
-func (lf *liveFixture) live(t *testing.T) domain.CreditLiveBalance {
+// liveAll is the engine's read, the one GET /v1/credits/balance/{id}/live
+// serves: one entry per currency.
+func (lf *liveFixture) liveAll(t *testing.T) domain.CreditLiveBalance {
 	t.Helper()
 	got, err := lf.engine.LiveCreditBalance(lf.ctx, lf.tenantID, lf.customerID)
 	if err != nil {
 		t.Fatalf("live credit balance: %v", err)
 	}
 	return got
+}
+
+// live is the USD entry of the engine's read, the fixture's currency (a zero
+// entry when there is none).
+func (lf *liveFixture) live(t *testing.T) domain.CreditLiveCurrency {
+	t.Helper()
+	all := lf.liveAll(t)
+	if all.ComputedAt.IsZero() {
+		t.Error("computed_at is not set")
+	}
+	for _, b := range all.Balances {
+		if b.Currency == "USD" {
+			return b
+		}
+	}
+	return domain.CreditLiveCurrency{Currency: "USD"}
+}
+
+// dashboardUSD is the USD entry of the public dashboard's credits block.
+func dashboardUSD(credits []usage.CostDashboardCredits) usage.CostDashboardCredits {
+	for _, c := range credits {
+		if c.Currency == "USD" {
+			return c
+		}
+	}
+	return usage.CostDashboardCredits{Currency: "USD"}
 }
 
 // estimated is the estimated remaining credit. It reads both surfaces and
@@ -130,7 +163,7 @@ func (lf *liveFixture) estimated(t *testing.T) int64 {
 	if err != nil {
 		t.Fatalf("dashboard: %v", err)
 	}
-	c := got.(usage.CostDashboardProjection).Credits
+	c := dashboardUSD(got.(usage.CostDashboardProjection).Credits)
 	live := lf.live(t)
 	if c.EstimatedRemainingCents != live.EstimatedRemainingCents || c.BalanceCents != live.BalanceCents || c.UnbilledUsageCents != live.UnbilledUsageCents {
 		t.Errorf("the two surfaces disagree: dashboard balance/unbilled/estimated = %d/%d/%d, live read = %d/%d/%d",
@@ -139,9 +172,6 @@ func (lf *liveFixture) estimated(t *testing.T) int64 {
 	}
 	if want := max(live.BalanceCents-live.UnbilledUsageCents, 0); live.EstimatedRemainingCents != want {
 		t.Errorf("estimated remaining = %d, want max(%d - %d, 0) = %d", live.EstimatedRemainingCents, live.BalanceCents, live.UnbilledUsageCents, want)
-	}
-	if live.ComputedAt.IsZero() {
-		t.Error("computed_at is not set")
 	}
 	return c.EstimatedRemainingCents
 }
@@ -545,6 +575,7 @@ func TestLiveBalance_ExpiredGrantNotYetSwept_NotSpendable(t *testing.T) {
 
 	expires := time.Now().UTC().Add(2 * time.Second)
 	if _, err := lf.creditSvc.Grant(lf.ctx, lf.tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: lf.customerID, AmountCents: 10000, Description: "promo", ExpiresAt: &expires,
 	}); err != nil {
 		t.Fatalf("grant expiring credit: %v", err)
@@ -707,8 +738,8 @@ func TestLiveBalance_DashboardAggregatesOncePerMeter(t *testing.T) {
 		t.Fatalf("dashboard: %v", err)
 	}
 	proj := got.(usage.CostDashboardProjection)
-	if proj.ProjectedTotalCents != 2500 || proj.Credits.EstimatedRemainingCents != 7500 {
-		t.Fatalf("projected = %d, estimated = %d; want 2500 and 7500", proj.ProjectedTotalCents, proj.Credits.EstimatedRemainingCents)
+	if proj.ProjectedTotalCents != 2500 || dashboardUSD(proj.Credits).EstimatedRemainingCents != 7500 {
+		t.Fatalf("projected = %d, estimated = %d; want 2500 and 7500", proj.ProjectedTotalCents, dashboardUSD(proj.Credits).EstimatedRemainingCents)
 	}
 	if memo.Queries() != 1 || memo.Hits() != 1 {
 		t.Errorf("usage aggregations: %d reached the database and %d were reused; want 1 and 1 (one meter, two readers)", memo.Queries(), memo.Hits())

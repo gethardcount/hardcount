@@ -387,8 +387,8 @@ func TestDoctor_CreditCurrencyChecks(t *testing.T) {
 		check, part string
 		want        bool
 	}{
-		{"balance_exceeds_block_capacity", "currency=USD", true},
-		{"balance_exceeds_block_capacity", "currency=EUR", false},
+		{"balance_exceeds_block_capacity", "customer_id=cus_dccy_cap currency=USD", true},
+		{"balance_exceeds_block_capacity", "customer_id=cus_dccy_cap currency=EUR", false},
 		{"ledger_currency_matches_invoice", "vlx_ccl_dccy_bad_use", true},
 		{"ledger_currency_matches_invoice", "vlx_ccl_dccy_bad_commit", true},
 		{"ledger_currency_matches_invoice", "vlx_ccl_dccy_ok_use", false},

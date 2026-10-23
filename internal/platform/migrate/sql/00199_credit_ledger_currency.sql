@@ -47,6 +47,12 @@ UPDATE customer_credit_ledger l
   FROM resolved r
  WHERE l.tenant_id = r.tenant_id AND l.customer_id = r.customer_id;
 
+-- Every new row needs an uppercase ISO-4217 code. 00200 checks the rows
+-- already there and makes the column NOT NULL.
+ALTER TABLE customer_credit_ledger ADD CONSTRAINT customer_credit_ledger_currency_check
+    CHECK (currency IS NOT NULL AND currency ~ '^[A-Z]{3}$') NOT VALID;
+
 -- +goose Down
 -- Rollback runs only with APP_ENV=local.
+ALTER TABLE customer_credit_ledger DROP CONSTRAINT customer_credit_ledger_currency_check;
 ALTER TABLE customer_credit_ledger DROP COLUMN currency;

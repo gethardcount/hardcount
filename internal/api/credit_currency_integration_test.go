@@ -299,7 +299,7 @@ func TestCreditCurrency_CollectAppliesOnlySameCurrency(t *testing.T) {
 		id := flowStr(e.invoice(t, cust, currency, 3000).want(t, 201, "create "+currency+" invoice").body, "id")
 		e.call(t, "POST", "/v1/invoices/"+id+"/finalize", nil).want(t, 200, "finalize "+currency)
 		e.call(t, "POST", "/v1/invoices/"+id+"/collect", nil)
-		return e.call(t, "GET", "/v1/invoices/"+id, nil).want(t, 200, "get "+currency+" invoice").body
+		return flowObj(e.call(t, "GET", "/v1/invoices/"+id, nil).want(t, 200, "get "+currency+" invoice").body, "invoice")
 	}
 
 	eur := collect("EUR")
@@ -396,7 +396,7 @@ func TestCreditCurrency_DerivedRowsTakeTheInvoiceCurrency(t *testing.T) {
 		e.grant(t, cust, "EUR", 2000)
 		inv := finalized(cust, addOn)
 		e.call(t, "POST", "/v1/invoices/"+inv+"/collect", nil)
-		if got := flowInt(e.call(t, "GET", "/v1/invoices/"+inv, nil).want(t, 200, "get invoice").body, "credits_applied_cents"); got != 2000 {
+		if got := flowInt(e.call(t, "GET", "/v1/invoices/"+inv, nil).want(t, 200, "get invoice").body, "invoice", "credits_applied_cents"); got != 2000 {
 			t.Fatalf("credits applied %d, want 2000", got)
 		}
 		issueNote(inv, 2500, 0)

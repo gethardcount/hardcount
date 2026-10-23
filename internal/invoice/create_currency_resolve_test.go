@@ -7,23 +7,23 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
-type currencyCustomerFake struct {
-	profile domain.CustomerBillingProfile
+// currencyFactsFake is CustomerCurrencyFacts: a profile currency and the plan
+// currencies of live subscriptions, or a read error.
+type currencyFactsFake struct {
+	profile string
+	plans   []string
 	err     error
 }
 
-func (f currencyCustomerFake) Get(context.Context, string, string) (domain.Customer, error) {
-	return domain.Customer{ID: "cus_1"}, nil
-}
-func (f currencyCustomerFake) GetBillingProfile(context.Context, string, string) (domain.CustomerBillingProfile, error) {
-	return f.profile, f.err
+func (f currencyFactsFake) CustomerCurrencyFacts(context.Context, string, string) (string, []string, error) {
+	return f.profile, f.plans, f.err
 }
 
 type currencySettingsFake struct {
@@ -35,110 +35,103 @@ func (f currencySettingsFake) Get(context.Context, string) (domain.TenantSetting
 	return f.s, f.err
 }
 
-// TestCreate_CurrencyResolvesProfileThenTenantDefault pins the FLOW I8
-// contract for one-off invoices (fixed 2026-07-26): an omitted currency
-// resolves customer billing-profile → tenant default → USD. Pre-fix the
-// service hardcoded USD, so a bare API create for a GBP-profile
-// customer silently minted a USD invoice (the composer masked it by
-// always sending its picker value). Explicit input always wins.
-func TestCreate_CurrencyResolvesProfileThenTenantDefault(t *testing.T) {
-	post := func(t *testing.T, h *Handler, body map[string]any) domain.Invoice {
-		t.Helper()
-		b, _ := json.Marshal(body)
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(b))
-		req = req.WithContext(auth.WithTenantID(req.Context(), "t1"))
-		rr := httptest.NewRecorder()
-		h.create(rr, req)
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("status: got %d, body=%s", rr.Code, rr.Body.String())
-		}
-		var inv domain.Invoice
-		if err := json.Unmarshal(rr.Body.Bytes(), &inv); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		return inv
-	}
-
-	newHandler := func(profileCurrency, tenantDefault string) *Handler {
-		h := &Handler{svc: NewService(newMemStore(), nil, newMemNumberer())}
-		h.customers = currencyCustomerFake{profile: domain.CustomerBillingProfile{Currency: profileCurrency}}
-		h.settings = currencySettingsFake{s: domain.TenantSettings{DefaultCurrency: tenantDefault}}
-		return h
-	}
-
-	t.Run("profile currency wins over tenant default", func(t *testing.T) {
-		inv := post(t, newHandler("GBP", "EUR"), map[string]any{"customer_id": "cus_1"})
-		if inv.Currency != "GBP" {
-			t.Errorf("currency = %q, want GBP (billing profile)", inv.Currency)
-		}
-	})
-
-	t.Run("no profile currency → tenant default", func(t *testing.T) {
-		inv := post(t, newHandler("", "EUR"), map[string]any{"customer_id": "cus_1"})
-		if inv.Currency != "EUR" {
-			t.Errorf("currency = %q, want EUR (tenant default)", inv.Currency)
-		}
-	})
-
-	t.Run("neither → USD fallback", func(t *testing.T) {
-		inv := post(t, newHandler("", ""), map[string]any{"customer_id": "cus_1"})
-		if inv.Currency != "USD" {
-			t.Errorf("currency = %q, want USD", inv.Currency)
-		}
-	})
-
-	t.Run("explicit input always wins", func(t *testing.T) {
-		inv := post(t, newHandler("GBP", "EUR"), map[string]any{"customer_id": "cus_1", "currency": "cad"})
-		if inv.Currency != "CAD" {
-			t.Errorf("currency = %q, want CAD (explicit, canonicalized)", inv.Currency)
-		}
-	})
+// currencyHandler is the create route over a service whose currency facts
+// and workspace default are the given ones.
+func currencyHandler(store *memStore, facts currencyFactsFake, settings currencySettingsFake) *Handler {
+	svc := NewService(store, nil, newMemNumberer())
+	svc.SetCustomerCurrencyFacts(facts)
+	svc.SetTenantSettingsReader(settings)
+	return &Handler{svc: svc}
 }
 
-// A currency read that ERRORS refuses the create (503, nothing created): a
-// database blip used to fall through to the tenant default or USD, minting a
-// wrong-currency invoice. A billing profile that does not exist is "not set"
-// and still falls through to the tenant default.
-func TestCreate_CurrencyReadErrorRefuses(t *testing.T) {
-	try := func(t *testing.T, cust currencyCustomerFake, set currencySettingsFake) (*httptest.ResponseRecorder, *memStore) {
-		t.Helper()
-		store := newMemStore()
-		h := &Handler{svc: NewService(store, nil, newMemNumberer()), customers: cust, settings: set}
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(`{"customer_id":"cus_1"}`)))
-		req = req.WithContext(auth.WithTenantID(req.Context(), "t1"))
-		rr := httptest.NewRecorder()
-		h.create(rr, req)
-		return rr, store
-	}
-	blip := errors.New("connection reset")
+func postCreate(t *testing.T, h *Handler, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte(body)))
+	req = req.WithContext(auth.WithTenantID(req.Context(), "t1"))
+	rr := httptest.NewRecorder()
+	h.create(rr, req)
+	return rr
+}
 
-	for name, c := range map[string]struct {
-		cust currencyCustomerFake
-		set  currencySettingsFake
+// TestCreate_CurrencyIsTheCustomers pins how a manual invoice gets its
+// currency (ADR-100, ADR-129). An omitted currency takes the billing profile's,
+// then the live subscriptions' plan currency, then the workspace default — the
+// order the engine stamps a cycle invoice. An explicit one must agree with
+// both facts, or the create is refused with 409 customer_currency_conflict
+// and nothing is written. A customer with neither fact may be invoiced in any
+// allowed currency. Unit-level; the real-Postgres proof is
+// TestInvoiceCreate_CurrencyIsTheCustomers in internal/api.
+//
+// Mutation-verify: drop the subscription-plan arm from resolveCurrency → the
+// "subscription plan" cases go red.
+func TestCreate_CurrencyIsTheCustomers(t *testing.T) {
+	workspace := currencySettingsFake{s: domain.TenantSettings{DefaultCurrency: "EUR"}}
+	for _, c := range []struct {
+		name     string
+		facts    currencyFactsFake
+		body     string
+		currency string // want this currency, or
+		conflict string // want a 409 naming this fact
 	}{
-		"billing profile read fails": {currencyCustomerFake{err: blip}, currencySettingsFake{s: domain.TenantSettings{DefaultCurrency: "USD"}}},
-		"tenant settings read fails": {currencyCustomerFake{err: errs.ErrNotFound}, currencySettingsFake{err: blip}},
+		{"no currency: the billing profile's", currencyFactsFake{profile: "GBP"}, `{"customer_id":"cus_1"}`, "GBP", ""},
+		{"no currency: the subscription plan's", currencyFactsFake{plans: []string{"cad"}}, `{"customer_id":"cus_1"}`, "CAD", ""},
+		{"no currency, no facts: the workspace default", currencyFactsFake{}, `{"customer_id":"cus_1"}`, "EUR", ""},
+		{"explicit, agreeing with both facts", currencyFactsFake{profile: "CAD", plans: []string{"CAD"}}, `{"customer_id":"cus_1","currency":"cad"}`, "CAD", ""},
+		{"explicit, no facts: any allowed currency", currencyFactsFake{}, `{"customer_id":"cus_1","currency":"chf"}`, "CHF", ""},
+		{"explicit against the billing profile", currencyFactsFake{profile: "USD"}, `{"customer_id":"cus_1","currency":"EUR"}`, "", "USD (billing profile)"},
+		{"explicit against the subscription plan", currencyFactsFake{plans: []string{"USD"}}, `{"customer_id":"cus_1","currency":"EUR"}`, "", "USD (subscription plan)"},
+		{"no currency, profile against the plan", currencyFactsFake{profile: "EUR", plans: []string{"USD"}}, `{"customer_id":"cus_1"}`, "", "USD (subscription plan)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := newMemStore()
+			rr := postCreate(t, currencyHandler(store, c.facts, workspace), c.body)
+			if c.conflict != "" {
+				var body struct {
+					Error struct{ Code, Message string } `json:"error"`
+				}
+				_ = json.Unmarshal(rr.Body.Bytes(), &body)
+				if rr.Code != http.StatusConflict || body.Error.Code != "customer_currency_conflict" || !strings.Contains(body.Error.Message, c.conflict) {
+					t.Errorf("status %d, body %s; want 409 customer_currency_conflict naming %q", rr.Code, rr.Body.String(), c.conflict)
+				}
+				if n := len(store.invoices); n != 0 {
+					t.Errorf("%d invoice(s) created by a refused create", n)
+				}
+				return
+			}
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("status %d, body %s; want 201", rr.Code, rr.Body.String())
+			}
+			var inv domain.Invoice
+			_ = json.Unmarshal(rr.Body.Bytes(), &inv)
+			if inv.Currency != c.currency {
+				t.Errorf("currency = %q, want %q", inv.Currency, c.currency)
+			}
+		})
+	}
+}
+
+// A currency read that ERRORS refuses the create and writes nothing: a
+// database blip used to fall through to the tenant default or USD, minting a
+// wrong-currency invoice. The facts read answers 503 (retry).
+func TestCreate_CurrencyReadErrorRefuses(t *testing.T) {
+	blip := errors.New("connection reset")
+	for name, c := range map[string]struct {
+		facts    currencyFactsFake
+		settings currencySettingsFake
+		status   int
+	}{
+		"currency facts read fails":  {currencyFactsFake{err: blip}, currencySettingsFake{s: domain.TenantSettings{DefaultCurrency: "USD"}}, http.StatusServiceUnavailable},
+		"tenant settings read fails": {currencyFactsFake{}, currencySettingsFake{err: blip}, http.StatusInternalServerError},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rr, store := try(t, c.cust, c.set)
-			if rr.Code != http.StatusServiceUnavailable {
-				t.Fatalf("status = %d (%s), want 503", rr.Code, rr.Body.String())
+			store := newMemStore()
+			rr := postCreate(t, currencyHandler(store, c.facts, c.settings), `{"customer_id":"cus_1"}`)
+			if rr.Code != c.status {
+				t.Fatalf("status = %d (%s), want %d", rr.Code, rr.Body.String(), c.status)
 			}
 			if n := len(store.invoices); n != 0 {
 				t.Errorf("%d invoice(s) created; a failed currency read must create none", n)
 			}
 		})
 	}
-
-	t.Run("no billing profile → tenant default", func(t *testing.T) {
-		rr, _ := try(t, currencyCustomerFake{err: errs.ErrNotFound}, currencySettingsFake{s: domain.TenantSettings{DefaultCurrency: "EUR"}})
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d (%s), want 201", rr.Code, rr.Body.String())
-		}
-		var inv domain.Invoice
-		_ = json.Unmarshal(rr.Body.Bytes(), &inv)
-		if inv.Currency != "EUR" {
-			t.Errorf("currency = %q, want EUR", inv.Currency)
-		}
-	})
 }

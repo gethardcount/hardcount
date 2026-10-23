@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -106,17 +107,6 @@ type GrantInput struct {
 	InvoiceID   string     `json:"invoice_id,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 
-	// SourceSubscriptionID + SourceSubscriptionItemID + SourcePlanChangedAt +
-	// SourceChangeType, when all set, mark this grant as a proration credit
-	// for a specific item mutation (plan downgrade, qty reduction, remove).
-	// The store enforces uniqueness on the full tuple so retries return
-	// ErrAlreadyExists instead of duplicating the credit — see migration 0027
-	// for the unique partial index.
-	SourceSubscriptionID     string                `json:"source_subscription_id,omitempty"`
-	SourceSubscriptionItemID string                `json:"source_subscription_item_id,omitempty"`
-	SourcePlanChangedAt      *time.Time            `json:"source_plan_changed_at,omitempty"`
-	SourceChangeType         domain.ItemChangeType `json:"source_change_type,omitempty"`
-
 	// SourceCreditNoteID dedups grants created by credit-note Issue()
 	// (GrantForCreditNoteTx sets it): a second grant for the same credit
 	// note hits the unique partial index (migration 0093) and the store
@@ -141,9 +131,24 @@ type GrantInput struct {
 	GrantKind domain.GrantKind `json:"grant_kind,omitempty"`
 }
 
+// normalizeCurrency validates a grant or adjustment currency the way every
+// currency input is validated (domain.ValidateCurrency: required, on the
+// allowlist, no zero-decimal code) and returns it uppercase (ADR-129).
+func normalizeCurrency(currency string) (string, error) {
+	c := strings.ToUpper(strings.TrimSpace(currency))
+	if err := domain.ValidateCurrency(c); err != nil {
+		return "", err
+	}
+	return c, nil
+}
+
 func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) (domain.CreditLedgerEntry, error) {
 	if input.CustomerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
+	}
+	currency, err := normalizeCurrency(input.Currency)
+	if err != nil {
+		return domain.CreditLedgerEntry{}, err
 	}
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
@@ -192,19 +197,16 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	}
 
 	return s.store.AppendEntryAudited(ctx, tenantID, domain.CreditLedgerEntry{
-		CustomerID:               input.CustomerID,
-		EntryType:                domain.CreditGrant,
-		AmountCents:              input.AmountCents,
-		Description:              desc,
-		InvoiceID:                input.InvoiceID,
-		ExpiresAt:                input.ExpiresAt,
-		SourceSubscriptionID:     input.SourceSubscriptionID,
-		SourceSubscriptionItemID: input.SourceSubscriptionItemID,
-		SourcePlanChangedAt:      input.SourcePlanChangedAt,
-		SourceChangeType:         input.SourceChangeType,
-		SourceCreditNoteID:       input.SourceCreditNoteID,
-		GrantKind:                input.GrantKind,
-		CreatedAt:                input.At,
+		CustomerID:         input.CustomerID,
+		EntryType:          domain.CreditGrant,
+		Currency:           currency,
+		AmountCents:        input.AmountCents,
+		Description:        desc,
+		InvoiceID:          input.InvoiceID,
+		ExpiresAt:          input.ExpiresAt,
+		SourceCreditNoteID: input.SourceCreditNoteID,
+		GrantKind:          input.GrantKind,
+		CreatedAt:          input.At,
 	}, s.grantEmission(ctx))
 }
 
@@ -221,16 +223,25 @@ func (s *Service) grantEmission(ctx context.Context) func(tx *sql.Tx, out domain
 			ResourceType:  "credit",
 			ResourceID:    out.ID,
 			ResourceLabel: out.Description,
-			Metadata: map[string]any{
-				"customer_id":  out.CustomerID,
-				"amount_cents": out.AmountCents,
-				"description":  out.Description,
-			},
+			Metadata:      grantAuditMetadata(out),
 		})
 	}
 }
 
-// GrantCommitForInvoiceTx appends the commit grant on the CALLER's tx —
+// grantAuditMetadata is the audit metadata of a grant or adjustment row. The
+// keys are FROZEN (the dashboard's audit log reads them); currency lets the
+// log show the amount in the row's own currency (ADR-129).
+func grantAuditMetadata(out domain.CreditLedgerEntry) map[string]any {
+	return map[string]any{
+		"customer_id":  out.CustomerID,
+		"currency":     out.Currency,
+		"amount_cents": out.AmountCents,
+		"description":  out.Description,
+	}
+}
+
+// GrantCommitForInvoiceTx appends the commit grant on the CALLER's tx, in the
+// funding invoice's currency (ADR-129) —
 // invoice.FinalizeWithDates runs it inside the finalize coordinator tx so the
 // status flip and the grant commit or roll back together (ADR-078 D2). An
 // error here fails Finalize by design: it is operator-synchronous, loud, and
@@ -240,12 +251,17 @@ func (s *Service) grantEmission(ctx context.Context) func(tx *sql.Tx, out domain
 // GrantForCreditNoteTx's contract). Flat args so the invoice store's
 // consumer-side CommitFunder interface is satisfied directly (zero
 // cross-domain imports).
-func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error) {
+func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error) {
 	if customerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
 	}
 	if invoiceID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("invoice_id")
+	}
+	if strings.TrimSpace(currency) == "" {
+		// The funding invoice always has a currency; an empty one here is a
+		// caller bug. The store refuses it too.
+		return domain.CreditLedgerEntry{}, fmt.Errorf("commit grant for invoice %s has no currency", invoiceID)
 	}
 	if amountCents <= 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("commit_granted_cents", "must be greater than 0")
@@ -269,6 +285,7 @@ func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenan
 	return s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:      customerID,
 		EntryType:       domain.CreditGrant,
+		Currency:        currency,
 		AmountCents:     amountCents,
 		Description:     desc,
 		InvoiceID:       invoiceID,
@@ -332,6 +349,10 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 	if input.CustomerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
 	}
+	currency, err := normalizeCurrency(input.Currency)
+	if err != nil {
+		return domain.CreditLedgerEntry{}, err
+	}
 	if input.AmountCents <= 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "must be greater than 0")
 	}
@@ -360,6 +381,7 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 	out, err := s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  input.CustomerID,
 		EntryType:   domain.CreditGrant,
+		Currency:    currency,
 		AmountCents: input.AmountCents,
 		Description: desc,
 		InvoiceID:   input.InvoiceID,
@@ -368,13 +390,9 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 		// literal omitted the field while Grant carried it), so every
 		// in-tx grant minted a NULL-kind block — misclassified into the
 		// paid drain class and invisible to kind-scoped reporting.
-		GrantKind:                input.GrantKind,
-		SourceSubscriptionID:     input.SourceSubscriptionID,
-		SourceSubscriptionItemID: input.SourceSubscriptionItemID,
-		SourcePlanChangedAt:      input.SourcePlanChangedAt,
-		SourceChangeType:         input.SourceChangeType,
-		SourceCreditNoteID:       input.SourceCreditNoteID,
-		CreatedAt:                input.At,
+		GrantKind:          input.GrantKind,
+		SourceCreditNoteID: input.SourceCreditNoteID,
+		CreatedAt:          input.At,
 	})
 	if err != nil {
 		return out, err
@@ -389,11 +407,7 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 			ResourceType:  "credit",
 			ResourceID:    out.ID,
 			ResourceLabel: out.Description,
-			Metadata: map[string]any{
-				"customer_id":  out.CustomerID,
-				"amount_cents": out.AmountCents,
-				"description":  out.Description,
-			},
+			Metadata:      grantAuditMetadata(out),
 		}); err != nil {
 			return domain.CreditLedgerEntry{}, fmt.Errorf("audit emission: %w", err)
 		}
@@ -474,10 +488,21 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 		return 0, err
 	}
 
-	// Sum all usage entries for this invoice (they're negative)
+	// Sum all usage entries for this invoice (they're negative). The
+	// reversal hands the credit back in the currency it was drawn in
+	// (ADR-129). The drain draws only in the invoice's currency, so every
+	// usage row of one invoice shares it; two currencies mean the ledger is
+	// corrupt, and handing back either would be a guess.
 	var totalUsed int64
+	currency := ""
 	for _, e := range entries {
 		totalUsed += -e.AmountCents // Convert negative to positive
+		switch {
+		case currency == "":
+			currency = e.Currency
+		case e.Currency != currency:
+			return 0, fmt.Errorf("reverse credits for invoice %s: its usage rows are in %s and %s; refusing to guess the currency to return", invoiceID, currency, e.Currency)
+		}
 	}
 
 	if totalUsed <= 0 {
@@ -506,6 +531,7 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 	if _, err := s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:              customerID,
 		EntryType:               domain.CreditGrant,
+		Currency:                currency,
 		AmountCents:             totalUsed,
 		Description:             desc,
 		InvoiceID:               invoiceID,
@@ -578,16 +604,23 @@ func (s *Service) processExpiry(ctx context.Context, grants []domain.CreditLedge
 // GrantsResponse is the burndown payload: per-grant rows plus the
 // kind-subtotal rollup (the headline Credit Balance mixes free promo with
 // money-backed commit liability — finance needs them split; the 2026-07-05
-// reassessment made the split an explicit acceptance criterion).
+// reassessment made the split an explicit acceptance criterion). The rollup
+// is per currency (ADR-129).
 type GrantsResponse struct {
-	Grants []GrantSummary `json:"grants"`
-	// Remaining, split by cost-basis class (ADR-078): commit = money-backed
-	// (funded by a paid commit invoice), promotional = free marketing
-	// credits, other = legacy/unclassified grants + positive adjustments +
-	// reversals (paid drain class).
-	CommitRemainingCents      int64 `json:"commit_remaining_cents"`
-	PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
-	OtherRemainingCents       int64 `json:"other_remaining_cents"`
+	Grants              []GrantSummary      `json:"grants"`
+	RemainingByCurrency []CurrencyRemaining `json:"remaining_by_currency"`
+}
+
+// CurrencyRemaining is what is left of the customer's credit in one currency,
+// split by cost-basis class (ADR-078): commit = money-backed (funded by a paid
+// commit invoice), promotional = free marketing credits, other =
+// legacy/unclassified grants + positive adjustments + reversals (paid drain
+// class).
+type CurrencyRemaining struct {
+	Currency                  string `json:"currency"`
+	CommitRemainingCents      int64  `json:"commit_remaining_cents"`
+	PromotionalRemainingCents int64  `json:"promotional_remaining_cents"`
+	OtherRemainingCents       int64  `json:"other_remaining_cents"`
 }
 
 // ListGrants returns the customer's credit blocks with drawdown state +
@@ -603,38 +636,52 @@ func (s *Service) ListGrants(ctx context.Context, tenantID, customerID string, i
 	if err != nil {
 		return GrantsResponse{}, err
 	}
-	resp := GrantsResponse{Grants: grants}
+	resp := GrantsResponse{Grants: grants, RemainingByCurrency: []CurrencyRemaining{}}
 	if resp.Grants == nil {
 		resp.Grants = []GrantSummary{}
 	}
+	byCurrency := map[string]*CurrencyRemaining{}
 	for _, g := range grants {
 		if g.RemainingCents <= 0 {
 			continue
 		}
+		r := byCurrency[g.Currency]
+		if r == nil {
+			r = &CurrencyRemaining{Currency: g.Currency}
+			byCurrency[g.Currency] = r
+		}
 		switch g.GrantKind {
 		case string(domain.GrantKindCommit):
-			resp.CommitRemainingCents += g.RemainingCents
+			r.CommitRemainingCents += g.RemainingCents
 		case string(domain.GrantKindPromotional):
-			resp.PromotionalRemainingCents += g.RemainingCents
+			r.PromotionalRemainingCents += g.RemainingCents
 		default:
-			resp.OtherRemainingCents += g.RemainingCents
+			r.OtherRemainingCents += g.RemainingCents
 		}
 	}
+	for _, r := range byCurrency {
+		resp.RemainingByCurrency = append(resp.RemainingByCurrency, *r)
+	}
+	sort.Slice(resp.RemainingByCurrency, func(i, j int) bool {
+		return resp.RemainingByCurrency[i].Currency < resp.RemainingByCurrency[j].Currency
+	})
 	return resp, nil
 }
 
-func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (domain.CreditBalance, error) {
+// GetBalance returns the customer's balances, one per currency (ADR-129).
+func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) ([]domain.CreditBalance, error) {
 	if err := s.requireCustomer(ctx, tenantID, customerID); err != nil {
-		return domain.CreditBalance{}, err
+		return nil, err
 	}
 	return s.store.GetBalance(ctx, tenantID, customerID)
 }
 
-// SpendableBalance is the credit a draw could use right now: the ledger
-// balance less any grant past its expiry that the sweep has not written off
-// yet. "Now" is the customer's own clock (the frozen time of a test clock the
-// customer is pinned to), the same instant a draw would judge expiry at.
-func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (int64, error) {
+// SpendableBalance is the credit a draw could use right now, per currency:
+// the ledger balance less any grant past its expiry that the sweep has not
+// written off yet. "Now" is the customer's own clock (the frozen time of a
+// test clock the customer is pinned to), the same instant a draw would judge
+// expiry at.
+func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error) {
 	ctx = s.bindForCustomer(ctx, tenantID, customerID)
 	return s.store.GetSpendableBalance(ctx, tenantID, customerID, clock.Now(ctx))
 }
@@ -674,7 +721,9 @@ func (s *Service) CountEntries(ctx context.Context, filter ListFilter) (int, err
 }
 
 type AdjustInput struct {
-	CustomerID  string `json:"customer_id"`
+	CustomerID string `json:"customer_id"`
+	// Currency is the balance the adjustment changes (ADR-129). Required.
+	Currency    string `json:"currency"`
 	AmountCents int64  `json:"amount_cents"` // Positive or negative
 	Description string `json:"description"`
 }
@@ -682,6 +731,10 @@ type AdjustInput struct {
 func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput) (domain.CreditLedgerEntry, error) {
 	if input.CustomerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
+	}
+	currency, err := normalizeCurrency(input.Currency)
+	if err != nil {
+		return domain.CreditLedgerEntry{}, err
 	}
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
@@ -724,13 +777,9 @@ func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput
 				ResourceType:  "credit",
 				ResourceID:    out.ID,
 				ResourceLabel: out.Description,
-				Metadata: map[string]any{
-					"customer_id":  out.CustomerID,
-					"amount_cents": out.AmountCents,
-					"description":  out.Description,
-				},
+				Metadata:      grantAuditMetadata(out),
 			})
 		}
 	}
-	return s.store.AdjustAtomicAudited(ctx, tenantID, input.CustomerID, desc, input.AmountCents, emit)
+	return s.store.AdjustAtomicAudited(ctx, tenantID, input.CustomerID, currency, desc, input.AmountCents, emit)
 }

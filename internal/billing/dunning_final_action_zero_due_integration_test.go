@@ -82,7 +82,7 @@ func TestExhaustOnEntry_AfterCreditNoteToZero_NoFinalAction(t *testing.T) {
 // (domain.OwnsChargeHold, as refuseWhileChargeHeld does) → red.
 func TestDunningFinalCancel_ReliefToZeroUnderItsHold_WritesOffNotPaid(t *testing.T) {
 	r := newZeroDueFinalActionRig(t, "Zero Due Final Cancel")
-	if _, err := r.creditSvc.Grant(r.ctx, r.tenantID, credit.GrantInput{CustomerID: r.cust.ID, AmountCents: 4000, Description: "goodwill"}); err != nil {
+	if _, err := r.creditSvc.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: r.cust.ID, AmountCents: 4000, Description: "goodwill"}); err != nil {
 		t.Fatalf("grant credit: %v", err)
 	}
 	if applied, err := r.creditSvc.ApplyToInvoice(r.ctx, r.tenantID, r.cust.ID, r.day1.ID, r.day1.AmountDueCents); err != nil || applied != 4000 {

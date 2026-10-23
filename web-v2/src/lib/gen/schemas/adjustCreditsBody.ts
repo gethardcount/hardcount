@@ -10,6 +10,8 @@
 
 export type AdjustCreditsBody = {
   customer_id: string;
+  /** ISO 4217 code of the balance to change. Case-insensitive; stored uppercase. */
+  currency: string;
   /** Positive adds credit, negative removes it. Not zero. */
   amount_cents: number;
   description: string;

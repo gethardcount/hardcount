@@ -328,7 +328,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	// With a credit balance, Collect payment applies it, and a credit that
 	// covers the amount pays the invoice with no charge.
 	call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
-		"customer_id": custA, "amount_cents": 50, "description": "Goodwill",
+		"customer_id": custA, "currency": "USD", "amount_cents": 50, "description": "Goodwill",
 	}}).want(t, 201, "grant credit A")
 	call("POST", "/v1/invoices/"+invA+"/collect", flowReq{}).want(t, 200, "collect A with credit")
 	if inv := getInvoice(invA); flowStr(inv, "status") != "paid" || flowInt(inv, "amount_due_cents") != 0 {
@@ -425,7 +425,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		t.Fatalf("invoice D runs after the decline: %v, want one active run", runs)
 	}
 	call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
-		"customer_id": custD, "amount_cents": 50, "description": "Goodwill",
+		"customer_id": custD, "currency": "USD", "amount_cents": 50, "description": "Goodwill",
 	}}).want(t, 201, "grant credit D")
 	warningsBefore := flowCount(t, db, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = 'dunning_warning'`, tenantID)
 	charges = stripe.count("POST /v1/payment_intents")

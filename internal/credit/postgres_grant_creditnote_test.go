@@ -41,6 +41,7 @@ func TestGrantForCreditNoteTx_IdempotentNoDoubleCredit(t *testing.T) {
 	// Same shape creditnote.Issue() uses for a credit-type CN.
 	const creditNoteID = "vlx_cn_grant_idem"
 	input := credit.GrantInput{
+		Currency:    "USD",
 		CustomerID:  cust.ID,
 		AmountCents: 4000,
 		Description: "Credit note CN-001 — duplicate_charge",
@@ -63,7 +64,7 @@ func TestGrantForCreditNoteTx_IdempotentNoDoubleCredit(t *testing.T) {
 		t.Fatalf("first grant amount: got %d, want 4000", first.AmountCents)
 	}
 
-	balAfterFirst, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	balAfterFirst, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance after first grant: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestGrantForCreditNoteTx_IdempotentNoDoubleCredit(t *testing.T) {
 	}
 
 	// Balance reflects a SINGLE grant, not doubled.
-	balAfterSecond, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	balAfterSecond, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance after second grant: %v", err)
 	}

@@ -757,8 +757,9 @@ export interface paths {
                              * @description Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open.
                              */
                             projected_total_cents?: number;
-                            /** @description The customer's credit position. `balance_cents` is the ledger balance, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage sent before a trial's first paid period, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted, and totals in different currencies are added together. */
+                            /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage sent before a trial's first paid period, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
                             credits?: {
+                                currency?: string;
                                 /** Format: int64 */
                                 balance_cents?: number;
                                 /** Format: int64 */
@@ -775,7 +776,7 @@ export interface paths {
                                 promotional_remaining_cents?: number;
                                 /** Format: int64 */
                                 estimated_remaining_cents?: number;
-                            };
+                            }[];
                         };
                     };
                 };
@@ -1311,9 +1312,9 @@ export interface paths {
         /**
          * Per-grant burndown + kind subtotals
          * @description The customer's credit blocks with drawdown state — granted /
-         *     drawn / remaining per grant, expiry, and remaining split by
-         *     cost-basis class (commit = money-backed, promotional = free,
-         *     other = legacy/adjustments). include_exhausted=true adds
+         *     drawn / remaining per grant, expiry, and remaining per currency
+         *     split by cost-basis class (commit = money-backed, promotional =
+         *     free, other = legacy/adjustments). include_exhausted=true adds
          *     fully-drawn blocks for history. Each grant's `consumed_cents`
          *     also counts credit no invoice used: `expired_cents`, the part that
          *     expired unused; `retired_cents`, commit credit taken back when the
@@ -1374,14 +1375,17 @@ export interface paths {
         put?: never;
         /**
          * Add or remove credit
-         * @description Writes one `adjustment` entry to the customer's credit ledger. A
-         *     positive amount adds credit; a negative amount removes it. Audit
-         *     action is `credit.adjustment` or `credit.deduction`.
+         * @description Writes one `adjustment` entry to the customer's credit ledger in
+         *     `currency`. A positive amount adds credit in that currency; a
+         *     negative amount removes credit in that currency only. Audit action
+         *     is `credit.adjustment` or `credit.deduction`.
          *
-         *     Errors (422, `param` names the field): `customer_id` or
-         *     `description` missing; `amount_cents` is zero, above 100000000
-         *     ($1,000,000), or a removal larger than the credit that can be
-         *     drawn (expired grants not yet written off do not count).
+         *     Errors (422, `param` names the field): `customer_id`, `currency` or
+         *     `description` missing; `currency` not supported (an unknown code or
+         *     a zero-decimal currency such as JPY); `amount_cents` is zero, above
+         *     100000000 ($1,000,000), or a removal larger than the credit in that
+         *     currency that can be drawn (expired grants not yet written off do
+         *     not count).
          */
         post: operations["adjustCredits"];
         delete?: never;
@@ -1399,10 +1403,10 @@ export interface paths {
         };
         /**
          * List credit balances for all customers
-         * @description One row per customer that has any credit ledger entry, highest
-         *     balance first. No paging and no `total`. `total_granted` is the
-         *     sum of every credit added (grants, positive adjustments and
-         *     reversals).
+         * @description One row per customer and currency that has any credit ledger
+         *     entry, highest balance first. No paging and no `total`.
+         *     `total_granted` is the sum of every credit added in that currency
+         *     (grants, positive adjustments and reversals).
          */
         get: operations["listCreditBalances"];
         put?: never;
@@ -1423,8 +1427,8 @@ export interface paths {
         /**
          * List a customer's credit ledger
          * @description Ledger entries for one customer. `balance_after` is the running
-         *     balance in time order over the whole ledger, so it stays right
-         *     when you filter by `entry_type`.
+         *     balance in the entry's currency, in time order over the whole
+         *     ledger, so it stays right when you filter by `entry_type`.
          */
         get: operations["listCreditLedgerEntries"];
         put?: never;
@@ -3490,9 +3494,16 @@ export interface paths {
          *     one transaction, or omit them and add lines later with
          *     `POST /v1/invoices/{id}/line-items`.
          *
+         *     A manual invoice uses the customer's currency. A `currency` that
+         *     differs from the customer's billing-profile currency, or from the
+         *     plan currency of any of the customer's live (draft, trialing or
+         *     active) subscriptions, is refused with 409. A customer with neither
+         *     may be invoiced in any supported currency.
+         *
          *     Defaults when a field is left out:
-         *     - `currency`: the customer's billing-profile currency, then the
-         *       tenant default, then `USD`.
+         *     - `currency`: the customer's billing-profile currency, then the plan
+         *       currency of the customer's live subscriptions, then the tenant
+         *       default.
          *     - `net_payment_term_days`: the tenant's net payment terms. A
          *       negative value is stored as 0 (due on receipt).
          *     - `billing_period_start` / `billing_period_end`: now.
@@ -5421,7 +5432,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Grant credits to customer */
+        /**
+         * Grant credits to customer
+         * @description Adds a block of credit in `currency`. The credit pays only the
+         *     customer's invoices in that currency; it is never converted. A
+         *     grant in a currency the customer is not billed in is accepted and
+         *     shows as its own balance.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -5442,6 +5459,13 @@ export interface paths {
                 content: {
                     "application/json": {
                         customer_id: string;
+                        /**
+                         * @description ISO 4217 code of the credit. Required. Case-insensitive;
+                         *     stored uppercase. Zero-decimal currencies (such as JPY)
+                         *     are not supported yet.
+                         * @example USD
+                         */
+                        currency: string;
                         /** Format: int64 */
                         amount_cents: number;
                         description?: string;
@@ -5476,7 +5500,7 @@ export interface paths {
                         "application/json": components["schemas"]["CreditLedgerEntry"];
                     };
                 };
-                /** @description A field failed validation, or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
+                /** @description A field failed validation (a missing or unsupported `currency` has `param` `currency`), or the body has an unknown field (`param` names it; the body must use only the fields listed here). */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -5500,7 +5524,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get customer credit balance */
+        /**
+         * Get customer credit balance
+         * @description The customer's balances, one per currency the customer's credit
+         *     ledger holds, ordered by currency. Empty when the customer has no
+         *     ledger entry.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -5512,13 +5541,15 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Credit balance */
+                /** @description Credit balances, one per currency. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["CreditBalance"];
+                        "application/json": {
+                            data: components["schemas"]["CreditBalance"][];
+                        };
                     };
                 };
                 /** @description No customer with this ID in this tenant and mode. */
@@ -5549,8 +5580,9 @@ export interface paths {
         };
         /**
          * Get customer live credit balance
-         * @description How much credit the customer has left right now: the settled balance
-         *     less the usage no invoice has billed yet. Use it to decide in your
+         * @description How much credit the customer has left right now, per currency: the
+         *     settled balance less the usage no invoice has billed yet in that
+         *     currency. Use it to decide in your
          *     own code whether to keep serving a prepaid customer; Velox records
          *     usage and never refuses it.
          *
@@ -8001,10 +8033,10 @@ export interface components {
             invoice: components["schemas"]["Invoice"];
             line_items: components["schemas"]["InvoiceLineItem"][];
         };
-        /** @description A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
+        /** @description A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents. */
         CreditBalance: {
             customer_id: string;
-            /** @description The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default. */
+            /** @description The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted. */
             currency: string;
             /** Format: int64 */
             balance_cents: number;
@@ -8034,17 +8066,28 @@ export interface components {
              */
             total_deducted: number;
         };
-        /** @description A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero. */
+        /** @description A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together. */
         CreditLiveBalance: {
             customer_id: string;
+            /** @description Ordered by currency. */
+            balances: components["schemas"]["CreditLiveCurrency"][];
+            /**
+             * Format: date-time
+             * @description When the server computed these figures.
+             */
+            computed_at: string;
+        };
+        /** @description The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero. */
+        CreditLiveCurrency: {
+            currency: string;
             /**
              * Format: int64
-             * @description Settled ledger balance, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
+             * @description Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
              */
             balance_cents: number;
             /**
              * Format: int64
-             * @description Metered usage that the next invoice of each subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+             * @description Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
              */
             unbilled_usage_cents: number;
             /**
@@ -8052,11 +8095,6 @@ export interface components {
              * @description `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
              */
             estimated_remaining_cents: number;
-            /**
-             * Format: date-time
-             * @description When the server computed these figures.
-             */
-            computed_at: string;
         };
         /** @description One override key declared in a recipe's `overridable` list. Drives validation at instantiate time and the override form in the dashboard's preview dialog. */
         RecipeOverride: {
@@ -8430,6 +8468,8 @@ export interface components {
             customer_id: string;
             /** @enum {string} */
             entry_type: "grant" | "usage" | "expiry" | "adjustment";
+            /** @description The entry's currency, uppercase. Credit pays only invoices in its own currency. */
+            currency: string;
             /**
              * Format: int64
              * @description Positive adds credit, negative removes it.
@@ -8437,7 +8477,7 @@ export interface components {
             amount_cents: number;
             /**
              * Format: int64
-             * @description Customer's credit balance after this entry, in cents.
+             * @description The customer's credit balance in this entry's currency after it, in cents.
              */
             balance_after: number;
             description: string;
@@ -8688,7 +8728,7 @@ export interface components {
          */
         AnalyticsOverview: {
             period: components["schemas"]["AnalyticsPeriod"];
-            /** @description The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`. */
+            /** @description The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own. */
             currency: string;
             /**
              * Format: int64
@@ -8740,11 +8780,12 @@ export interface components {
              * @description Average total of invoices paid in the window.
              */
             avg_invoice_value: number;
-            /**
-             * Format: int64
-             * @description Sum of all customers' credit balances. Not limited to `currency`.
-             */
-            credit_balance_total: number;
+            /** @description Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted. */
+            credit_balance_by_currency: {
+                currency: string;
+                /** Format: int64 */
+                amount_cents: number;
+            }[];
             /**
              * @description Customer records with status `active`. Includes customers with
              *     no subscription or only canceled ones; `live_customers` counts
@@ -8843,7 +8884,7 @@ export interface components {
             /** @description Optional. Must belong to `customer_id`. Leave out for a one-off invoice. */
             subscription_id?: string;
             /**
-             * @description ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
+             * @description ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
              * @example USD
              */
             currency?: string;
@@ -10265,6 +10306,8 @@ export interface components {
             id: string;
             /** @description `grant` or `adjustment`. */
             entry_type: string;
+            /** @description The block's currency, uppercase. */
+            currency: string;
             /**
              * @description Absent for unclassified credit.
              * @enum {string}
@@ -10314,25 +10357,29 @@ export interface components {
         };
         /**
          * @description A customer's credit blocks, newest first, with the remaining credit
-         *     added up by kind.
+         *     added up by currency and kind.
          */
         CreditGrants: {
             grants: components["schemas"]["CreditGrantBlock"][];
-            /**
-             * Format: int64
-             * @description Remaining credit the customer paid for (`commit`).
-             */
-            commit_remaining_cents: number;
-            /**
-             * Format: int64
-             * @description Remaining free credit (`promotional`).
-             */
-            promotional_remaining_cents: number;
-            /**
-             * Format: int64
-             * @description Remaining credit with no kind, such as adjustments and proration credits.
-             */
-            other_remaining_cents: number;
+            /** @description One entry per currency with credit left, ordered by currency. */
+            remaining_by_currency: {
+                currency: string;
+                /**
+                 * Format: int64
+                 * @description Remaining credit the customer paid for (`commit`).
+                 */
+                commit_remaining_cents: number;
+                /**
+                 * Format: int64
+                 * @description Remaining free credit (`promotional`).
+                 */
+                promotional_remaining_cents: number;
+                /**
+                 * Format: int64
+                 * @description Remaining credit with no kind, such as adjustments and credit-note credit.
+                 */
+                other_remaining_cents: number;
+            }[];
         };
         /** @description A new webhook endpoint and its signing secret. The secret is shown only here. */
         WebhookEndpointCreated: {
@@ -11908,6 +11955,11 @@ export interface operations {
             content: {
                 "application/json": {
                     customer_id: string;
+                    /**
+                     * @description ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
+                     * @example USD
+                     */
+                    currency: string;
                     /**
                      * Format: int64
                      * @description Positive adds credit, negative removes it. Not zero.
@@ -13966,6 +14018,19 @@ export interface operations {
             };
             /** @description Customer or subscription not found (code `not_found`). */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description `currency` is not the customer's (code
+             *     `customer_currency_conflict`). The message names the billing
+             *     profile or subscription plan currency it conflicts with.
+             */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

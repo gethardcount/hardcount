@@ -42,12 +42,14 @@ func TestDrainAttribution_PersistedInMetadata(t *testing.T) {
 	// Two grants so a big drain spans blocks: $40 then $60 (FIFO by
 	// created_at within the same kind class).
 	g1, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 4000, Description: "g1",
 	})
 	if err != nil {
 		t.Fatalf("grant 1: %v", err)
 	}
 	g2, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 6000, Description: "g2",
 	})
 	if err != nil {
@@ -110,6 +112,7 @@ func TestDrainAttribution_PersistedInMetadata(t *testing.T) {
 
 	// (2) Negative adjustment drains the rest of g2 ($30 remains).
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: -3000, Description: "clawback",
 	}); err != nil {
 		t.Fatalf("adjust: %v", err)
@@ -160,6 +163,7 @@ func TestGrantTx_CarriesGrantKind(t *testing.T) {
 	runInTx(func(tx *sql.Tx) error {
 		var err error
 		entry, err = svc.GrantTx(ctx, tx, tenantID, credit.GrantInput{
+			Currency:   "USD",
 			CustomerID: cust.ID, AmountCents: 1000, Description: "promo in-tx",
 			GrantKind: domain.GrantKindPromotional, At: time.Now().UTC(),
 		})
@@ -188,6 +192,7 @@ func TestGrantTx_CarriesGrantKind(t *testing.T) {
 	}
 	defer postgres.Rollback(tx2)
 	if _, err := svc.GrantTx(ctx, tx2, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 1000, Description: "sneaky commit",
 		GrantKind: domain.GrantKindCommit,
 	}); err == nil {
@@ -217,12 +222,14 @@ func TestListGrants_BurndownAndKindSubtotals(t *testing.T) {
 	// A promo grant ($20) and an unclassified grant ($50). Promotional
 	// drains FIRST (ADR-078 drain order).
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 2000, Description: "promo",
 		GrantKind: domain.GrantKindPromotional,
 	}); err != nil {
 		t.Fatalf("grant promo: %v", err)
 	}
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 5000, Description: "legacy",
 	}); err != nil {
 		t.Fatalf("grant legacy: %v", err)
@@ -230,6 +237,7 @@ func TestListGrants_BurndownAndKindSubtotals(t *testing.T) {
 
 	// Drain $30: all of promo ($20) + $10 of legacy.
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: -3000, Description: "clawback",
 	}); err != nil {
 		t.Fatalf("adjust: %v", err)
@@ -243,9 +251,11 @@ func TestListGrants_BurndownAndKindSubtotals(t *testing.T) {
 	if len(resp.Grants) != 1 || resp.Grants[0].RemainingCents != 4000 {
 		t.Fatalf("live grants: got %+v, want one legacy row with 4000 remaining", resp.Grants)
 	}
-	if resp.PromotionalRemainingCents != 0 || resp.OtherRemainingCents != 4000 || resp.CommitRemainingCents != 0 {
-		t.Fatalf("subtotals: got promo=%d other=%d commit=%d, want 0/4000/0",
-			resp.PromotionalRemainingCents, resp.OtherRemainingCents, resp.CommitRemainingCents)
+	if len(resp.RemainingByCurrency) != 1 {
+		t.Fatalf("remaining_by_currency = %+v, want one USD entry", resp.RemainingByCurrency)
+	}
+	if r := resp.RemainingByCurrency[0]; r.Currency != "USD" || r.PromotionalRemainingCents != 0 || r.OtherRemainingCents != 4000 || r.CommitRemainingCents != 0 {
+		t.Fatalf("subtotals: got %+v, want USD promo=0 other=4000 commit=0", r)
 	}
 
 	// History view includes the exhausted promo block.

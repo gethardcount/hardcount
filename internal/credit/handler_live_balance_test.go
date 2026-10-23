@@ -52,32 +52,44 @@ func liveHandler(live LiveBalanceReader) *Handler {
 func TestGetLiveBalance_ReturnsThePartsAndTheResult(t *testing.T) {
 	at := time.Date(2026, 10, 13, 9, 30, 0, 0, time.UTC)
 	h := liveHandler(&liveStub{live: domain.CreditLiveBalance{
-		BalanceCents: 4000, UnbilledUsageCents: 1000, EstimatedRemainingCents: 3000, ComputedAt: at,
+		Balances: []domain.CreditLiveCurrency{
+			{Currency: "EUR", BalanceCents: 500, UnbilledUsageCents: 0, EstimatedRemainingCents: 500},
+			{Currency: "USD", BalanceCents: 4000, UnbilledUsageCents: 1000, EstimatedRemainingCents: 3000},
+		},
+		ComputedAt: at,
 	}})
 
 	rr := creditReq(t, h.getLiveBalance, http.MethodGet, "", map[string]string{"customer_id": "cus_mine"})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
-	// Decoded into a map so the test pins the wire names, and that nothing
-	// beyond the five documented fields is sent.
+	// Decoded into maps so the test pins the wire names, and that nothing
+	// beyond the documented fields is sent: three at the top, four per
+	// currency (ADR-129).
 	var body map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	if len(body) != 3 || body["customer_id"] != "cus_mine" || body["computed_at"] != "2026-10-13T09:30:00Z" {
+		t.Errorf("body = %v, want customer_id, balances and computed_at only", body)
+	}
+	balances, _ := body["balances"].([]any)
+	if len(balances) != 2 {
+		t.Fatalf("balances = %v, want two entries", body["balances"])
+	}
 	want := map[string]any{
-		"customer_id":               "cus_mine",
+		"currency":                  "USD",
 		"balance_cents":             float64(4000),
 		"unbilled_usage_cents":      float64(1000),
 		"estimated_remaining_cents": float64(3000),
-		"computed_at":               "2026-10-13T09:30:00Z",
 	}
-	if len(body) != len(want) {
-		t.Errorf("body has %d fields, want %d: %v", len(body), len(want), body)
+	usd, _ := balances[1].(map[string]any)
+	if len(usd) != len(want) {
+		t.Errorf("USD entry has %d fields, want %d: %v", len(usd), len(want), usd)
 	}
 	for k, v := range want {
-		if body[k] != v {
-			t.Errorf("%s = %v, want %v", k, body[k], v)
+		if usd[k] != v {
+			t.Errorf("%s = %v, want %v", k, usd[k], v)
 		}
 	}
 }
@@ -87,7 +99,7 @@ func TestGetLiveBalance_ReturnsThePartsAndTheResult(t *testing.T) {
 // be 200 with zeros, because row-level security hides every row behind the
 // figure.
 func TestGetLiveBalance_CustomerNotTheCallers_Returns404(t *testing.T) {
-	live := &liveStub{live: domain.CreditLiveBalance{BalanceCents: 4000}}
+	live := &liveStub{live: domain.CreditLiveBalance{Balances: []domain.CreditLiveCurrency{{Currency: "USD", BalanceCents: 4000}}}}
 	h := liveHandler(live)
 
 	rr := creditReq(t, h.getLiveBalance, http.MethodGet, "", map[string]string{"customer_id": "cus_someone_elses"})

@@ -298,7 +298,7 @@ func (d *dunningRetryRig) isDue(runID string) bool {
 
 func (d *dunningRetryRig) grant(custID string, cents int64) {
 	d.t.Helper()
-	if _, err := d.credits.Grant(d.ctx, d.tenantID, credit.GrantInput{CustomerID: custID, AmountCents: cents, Description: "goodwill"}); err != nil {
+	if _, err := d.credits.Grant(d.ctx, d.tenantID, credit.GrantInput{Currency: "USD", CustomerID: custID, AmountCents: cents, Description: "goodwill"}); err != nil {
 		d.t.Fatalf("grant credit: %v", err)
 	}
 }

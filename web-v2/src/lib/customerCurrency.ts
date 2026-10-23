@@ -1,8 +1,8 @@
 // The one answer to "which currency is this customer billed in?".
 //
-// Every money figure on a customer that has no currency of its own (the
-// credit balance, an empty usage window, a margin with no revenue yet, the
-// default of the New invoice dialog) is shown in this currency. Before, each
+// Every money figure on a customer that has no currency of its own (an empty
+// usage window, a margin with no revenue yet, the default of the New invoice
+// and Grant credits dialogs) is shown in this currency. Before, each
 // card fell back on its own: the credit balance took the billing profile and
 // then the invoices, the usage and margin cards took the workspace default. A
 // customer on a EUR plan with no profile and no invoice yet read $0.00 in
@@ -18,9 +18,8 @@
 //  3. the newest invoice's currency;
 //  4. the workspace default.
 //
-// Credits have no currency of their own: the ledger is drawn 1:1 against
-// whatever invoice they are applied to (ADR-100), which is why the credit
-// balance follows this answer too.
+// Credit is not such a figure: each ledger row stores its own currency and
+// pays only invoices in it (ADR-129), so credit amounts are shown in theirs.
 
 export type CustomerCurrencySource = 'subscription' | 'billing_profile' | 'invoice' | 'workspace'
 

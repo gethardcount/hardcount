@@ -38,6 +38,7 @@ func TestAdjustAtomic_NoOversellUnderContention(t *testing.T) {
 	// to deduct 20 cents, the safe total is 100 (5 can succeed). The race
 	// implementation would let all 10 commit, leaving balance = -100.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 100, Description: "seed",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -59,6 +60,7 @@ func TestAdjustAtomic_NoOversellUnderContention(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+				Currency:    "USD",
 				CustomerID:  cust.ID,
 				AmountCents: deductCents,
 				Description: "contended deduction",
@@ -76,7 +78,7 @@ func TestAdjustAtomic_NoOversellUnderContention(t *testing.T) {
 	}
 	wg.Wait()
 
-	bal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
@@ -116,12 +118,14 @@ func TestAdjustAtomic_DeductionExceedsBalance(t *testing.T) {
 	}
 
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 500, Description: "seed",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 
 	_, err = svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:    "USD",
 		CustomerID:  cust.ID,
 		AmountCents: -1000,
 		Description: "over-deduct",
@@ -133,7 +137,7 @@ func TestAdjustAtomic_DeductionExceedsBalance(t *testing.T) {
 		t.Fatalf("expected insufficient-balance error, got: %v", err)
 	}
 
-	bal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}

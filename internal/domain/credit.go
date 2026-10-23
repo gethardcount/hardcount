@@ -104,7 +104,11 @@ const (
 )
 
 type CreditBalance struct {
-	CustomerID   string `json:"customer_id"`
+	CustomerID string `json:"customer_id"`
+	// Currency is the stored currency of the ledger rows this balance sums
+	// (ADR-129). A customer with credit in two currencies has two balances;
+	// they are never added together or converted.
+	Currency     string `json:"currency"`
 	BalanceCents int64  `json:"balance_cents"`
 	TotalGranted int64  `json:"total_granted"`
 	TotalUsed    int64  `json:"total_used"`
@@ -117,26 +121,27 @@ type CreditBalance struct {
 	// + BalanceCents.
 	TotalRetired  int64 `json:"total_retired"`
 	TotalDeducted int64 `json:"total_deducted"`
-	// Currency is the currency the customer is billed in. The ledger has
-	// none of its own (ADR-100): credit is drawn 1:1 against the customer's
-	// invoices, so its amounts read in theirs. Read, not stored; the order is
-	// the engine's (billing profile, then the plan of the live subscription),
-	// then the newest invoice, then the workspace default.
-	Currency string `json:"currency"`
 }
 
-// CreditLiveBalance is a customer's credit position right now (issue #1019):
-// the credit that can be spent (the settled ledger balance, without any grant
-// past its expiry that the sweep has not written off), the usage of the
-// current period(s) that no invoice has billed yet, and the difference,
-// floored at zero. The parts are
-// returned beside the result so a caller can see how far past zero a customer
-// is (BalanceCents - UnbilledUsageCents) and so the arithmetic on a page adds
-// up. Computed on read by billing.Engine.LiveCreditBalance; nothing is stored.
+// CreditLiveBalance is a customer's credit position right now (issue #1019),
+// one entry per currency (ADR-129). Computed on read by
+// billing.Engine.LiveCreditBalance; nothing is stored.
 type CreditLiveBalance struct {
-	CustomerID              string    `json:"customer_id"`
-	BalanceCents            int64     `json:"balance_cents"`
-	UnbilledUsageCents      int64     `json:"unbilled_usage_cents"`
-	EstimatedRemainingCents int64     `json:"estimated_remaining_cents"`
-	ComputedAt              time.Time `json:"computed_at"`
+	CustomerID string               `json:"customer_id"`
+	Balances   []CreditLiveCurrency `json:"balances"`
+	ComputedAt time.Time            `json:"computed_at"`
+}
+
+// CreditLiveCurrency is the live position in one currency: the credit that
+// can be spent (the settled ledger balance, without any grant past its expiry
+// that the sweep has not written off), the usage of the current period(s)
+// that no invoice has billed yet and that will be invoiced in this currency,
+// and the difference, floored at zero. The parts are returned beside the
+// result so a caller can see how far past zero a customer is
+// (BalanceCents - UnbilledUsageCents) and so the arithmetic on a page adds up.
+type CreditLiveCurrency struct {
+	Currency                string `json:"currency"`
+	BalanceCents            int64  `json:"balance_cents"`
+	UnbilledUsageCents      int64  `json:"unbilled_usage_cents"`
+	EstimatedRemainingCents int64  `json:"estimated_remaining_cents"`
 }

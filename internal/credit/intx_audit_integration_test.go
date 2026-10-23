@@ -58,6 +58,7 @@ func TestCreditAudit_SharedFate(t *testing.T) {
 		svc.SetAuditLogger(logger)
 
 		entry, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+			Currency:   "USD",
 			CustomerID: customerID, AmountCents: 5000, Description: "shared-fate grant",
 		})
 		if err != nil {
@@ -82,12 +83,13 @@ func TestCreditAudit_SharedFate(t *testing.T) {
 		svc.SetAuditLogger(failingEmitter{})
 
 		_, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+			Currency:   "USD",
 			CustomerID: customerID, AmountCents: 7700, Description: "must-roll-back grant",
 		})
 		if err == nil {
 			t.Fatal("grant must fail when its audit emission fails (shared fate)")
 		}
-		bal, err := store.GetBalance(ctx, tenantID, customerID)
+		bal, err := testutil.BalanceUSD(store.GetBalance(ctx, tenantID, customerID))
 		if err != nil {
 			t.Fatalf("balance: %v", err)
 		}
@@ -103,6 +105,7 @@ func TestCreditAudit_SharedFate(t *testing.T) {
 		// Deduct more than the balance — AdjustAtomic fails inside the tx
 		// AFTER the emission hook site would run on success.
 		_, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+			Currency:   "USD",
 			CustomerID: customerID, AmountCents: -999999, Description: "overdraft attempt",
 		})
 		if err == nil {
@@ -121,17 +124,18 @@ func TestCreditAudit_SharedFate(t *testing.T) {
 		svc := credit.NewService(store)
 		svc.SetAuditLogger(failingEmitter{})
 
-		before, err := store.GetBalance(ctx, tenantID, customerID)
+		before, err := testutil.BalanceUSD(store.GetBalance(ctx, tenantID, customerID))
 		if err != nil {
 			t.Fatalf("balance before: %v", err)
 		}
 		_, err = svc.Adjust(ctx, tenantID, credit.AdjustInput{
+			Currency:   "USD",
 			CustomerID: customerID, AmountCents: -500, Description: "must-roll-back deduction",
 		})
 		if err == nil {
 			t.Fatal("adjust must fail when its audit emission fails (shared fate)")
 		}
-		after, err := store.GetBalance(ctx, tenantID, customerID)
+		after, err := testutil.BalanceUSD(store.GetBalance(ctx, tenantID, customerID))
 		if err != nil {
 			t.Fatalf("balance after: %v", err)
 		}
@@ -145,6 +149,7 @@ func TestCreditAudit_SharedFate(t *testing.T) {
 		svc.SetAuditLogger(logger)
 
 		entry, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+			Currency:   "USD",
 			CustomerID: customerID, AmountCents: -1000, Description: "small deduction",
 		})
 		if err != nil {

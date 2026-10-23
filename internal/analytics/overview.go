@@ -33,13 +33,18 @@ type OverviewResponse struct {
 	RevenuePrev     int64 `json:"revenue_prev"`
 	OutstandingAR   int64 `json:"outstanding_ar"`
 	AvgInvoiceValue int64 `json:"avg_invoice_value"`
-	CreditBalance   int64 `json:"credit_balance_total"`
 
 	// OutstandingByCurrency is the amount still due on the same open invoices
 	// OpenInvoices counts, one row per currency. OutstandingAR covers the
 	// default currency only, so on its own it under-reports a tenant that
 	// bills in more than one currency. Default currency first, then largest.
 	OutstandingByCurrency []CurrencyAmount `json:"outstanding_by_currency"`
+
+	// CreditBalanceByCurrency is the credit customers hold, one row per
+	// currency (ADR-129): each ledger row stores its own currency, and
+	// balances in two currencies are never added together. Default currency
+	// first, then largest. Test-clock customers are left out.
+	CreditBalanceByCurrency []CurrencyAmount `json:"credit_balance_by_currency"`
 
 	// Counts
 	ActiveCustomers int `json:"active_customers"`
@@ -233,17 +238,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Credit balance: authoritative SUM(amount_cents) over the whole ledger,
-	// matching credit.GetBalance. The previous DISTINCT ON (customer_id)
-	// balance_after read the denormalized running balance of the latest row
-	// BY created_at — but catchup / late-cron expiry entries can be inserted
-	// out of created_at order, so "latest row" wasn't the true latest balance
-	// and total credit liability was mis-reported. Summing amount_cents is
-	// order-independent and exact.
-	err = tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount_cents), 0) FROM customer_credit_ledger
-		WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id IS NULL)
-	`).Scan(&resp.CreditBalance)
+	resp.CreditBalanceByCurrency, err = creditBalanceByCurrency(ctx, tx, defaultCurrency)
 	if err != nil {
 		slog.Error("analytics overview: credit balance", "error", err)
 		respond.InternalError(w, r)
@@ -374,6 +369,38 @@ func outstandingByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency stri
 		WHERE status = 'finalized' AND payment_status != 'succeeded' AND amount_due_cents > 0`+notSimInvoice+`
 		GROUP BY currency
 		ORDER BY (currency = $1) DESC, SUM(amount_due_cents) DESC, currency
+	`, defaultCurrency)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []CurrencyAmount{}
+	for rows.Next() {
+		var a CurrencyAmount
+		if err := rows.Scan(&a.Currency, &a.AmountCents); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// creditBalanceByCurrency is the credit customers hold per currency:
+// authoritative SUM(amount_cents) over the ledger, matching
+// credit.GetBalance. (A DISTINCT ON (customer_id) read of the latest row's
+// balance_after mis-reported it: catchup / late-cron expiry entries can be
+// inserted out of created_at order. Summing amount_cents is order-independent
+// and exact.) Grouped by the currency each row stores (ADR-129); a currency
+// whose balance is zero is left out. Ordered like outstandingByCurrency.
+// Test-clock customers are left out.
+func creditBalanceByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency string) ([]CurrencyAmount, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT currency, COALESCE(SUM(amount_cents), 0)
+		FROM customer_credit_ledger
+		WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id IS NULL)
+		GROUP BY currency
+		HAVING SUM(amount_cents) <> 0
+		ORDER BY (currency = $1) DESC, SUM(amount_cents) DESC, currency
 	`, defaultCurrency)
 	if err != nil {
 		return nil, err

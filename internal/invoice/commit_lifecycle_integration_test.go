@@ -153,7 +153,7 @@ func (h *commitHarness) createCommitInvoice(t *testing.T, ctx context.Context, p
 
 func (h *commitHarness) balance(t *testing.T, ctx context.Context) int64 {
 	t.Helper()
-	bal, err := h.creditSvc.GetBalance(ctx, h.tenantID, h.custID)
+	bal, err := testutil.BalanceUSD(h.creditSvc.GetBalance(ctx, h.tenantID, h.custID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}

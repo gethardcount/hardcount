@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -181,6 +182,7 @@ type Service struct {
 	disputes       DisputeReader
 	creditApplier  CreditApplier
 	settings       TenantSettingsReader
+	currencyFacts  CustomerCurrencyFacts
 	audit          AuditLogger
 	events         domain.EventDispatcher
 	// collectionStopper and dunningResolver are AfterVoid's Stripe and
@@ -254,6 +256,85 @@ func (s *Service) dispatchEvent(ctx context.Context, tenantID, eventType string,
 		slog.ErrorContext(ctx, "failed to enqueue webhook event",
 			"event_type", eventType, "tenant_id", tenantID, "error", err)
 	}
+}
+
+// CustomerCurrencyFacts reads the stored facts a manual invoice's currency
+// must agree with (ADR-100, ADR-129): the customer's billing-profile currency
+// ("" when there is no profile or it sets none) and the plan currencies of the
+// customer's non-terminal subscriptions. Plain strings, so this package
+// imports neither the customer nor the subscription domain; the adapter lives
+// in internal/api. A read error is returned, never read as "no fact".
+type CustomerCurrencyFacts interface {
+	CustomerCurrencyFacts(ctx context.Context, tenantID, customerID string) (profileCurrency string, planCurrencies []string, err error)
+}
+
+// SetCustomerCurrencyFacts wires the currency facts Create checks a manual
+// invoice against. Production wires it at boot; an unwired reader (narrow
+// unit tests) skips the check.
+func (s *Service) SetCustomerCurrencyFacts(f CustomerCurrencyFacts) { s.currencyFacts = f }
+
+// ErrCurrencyUnavailable is a Create whose currency could not be read. It is
+// retryable; the handler answers 503 rather than guess a currency.
+var ErrCurrencyUnavailable = errors.New("could not read the customer's billing currency")
+
+// resolveCurrency is a manual invoice's currency (ADR-100, ADR-129). An
+// explicit one must agree with the customer's stored facts: the billing
+// profile's currency when set, and every non-terminal subscription's plan
+// currency. An empty one takes the profile's, then the subscriptions' plan
+// currency, then the workspace default, in the order the engine stamps a
+// cycle invoice (Engine.invoiceCurrency); the result is then held to the same
+// facts. A customer with neither fact may be invoiced in any allowed
+// currency. A credit pays only invoices in its own currency, so an invoice in
+// a currency the customer is not billed in would sell credit (a commit line)
+// or take a payment that none of the customer's other money can meet.
+func (s *Service) resolveCurrency(ctx context.Context, tenantID, customerID, requested, workspaceDefault string) (string, error) {
+	var (
+		profile string
+		plans   []string
+	)
+	if s.currencyFacts != nil {
+		p, ps, err := s.currencyFacts.CustomerCurrencyFacts(ctx, tenantID, customerID)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrCurrencyUnavailable, err)
+		}
+		profile = strings.ToUpper(strings.TrimSpace(p))
+		seen := map[string]bool{}
+		for _, c := range ps {
+			c = strings.ToUpper(strings.TrimSpace(c))
+			if c != "" && !seen[c] {
+				seen[c] = true
+				plans = append(plans, c)
+			}
+		}
+		sort.Strings(plans)
+	}
+	currency := requested
+	switch {
+	case currency != "":
+	case profile != "":
+		currency = profile
+	case len(plans) > 0:
+		currency = plans[0]
+	default:
+		currency = strings.ToUpper(strings.TrimSpace(workspaceDefault))
+	}
+	if err := domain.ValidateCurrency(currency); err != nil {
+		return "", err
+	}
+	conflict := func(fact, source string) error {
+		return errs.InvalidState(fmt.Sprintf(
+			"this customer is billed in %s (%s); a manual invoice uses the customer's currency, so it cannot be in %s",
+			fact, source, currency)).WithCode("customer_currency_conflict")
+	}
+	if profile != "" && profile != currency {
+		return "", conflict(profile, "billing profile")
+	}
+	for _, p := range plans {
+		if p != currency {
+			return "", conflict(p, "subscription plan")
+		}
+	}
+	return currency, nil
 }
 
 func NewService(store Store, clk clock.Clock, numberer InvoiceNumberer) *Service {
@@ -649,27 +730,33 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// of revenue/at-risk sums. The store insert normalizes again as the
 	// single chokepoint for all callers (incl. the cycle engine's "usd"
 	// fallback); doing it here too keeps the in-memory struct consistent.
+	// An explicit currency is allowlist-validated before anything is read:
+	// it catches typos and the zero-decimal class (ADR-100) before an
+	// unchargeable or 100x-mischarged label reaches Stripe.
 	currency := strings.ToUpper(strings.TrimSpace(input.Currency))
-	if currency == "" {
-		currency = "USD"
-	} else if err := domain.ValidateCurrency(currency); err != nil {
-		// Allowlist-validate only when a currency was actually supplied — the
-		// empty→USD default above is a working API contract (composer sends
-		// no currency). Catches typos and the zero-decimal class (ADR-100)
-		// before an unchargeable or 100x-mischarged label reaches Stripe.
-		return domain.Invoice{}, err
+	if currency != "" {
+		if err := domain.ValidateCurrency(currency); err != nil {
+			return domain.Invoice{}, err
+		}
 	}
 
-	// Read tenant settings once, for the default Net terms and the billing
-	// timezone. A read failure fails the create rather than guessing Net 30
-	// (P24) or stamping a wrong zone, and happens before an invoice number is
-	// spent. No reader wired (tests) means Net 30 and UTC, as in the engine.
-	var ts domain.TenantSettings
+	// Read tenant settings once, for the default Net terms, the billing
+	// timezone and the workspace currency. A read failure fails the create
+	// rather than guessing Net 30 (P24), a zone or a currency, and happens
+	// before an invoice number is spent. No reader wired (tests) means Net 30,
+	// UTC and USD, as in the engine.
+	ts := domain.TenantSettings{DefaultCurrency: "USD"}
 	if s.settings != nil {
 		ts, err = s.settings.Get(ctx, tenantID)
 		if err != nil {
 			return domain.Invoice{}, fmt.Errorf("read tenant settings: %w", err)
 		}
+	}
+	// The customer's currency (ADR-100, ADR-129): an explicit one must agree
+	// with the stored facts, an empty one is taken from them.
+	currency, err = s.resolveCurrency(ctx, tenantID, input.CustomerID, currency, ts.DefaultCurrency)
+	if err != nil {
+		return domain.Invoice{}, err
 	}
 	// The org billing timezone is stamped on the invoice at create, as every
 	// engine writer does (ADR-077). Without it the PDF, hosted page and

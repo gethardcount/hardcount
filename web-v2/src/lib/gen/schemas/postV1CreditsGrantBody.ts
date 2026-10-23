@@ -11,6 +11,12 @@ import type { PostV1CreditsGrantBodyGrantKind } from './postV1CreditsGrantBodyGr
 
 export type PostV1CreditsGrantBody = {
   customer_id: string;
+  /**
+     * ISO 4217 code of the credit. Required. Case-insensitive;
+     * stored uppercase. Zero-decimal currencies (such as JPY)
+     * are not supported yet.
+     */
+  currency: string;
   amount_cents: number;
   description?: string;
   /**

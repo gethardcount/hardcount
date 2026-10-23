@@ -92,8 +92,10 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 		OutstandingByCurrency: []CurrencyAmount{
 			{Currency: "USD", AmountCents: 15_000_00},
 		},
-		AvgInvoiceValue:     320_00,
-		CreditBalance:       8_500_00,
+		AvgInvoiceValue: 320_00,
+		CreditBalanceByCurrency: []CurrencyAmount{
+			{Currency: "USD", AmountCents: 8_500_00},
+		},
 		ActiveCustomers:     42,
 		NewCustomers:        5,
 		ActiveSubs:          38,
@@ -124,7 +126,7 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 
 	expected := []string{
 		"period", "currency", "mrr", "mrr_prev", "arr", "arr_prev",
-		"revenue", "revenue_prev", "outstanding_ar", "outstanding_by_currency", "avg_invoice_value", "credit_balance_total",
+		"revenue", "revenue_prev", "outstanding_ar", "outstanding_by_currency", "avg_invoice_value", "credit_balance_by_currency",
 		"active_customers", "new_customers", "live_customers", "live_customers_prev",
 		"active_subscriptions", "trialing_subscriptions",
 		"paid_invoices", "failed_payments", "failed_payments_prev", "open_invoices",

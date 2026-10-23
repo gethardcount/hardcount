@@ -17,9 +17,11 @@ export interface CreditLedgerEntry {
   tenant_id?: string;
   customer_id: string;
   entry_type: CreditLedgerEntryEntryType;
+  /** The entry's currency, uppercase. Credit pays only invoices in its own currency. */
+  currency: string;
   /** Positive adds credit, negative removes it. */
   amount_cents: number;
-  /** Customer's credit balance after this entry, in cents. */
+  /** The customer's credit balance in this entry's currency after it, in cents. */
   balance_after: number;
   description: string;
   invoice_id?: string;

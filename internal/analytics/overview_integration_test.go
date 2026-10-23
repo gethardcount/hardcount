@@ -17,7 +17,7 @@ import (
 )
 
 // TestOverview_CreditAndCurrency covers two medium-severity audit findings:
-//   - credit_balance_total used DISTINCT ON balance_after (latest row by
+//   - the credit balance used DISTINCT ON balance_after (latest row by
 //     created_at), which mis-reports after out-of-order expiry inserts; it now
 //     sums amount_cents (order-independent, matches credit.GetBalance).
 //   - revenue/AR/avg summed total_amount_cents across currencies; they're now
@@ -71,8 +71,8 @@ func TestOverview_CreditAndCurrency(t *testing.T) {
 	if resp.Revenue != 100_00 {
 		t.Errorf("revenue: got %d, want 10000 (USD only — EUR invoices excluded, not summed)", resp.Revenue)
 	}
-	if resp.CreditBalance != 3000 {
-		t.Errorf("credit_balance_total: got %d, want 3000 (SUM(amount_cents), not latest balance_after)", resp.CreditBalance)
+	if len(resp.CreditBalanceByCurrency) != 1 || resp.CreditBalanceByCurrency[0] != (CurrencyAmount{Currency: "USD", AmountCents: 3000}) {
+		t.Errorf("credit_balance_by_currency: got %+v, want [USD 3000] (SUM(amount_cents), not latest balance_after)", resp.CreditBalanceByCurrency)
 	}
 }
 
@@ -117,9 +117,9 @@ func seedLedger(t *testing.T, db *postgres.DB, tenantID, custID string, now time
 	defer func() { _ = tx.Rollback() }()
 	// grant +5000 at T (created later), expiry -2000 at T-2h (created earlier).
 	if _, err := tx.Exec(`
-		INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, amount_cents, balance_after, description, created_at)
-		VALUES ($1,$2,$3,'expiry',-2000,3000,'expiry', $5),
-		       ($4,$2,$3,'grant',  5000,5000,'grant',  $6)
+		INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, currency, amount_cents, balance_after, description, created_at)
+		VALUES ($1,$2,$3,'expiry','USD',-2000,3000,'expiry', $5),
+		       ($4,$2,$3,'grant', 'USD', 5000,5000,'grant',  $6)
 	`, postgres.NewID("vlx_ccl"), tenantID, custID, postgres.NewID("vlx_ccl"), now.Add(-2*time.Hour), now); err != nil {
 		t.Fatalf("seed ledger: %v", err)
 	}

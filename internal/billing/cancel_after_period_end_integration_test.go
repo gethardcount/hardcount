@@ -21,6 +21,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/testclock"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
@@ -426,7 +427,7 @@ func TestImmediateCancel_InAdvance_AfterPeriodEnd_KeepsEndedPeriodUsage(t *testi
 			if usage != 1000 || base != cancelFixtureBaseCents || renewal.TotalAmountCents != 1000+cancelFixtureBaseCents {
 				t.Fatalf("renewal invoice: usage=%dc base=%dc total=%dc, want 1000 + %d", usage, base, renewal.TotalAmountCents, cancelFixtureBaseCents)
 			}
-			bal, err := r.credit.GetBalance(r.base, r.f.tenantID, r.f.customerID)
+			bal, err := testutil.BalanceUSD(r.credit.GetBalance(r.base, r.f.tenantID, r.f.customerID))
 			if err != nil {
 				t.Fatalf("credit balance: %v", err)
 			}

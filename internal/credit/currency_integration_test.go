@@ -478,8 +478,19 @@ func TestCurrency_DerivedRowsInherit(t *testing.T) {
 		if _, err := r.svc.ApplyToInvoice(r.ctx, r.tenantID, cust, inv, 1500); err != nil {
 			t.Fatalf("apply: %v", err)
 		}
-		r.exec(`INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, currency, amount_cents, balance_after, description, invoice_id, livemode)
-			VALUES ('vlx_ccl_mixed_usd', $1, $2, 'usage', 'USD', -100, -100, 'drift', $3, false)`, r.tenantID, cust, inv)
+		// A tenant tx, so the row lands in this test's mode (the livemode
+		// trigger reads the session).
+		tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		if _, err := tx.ExecContext(r.ctx, `INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, currency, amount_cents, balance_after, description, invoice_id)
+			VALUES ('vlx_ccl_mixed_usd', $1, $2, 'usage', 'USD', -100, -100, 'drift', $3)`, r.tenantID, cust, inv); err != nil {
+			t.Fatalf("seed USD usage row: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
 		r.reverse(cust, inv, true)
 		if n := r.scanInt(`SELECT count(*) FROM customer_credit_ledger WHERE source_invoice_reversal_id = $1`, inv); n != 0 {
 			t.Errorf("reversal rows = %d, want 0", n)
@@ -541,6 +552,20 @@ func TestCurrency_EveryWriterRequiresOne(t *testing.T) {
 	postgres.Rollback(tx)
 	if err == nil {
 		t.Error("credit-note grant with no currency: accepted, want an error")
+	}
+
+	inv := r.invoiceIn(cust, "EUR", 1000, "VLX-WRITERS-COMMIT")
+	tx, err = r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	_, err = r.svc.GrantCommitForInvoiceTx(r.ctx, tx, r.tenantID, cust, inv, "VLX-WRITERS-COMMIT", "", 1000, nil)
+	postgres.Rollback(tx)
+	if err == nil {
+		t.Error("commit grant with no currency: accepted, want an error")
+	}
+	if _, err := r.store.AdjustAtomic(r.ctx, r.tenantID, cust, "", "no currency", 100); err == nil {
+		t.Error("store adjustment with no currency: accepted, want an error")
 	}
 
 	if n := r.scanInt(`SELECT count(*) FROM customer_credit_ledger WHERE customer_id = $1`, cust); n != 0 {
