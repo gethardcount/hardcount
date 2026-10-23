@@ -981,7 +981,8 @@ func (s *PostgresStore) LockMeterTx(ctx context.Context, tx *sql.Tx, meterID str
 }
 
 // CountSubsUsingMeterTx locks the plans wiring the meter, in id order so two
-// edits never take them in opposite orders, then counts the subscriptions
+// edits never take them in opposite orders (subscription writers take plans
+// in the same order), then counts the subscriptions
 // that bill the meter. The count is a new statement, so under READ COMMITTED
 // it sees a subscription whose insert the lock waited for.
 //

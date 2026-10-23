@@ -339,8 +339,9 @@ type Store interface {
 	//
 	// Every write to subscription_items locks the subscription row first
 	// (#1270), so item writers wait for each other and for the period
-	// closers, and all of them lock in one order: subscription row, item
-	// rows, billing_intervals, invoices.
+	// closers, and all of them lock in one order: subscription row, the
+	// plans the write references (in ascending id, D08 §4.21), item rows,
+	// billing_intervals, invoices.
 
 	// LockForItemChangeTx locks the subscription row on the caller's tx and
 	// returns the subscription with its live items, read after the lock

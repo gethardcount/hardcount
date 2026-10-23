@@ -325,6 +325,67 @@ func TestPlanLockOrder_NoDeadlockWithMeterEdit(t *testing.T) {
 	}
 }
 
+// TestPlanLockOrder_LockStatementIsAscending pins the order inside the lock
+// statement itself, whatever scan the planner picks. Postgres usually reads
+// `id = ANY($1)` through the primary key, which returns ids in order anyway,
+// so the race test above would not notice a statement that lost its ORDER BY.
+// Here the transaction scans the table sequentially, and lo's live row is
+// moved after hi's: without the ORDER BY the statement locks hi, then waits
+// for lo.
+func TestPlanLockOrder_LockStatementIsAscending(t *testing.T) {
+	r := newLockOrderRig(t)
+	_, lo, hi := r.meterPlans(t, "lockasc")
+	// An update writes lo's new row version after hi's in the heap.
+	if _, err := r.admin.ExecContext(r.ctx, `UPDATE plans SET updated_at = updated_at WHERE id = $1`, lo.ID); err != nil {
+		t.Fatalf("move lo: %v", err)
+	}
+
+	guard, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin guard: %v", err)
+	}
+	defer postgres.Rollback(guard)
+	if _, err := guard.ExecContext(r.ctx, `SELECT id FROM plans WHERE id = $1 FOR UPDATE`, lo.ID); err != nil {
+		t.Fatalf("guard locks lo: %v", err)
+	}
+
+	writer, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin writer: %v", err)
+	}
+	defer postgres.Rollback(writer)
+	if _, err := writer.ExecContext(r.ctx, `SET LOCAL enable_indexscan = off; SET LOCAL enable_bitmapscan = off`); err != nil {
+		t.Fatalf("force a sequential scan: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- lockPlansTx(r.ctx, writer, []string{hi.ID, lo.ID}) }()
+	waitBlockedBy(t, r.ctx, r.admin, "WHERE id = $1 FOR UPDATE")
+
+	// The writer waits for lo, so it must not hold hi yet: an exclusive lock
+	// on hi is free.
+	probe, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin probe: %v", err)
+	}
+	defer postgres.Rollback(probe)
+	if _, err := probe.ExecContext(r.ctx, `SELECT id FROM plans WHERE id = $1 FOR UPDATE NOWAIT`, hi.ID); err != nil {
+		t.Errorf("the lock statement took hi before lo: %v", err)
+	}
+	postgres.Rollback(probe)
+
+	if err := guard.Rollback(); err != nil {
+		t.Fatalf("release lo: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("lock plans: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("the lock statement never finished")
+	}
+}
+
 // TestPlanLockOrder_SinglePlanWritersLockFirst covers the writers that
 // reference one plan. One lock alone cannot deadlock against the guard, so
 // the test pins where it is taken: with the plan held FOR UPDATE, as the
