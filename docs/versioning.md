@@ -40,13 +40,16 @@ Velox has one API version, `/v1`. Before 1.0, a breaking change goes into
 
 Read these before every upgrade:
 
-1. **The [CHANGELOG](../CHANGELOG.md).** Each release starts with a
-   **Before upgrading** list: what changed, who it affects, and what to do.
-   Lines for code that calls the API start with "API callers:". Changes not
-   yet released are under **Unreleased**.
+1. **The [CHANGELOG](../CHANGELOG.md).** Read the entry for every release
+   between yours and the new one. Since 0.4.0, a release with steps to take
+   lists them under **Before upgrading**: what changed, who it affects, and
+   what to do. A release with nothing to do says so at the top, as 0.6.1
+   does. Changes not yet released are under **Unreleased**, where lines for
+   code that calls the API say "API callers:".
 2. **The release notes** on
-   [GitHub releases](https://github.com/getvelox/velox/releases). They open
-   with the same steps, under **Before you upgrade**.
+   [GitHub releases](https://github.com/getvelox/velox/releases). Since
+   v0.6.0, a release with steps to take repeats them under **Before you
+   upgrade**. v0.4.0 has them too.
 
 Take a backup before you upgrade. To go back, restore that backup: see
 [Upgrading](self-host.md#upgrading).

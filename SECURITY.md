@@ -43,7 +43,7 @@ Velox is pre-1.0. Only the latest release gets security fixes.
 
 ## Hardening status
 
-Velox is **pre-launch** and pre-audit. Encryption-at-rest, RLS on API request paths, audit log immutability, HMAC webhook signing, bcrypt (cost 12) passwords, SHA-256 session/API-key/token hashing, security headers, GCRA rate limiting (a leaky-bucket-style algorithm), and TLS-only intent (secure cookies + HSTS; TLS termination itself is left to the operator's proxy) are all implemented. (A SOC 2 control mapping is deferred until a design partner requires it — see the deferred list in the README.)
+Velox is **pre-launch** and pre-audit. Encryption-at-rest, RLS on most API requests (the exceptions are listed in [Architecture](docs/architecture.md#design-rules)), audit log immutability, HMAC webhook signing, bcrypt (cost 12) passwords, SHA-256 session/API-key/token hashing, security headers, GCRA rate limiting (a leaky-bucket-style algorithm), and TLS-only intent (secure cookies + HSTS; TLS termination itself is left to the operator's proxy) are all implemented. (A SOC 2 control mapping waits until a design partner requires it: see [Later](docs/roadmap.md#later) in the roadmap.)
 
 Known gaps, documented openly:
 

@@ -132,7 +132,7 @@ The default 20 connections carried 1,200 requests a second for one account in th
 
 | Table | Grows with | Keep |
 |---|---|---|
-| `usage_events` | Every usage event. Can pass 10 million rows a month. | Split by month, or move rows older than 12 months to cold storage. Velox deletes nothing. |
+| `usage_events` | Every usage event. Can pass 10 million rows a month. | All. Velox deletes nothing, and cannot yet split the table by month. Do not delete or archive old rows: an event's idempotency key is kept only in its row, so a resent old event would be stored again ([If you need more](../scale.md#if-you-need-more)). |
 | `audit_log` | Every change by a person or by Velox. Hundreds a day per account. | Often 7 years for audits such as SOC 2 |
 | `email_outbox` | One row per email sent | All. The invoice timeline, the customer's Sent emails and the Postmark webhook read them. |
 | `webhook_outbox` | One row per webhook queued | Rows with `status='dispatched'` can be deleted at any age; Velox does not delete them. Keep `failed` rows: [the runbook](runbook/webhook-outbox-backed-up.md#send-failed-rows-again) sends them again. |

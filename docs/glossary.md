@@ -128,10 +128,11 @@ Words used in the Velox docs and dashboard. For the big picture, read
 
 - **credit grant / credit block**: Credit added to a customer's balance.
   Examples: a prepaid commit, free promotional credit, a goodwill credit,
-  or credit from a proration or a credit note. The balance is a ledger that
-  is only ever added to. Each grant is a block that invoices draw down when
-  billed: promotional credit first, then the soonest to expire, then the
-  oldest. [More](adr/071-credit-expiry-retires-the-block.md)
+  or credit from a proration or a credit note. The balance is a ledger of
+  grant, usage, expiry and adjustment entries. Each grant is a block that
+  invoices draw down when billed: promotional credit first, then the
+  soonest to expire, then the oldest. A draw-down updates the grant entry's
+  used amount in place. [More](adr/071-credit-expiry-retires-the-block.md)
 - **prepaid commit**: Usage credit the customer pays for up front, sold as
   a line on a one-off invoice. When that invoice is finalized, Velox adds a
   credit block to the customer's balance. The credit can be more than the

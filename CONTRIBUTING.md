@@ -190,9 +190,14 @@ internal/{domain}/
   `internal/arch/boundaries_test.go` enforces this: a new cross-domain
   import fails the test until it is added there on purpose.
 - Every handler uses `respond.JSON()` / `respond.FromError()` for responses.
-- Every store method runs inside a transaction scoped to one tenant by
-  Postgres Row-Level Security (RLS). A tenant is one account's data in a
-  shared database; RLS hides every other tenant's rows.
+- Most store methods run inside a transaction scoped to one tenant by
+  Postgres Row-Level Security (RLS):
+  `db.BeginTx(ctx, postgres.TxTenant, tenantID)`. A tenant is one account's
+  data in a shared database; RLS hides every other tenant's rows.
+- Some store methods run under `postgres.TxBypass`, where RLS does not
+  apply: work across tenants, work before the tenant is known, and two
+  signed-in areas. Such a query must filter by `tenant_id` itself.
+  [Architecture](docs/architecture.md#design-rules) lists them.
 - Integration tests use `testutil.SetupTestDB()`.
 
 ## Adding a new domain

@@ -19,6 +19,12 @@ first. Every shipped change, with its date, is in the
   would change the price of a billing period already open is refused.
 - **Planned:** the commands in the [first-invoice guide](first-invoice.md)
   run in CI, so a change that breaks them fails.
+- **Planned: usage prices set per plan.** Today a usage price is set on the
+  meter, so two plans that charge different token rates need two meters.
+  In v0.9.0, each plan sets its own price for each meter, and a price edit
+  takes effect at each subscriber's next billing period. The pricing API
+  changes. A design goes up for review first, and it sets the details.
+  v0.9.0 is released after this ships.
 
 Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
 
@@ -30,24 +36,18 @@ Also now, in v0.9.0 or right after it:
   invoiced. A batch answer will give each event's status.
 - A secret API key that can only send usage, for LiteLLM and other
   gateways.
-- The design for usage prices set per plan (v0.10.0, below), for review.
 
 ## Next
 
-Planned after v0.9.0:
+**v0.10.0**, planned after v0.9.0:
 
-- **v0.10.0: usage prices set per plan.** Today a usage price is set on the
-  meter, so two plans that charge different token rates need two meters.
-  In v0.10.0 each plan sets its own price for each meter. A price edit
-  takes effect at each subscriber's next billing period. The pricing API
-  changes: for example, mode `flat` is renamed `per_unit`, and the meter's
-  default price goes away. A migration moves v0.9.0 prices over.
 - **Spend alerts.** A spend threshold on each subscription, checked
   against live usage, with an optional repeat. When usage crosses it, Velox
   sends a webhook and an email. Cutting a customer off stays in your app
   ([how](stop-usage-when-credit-runs-out.md)).
 - **Generated SDKs for Go and TypeScript,** built from
-  [`api/openapi.yaml`](../api/openapi.yaml) once v0.10.0 settles the API.
+  [`api/openapi.yaml`](../api/openapi.yaml), once the per-plan pricing API
+  has settled.
 
 ## Later
 
@@ -88,8 +88,8 @@ Each item waits until someone using Velox needs it:
   Velox ask for feature gating.
 - A plugin system.
 - Plan phases, plan versions, an XML catalog, several API versions side by
-  side, or GraphQL beside REST. From v0.10.0, keeping customers on an old
-  price means a separate plan.
+  side, or GraphQL beside REST. Once prices are set per plan, keeping
+  customers on an old price means a separate plan.
 - A double-entry accounting ledger or revenue recognition.
 - Dedup that is optional or expires, money in floating-point numbers, and
   retrying an unclear card charge under a new key.
