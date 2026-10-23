@@ -658,21 +658,23 @@ func TestThresholdScan_BoundaryDefersToCycle(t *testing.T) {
 	}
 }
 
-// seedThresholdFleet inserts n active subscriptions on a shared base-fee-only
-// plan (no meters, so they cross on the in_arrears base alone — no per-sub
-// usage ingestion needed) with an amount threshold configured directly on the
-// row. IDs are zero-padded so the drain cursor (ORDER BY id, id > afterID)
+// seedThresholdFleet inserts n active subscriptions of the fixture's
+// customer on a shared plan with the fixture's meter, with a 100c amount
+// threshold configured directly on the row. Usage is per customer and meter,
+// so one ingest of 100 calls (100c) makes every one of them cross; the base
+// fee does not count toward a threshold. IDs are zero-padded so the drain cursor (ORDER BY id, id > afterID)
 // pages deterministically.
 func (f *thresholdFixture) seedThresholdFleet(t *testing.T, ctx context.Context, n int) []string {
 	t.Helper()
 	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_fleet_base", Name: "Fleet Base Plan",
 		Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 4900,
+		BaseAmountCents: 4900, MeterIDs: []string{f.meterID},
 	})
 	if err != nil {
 		t.Fatalf("create fleet plan: %v", err)
 	}
+	f.ingestUsage(t, ctx, 1, 100)
 
 	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
 	if err != nil {
@@ -1192,10 +1194,10 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 // TestImmediateCancel_AfterThresholdFire_NoDoubleBill is the ADR-066 §5
 // site-set fix on real Postgres: the immediate cancel is the period's SECOND
 // closer, and pre-fix it ignored the threshold watermark entirely — after a
-// fire it re-billed the pre-fire sum usage AND the full
-// in_arrears base (both already on the fire invoice). The final cancel
-// invoice must bill only the post-fire residual sum, zero base, and the
-// deferred max bucket over the FULL window.
+// fire it re-billed the pre-fire sum usage (already on the fire invoice).
+// The final cancel invoice must bill only the post-fire residual sum, the
+// deferred max bucket over the FULL window, and the in_arrears base prorated
+// to the cancel: a fire bills no base.
 func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
@@ -1284,8 +1286,8 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 		}
 	}
 
-	// Fire: full base 3000 + sum 1000 ride the invoice; max
-	// dropped (deferred).
+	// Fire: sum 1000 rides the invoice; max dropped (deferred). The base
+	// does not ride a fire.
 	fired, errs := f.engine.ScanThresholds(ctx, 50)
 	if len(errs) > 0 {
 		t.Fatalf("scan errors: %v", errs)
@@ -1339,9 +1341,16 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 			sumLines++
 		}
 	}
-	// The fire billed base + pre-fire sum; the cancel bills NEITHER again.
-	if baseLines != 0 {
-		t.Errorf("final cancel invoice re-billed %d base line(s) — the fire already carried the full base", baseLines)
+	// The fire billed the pre-fire sum; the cancel does not bill it again. A
+	// fire bills no base, so the cancel bills the base prorated to the cancel.
+	var baseCents int64
+	for _, li := range lines {
+		if li.LineType == domain.LineTypeBaseFee {
+			baseCents += li.AmountCents
+		}
+	}
+	if baseLines != 1 || baseCents <= 0 || baseCents >= 3000 {
+		t.Errorf("final cancel invoice base = %d line(s), %dc; want 1 line prorated below the 3000c month", baseLines, baseCents)
 	}
 	if sumLines != 0 {
 		t.Errorf("final cancel invoice re-billed %d sum line(s) — pre-fire usage already on the fire invoice, and no post-fire usage exists", sumLines)
@@ -1349,7 +1358,7 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 	if maxLines != 1 {
 		t.Errorf("deferred max lines on final invoice = %d, want exactly 1", maxLines)
 	}
-	if finalInv.SubtotalCents != 10000 {
-		t.Errorf("final invoice subtotal = %d, want 10000 (deferred max only)", finalInv.SubtotalCents)
+	if finalInv.SubtotalCents != 10000+baseCents {
+		t.Errorf("final invoice subtotal = %d, want %d (deferred max + prorated base)", finalInv.SubtotalCents, 10000+baseCents)
 	}
 }

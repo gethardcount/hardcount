@@ -131,13 +131,20 @@ func (r *lagRig) scanThresholds(at time.Time) int {
 // previewUsage is the usage total of the subscription's preview at `at`.
 func (r *lagRig) previewUsage(at time.Time) int64 {
 	r.t.Helper()
+	return r.previewSum(at, "usage")
+}
+
+// previewSum sums the amounts of the default-window preview's lines of one
+// line type.
+func (r *lagRig) previewSum(at time.Time, lineType string) int64 {
+	r.t.Helper()
 	out := r.must(http.MethodPost, "/v1/invoices/create_preview", at,
 		map[string]any{"customer_id": r.custID, "subscription_id": r.subID}, http.StatusOK)
 	lines, _ := out["lines"].([]any)
 	var n int64
 	for _, raw := range lines {
 		l, _ := raw.(map[string]any)
-		if l["line_type"] == "usage" {
+		if l["line_type"] == lineType {
 			c, _ := l["amount_cents"].(float64)
 			n += int64(c)
 		}
@@ -310,7 +317,7 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 	r.ingest(dayAt(19, 0), 7)
 	r.expireTrials(dayAt(19, 45))
 	r.must(http.MethodPut, "/v1/subscriptions/"+r.subID+"/billing-thresholds", dayAt(20, 0),
-		map[string]any{"amount_gte": 100}, http.StatusOK)
+		map[string]any{"amount_gte": 5}, http.StatusOK)
 	if n := r.scanThresholds(dayAt(21, 0)); n != 1 {
 		t.Fatalf("threshold scan fired %d invoices, want 1", n)
 	}

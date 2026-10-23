@@ -828,7 +828,7 @@ export default function SubscriptionDetailPage() {
           <div className="space-y-1">
             <CardTitle className="text-sm">Spend thresholds</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Issues an invoice early when this period's running total, or an item's usage, reaches a set level. Checked by the hourly billing run. Usage is not stopped.
+              Invoices usage early when this period's usage total, or an item's usage, reaches a set level. Checked by the hourly billing run. Usage is not stopped.
             </p>
           </div>
           {sub.status !== 'canceled' && (
@@ -842,7 +842,7 @@ export default function SubscriptionDetailPage() {
             <div className="divide-y divide-border">
               {sub.billing_thresholds.amount_gte != null && (
                 <div className="flex items-center justify-between px-6 py-3">
-                  <span className="text-sm text-muted-foreground w-40 shrink-0">Period total</span>
+                  <span className="text-sm text-muted-foreground w-40 shrink-0">Usage total</span>
                   <span className="text-sm text-foreground">
                     {firstItemPlan ? formatCents(sub.billing_thresholds.amount_gte, firstItemPlan.currency) : formatCentsBare(sub.billing_thresholds.amount_gte)}
                   </span>
@@ -1839,7 +1839,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     if (trimmedAmount !== '') {
       const amt = Number(trimmedAmount)
       if (!Number.isFinite(amt) || amt <= 0) {
-        toast.error('The period total must be more than zero')
+        toast.error('The usage total must be more than zero')
         return
       }
       body.amount_gte = Math.round(amt * 100)
@@ -1860,7 +1860,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
     }
 
     if (body.amount_gte == null && (body.item_thresholds == null || body.item_thresholds.length === 0)) {
-      toast.error('Set a period total or at least one item threshold')
+      toast.error('Set a usage total or at least one item threshold')
       return
     }
 
@@ -1891,12 +1891,12 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         <DialogHeader>
           <DialogTitle>{existing ? 'Edit spend thresholds' : 'Set spend thresholds'}</DialogTitle>
           <DialogDescription>
-            When this period's running total, or an item's usage, reaches a level you set, an invoice is issued early at the next hourly billing run. The period keeps running, and the rest of it is billed at its normal end. Usage is not stopped. Set at least one level.
+            When this period's usage total, or an item's usage, reaches a level you set, the usage so far is invoiced early at the next hourly billing run. The period keeps running: its own invoice bills the base fee and the rest of the usage at its normal end. Usage is not stopped. Set at least one level.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="amount-gte">Period total{subCurrency ? ` (${subCurrency.toUpperCase()})` : ''}</Label>
+            <Label htmlFor="amount-gte">Usage total{subCurrency ? ` (${subCurrency.toUpperCase()})` : ''}</Label>
             <Input
               id="amount-gte"
               type="number"
@@ -1908,7 +1908,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
               onChange={(e) => setAmountStr(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              An invoice is issued early when the period's total reaches this amount. Leave blank for none.
+              Usage is invoiced early when the period's usage reaches this amount. The base fee is not counted. Leave blank for none.
             </p>
           </div>
 

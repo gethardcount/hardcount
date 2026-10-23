@@ -11,13 +11,13 @@ import (
 )
 
 // These tests lock the C2 fix from the periodic-jobs audit: when a
-// threshold invoice fired mid-cycle and the cycle was NOT reset
-// (reset_billing_cycle=false, or reset=true whose cycle advance failed),
-// the cycle close must bill only the residual — usage from the threshold
-// invoice's billing_period_end, and NO in_arrears base fee (fireThreshold
-// already billed the full unprorated base). Pre-fix the cycle close
-// re-billed the whole period on top of the threshold invoice: base 2x,
-// pre-fire usage 2x.
+// threshold invoice fired mid-cycle, the cycle close bills only the residual
+// usage — from the threshold invoice's billing_period_end. Pre-fix the cycle
+// close re-billed the whole period on top of the threshold invoice.
+//
+// A fire bills usage only, so the close bills the period's in_arrears base
+// in full. A fire made before that change carried the full base; the close
+// then skips it (seedLegacyThresholdInvoice).
 
 func residualHarness(thresholds *domain.BillingThresholds) (*mockSubs, *mockUsage, *mockPricing, *mockInvoices, *Engine) {
 	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
@@ -65,14 +65,44 @@ func residualHarness(thresholds *domain.BillingThresholds) (*mockSubs, *mockUsag
 	return subs, usage, pricing, invoices, engine
 }
 
+// seedThresholdInvoice seeds a fire over [Apr 1, Apr 10): 700 calls, usage
+// only, as fires bill now.
 func seedThresholdInvoice(inv *mockInvoices, status domain.InvoiceStatus) {
+	seedThresholdInvoiceLines(inv, status, false)
+}
+
+// seedLegacyThresholdInvoice seeds the same fire as made before fires
+// stopped billing the base: it also carries the full 4900c in_arrears base.
+func seedLegacyThresholdInvoice(inv *mockInvoices, status domain.InvoiceStatus) {
+	seedThresholdInvoiceLines(inv, status, true)
+}
+
+func seedThresholdInvoiceLines(inv *mockInvoices, status domain.InvoiceStatus, withBase bool) {
+	start := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	subtotal := int64(70000)
+	inv.lineItems = append(inv.lineItems, domain.InvoiceLineItem{
+		ID: "li_thr_usage", InvoiceID: "inv_thr", TenantID: "t1", LineType: domain.LineTypeUsage,
+		MeterID: "mtr_api", RatingRuleVersionID: "rrv_api", Description: "API Calls",
+		Quantity: 700, QuantityDecimal: decimal.NewFromInt(700), UnitAmountCents: 100,
+		AmountCents: 70000, TotalAmountCents: 70000, Currency: "USD",
+		BillingPeriodStart: &start, BillingPeriodEnd: &end,
+	})
+	if withBase {
+		subtotal += 4900
+		inv.lineItems = append(inv.lineItems, domain.InvoiceLineItem{
+			ID: "li_thr_base", InvoiceID: "inv_thr", TenantID: "t1", LineType: domain.LineTypeBaseFee,
+			Description: "Pro Plan - base fee (qty 1)", Quantity: 1, UnitAmountCents: 4900,
+			AmountCents: 4900, TotalAmountCents: 4900, Currency: "USD",
+		})
+	}
 	inv.invoices = append(inv.invoices, domain.Invoice{
 		ID: "inv_thr", TenantID: "t1", CustomerID: "cus_1", SubscriptionID: "sub_1",
 		InvoiceNumber: "VLX-THR-1", BillingReason: domain.BillingReasonThreshold,
 		Status: status, PaymentStatus: domain.PaymentSucceeded,
-		BillingPeriodStart: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
-		BillingPeriodEnd:   time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC),
-		SubtotalCents:      74900, TotalAmountCents: 74900,
+		BillingPeriodStart: start,
+		BillingPeriodEnd:   end,
+		SubtotalCents:      subtotal, TotalAmountCents: subtotal,
 	})
 }
 
@@ -105,10 +135,9 @@ func TestCycleClose_AfterThresholdFire_BillsOnlyResidual(t *testing.T) {
 	cycle := invoices.invoices[1]
 	base, usage := cycleInvoiceLines(t, invoices, cycle.ID)
 
-	// Base was billed IN FULL by the threshold invoice — re-emitting it
-	// here is the 2x-base half of the double-bill.
-	if len(base) != 0 {
-		t.Errorf("cycle close must not re-bill the in_arrears base after a threshold fire; got %d base lines", len(base))
+	// The fire billed no base, so the close bills April's in full, once.
+	if len(base) != 1 || base[0].AmountCents != 4900 {
+		t.Errorf("cycle close must bill the full in_arrears base (4900c) after a usage-only fire; got %+v", base)
 	}
 	// Usage clamps to the residual window: 300 units @ 100 = 30000, NOT
 	// the full-period 1000 units (the pre-fire 700 were on the threshold
@@ -126,8 +155,28 @@ func TestCycleClose_AfterThresholdFire_BillsOnlyResidual(t *testing.T) {
 	if usage[0].BillingPeriodStart == nil || !usage[0].BillingPeriodStart.Equal(wantStart) {
 		t.Errorf("usage line period start: got %v, want %v (threshold watermark)", usage[0].BillingPeriodStart, wantStart)
 	}
-	if cycle.SubtotalCents != 30000 {
-		t.Errorf("cycle subtotal: got %d, want 30000 (residual usage only)", cycle.SubtotalCents)
+	if cycle.SubtotalCents != 34900 {
+		t.Errorf("cycle subtotal: got %d, want 34900 (base + residual usage)", cycle.SubtotalCents)
+	}
+}
+
+// A fire made before fires stopped billing the base carried the full
+// in_arrears base. The close of a period that crosses the upgrade must not
+// bill it again: it skips the base because that invoice has a base line.
+func TestCycleClose_AfterLegacyThresholdFireWithBase_SkipsBase(t *testing.T) {
+	_, _, _, invoices, engine := residualHarness(&domain.BillingThresholds{AmountGTE: 100000})
+	seedLegacyThresholdInvoice(invoices, domain.InvoiceFinalized)
+
+	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+		t.Fatalf("cycle errors: %v", errs)
+	}
+	cycle := invoices.invoices[1]
+	base, usage := cycleInvoiceLines(t, invoices, cycle.ID)
+	if len(base) != 0 {
+		t.Errorf("the legacy fire billed the base; the close re-billed it on %d lines", len(base))
+	}
+	if len(usage) != 1 || usage[0].AmountCents != 30000 || cycle.SubtotalCents != 30000 {
+		t.Errorf("close: usage %+v subtotal %d, want 30000c residual usage only", usage, cycle.SubtotalCents)
 	}
 }
 
@@ -155,10 +204,11 @@ func TestCycleClose_NoThresholdInvoice_FullPeriodUnchanged(t *testing.T) {
 
 // The watermark keys on the INVOICE (ground truth), not the mutable
 // BillingThresholds config — an operator removing thresholds after a
-// mid-cycle fire must not resurrect the double-bill at period end.
+// mid-cycle fire must not resurrect the double-bill at period end. The
+// legacy fire is used so the base skip is covered too.
 func TestCycleClose_ThresholdsRemovedAfterFire_StillBillsResidual(t *testing.T) {
 	_, _, _, invoices, engine := residualHarness(nil)
-	seedThresholdInvoice(invoices, domain.InvoiceFinalized)
+	seedLegacyThresholdInvoice(invoices, domain.InvoiceFinalized)
 
 	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
 		t.Fatalf("cycle errors: %v", errs)

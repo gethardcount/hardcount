@@ -6046,8 +6046,9 @@ type Subscription struct {
 	BillingFailure BillingFailure `json:"billing_failure,omitempty"`
 
 	// BillingThresholds Limits that make Velox invoice before the period ends. A threshold
-	// invoice bills the period so far; the period keeps its dates, and
-	// the period's own invoice bills the rest at its normal end.
+	// invoice bills the period's usage so far; the period keeps its dates,
+	// and the period's own invoice bills the base fee and the rest of the
+	// usage at its normal end.
 	BillingThresholds SubscriptionBillingThresholds `json:"billing_thresholds,omitempty"`
 	BillingTime       SubscriptionBillingTime       `json:"billing_time"`
 
@@ -6098,10 +6099,11 @@ type SubscriptionBillingTime string
 type SubscriptionStatus string
 
 // SubscriptionBillingThresholds Limits that make Velox invoice before the period ends. A threshold
-// invoice bills the period so far; the period keeps its dates, and
-// the period's own invoice bills the rest at its normal end.
+// invoice bills the period's usage so far; the period keeps its dates,
+// and the period's own invoice bills the base fee and the rest of the
+// usage at its normal end.
 type SubscriptionBillingThresholds struct {
-	// AmountGte Running-subtotal threshold in cents. Absent when not set.
+	// AmountGte Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
 	AmountGte      int64                       `json:"amount_gte,omitempty"`
 	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
 }
@@ -8238,7 +8240,7 @@ type PostV1SubscriptionsIdActivateParams struct {
 
 // SetSubscriptionBillingThresholdsJSONBody defines parameters for SetSubscriptionBillingThresholds.
 type SetSubscriptionBillingThresholdsJSONBody struct {
-	// AmountGte Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
+	// AmountGte Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
 	AmountGte      int64 `json:"amount_gte,omitempty"`
 	ItemThresholds []struct {
 		// SubscriptionItemId An item of this subscription. Each item can appear once.

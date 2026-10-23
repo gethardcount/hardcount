@@ -130,11 +130,14 @@ func TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays(t *testing.T) {
 }
 
 // TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose: after a fire,
-// the April close bills April's whole in_arrears base, once. The threshold
-// invoice bills usage only.
+// the April close bills April's whole in_arrears base, once, and the preview
+// of April's invoice shows it. The threshold invoice bills usage only.
 func TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose(t *testing.T) {
 	skipShort(t)
-	r, _, _ := keepAnchorFired(t)
+	r, fireAt, _ := keepAnchorFired(t)
+	if got := r.previewSum(fireAt.Add(time.Hour), "base_fee"); got != 3000 {
+		t.Errorf("preview of April's invoice after the fire shows base %dc, want 3000c", got)
+	}
 	r.run(lagB.Add(2 * time.Hour))
 	invs := r.invoices()
 	var total int64
@@ -150,19 +153,54 @@ func TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose(t *testing.T) {
 	}
 }
 
+// TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce: a fire made
+// before fires stopped billing the base carried the full in_arrears base. A
+// period open across the upgrade must still bill its base exactly once, by
+// the close or by an immediate cancel. The fixture adds the base line the old
+// code wrote to the threshold invoice.
+func TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce(t *testing.T) {
+	skipShort(t)
+	for _, tc := range []struct {
+		name  string
+		close func(r *lagRig, fireAt time.Time)
+	}{
+		{"the April close", func(r *lagRig, _ time.Time) { r.run(lagB.Add(2 * time.Hour)) }},
+		{"an immediate cancel", func(r *lagRig, fireAt time.Time) { r.cancelNow(fireAt.Add(5 * 24 * time.Hour)) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, fireAt, thrID := keepAnchorFired(t)
+			r.exec(`INSERT INTO invoice_line_items (tenant_id, invoice_id, line_type, description, quantity, unit_amount_cents, amount_cents, total_amount_cents, currency)
+				SELECT tenant_id, id, 'base_fee', 'plan_p - base fee (qty 1)', 1, 3000, 3000, 3000, currency FROM invoices WHERE id = $1`, thrID)
+			tc.close(r, fireAt)
+			invs := r.invoices()
+			var base int64
+			for _, i := range invs {
+				base += i.sum("base_fee")
+			}
+			if base != 3000 {
+				r.logInvoices(invs)
+				t.Errorf("base billed %dc in all, want 3000c: the legacy fire billed it, and nothing bills it again", base)
+			}
+		})
+	}
+}
+
 // TestThresholdKeepAnchor_InvoicesUnchanged is the control for the removal:
 // what a spend threshold bills when it keeps the anchor must not change by a
 // single byte. Each case drives the real server and writes every invoice of
 // the subscription, with its lines, in a fixed text form. The golden file
-// was written on main before the removal (a08b5e2a) and must still match
-// after it.
+// was written on main before the removal (a08b5e2a) and still matched after
+// it. It was rewritten once on purpose, by the review fix that moved the
+// in_arrears base off the fire: the threshold invoices lost their base line,
+// and the close and the cancel gained it (3000c full, 2400c prorated). Every
+// usage line stayed the same.
 //
-// The cases cover each reader of the threshold watermark that the removal
-// edits: the fire's line build (full in_arrears base, a max bucket left for
-// the close, a prepaid in_advance base skipped), the cycle close (base
-// skipped, usage from the fire on, the max bucket over the whole month), an
-// item threshold (its config hydrated from the item rows alone) and the
-// immediate cancel.
+// The cases cover each reader of the threshold watermark: the fire's line
+// build (usage only, a max bucket left for the close, a prepaid in_advance
+// base skipped), the cycle close (the full base, usage from the fire on, the
+// max bucket over the whole month), an item threshold (its config hydrated
+// from the item rows alone) and the immediate cancel (the base prorated to
+// the cancel).
 //
 // Regenerate only on purpose: go test ./internal/api -run
 // TestThresholdKeepAnchor_InvoicesUnchanged -short=false

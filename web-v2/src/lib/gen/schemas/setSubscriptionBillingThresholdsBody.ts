@@ -11,7 +11,7 @@ import type { SetSubscriptionBillingThresholdsBodyItemThresholdsItem } from './s
 
 export type SetSubscriptionBillingThresholdsBody = {
   /**
-     * Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
+     * Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
      * @minimum 1
      */
   amount_gte?: number;

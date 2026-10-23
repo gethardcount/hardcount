@@ -368,7 +368,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	// The close runs at periodEnd; a scheduled cancel firing there skips
 	// the upcoming in_advance base.
 	terminal := shouldFireScheduledCancel(sub, periodEnd, periodEnd)
-	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, terminal, wm.billedThrough != nil) {
+	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, terminal, wm.billedBase()) {
 		result.Lines = append(result.Lines, PreviewLine{
 			LineType:        "base_fee",
 			Description:     bl.line.Description,

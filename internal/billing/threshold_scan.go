@@ -259,7 +259,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// billing run's cancel arm bills [period_start, cancel_at) at the
 	// contracted instant (ADR-097), but the scheduler runs this scan first in
 	// its tick: a fire here would bill [period_start, now), usage stamped after
-	// the subscription ended and the full in_arrears base included, and the
+	// the subscription ended included, and the
 	// cancel's final invoice would then find the window already billed.
 	if sub.CancelAt != nil && !now.Before(*sub.CancelAt) {
 		return false, nil
@@ -351,9 +351,9 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 // (ADR-066 §4) — shared by BOTH period-closers (billOnePeriod and
 // billFinalOnImmediateCancelImpl) so the protocol cannot drift between them:
 //
-//   - billedThrough: usage before this instant (and the in_arrears base)
-//     already billed on the mid-cycle threshold invoice; additive buckets
-//     bill only the residual window.
+//   - billedThrough: usage before this instant already billed on the
+//     mid-cycle threshold invoice; additive buckets bill only the residual
+//     window.
 //   - lines: the fire invoice's persisted line items — the per-bucket
 //     ground-truth for the non-additive clamp exemption. A max/last bucket
 //     with NO line was deliberately deferred by the fire and must bill
@@ -405,6 +405,21 @@ func (e *Engine) loadThresholdWatermarkTx(ctx context.Context, tx *sql.Tx, tenan
 }
 
 func (w thresholdWatermark) exists() bool { return w.billedThrough != nil }
+
+// billedBase reports whether the fire invoice carries a base fee line. A
+// fire no longer bills a base (the period's own invoice does), but one made
+// before that change billed the full in_arrears base, and the period's
+// closer must not bill it again. Keyed on the invoice's lines, like the
+// non-additive exemption, so an open period that crosses the upgrade bills
+// its base exactly once.
+func (w thresholdWatermark) billedBase() bool {
+	for _, l := range w.lines {
+		if l.LineType == domain.LineTypeBaseFee {
+			return true
+		}
+	}
+	return false
+}
 
 // ThresholdBilledThroughTx implements subscription.Biller for the atomic
 // plan swap (ADR-115, fire-vs-swap): on the swap's tx, after its period CAS
@@ -509,19 +524,16 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		return thresholdEval{}, err
 	}
 
-	// in_advance base fees are billed up front by BillOnCreate / cycle close,
-	// so they must NOT count toward the threshold running total or ride along
-	// on the early-finalize invoice — doing so double-bills the prepaid base.
-	// Each base_fee preview line carries its own PlanID + BaseBillTiming
-	// (stamped at emission, json:"-"), so the skip/proration below matches
-	// PER LINE — the previous parallel-array rebuild of the preview's
-	// emission order silently mis-attributed plans if that order ever
-	// changed (2026-07-10 design review: positional contract between a
-	// display surface and a money writer).
+	// A threshold counts and bills usage only. Base fees stay with the
+	// period's own invoice: an in_advance base is prepaid by BillOnCreate or
+	// the previous close, and an in_arrears base is billed by the period's
+	// close or immediate cancel, prorated as it would be with no fire. The
+	// fire used to bill the full in_arrears base, so a cancel after it
+	// charged the whole period's base for part of it.
 
 	// Roll up TWO totals across the previewed lines (ADR-066 §4 subtotal
 	// split). capRunning is the amount_gte comparison + event payload — the
-	// customer's committed spend. billedSubtotal is the sum of lines that
+	// customer's committed usage spend. billedSubtotal is the sum of lines that
 	// actually ride the invoice — it feeds tax and the invoice header. They
 	// diverge exactly when a non-additive bucket is dropped; collapsing them
 	// charged the customer for
@@ -533,20 +545,12 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 	lineItems := make([]domain.InvoiceLineItem, 0, len(preview.Lines))
 	for _, pl := range preview.Lines {
 		if pl.LineType == "base_fee" {
-			if pl.PlanID == "" {
-				// Every base_fee line is stamped at emission; an unstamped
-				// line means a new producer bypassed the contract — fail
-				// loud rather than guess whose base this is (money path).
-				return thresholdEval{}, fmt.Errorf("threshold fire: base_fee preview line %q has no plan stamp", pl.Description)
+			// Not billed here, but its currency (the plan's) still names the
+			// invoice's, as when the base rode the fire.
+			if currency == "" {
+				currency = pl.Currency
 			}
-			if pl.BaseBillTiming == domain.BillInAdvance {
-				// Already prepaid — skip from running total and line items.
-				continue
-			}
-			// An in_arrears base rides the fire in full: the period keeps its
-			// anchor, and its close skips the base when a threshold
-			// watermark exists (closeBaseFeeLines' thresholdBilled), so the
-			// period bills it exactly once.
+			continue
 		}
 		// Non-additive buckets (max / last_during_period / last_ever) cannot be
 		// split across a threshold fire and a cycle close: max[0,t1) +
@@ -721,7 +725,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 
 	invoiceCurrency := eval.InvoiceCurrency
 	if invoiceCurrency == "" {
-		// Empty preview lines (zero base fees, zero usage) would land here.
+		// Empty preview lines (no usage) would land here.
 		// In that case the running subtotal is zero so we shouldn't have
 		// reached the fire path — defensive bail.
 		return false, fmt.Errorf("no invoice currency resolved for threshold fire")

@@ -6949,8 +6949,9 @@ export const getSetSubscriptionBillingThresholdsUrl = (id: string,) => {
  * block usage. Set `amount_gte`, `item_thresholds`, or both. The
  * first threshold reached triggers the invoice.
  *
- * The threshold invoice bills the period so far. The period keeps its
- * dates: the period's own invoice bills the rest at its normal end.
+ * The threshold invoice bills the period's usage so far. The period
+ * keeps its dates: the period's own invoice bills the base fee and the
+ * rest of the usage at its normal end.
  * `reset_billing_cycle`, which started a new period at the threshold
  * invoice, was removed; a body that sends it is refused with 422.
  *

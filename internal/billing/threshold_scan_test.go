@@ -112,14 +112,12 @@ func setupThresholdEngine(thresholds *domain.BillingThresholds, usageQty int64) 
 }
 
 // TestEvaluateThresholds_AmountCross verifies the running-subtotal check —
-// usage * unit_amount + base_fee crossing AmountGTE flips CrossedAny and
-// CrossedAmount. The minimum bar to ship; if this drifts the engine would
+// usage * unit_amount crossing AmountGTE flips CrossedAny and CrossedAmount.
+// The base fee is not counted. The minimum bar to ship; if this drifts the engine would
 // either over- or under-fire.
 func TestEvaluateThresholds_AmountCross(t *testing.T) {
-	// Plan: $49 base + 1000 calls @ $1 each = $1049 (104900 cents).
-	// Threshold: $1000 (100000 cents) → crossed.
-	// The FULL in_arrears base counts: the period keeps its anchor, and its
-	// close skips the base behind the watermark.
+	// Plan: $49 base + 1000 calls @ $1 each. Usage alone is $1000
+	// (100000 cents). Threshold: $1000 (100000 cents) → crossed.
 	thresholds := &domain.BillingThresholds{
 		AmountGTE: 100000,
 	}
@@ -143,8 +141,8 @@ func TestEvaluateThresholds_AmountCross(t *testing.T) {
 	if eval.CrossedItem {
 		t.Error("CrossedItem should be false (no item caps configured)")
 	}
-	// $49 base (4900) + 1000 calls × 100 cents/call (100000) = 104900 cents
-	wantSubtotal := int64(4900 + 1000*100)
+	// 1000 calls × 100 cents/call = 100000 cents; the base is not counted.
+	wantSubtotal := int64(1000 * 100)
 	if eval.RunningSubtotal != wantSubtotal {
 		t.Errorf("running subtotal: got %d, want %d", eval.RunningSubtotal, wantSubtotal)
 	}
@@ -160,7 +158,7 @@ func TestEvaluateThresholds_AmountCross(t *testing.T) {
 // is below the configured cap. The natural cycle would still bill at end —
 // the threshold scan just stays out of the way.
 func TestEvaluateThresholds_BelowAmount(t *testing.T) {
-	// Plan: $49 base + 100 calls × 100 cents = 14900 cents. Threshold: 100000 → not crossed.
+	// 100 calls × 100 cents = 10000 cents of usage. Threshold: 100000 → not crossed.
 	thresholds := &domain.BillingThresholds{
 		AmountGTE: 100000,
 	}

@@ -2806,11 +2806,12 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	terminalCycleClose := shouldFireScheduledCancel(sub, periodEnd, now)
 
 	// Threshold-fired invoice for THIS cycle: when fireThreshold ran
-	// mid-cycle (the period keeps its anchor), that invoice already billed (and typically charged) usage through its
-	// billing_period_end PLUS the full in_arrears base fee
-	// (evaluateThresholds → previewWithWindow emits the unprorated base).
-	// Without this watermark the cycle close re-billed both: usage from
-	// periodStart and the base again — every threshold cycle
+	// mid-cycle (the period keeps its anchor), that invoice already billed
+	// (and typically charged) usage through its billing_period_end. It bills
+	// no base fee: the close bills the period's base as if no fire happened
+	// (a fire made before that change carried the full in_arrears base, and
+	// wm.billedBase skips it here). Without this watermark the cycle close
+	// re-billed the usage from periodStart — every threshold cycle
 	// double-charged. Keyed on the invoice (ground truth), not the
 	// mutable BillingThresholds config, so an operator removing
 	// thresholds mid-cycle doesn't resurrect the double-bill.
@@ -2875,7 +2876,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// Base-fee lines: segment-aware for in_arrears, one upcoming-period
 	// line for in_advance. closeBaseFeeLines is shared with the operator
 	// preview (previewCycle) so the estimate and the invoice cannot drift.
-	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, terminalCycleClose, thresholdBilledThrough != nil) {
+	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, terminalCycleClose, wm.billedBase()) {
 		lineItems = append(lineItems, bl.line)
 		subtotal += bl.line.AmountCents
 	}
@@ -4161,13 +4162,11 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	subtotal := int64(0)
 	periodDays := roundDays(canceledAt.Sub(periodStart))
 
-	// In_arrears base is skipped ENTIRELY when a threshold fire exists in
-	// this window (ADR-066 §5): a reset=false fire bills the FULL unprorated
-	// base, so re-emitting any prorated segment here double-bills — same
-	// watermark base skip billOnePeriod applies. (reset=true fires are
-	// invisible to this window's watermark by construction: the atomic
-	// re-anchor moves period_start past the fire's own billing_period_start.)
-	if !wm.exists() {
+	// The in_arrears base is billed here, prorated to the cancel, whether or
+	// not a threshold fired: a fire bills usage only. A fire made before that
+	// change carried the full base (wm.billedBase), so it is skipped then —
+	// the same skip billOnePeriod applies.
+	if !wm.billedBase() {
 		// Pass 1: items currently on the sub at cancel time.
 		for _, it := range sub.Items {
 			plan := plans[it.PlanID]
@@ -4491,11 +4490,12 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 	// Threshold watermark (ADR-066 §4/§5): the immediate cancel is the
 	// period's SECOND closer, and pre-fix it ignored the fire entirely — a
 	// threshold fire followed by an immediate cancel re-billed
-	// the pre-fire sum usage AND the full in_arrears base (both already on
-	// the fire invoice, typically already charged). Shared protocol with
-	// billOnePeriod: base skipped when a fire exists, additive buckets
+	// the pre-fire sum usage (already on the fire invoice, typically
+	// already charged). Shared protocol with billOnePeriod: additive buckets
 	// clamped to the residual window, deferred non-additive buckets billed
-	// full-window exactly once.
+	// full-window exactly once. The in_arrears base is prorated to the cancel
+	// as with no fire (a fire bills no base), except behind a fire made
+	// before that change, which billed it in full.
 	//
 	// Read on the cancel's tx when there is one: after the cancel's UPDATE
 	// locked the subscription, and holding the threshold invoice FOR KEY

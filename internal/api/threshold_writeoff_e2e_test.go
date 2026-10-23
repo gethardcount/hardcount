@@ -16,16 +16,17 @@ import (
 // A written-off spend-threshold invoice keeps its window billed; only a void
 // reopens it (ADR-066 amendment 2026-10-23). Before, every reader of the
 // threshold watermark skipped a written-off invoice, so the period's next
-// closer billed the window again from the period start: the in_arrears base
-// and the pre-fire usage, a second time. A written-off invoice can still be
+// closer billed the window again from the period start: the pre-fire usage
+// (and, while fires billed it, the in_arrears base) a second time. A written-off invoice can still be
 // paid (an offline payment, or a card charge that settles late), and its
 // credits stay applied, so the customer paid for the window twice.
 //
 // The rig is thresholdFired: April on one subscription with a 3000c
 // in_arrears base, 100 calls on April 10 (1c each) and a peak of 5 on a max
-// meter. A spend threshold of 100c with no reset fires on April 20 and bills
-// April 1 to 20: base 3000 + 100 calls. The max bucket is deferred to the
-// close (ADR-066 §4), so the April close bills the 5 peak in every case.
+// meter. A spend threshold of 100c fires on April 20 and bills the 100 calls
+// of April 1 to 20. A fire bills no base: the period's own invoice bills it.
+// The max bucket is deferred to the close (ADR-066 §4), so the April close
+// bills the 5 peak in every case.
 
 // invoiceAction posts one operator action on an invoice and wants it to
 // succeed.
@@ -72,15 +73,16 @@ func (r *lagRig) wantSubUsageBilledOnce() {
 // charge that settles late (MarkPaidCardSettlementTransition, the chokepoint
 // of the webhook, the reconciler, the stale-hold sweep and ADR-108
 // adoption), or credit applied before the write-off with no payment at all.
-// In every form April's close must bill neither the base nor the pre-fire
-// calls again: the window is billed once, on the threshold invoice.
+// In every form April's close must not bill the pre-fire calls again: the
+// window is billed once, on the threshold invoice. It bills April's base in
+// full, once, as with no fire.
 //
 // The operator preview and the live credit balance must agree with the
 // close: writing the invoice off does not change what April's invoice will
 // bill.
 //
 // Mutation check: put 'uncollectible' back in the watermark predicate →
-// April's invoice bills base 3000 and 105c of usage in all three forms.
+// April's invoice bills 105c of usage in all three forms.
 func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 	skipShort(t)
 	for _, tc := range []struct {
@@ -96,7 +98,7 @@ func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 				r.t.Fatalf("card settle on the written-off invoice: won=%v err=%v, want the uncollectible → paid transition", won, err)
 			}
 		}},
-		{"credit applied before the write-off, nothing paid", 1500, nil},
+		{"credit applied before the write-off, nothing paid", 60, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, fireAt, thr := thresholdFiredWithCredit(t, tc.grantCents)
@@ -127,9 +129,9 @@ func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 
 			invs := r.invoices()
 			apr := r.cycleInvoice(invs, lagP0)
-			if apr.sum("base_fee") != 0 || apr.sum("usage") != 5 {
+			if apr.sum("base_fee") != 3000 || apr.sum("usage") != 5 {
 				r.logInvoices(invs)
-				t.Errorf("April close billed base %dc and usage %dc, want 0c and 5c (the deferred peak): the written-off threshold invoice already billed the base and April 1-20", apr.sum("base_fee"), apr.sum("usage"))
+				t.Errorf("April close billed base %dc and usage %dc, want 3000c and 5c (April's base, the deferred peak): the written-off threshold invoice already billed April 1-20", apr.sum("base_fee"), apr.sum("usage"))
 			}
 			if got := usageBilled(invs); got != 100+5 {
 				r.logInvoices(invs)
@@ -150,7 +152,7 @@ func TestThresholdWriteOff_CloseBillsOnlyTheResidual(t *testing.T) {
 
 // TestThresholdWriteOff_VoidStillReopensTheWindow is the control the fix must
 // not change: a voided threshold invoice can never be paid, so April's close
-// bills its window again, the base and the pre-fire calls. That holds when
+// bills its window again, the pre-fire calls, with April's base. That holds when
 // the invoice was written off first and voided after (uncollectible → voided
 // is allowed), as long as the void lands before the close.
 func TestThresholdWriteOff_VoidStillReopensTheWindow(t *testing.T) {
@@ -183,10 +185,11 @@ func TestThresholdWriteOff_VoidStillReopensTheWindow(t *testing.T) {
 // cancel is the period's other closer and reads the same watermark. After a
 // write-off (an operator, or dunning's mark_uncollectible final action that
 // can also cancel the subscription), the cancel's final invoice must not bill
-// the base or the pre-fire calls again.
+// the pre-fire calls again. It bills the base prorated to the cancel (19 of
+// 30 days), as with no fire.
 //
 // Mutation check: put 'uncollectible' back in the watermark predicate → the
-// final invoice bills a prorated base and the 100 calls again.
+// final invoice bills the 100 calls again.
 func TestThresholdWriteOff_ImmediateCancelBillsOnlyTheResidual(t *testing.T) {
 	skipShort(t)
 	r, fireAt, thr := thresholdFired(t)
@@ -204,9 +207,9 @@ func TestThresholdWriteOff_ImmediateCancelBillsOnlyTheResidual(t *testing.T) {
 		r.logInvoices(invs)
 		t.Fatalf("%d final cancel invoices, want 1 (the deferred peak bills there)", len(final))
 	}
-	if final[0].sum("base_fee") != 0 || final[0].sum("usage") != 5 {
+	if final[0].sum("base_fee") != 1900 || final[0].sum("usage") != 5 {
 		r.logInvoices(invs)
-		t.Errorf("final cancel invoice billed base %dc and usage %dc, want 0c and 5c: the written-off threshold invoice already billed the base and April 1-20", final[0].sum("base_fee"), final[0].sum("usage"))
+		t.Errorf("final cancel invoice billed base %dc and usage %dc, want 1900c and 5c: the base prorated to April 20, and the written-off threshold invoice already billed April 1-20", final[0].sum("base_fee"), final[0].sum("usage"))
 	}
 	r.wantSubUsageBilledOnce()
 }

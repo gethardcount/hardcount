@@ -51,7 +51,8 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   event is flagged only after a paid spend-threshold invoice, which cannot
   be voided.
 - **Writing off or voiding a spend-threshold invoice.** A spend-threshold
-  invoice bills the usage up to when it fired, and the base fee if the plan bills it in arrears. It leaves out
+  invoice bills the usage up to when it fired, and no base fee: the
+  period-end invoice bills the base fee. It leaves out
   usage priced with `max`, `last_during_period` or `last_ever`: the
   period-end invoice bills that for the whole period. What happens to the
   charges on the threshold invoice depends on what you do with it, and

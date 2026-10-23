@@ -1,6 +1,6 @@
 # Billing Thresholds — Technical Design
 
-> - **Decided:** a subscription can carry a spend cap (`amount_gte`) or per-item usage caps (`usage_gte`). When the period's total reaches one, Velox invoices early and sends `subscription.threshold_crossed`. The period keeps its dates.
+> - **Decided:** a subscription can carry a spend cap (`amount_gte`) or per-item usage caps (`usage_gte`). When the period's usage reaches one, Velox invoices that usage early and sends `subscription.threshold_crossed`. The period keeps its dates, and its own invoice bills the base fee.
 > - **Shipped:** v0.1.0, in [#29](https://github.com/getvelox/velox/pull/29) (migration `0056_subscription_billing_thresholds`).
 > - **Current docs:** [Billing thresholds](../../features.md#subscriptions-and-invoices) in the feature list and the [threshold event](../../webhooks.md#subscriptions). The decisions made since are listed below. Where this page and the code disagree, the code wins.
 
@@ -17,6 +17,7 @@
 > 5. The once-fired guard is the **partial unique index alone**, surfacing `errs.ErrAlreadyExists` on a retried tick. There is no invoice source-key column, and `ON CONFLICT DO NOTHING` returns no row.
 > 6. The scheduler tick is now reconcilers → auto-charge retry → dunning enrollment → threshold scan → cycle scan.
 > 7. `amount_gte` is integer cents in the currency's **minor** unit; the body's "major-unit-cents" contradicts itself.
+> 8. A threshold counts and bills **usage only** (2026-10-23). `amount_gte` is compared with the period's usage so far, and the base fee, in advance or in arrears, is billed by the period's own invoice, not the threshold invoice.
 >
 > Related design docs: `docs/dev/design/create-preview.md` (same wire conventions), `docs/dev/design/multi-dim-meters.md` (`usage.AggregateByPricingRules`).
 

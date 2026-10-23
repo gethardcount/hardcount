@@ -41,9 +41,10 @@ full access ([Roadmap](roadmap.md#later)).
 | Invoices | PDF invoices, a hosted invoice page the customer opens from a secure link, and emails with your branding. | [How Velox works](how-velox-works.md) |
 | Invoice preview | See the next invoice before it is made. The preview shows the subtotal only, without tax or credits. | [The Velox API](api-surface.md#invoices-and-billing) |
 | Dunning | When a card payment fails, Velox retries it on a schedule and, once email is set up, emails the customer. If every retry fails, it does what your policy says. | [How Velox works](how-velox-works.md) |
-| Billing thresholds | Set a spend or usage level, and Velox makes an invoice early once the period's total reaches it. It bills earlier; it does not stop usage. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
+| Billing thresholds | Set a spend or usage level, and Velox makes an invoice early once the period's usage reaches it. It bills earlier; it does not stop usage. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
 
 A threshold fires at most once per period, and the period keeps its dates.
+It counts and bills usage only: the period's own invoice bills the base fee.
 It is checked on each scheduled billing run: every hour, or every 5 minutes
 with `APP_ENV=local`. `POST /v1/billing/run` does not check it. The
 period's own invoice does not bill again what the threshold invoice billed,

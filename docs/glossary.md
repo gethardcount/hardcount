@@ -109,9 +109,10 @@ Words used in the Velox docs and dashboard. For the big picture, read
   [More](adr/050-unpaid-source-proration-policy.md)
 - **spend threshold**: A limit on one subscription that issues an invoice
   early. It is either a money amount (`amount_gte`) checked against the
-  period's running subtotal, or a usage count on one item (`usage_gte`).
-  Crossing it issues an invoice with `billing_reason` "threshold", and can
-  restart the cycle if you choose. Usage is never blocked.
+  period's usage so far, or a usage count on one item (`usage_gte`).
+  Crossing it issues an invoice with `billing_reason` "threshold" for that
+  usage. The period keeps its dates, and its own invoice bills the base fee.
+  Usage is never blocked.
   [More](features.md#subscriptions-and-invoices)
 - **invoice states (draft, finalized, paid, void, uncollectible)**: Where
   an invoice is in its life. Draft: you can still change it. Finalized:

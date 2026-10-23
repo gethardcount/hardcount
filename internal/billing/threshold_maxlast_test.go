@@ -38,7 +38,8 @@ func (r *recordingAudit) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) er
 
 // setupMaxLastEngine wires the threshold fixture with a mixed-mode meter: one
 // sum bucket (rrv_api, 1000 calls @ $1 = 100000c) and one max bucket
-// (rrv_max, peak 50 @ $1 = 5000c), plus the plan's 4900c in_arrears base.
+// (rrv_max, peak 50 @ $1 = 5000c), plus the plan's 4900c in_arrears base,
+// which a threshold neither counts nor bills.
 // Bucket modes ride RuleAggregation.AggregationMode exactly as the real
 // store's COALESCE(rule_mode, default) emits them.
 func setupMaxLastEngine(thresholds *domain.BillingThresholds) (*Engine, *thresholdMockSubs, *mockInvoices) {
@@ -65,11 +66,12 @@ func setupMaxLastEngine(thresholds *domain.BillingThresholds) (*Engine, *thresho
 // still counts toward the cap, and the invoice header charges ONLY the
 // rendered lines — no phantom money. Mutation seams: classify per meter
 // instead of per bucket → the max line rides; feed RunningSubtotal to the
-// invoice → subtotal 109900.
+// invoice → subtotal 105000.
 func TestFireThreshold_ResetFalse_DropsMaxBucket_SubtotalSplit(t *testing.T) {
-	// capRunning = 4900 base + 100000 sum + 5000 max = 109900 ≥ 107000: the
-	// cap crosses ONLY because the max bucket counts (sum-only is 104900).
-	thresholds := &domain.BillingThresholds{AmountGTE: 107000}
+	// capRunning = 100000 sum + 5000 max = 105000 ≥ 102000: the cap
+	// crosses ONLY because the max bucket counts (sum-only is 100000). The
+	// base is not counted.
+	thresholds := &domain.BillingThresholds{AmountGTE: 102000}
 	engine, _, invoices := setupMaxLastEngine(thresholds)
 
 	fired, errs := engine.ScanThresholds(context.Background(), 50)
@@ -80,9 +82,9 @@ func TestFireThreshold_ResetFalse_DropsMaxBucket_SubtotalSplit(t *testing.T) {
 		t.Fatalf("fired = %d, want 1 (max amount must count toward the cap)", fired)
 	}
 	inv := invoices.invoices[0]
-	// Header charges rendered lines only: base 4900 + sum 100000.
-	if inv.SubtotalCents != 104900 || inv.TotalAmountCents != 104900 {
-		t.Errorf("invoice subtotal/total = %d/%d, want 104900 (dropped max bucket must not be charged)", inv.SubtotalCents, inv.TotalAmountCents)
+	// Header charges rendered lines only: sum 100000 (no base).
+	if inv.SubtotalCents != 100000 || inv.TotalAmountCents != 100000 {
+		t.Errorf("invoice subtotal/total = %d/%d, want 100000 (dropped max bucket must not be charged)", inv.SubtotalCents, inv.TotalAmountCents)
 	}
 	var lineSum int64
 	for _, li := range invoices.lineItems {

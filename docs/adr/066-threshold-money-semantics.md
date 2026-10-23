@@ -1,13 +1,13 @@
 # ADR-066: Threshold money semantics — prorated reset base, atomic fire→reset, $0 auto-pay, max/last deferral
 
 **Date:** 2026-07-02
-**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11 and 2026-10-23; `reset_billing_cycle` removed 2026-10-23, see the [last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed)); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4's rule-bucket granularity, the ladder seed key, the package clamp and the flat threshold window), not built yet
+**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11 and 2026-10-23; `reset_billing_cycle` removed 2026-10-23, see [that amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed); a fire bills usage only since 2026-10-23, see the [last amendment](#amendment-2026-10-23-a-fire-bills-usage-only)); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4's rule-bucket granularity, the ladder seed key, the package clamp and the flat threshold window), not built yet
 
-**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. In decision 4, "granularity is the rule bucket, not the meter" goes, because a meter has one aggregation and `last_ever` is dropped (PR-2). In the 2026-10-11 amendment, the ladder seed keys on the price id instead of the resolved rule version. The ambiguous-config failure goes, because lines carry the price id the seed keys on (PR-4). The non-monotone package clamp goes, because a package always rounds up with no overage (PR-3). The threshold invoice prices each plan window instead of one flat window (PR-4). ADR-130 leaves the prorated reset base, the one-transaction fire, the $0 rule and the write-off amendment as they are. Removing `reset_billing_cycle=true` was a separate change, approved and made on 2026-10-23 ([last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed)).
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. In decision 4, "granularity is the rule bucket, not the meter" goes, because a meter has one aggregation and `last_ever` is dropped (PR-2). In the 2026-10-11 amendment, the ladder seed keys on the price id instead of the resolved rule version. The ambiguous-config failure goes, because lines carry the price id the seed keys on (PR-4). The non-monotone package clamp goes, because a package always rounds up with no overage (PR-3). The threshold invoice prices each plan window instead of one flat window (PR-4). ADR-130 leaves the one-transaction fire, the $0 rule and the write-off amendment as they are. Removing `reset_billing_cycle=true` (and with it the prorated reset base) was a separate change, approved and made on 2026-10-23 ([amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed)).
 
 ## Summary
 
-A usage threshold (a spend cap) bills an early invoice mid-period, and the cycle close and an immediate cancel skip what that invoice already billed. With `reset_billing_cycle=true`, the fire bills the base fee prorated by days over the plan's full interval, and the invoice and the cycle reset commit in one transaction. With `false`, the default when the field is omitted, peak and last-value usage stays off the fire and is billed once at period end. Amended 2026-10-11: under `false`, graduated and package tiers continue across the fire instead of restarting, so the whole period is priced on one ladder. Status: active, amended 2026-10-11; a threshold or cycle invoice that totals $0 is marked paid at once. Amended 2026-10-23: a written-off threshold invoice keeps its window billed; only a void gives it back to the period's invoice.
+A usage threshold (a spend cap) bills an early invoice mid-period, and the cycle close and an immediate cancel skip what that invoice already billed. The period keeps its dates. The fire bills usage only: peak and last-value usage stays off it and is billed once at period end, and the base fee is billed by the period's own invoice (amended 2026-10-23; the fire billed the full in_arrears base before). Amended 2026-10-11: graduated and package tiers continue across the fire instead of restarting, so the whole period is priced on one ladder. A threshold or cycle invoice that totals $0 is marked paid at once. Amended 2026-10-23: a written-off threshold invoice keeps its window billed; only a void gives it back to the period's invoice. Removed 2026-10-23: `reset_billing_cycle`, which started a new period at the fire and billed a prorated base on it (decisions 1 and 2 describe it as it was). Status: active.
 
 ## Context
 
@@ -22,7 +22,7 @@ materially amended the plan's §4.1 sketch; plan doc updated same-day).
 
 ### 1. reset=true fires bill a PRORATED in_arrears base (shipped, P1b)
 
-*(Removed 2026-10-23 with `reset_billing_cycle`: a fire always keeps the period and bills the in_arrears base in full, and the close skips it. See the [last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed).)*
+*(Removed 2026-10-23 with `reset_billing_cycle`: a fire always keeps the period. See the [amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed). Since the [next amendment](#amendment-2026-10-23-a-fire-bills-usage-only) a fire bills no base at all.)*
 
 With `reset_billing_cycle=true` the fire re-anchors the cycle at the fire
 instant, so the cycle close never true-ups the fired window's base — the
@@ -153,7 +153,7 @@ now so P1c implements against them without re-litigating:
   Customer-favored, rare, pre-existing. DOCUMENTED, not fixed in-window;
   trigger to revisit = first DP configuring reset=true on in_advance plans.
   *(Ended 2026-10-23: `reset_billing_cycle` is removed, so no fire starts a
-  period. See the [last amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed).)*
+  period. See the [amendment](#amendment-2026-10-23-reset_billing_cycle-is-removed).)*
 
 ## Test locks (mutation- or fault-injection-verified)
 
@@ -449,7 +449,8 @@ re-anchor arm of decision 2 (the fire keeps its one transaction, opened by
 the verify-only period CAS of ADR-115); the reset halves of decision 4 (a
 max or last bucket rode the fire and did not count toward the cap); and the
 `reset=true` paragraph of the write-off amendment. Everything this ADR
-says about `reset=false` is now what every fire does.
+says about `reset=false` is now what every fire does, except the base fee:
+see the [next amendment](#amendment-2026-10-23-a-fire-bills-usage-only).
 
 **Keep-anchor results do not change.** `TestThresholdKeepAnchor_InvoicesUnchanged`
 compares every invoice and line of four keep-anchor cases (an in_arrears
@@ -467,12 +468,64 @@ Converted to the keep-anchor fire:
 `TestScanThresholds_ResetAdvanceFailure_IsLoud` is now
 `TestScanThresholds_PeriodCASFailure_IsLoud`.
 
-**Data.** Under the clean break (no upgrade from 0.8.x) only a local
-database can hold `billing_threshold_reset_cycle = true`. The migration
-drops the column; it does not refuse. The value was configuration read only
+**Data.** There is no upgrade from 0.8.x, but an install that ran a build
+of `main` from the switch to goose (#1198) on can upgrade, and those builds
+accepted `reset_billing_cycle: true`. The migration drops the column; it
+does not refuse. The value was configuration read only
 when a threshold fired, so no issued invoice changes, and keep-anchor is a
 true value for every such subscription from its next fire on. Its open
 period stays consistent: a fire that had re-anchored it left no threshold
 invoice in the new period, so the next fire or close bills it as any
-keep-anchor period. The CHANGELOG has the query that lists such
-subscriptions before upgrading.
+keep-anchor period. One gap stays: on an anniversary subscription with an
+in_advance base, a fire before the upgrade that started its current period
+left §5's slice unbilled (a fire on April 20 in an April period: May 1 to
+20). The migration does not move the period, so that period's close still
+bills from its own end. Seen in the code, not reproduced: the old fire
+cannot run on this code. The CHANGELOG has the query that lists such
+subscriptions before upgrading and says to bill the slice with a one-off
+invoice if wanted.
+
+## Amendment 2026-10-23: a fire bills usage only
+
+**The defect.** A fire billed the full in_arrears base for the period, and
+the period's closer skipped the base behind the watermark. The cycle close
+then billed the base once, but an immediate cancel billed none, so a
+cancel after a fire charged the whole period's base. Reproduced on real
+Postgres: a 3000c in_arrears base from April 1, a fire on April 20, an
+immediate cancel on April 25. The same cancel with no threshold bills 24 of
+30 days, 2400c; with the fire the customer paid 3000c. The same skip left
+an item added after the fire without its partial base (decision 5's
+"known imprecision").
+
+**Decision.** A threshold counts and bills usage only. The base fee, in
+advance or in arrears, never rides the fire and never counts toward
+`amount_gte`; the period's own invoice bills it, prorated as with no fire:
+the full base at the close, the used days on an immediate cancel, per
+segment after a plan or item change. Lago's progressive billing also
+counts usage-based charges billed in arrears toward its threshold and
+invoices the period's usage (docs.getlago.com, read 2026-10-23). An
+in_advance base was already left out of both. Rejected: prorating the base
+on the fire and billing the rest at the close (two roundings that need not add up to the base, and a residual base
+per segment), and crediting the unused base on cancel (a credit note for a
+charge that need not have been made).
+
+**What changes for operators.** An `amount_gte` that counted the base is
+reached later, by the base fee. A cap below the base no longer fires on the
+first scan of every period with the base alone. The threshold invoice is
+smaller by the base, and the period's invoice larger by it.
+
+**A fire made before this change** carries the full in_arrears base. The
+closers skip the base when the threshold invoice has a base line
+(`thresholdWatermark.billedBase`), keyed on the invoice like the §4
+exemption, so a period open across the upgrade bills its base once.
+
+**Tests.** `TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays`
+(red before: 3000c against 2400c),
+`TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose`,
+`TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce`,
+`TestEvaluateThresholds_InArrearsBaseExcluded`,
+`TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross` and
+`TestCycleClose_AfterLegacyThresholdFireWithBase_SkipsBase`.
+`TestThresholdKeepAnchor_InvoicesUnchanged`'s golden file was rewritten on
+purpose: the threshold invoices lost their base line, the close and the
+cancel gained it, and every usage line stayed the same.
