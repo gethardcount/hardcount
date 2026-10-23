@@ -2937,9 +2937,11 @@ export interface paths {
                          *     for exact decimals). At most 12 decimal places; trailing
                          *     zeros do not count. Its size must be under 10^26, and it
                          *     is at most 100 characters. A
-                         *     negative value is a correction. A missing quantity, or
-                         *     any other value, is refused with 422 and `param:
-                         *     quantity`.
+                         *     negative value is a correction. When a provider cost
+                         *     rate matches the event, quantity × `cost_per_token`
+                         *     must be under 2^63 micro-dollars (about $9.2 trillion).
+                         *     A missing quantity, or any other value, is refused with
+                         *     422 and `param: quantity`.
                          */
                         quantity: number | string;
                         /** @description Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */
@@ -3069,8 +3071,10 @@ export interface paths {
                          *     for exact decimals). At most 12 decimal places;
                          *     trailing zeros do not count. Its size must be under
                          *     10^26, and it is at most 100 characters. A negative
-                         *     value is a correction. A missing
-                         *     quantity, or any other value, fails validation.
+                         *     value is a correction. When a provider cost rate
+                         *     matches the event, quantity × `cost_per_token` must be
+                         *     under 2^63 micro-dollars (about $9.2 trillion). A
+                         *     missing quantity, or any other value, fails validation.
                          */
                         quantity: number | string;
                         dimensions?: {
@@ -5135,7 +5139,7 @@ export interface paths {
                         "application/json": components["schemas"]["ProviderCostRate"];
                     };
                 };
-                /** @description `validation_error`: a required field is missing, `cost_per_token` is outside its limits, or `currency` is not USD (param names the field). */
+                /** @description `validation_error`: a required field is missing, `cost_per_token` is not a number or is outside its limits, or `currency` is not USD (param names the field). */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -13207,9 +13211,11 @@ export interface operations {
                      *     for exact decimals). At most 12 decimal places; trailing
                      *     zeros do not count. Its size must be under 10^26, and it
                      *     is at most 100 characters. A
-                     *     negative value is a correction. A missing quantity, or
-                     *     any other value, is refused with 422 and `param:
-                     *     quantity`.
+                     *     negative value is a correction. When a provider cost
+                     *     rate matches the event, quantity × `cost_per_token`
+                     *     must be under 2^63 micro-dollars (about $9.2 trillion).
+                     *     A missing quantity, or any other value, is refused with
+                     *     422 and `param: quantity`.
                      */
                     quantity: number | string;
                     /** @description Scalar dimension values used to pick the pricing rule. */
@@ -13278,8 +13284,9 @@ export interface operations {
              *     or `timestamp`; unknown customer or meter; a future or badly
              *     formatted `timestamp`; more than 16 dimensions or a non-scalar
              *     dimension value; a missing or malformed `quantity`, one with
-             *     more than 12 decimal places, one of 10^26 or more, or one longer
-             *     than 100 characters; a
+             *     more than 12 decimal places, one of 10^26 or more, one longer
+             *     than 100 characters, or one whose provider cost is too large to
+             *     record; a
              *     `properties` field with a key (it was renamed `dimensions`).
              */
             422: {
@@ -15763,7 +15770,8 @@ export interface operations {
             };
             /**
              * @description `validation_error`: a missing field, an unknown rating rule, a
-             *     rate outside its limits, a price shape that cannot be billed (bad
+             *     rate that is not a number or is outside its limits, a price
+             *     shape that cannot be billed (bad
              *     tier table, package size of 0), or an unknown field at any depth
              *     (`param` names it; the body must use only the fields listed
              *     here).

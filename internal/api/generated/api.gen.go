@@ -8577,9 +8577,11 @@ type PostV1UsageEventsJSONBody struct {
 	// for exact decimals). At most 12 decimal places; trailing
 	// zeros do not count. Its size must be under 10^26, and it
 	// is at most 100 characters. A
-	// negative value is a correction. A missing quantity, or
-	// any other value, is refused with 422 and `param:
-	// quantity`.
+	// negative value is a correction. When a provider cost
+	// rate matches the event, quantity × `cost_per_token`
+	// must be under 2^63 micro-dollars (about $9.2 trillion).
+	// A missing quantity, or any other value, is refused with
+	// 422 and `param: quantity`.
 	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                          `json:"timestamp,omitempty"`
 }
@@ -8644,9 +8646,11 @@ type BackfillUsageEventJSONBody struct {
 	// for exact decimals). At most 12 decimal places; trailing
 	// zeros do not count. Its size must be under 10^26, and it
 	// is at most 100 characters. A
-	// negative value is a correction. A missing quantity, or
-	// any other value, is refused with 422 and `param:
-	// quantity`.
+	// negative value is a correction. When a provider cost
+	// rate matches the event, quantity × `cost_per_token`
+	// must be under 2^63 micro-dollars (about $9.2 trillion).
+	// A missing quantity, or any other value, is refused with
+	// 422 and `param: quantity`.
 	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity"`
 
 	// Timestamp RFC 3339. Must not be in the future.
@@ -8691,8 +8695,10 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// for exact decimals). At most 12 decimal places;
 	// trailing zeros do not count. Its size must be under
 	// 10^26, and it is at most 100 characters. A negative
-	// value is a correction. A missing
-	// quantity, or any other value, fails validation.
+	// value is a correction. When a provider cost rate
+	// matches the event, quantity × `cost_per_token` must be
+	// under 2^63 micro-dollars (about $9.2 trillion). A
+	// missing quantity, or any other value, fails validation.
 	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                               `json:"timestamp,omitempty"`
 }

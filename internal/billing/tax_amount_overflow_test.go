@@ -56,6 +56,17 @@ func TestApplyTaxToLineItems_TotalWithTaxTooLarge(t *testing.T) {
 		t.Errorf("err = %v, want ErrAmountOverflow", err)
 	}
 
+	// Two lines of 4e18: each line's total (4.8e18) fits, the invoice's
+	// (9.6e18) does not.
+	lines = []domain.InvoiceLineItem{
+		{AmountCents: 4_000_000_000_000_000_000, Quantity: 1},
+		{AmountCents: 4_000_000_000_000_000_000, Quantity: 1},
+	}
+	_, err = e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 8_000_000_000_000_000_000, 0, lines)
+	if !errors.Is(err, domain.ErrAmountOverflow) {
+		t.Errorf("two lines: err = %v, want ErrAmountOverflow", err)
+	}
+
 	// A provider's own result is checked the same way.
 	stub := &stubProvider{result: &tax.Result{
 		Provider: "stub", TotalTaxCents: math.MaxInt64,
@@ -66,6 +77,22 @@ func TestApplyTaxToLineItems_TotalWithTaxTooLarge(t *testing.T) {
 		[]domain.InvoiceLineItem{{AmountCents: 10, Quantity: 1}})
 	if !errors.Is(err, domain.ErrAmountOverflow) {
 		t.Errorf("stub provider: err = %v, want ErrAmountOverflow", err)
+	}
+
+	// A line's own total is checked even when the invoice's fits: a split
+	// group gives its credit line a negative tax and its absorber the rest.
+	stub = &stubProvider{result: &tax.Result{
+		Provider: "stub", TotalTaxCents: 0,
+		Lines: []tax.ResultLine{
+			{Ref: "line_0", NetAmountCents: 10, TaxAmountCents: math.MaxInt64},
+			{Ref: "line_1", NetAmountCents: 10, TaxAmountCents: -math.MaxInt64},
+		},
+	}}
+	e = &Engine{settings: &taxSettings{provider: "stripe_tax"}, taxProviders: stubResolver(stub)}
+	_, err = e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 20, 0,
+		[]domain.InvoiceLineItem{{AmountCents: 10, Quantity: 1}, {AmountCents: 10, Quantity: 1}})
+	if !errors.Is(err, domain.ErrAmountOverflow) {
+		t.Errorf("line total: err = %v, want ErrAmountOverflow", err)
 	}
 }
 

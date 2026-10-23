@@ -270,6 +270,14 @@ func IsForeignKeyViolation(err error) bool {
 	return false
 }
 
+// IsNumericOutOfRange reports whether err is Postgres refusing a value that
+// does not fit its numeric type (SQLSTATE 22003), such as a NUMERIC cast to
+// BIGINT past 2^63.
+func IsNumericOutOfRange(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "22003"
+}
+
 // IsCheckViolation reports whether err is a Postgres check-constraint
 // violation (SQLSTATE 23514). Used to translate DB-level invariant failures
 // (e.g. the test_clocks livemode CHECK, or subscriptions_test_clock_requires_testmode)

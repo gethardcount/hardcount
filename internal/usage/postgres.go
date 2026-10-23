@@ -213,6 +213,15 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	if err == sql.ErrNoRows {
 		return domain.UsageEvent{}, fmt.Errorf("%w: idempotency_key %q", errs.ErrDuplicateKey, event.IdempotencyKey)
 	}
+	// The cost stamp is the one value in this INSERT that can be out of
+	// range: quantity was checked against its column before (domain
+	// QuantityLimits), and $10 is a Go int64. A quantity and a rate inside
+	// their limits can still price a cost past BIGINT micros, so the event
+	// is refused naming quantity, not answered with a database error.
+	if postgres.IsNumericOutOfRange(err) {
+		return domain.UsageEvent{}, errs.Invalid("quantity",
+			"quantity × the provider cost rate for this model is too large to record: the cost must be under 2^63 micro-dollars")
+	}
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}

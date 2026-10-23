@@ -171,6 +171,8 @@ original text.
 
 ### Fixed
 
+- **Manual tax is exact on any invoice amount, and an invoice too large for 64-bit cents fails instead of carrying wrong amounts (2026-10-24, [#1378](https://github.com/getvelox/velox/pull/1378)).** At 20%, a 1e14-cent invoice was taxed 1553255926290 cents; it is now taxed 2e13. An invoice whose sum or total with tax does not fit fails to bill with an overflow error.
+- **A usage event whose provider cost is too large to record is a 422 naming `quantity` (2026-10-24, [#1378](https://github.com/getvelox/velox/pull/1378)).** Before, the ingest failed with a database error (a 500).
 - **A spend threshold followed by an immediate cancel no longer bills the whole period's base fee ([#1371](https://github.com/getvelox/velox/pull/1371)).** A 3000c monthly base canceled after 24 days billed 3000c; it now bills 2400c, as without a threshold.
 - **An invoice paid outside Velox no longer shows a Stripe payment ID (2026-10-23).** Its **Payment details** showed `out_of_band:<time>` as the Stripe payment ID. A second payment by card on such an invoice now says the first was recorded as paid outside Velox ([#1370](https://github.com/getvelox/velox/pull/1370)).
 - **A plan change, a new subscription or an activation no longer fails with a deadlock error when a meter's prices or aggregation are edited at the same time (2026-10-23).** When two plans that bill an edited meter were involved, Postgres could stop one of the requests (`40P01`). Subscription writes now lock plans in the same order as the meter edit ([#1367](https://github.com/getvelox/velox/pull/1367)).

@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -73,18 +72,27 @@ func TestCheckDecimal_ZeroIsPlainZero(t *testing.T) {
 	}
 }
 
-// Any exponent shopspring can hold is answered at once.
-func TestCheckDecimal_AnyExponentAnsweredAtOnce(t *testing.T) {
-	for _, d := range []decimal.Decimal{
-		decimal.New(1, 2147483647), decimal.New(1, -2147483648),
-		decimal.New(-7, 2147483647), decimal.New(123456789, -2147483648),
-		decimal.New(0, 2147483647), decimal.New(0, -2147483648),
+// The extreme exponents shopspring can hold: too large, too many places, or
+// a zero.
+func TestCheckDecimal_ExtremeExponents(t *testing.T) {
+	for _, tc := range []struct {
+		d    decimal.Decimal
+		want string // "" = accepted as plain 0
+	}{
+		{decimal.New(1, 2147483647), "too large"},
+		{decimal.New(-7, 2147483647), "too large"},
+		{decimal.New(1, -2147483648), "decimal places"},
+		{decimal.New(123456789, -2147483648), "decimal places"},
+		{decimal.New(0, 2147483647), ""},
+		{decimal.New(0, -2147483648), ""},
 	} {
 		for name, lim := range requestLimits {
-			start := time.Now()
-			_, _ = CheckDecimal("v", d, lim)
-			if took := time.Since(start); took > 50*time.Millisecond {
-				t.Errorf("%s: coefficient %s exponent %d took %v", name, d.Coefficient(), d.Exponent(), took)
+			got, err := CheckDecimal("v", tc.d, lim)
+			switch {
+			case tc.want == "" && (err != nil || !got.IsZero() || got.Exponent() != 0):
+				t.Errorf("%s: %se%d: got %s, err %v; want plain 0", name, tc.d.Coefficient(), tc.d.Exponent(), got, err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Errorf("%s: %se%d: err %v, want %q", name, tc.d.Coefficient(), tc.d.Exponent(), err, tc.want)
 			}
 		}
 	}

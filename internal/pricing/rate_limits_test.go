@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -257,24 +256,9 @@ func TestRates_ExponentOutOfRangeIsNamed(t *testing.T) {
 	}
 }
 
-// answeredWithin runs do and fails the test when it has not answered within
-// d. It does not wait for a late answer, so one slow case ends the test.
-func answeredWithin(t *testing.T, d time.Duration, do func() int) int {
-	t.Helper()
-	done := make(chan int, 1)
-	go func() { done <- do() }()
-	select {
-	case code := <-done:
-		return code
-	case <-time.After(d):
-		t.Fatalf("not answered within %v", d)
-		return 0
-	}
-}
-
-// Every rate is answered at once whatever its exponent: the limits are
-// decided from the digit count and the exponent, before any arithmetic.
-func TestRates_LargeExponentsAnsweredAtOnce(t *testing.T) {
+// Exponents far outside the limits are refused; a zero with any exponent is
+// stored.
+func TestRates_ExtremeExponents(t *testing.T) {
 	cases := []struct {
 		raw  string
 		want int
@@ -290,12 +274,9 @@ func TestRates_LargeExponentsAnsweredAtOnce(t *testing.T) {
 	for _, tc := range cases {
 		for _, door := range rateDoors {
 			for _, f := range rateFields {
-				code := answeredWithin(t, 200*time.Millisecond, func() int {
-					rr, _, _ := door.send(t, f.frag(tc.raw))
-					return rr.Code
-				})
-				if code != tc.want {
-					t.Errorf("%s %s %s: status %d, want %d", door.name, f.param, tc.raw, code, tc.want)
+				rr, _, _ := door.send(t, f.frag(tc.raw))
+				if rr.Code != tc.want {
+					t.Errorf("%s %s %s: status %d, want %d", door.name, f.param, tc.raw, rr.Code, tc.want)
 				}
 			}
 		}

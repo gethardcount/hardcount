@@ -31,6 +31,10 @@ var (
 	// RateLimits bound a per-unit rate in cents. A rate under 10^18 cents
 	// prices one unit inside int64 cents, the type every invoice amount
 	// is held in; 12 places is Stripe's unit_amount_decimal precision.
+	// The limit does not bound what a rate bills: rate × quantity, the
+	// invoice's sum and its total with tax are each refused with
+	// ErrAmountOverflow when they do not fit int64 (ComputeAmountCents,
+	// billing.ApplyTaxToLineItems).
 	RateLimits = DecimalLimits{IntDigits: 18, Scale: 12}
 	// ProviderCostLimits fit provider_cost_rates.cost_per_token,
 	// NUMERIC(20,12) (dollars per token).
@@ -46,7 +50,7 @@ const MaxDecimalChars = 100
 //
 // The value is coefficient × 10^exponent, and both limits are decided from
 // the coefficient's digit count and the exponent before any comparison or
-// rounding, so the check costs the same whatever the exponent. A zero passes
+// rounding. A zero passes
 // both limits whatever its exponent, so it is returned as plain 0.
 func CheckDecimal(field string, d decimal.Decimal, lim DecimalLimits) (decimal.Decimal, error) {
 	if d.IsZero() {

@@ -1696,6 +1696,12 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		return TaxApplication{}, fmt.Errorf("settings store not wired")
 	}
 
+	// Every invoice with priced lines passes here, so this is where its
+	// amounts are held to int64 cents: callers sum their lines unchecked,
+	// and when the lines' sizes sum inside int64, no sum of them wrapped.
+	if err := checkLineAmountsFit(lineItems); err != nil {
+		return TaxApplication{}, err
+	}
 	subtotal = commitInvoiceSubtotal(lineItems, subtotal)
 	app := TaxApplication{
 		SubtotalCents: subtotal,
@@ -1917,7 +1923,11 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		lineItems[i].TaxJurisdiction = rl.Jurisdiction
 		lineItems[i].TaxCode = rl.TaxCode
 		lineItems[i].TaxabilityReason = rl.TaxabilityReason
-		lineItems[i].TotalAmountCents = net + rl.TaxAmountCents
+		total, ok := addCentsSigned(net, rl.TaxAmountCents)
+		if !ok {
+			return TaxApplication{}, fmt.Errorf("line %d total with tax: %w", i, domain.ErrAmountOverflow)
+		}
+		lineItems[i].TotalAmountCents = total
 		netSubtotalSum += net
 	}
 
@@ -1929,6 +1939,13 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		// netSubtotalSum - netDiscount + tax. Solve for netDiscount.
 		gross := subtotal - discount
 		app.DiscountCents = max(netSubtotalSum+res.TotalTaxCents-gross, 0)
+	}
+	// The invoice total (subtotal − discount + tax) must fit too; callers
+	// work it out unchecked from these three.
+	if net, ok := addCentsSigned(app.SubtotalCents, -app.DiscountCents); !ok {
+		return TaxApplication{}, fmt.Errorf("invoice total: %w", domain.ErrAmountOverflow)
+	} else if _, ok := addCentsSigned(net, app.TaxAmountCents); !ok {
+		return TaxApplication{}, fmt.Errorf("invoice total with tax: %w", domain.ErrAmountOverflow)
 	}
 
 	if e.taxCalcStore != nil {
