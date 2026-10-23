@@ -1,6 +1,6 @@
 # ADR-031: Per-plan base bill_timing (in_advance vs in_arrears)
 
-**Status:** Accepted (amended 2026-06-01); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet
+**Status:** Accepted (amended 2026-06-01); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (`base_bill_timing` has no default above a base of 0; `in_advance` at a base of 0 is refused), not built yet
 **Date:** 2026-05-14
 **Related**: ADR-028 (period loop), `project_billing_timing_model.md`, `feedback_stripe_parity_framing.md`
 

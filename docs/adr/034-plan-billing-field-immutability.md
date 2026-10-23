@@ -1,6 +1,6 @@
 # ADR-034: Plan billing-field immutability once a live sub attaches
 
-**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet
+**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (the `meter_ids` lock goes; the base-fee lock becomes next-period edits), not built yet
 **Date:** 2026-05-15
 **Related**: ADR-031 (per-plan bill_timing), ADR-005 (integer cents for money), industry-reference-first workflow
 

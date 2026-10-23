@@ -16,8 +16,10 @@ several prices could take an event, the one that names the most labels
 wins. Two prices that could both take one event with the same number of
 labels are refused when you save the second.
 
-Editing a price never changes a period that has already started. On a plan
-no subscription has ever used, the edit applies at once. On a used plan,
+Editing a price never changes a period that has already started. The one
+exception is measured in milliseconds: a period that starts while the edit
+is being saved gets the edit (section 7). On a plan no subscription has
+ever used, the edit applies at once. On a used plan,
 each subscriber pays the new price from their next billing period. This
 holds in each subscriber's own time, so a test-clock customer gets the edit
 from its next simulated period. To keep old customers on an old price, put
@@ -49,7 +51,7 @@ settings.
 
 ## Context
 
-**How pricing works today** (origin/main `196c9f51`):
+**How pricing works today** (origin/main `c234a364`):
 
 - A usage price is a rating rule with versions (`rating_rule_versions`).
   A meter points at one by default (`meters.rating_rule_version_id`).
@@ -129,8 +131,11 @@ is a break. v0.9.0 is also a clean break: there is no upgrade from Velox
 - `last_ever` is dropped, and so is the per-rule aggregation mode.
 - `key` is renamed `event_name`, the name ingest already sends.
 - The aggregation cannot change once the meter has events: 409
-  `meter_has_usage`. The meter gains `has_usage` so the dashboard can show
-  this before an edit. `name` and `unit` change at once.
+  `meter_has_usage`. Events are rows in `usage_events` for the meter, or
+  held events for its `event_name` (`usage_held_events` with status
+  `held`). A held event counts because it is billed under the meter's
+  aggregation when it is released. The meter gains `has_usage` so the
+  dashboard can show this before an edit. `name` and `unit` change at once.
 
 ### 3. Price shapes and units (PR-3)
 
@@ -182,7 +187,7 @@ A removed price and a later tying price are never in force at one pin,
 because versions on a plan take effect in the order their writes commit
 (section 7).
 The check is D05's compatibility clause without the priority term
-(`internal/pricing/postgres.go:1063-1087`).
+(`internal/pricing/postgres.go:1064-1088`).
 
 ### 5. The edit rule (PR-4; the base fee in PR-7)
 
@@ -192,10 +197,10 @@ names it.
 
 | What | Never-used plan | Used plan |
 |---|---|---|
-| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes. |
+| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). |
 | Base fee, if PR-7 ships | Applies at once. | Applies from each subscriber's next period. |
 | Base fee, if PR-7 is cut | Editable. | Refused while a live subscription uses the plan, as today (ADR-034). |
-| `base_bill_timing` | Editable. | Locked. |
+| `base_bill_timing` | Editable, but not to `in_advance` at a base of 0 (section 14). | Locked. |
 | `code`, `currency`, `billing_interval` | Fixed. | Fixed. |
 | `name`, `description`, `tax_code`, `status` | At once. | At once. |
 | Meter `aggregation`, `event_name` | Until the meter has events. | Until the meter has events. |
@@ -207,10 +212,14 @@ names it.
 - "Used" is conservative on purpose. A plan whose subscribers all canceled
   still waits a period per edit. A test-clock teardown deletes that
   clock's subscriptions, so their plan can become never-used again.
-- A price added to a used plan bills from the next period. Until then its
-  usage is `no_price`. There is no exception for a price that only prices
-  unpriced usage (D05 allowed one): it would make an ingest `no_price`
-  flag false later.
+- A price added to a used plan takes part from the next period. Until
+  then the plan's other prices bill its usage as before. A less specific
+  price that matches, such as `{}`, bills it this period. With no matching
+  price the usage is `no_price`. If the meter is new to the plan, the plan
+  does not price that meter at the pin, so the usage is `not_on_plan`
+  (section 12). There is no exception for a price that only prices
+  unpriced usage (D05 allowed one): it would make an ingest flag false
+  later.
 - A PATCH can set the base fee to 0 (PR-4). Today it cannot: the update
   tests `> 0` (`internal/pricing/service.go:637`, `:673`).
 - History stays internal: versions are kept once a plan is used, and every
@@ -229,12 +238,19 @@ applies and the docs say so.
 - An override is keyed by (customer, price) and takes the price's shape
   plus a `reason`. Usage prices only; a negotiated base fee is a new plan.
 - It follows its price across content edits.
-- Its `[created_at, deactivated_at)` window is stamped in the customer's
-  own time (section 7).
+- Its window is `[created_at, deactivated_at)`. A create, replace or
+  delete stamps it after the write's locks (section 8), in the customer's
+  own time: wall time read with `clock_timestamp()`, or the customer's
+  clock time plus 1 microsecond. Not `now()`: that is the transaction's
+  start, so a write that waited for a lock across a period start would
+  change the period already open.
 - Removing the price ends it. In the removal's transaction, each open
-  override of the price is closed in its customer's own time: wall time,
-  or the customer's clock time plus 1 microsecond. The open period keeps the
-  negotiated rate, because its pin is earlier. On a never-used plan the
+  override of the price is closed at the instant the tombstone takes
+  effect for its customer. For a customer without a test clock that is
+  the tombstone's `valid_from`; for a clock customer, the tombstone's
+  stamp for its clock (section 7). So at every pin an override is open
+  exactly while its price takes part, and the open period keeps the
+  negotiated rate. On a never-used plan the
   removal applies at once, so it empties every window of the price's
   overrides.
 - Adding back a removed price (the same plan, meter and
@@ -254,6 +270,11 @@ applies and the docs say so.
   order their writes commit. Postgres `now()` is not used: it is the
   transaction's start, so of two racing edits the one saved last could get
   the earlier time and never apply.
+- The wall time is read before the commit, so a period that starts in the
+  milliseconds between the two gets the new version. A reader that priced
+  that period in those milliseconds saw the old one. This is the same
+  straddle as section 12's `no_price` exception. A clock's time cannot
+  move in between, because the write holds the clock `FOR SHARE`.
 - On a never-used plan, `valid_from` is the beginning of time.
 - A write to a used test-mode plan also writes, for every test clock of
   the account, the clock's current time plus 1 microsecond
@@ -266,23 +287,28 @@ applies and the docs say so.
 - A write to a never-used plan writes no stamps, so its version is in
   force at every pin on every clock. A clock customer's first period
   starts at midnight, before the clock's time; a stamp would leave that
-  period with no price.
+  period with no price. It deletes the stamps of the versions it replaces.
+- Every price write and override write reads a clock `FOR SHARE` before
+  it writes or deletes that clock's stamp rows or an override of its
+  customer (section 8).
 - A subscription on clock C compares its simulated pin with C's stamp. A
   version with no stamp for C counts as always in force: it was written
   before C existed, or on a never-used plan.
 - One stamp per clock is needed because a clock keeps only its current
   time; its time at a past wall instant cannot be recovered.
-- Override windows are stamped with the customer's clock time the same way.
+- Override windows use the same times (section 6).
 - The test-clock caveat of ADR-070 decision 4 is withdrawn, and the
   dashboard's three "applies to the current simulated period" warnings go.
-- Teardown deletes the clock's stamp rows. The plan, its prices and
-  versions stay, as plans and meters do today
+- Teardown locks its clock row first (section 8) and deletes the clock's
+  stamp rows. The plan, its prices and versions stay, as plans and meters
+  do today
   ([ADR-086](086-simulated-data-lifecycle.md)).
 
 ### 8. One lock order (PR-0b shipped; PR-4)
 
-A transaction takes these rows in this order. Once it holds a row of one
-step, it takes no row of an earlier step.
+Subscription writers, price writes and override writes take rows in this
+order. Once one holds a row of one step, it takes no row of an earlier
+step. A test-clock teardown is the one exception (below).
 
 1. the subscription row ([ADR-115](115-one-closer-for-the-billing-period.md));
 2. plan rows in ascending id, in one statement: `FOR KEY SHARE` for
@@ -301,6 +327,23 @@ customer's clock, and a writer takes its plans before it numbers an
 invoice or a credit note. Until PR-4, D05's meter edit takes its meter and
 then plans; no writer takes a plan and then a meter before PR-4, so this
 makes no cycle.
+
+**A test-clock teardown is outside this order.** It deletes bottom-up for
+foreign keys: invoice rows before the subscription row, override rows
+before the clock row (`internal/testclock/postgres.go:150-221`). From PR-4,
+its first lock is its clock row, `FOR UPDATE`. A price write or override
+write reads that clock `FOR SHARE` before it touches a row teardown
+deletes: the clock's stamp rows or an override of its customer (section
+7). So one of the two waits for the other at the clock row, and they make
+no cycle. Teardown takes no plan or price row. Without the clock lock
+first, a removal and a teardown deadlock: the removal holds the clock and
+waits for an override row, and the teardown holds that override row and
+waits to delete the clock. A real-Postgres model aborted one with `40P01`;
+with the clock lock first, both committed. An override write on the
+clock's customer deadlocks with a teardown the same way, and the clock lock
+first fixes it too. A never-used write that deleted the clock's stamps
+without reading the clock deadlocked even with a clock-first teardown;
+reading the clock first fixed it.
 
 PR-0b (#1367, merged as `c234a364`) brought step 2 to every subscription
 writer. It fixed a deadlock it reproduced on main. D05's meter edit takes
@@ -403,9 +446,10 @@ over it (`internal/billing/engine.go:2789`, `:2899`).
 
 `base_bill_timing` is required when `base_amount_cents` is above 0, and the
 422 names both values. With a base of 0 it may be left out and is stored
-`in_arrears`. `in_advance` with a base of 0 is refused, at create and on a
-base edit. Today the field defaults to `in_arrears`
-(`internal/pricing/service.go:544-547`). An in_advance plan moves the cycle
+`in_arrears`. A write that would leave a plan `in_advance` with a base of
+0 is refused: a create, a base edit to 0 on an `in_advance` plan, and a
+`base_bill_timing` edit to `in_advance` on a plan whose base is 0. Today
+the field defaults to `in_arrears` (`internal/pricing/service.go:544-547`). An in_advance plan moves the cycle
 invoice's header to the next period even at base 0
 (`internal/billing/engine.go:3350-3371`), so a usage-only plan must be
 in_arrears.
@@ -452,10 +496,13 @@ over the existing billing fixtures and must give identical lines.
 ### 18. No index for the meter-has-events check
 
 The aggregation lock asks whether `usage_events` holds any row for the
-meter. No index on `usage_events` starts with `(tenant_id, meter_id)`.
+meter, or `usage_held_events` a held row for its event name (section 2).
+No index on `usage_events` starts with `(tenant_id, meter_id)`.
 The nearest are `(tenant_id, customer_id, meter_id, timestamp)` and
-`(tenant_id, timestamp)` (baseline `00180`, `:3048`, `:3062`). No index is added now: the edit is
-rare. Revisit if a large account reports a slow meter PATCH.
+`(tenant_id, timestamp)` (baseline `00180`, `:3048`, `:3062`). Held rows
+are found through `(tenant_id, livemode, status, external_customer_id)`
+(`:3139`). No index is added now: the edit is rare. Revisit if a large
+account reports a slow meter PATCH.
 
 ## Why this design
 
@@ -515,7 +562,7 @@ part breaks:
   the 30 minutes of usage already recorded.
 - **An overlap lock that did not hold.** Its check locked other plans in
   `FindMeterConflicts`, which opens its own transaction
-  (`internal/subscription/postgres.go:2472-2480`). The lock ended before
+  (`internal/subscription/postgres.go:2601-2609`). The lock ended before
   the subscription insert, so the race stayed open.
 - **A flat threshold window.** It kept the threshold invoice's one flat
   window priced with the current plans, so after a swap pre-swap usage
@@ -536,8 +583,9 @@ part breaks:
   would point at terms other than those billed.
 - **Closing overrides at wall now on removal.** For a test-clock customer
   ahead of wall time, that ends the override before its open period's pin,
-  so the open period loses the negotiated price. A removal closes them in
-  each customer's own time instead (section 6).
+  so the open period loses the negotiated price. A removal closes them at
+  the instant its tombstone takes effect for each customer instead
+  (section 6).
 - **Numeric dimension values.** Normalized as float64 in Go but compared
   exactly in Postgres, so the ingest flag and the close could disagree on
   large numbers. Values are strings only.
@@ -574,8 +622,13 @@ The breaks that concerned moving 0.8.x data went with the clean break.
 
 - **Test clocks cost one stamp row per clock per test-mode price write.**
   An account with 1,000 clocks writes 1,000 rows per edit. Test mode only.
-- **The `no_price` straddle exception** (section 12), measured in
-  milliseconds.
+- **The commit straddle, measured in milliseconds.** A price write's wall
+  time is read before it commits. A period that starts in between gets the
+  write (section 7), and one ingest `no_price` flag can be wrong (section
+  12).
+- **A test-clock teardown is outside the lock order.** It takes its clock
+  row first, which orders it against price and override writes (section
+  8).
 - **Price add against a concurrent subscription create is check-then-act.**
   A price for a meter new to a used plan runs the overlap check for every
   customer on the plan (409 `meter_overlap`). A subscription created on

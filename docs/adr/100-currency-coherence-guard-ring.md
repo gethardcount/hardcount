@@ -1,9 +1,9 @@
 # ADR-100: Currency coherence is enforced at every write — a guard ring, not engine reconciliation
 
 **Date:** 2026-07-26
-**Status:** Accepted (amended 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md)); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet
+**Status:** Accepted (amended 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md)); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (G1, G2, G2b, G4 and the override currency clause go), not built yet
 
-**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. G1, G2, G2b, ADR-070's override currency clause and G4's recipe meter probe go, because a price and an override have no currency and take the plan's (PR-4). G3, G5 to G8 and the ADR-129 amendment stay.
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. G1, G2, G2b and ADR-070's override currency clause go, because a price and an override have no currency and take the plan's (PR-4). G4 goes whole: its `CreateRatingRuleTx` normalization, allowlist and republish clauses go with the rating-rule tables, and its recipe meter probe goes because recipe prices take the new plan's currency (PR-4). G3, G5 to G8 and the ADR-129 amendment stay.
 
 ## Summary
 

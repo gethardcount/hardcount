@@ -1,7 +1,7 @@
 # ADR-085: A recipe is an idempotent, additive provisioning event — one verb, no uninstall
 
 **Date:** 2026-07-08
-**Status:** Accepted (amended 2026-07-26 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet
+**Status:** Accepted (amended 2026-07-26 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (rule adoption goes; recipes stop creating dunning policies and webhook endpoints), not built yet
 
 **Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. Rating-rule adoption, its conformance check ("Never republish an existing rule key") and the 2026-10-23 amendment go, because a recipe's prices belong to its new plan and touch no other plan (PR-4). The plan's currency comes from the recipe, not from adopted rules (PR-4). Step 4 goes: recipes no longer create a dunning policy or a webhook endpoint (PR-5). The fresh plan per apply, the badge and the meter aggregation check stay; the meter is read inside the apply's transaction (PR-4).
 

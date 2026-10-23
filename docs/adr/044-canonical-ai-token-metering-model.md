@@ -1,6 +1,6 @@
 # ADR-044: Canonical AI token-metering model (one `tokens` meter + `token_type` dimension)
 
-**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet
+**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4: token prices become plan prices, most specific wins), not built yet
 **Date:** 2026-06-01
 **Related:** ADR-033 (LiteLLM spend adapter), multi-dimensional metering (`internal/usage` `AggregateByPricingRules`), pricing recipes (`internal/recipe`), `project_positioning_wedge.md`
 
