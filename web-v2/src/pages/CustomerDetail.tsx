@@ -71,6 +71,7 @@ import {
 } from '@/lib/geo'
 import { TAX_ID_HINTS, taxIdTypeOptions } from '@/lib/taxIdTypes'
 import { finalActionSummary } from '@/lib/dunningActions'
+import { retryPlanText } from '@/lib/dunningSchedule'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
 const statusVariant = statusBadgeVariant
@@ -821,17 +822,9 @@ export default function CustomerDetailPage() {
                   )}
                 </div>
               </div>
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Max retry attempts</span>
-                <span className="text-sm text-foreground">{effectiveDunningPolicy.max_retry_attempts}</span>
-              </div>
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Grace period</span>
-                <span className="text-sm text-foreground">{effectiveDunningPolicy.grace_period_days} days</span>
-              </div>
-              <div className="flex items-center justify-between px-6 py-3">
-                <span className="text-sm text-muted-foreground">Retry schedule</span>
-                <span className="text-sm text-foreground">{effectiveDunningPolicy.retry_schedule.join(' · ') || '—'}</span>
+              <div className="flex items-center justify-between gap-4 px-6 py-3">
+                <span className="text-sm text-muted-foreground">Schedule</span>
+                <span className="text-sm text-foreground text-right">{retryPlanText(effectiveDunningPolicy.retry_days)}</span>
               </div>
               <div className="flex items-center justify-between px-6 py-3">
                 <span className="text-sm text-muted-foreground">Final action</span>
@@ -1677,9 +1670,7 @@ function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onCl
           </div>
           {selectedPolicy && (
             <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
-              <div className="flex justify-between"><span className="text-muted-foreground">Max retries</span><span>{selectedPolicy.max_retry_attempts}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Grace period</span><span>{selectedPolicy.grace_period_days} days</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Retry schedule</span><span>{selectedPolicy.retry_schedule.join(' · ') || '—'}</span></div>
+              <div className="flex justify-between gap-4"><span className="text-muted-foreground">Schedule</span><span className="text-right">{retryPlanText(selectedPolicy.retry_days)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">On exhaustion</span><span>{finalActionSummary(selectedPolicy)}</span></div>
             </div>
           )}

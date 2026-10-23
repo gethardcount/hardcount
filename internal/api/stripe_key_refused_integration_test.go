@@ -277,7 +277,7 @@ func TestDunningRetry_RefusedKey_NotCounted(t *testing.T) {
 		r := newKeyRefusedRig(t, "Key Refused Final", true, http.StatusForbidden, keyStripe403)
 		custID := r.customerWithCard("keyfinal", "pm_keyfinal")
 		inv := r.dunnedInvoice(custID, "INV-KEY-FINAL")
-		before := r.dueRun(inv.ID, custID, r.policy.MaxRetryAttempts-1)
+		before := r.dueRun(inv.ID, custID, r.policy.Retries()-1)
 
 		r.tick()
 		if got := r.invoice(inv.ID); got.Status != domain.InvoiceFinalized {

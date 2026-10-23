@@ -14,7 +14,7 @@ import (
 )
 
 // TestRunListReads_CarryThePolicyLimit: the list reads of a run carry its
-// bound policy's max_retry_attempts, read from the policy row as it is now
+// bound policy's retry count (the length of its retry_days), read from the policy row as it is now
 // (an edit reaches in-flight runs, as it does the dunning tick). The dashboard
 // and the invoice notices use it to tell a run with a retry still to come
 // from one whose next step is only its final action (RetryScheduled): the
@@ -22,7 +22,7 @@ import (
 // attempt used (ADR-120 amendment 2026-10-22).
 //
 // Mutation check: drop the policy join from ListRunsByInvoices or ListRuns →
-// max_retry_attempts reads 0 and the run with attempts left no longer reads
+// the run's max_retry_attempts reads 0 and the run with attempts left no longer reads
 // as retrying.
 func TestRunListReads_CarryThePolicyLimit(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -35,8 +35,8 @@ func TestRunListReads_CarryThePolicyLimit(t *testing.T) {
 	}
 	store := dunning.NewPostgresStore(db)
 	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "96h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 4},
+		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionNone,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -99,8 +99,7 @@ func TestRunListReads_CarryThePolicyLimit(t *testing.T) {
 
 	// An edit lowering the limit reaches the in-flight runs: the run with
 	// one attempt used now has none left either.
-	policy.MaxRetryAttempts = 1
-	policy.RetrySchedule = nil
+	policy.RetryDays = policy.RetryDays[:1]
 	if _, err := store.UpsertPolicy(ctx, tenantID, policy); err != nil {
 		t.Fatalf("lower the limit: %v", err)
 	}

@@ -39,7 +39,7 @@ func finalAttemptRun(t *testing.T, store *memStore, svc *Service) domain.Invoice
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
-	run.AttemptCount = store.policies[store.defaultID].MaxRetryAttempts - 1
+	run.AttemptCount = store.policies[store.defaultID].Retries() - 1
 	due := time.Now().UTC().Add(-time.Minute)
 	run.NextActionAt = &due
 	store.runs[run.ID] = run
@@ -421,7 +421,7 @@ func TestExhaustOnEntry_LoweredPolicy_StampsWhenItRan(t *testing.T) {
 	r.LastAttemptAt = &oldRetry
 	mem.runs[run.ID] = r
 	p := mem.policies[mem.defaultID]
-	p.MaxRetryAttempts = r.AttemptCount // the operator lowers it
+	p.RetryDays = p.RetryDays[:r.AttemptCount] // the operator shortens it
 	mem.policies[mem.defaultID] = p
 
 	tick := time.Now().UTC().Truncate(time.Microsecond)

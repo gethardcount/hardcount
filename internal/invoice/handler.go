@@ -1116,7 +1116,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		}
 		// A credit-paid invoice is recovered exactly as a card-paid one is, so
 		// its dunning run closes the same way. Without this the run stayed
-		// active at $0: a no-card run's next retry is a grace period away and
+		// active at $0: a no-card run's next retry is days away and
 		// the dunning tick only touches due runs. SettleZeroDue can return the
 		// invoice unsettled (not finalized, or no longer pending); a run on an
 		// unpaid invoice stays open.

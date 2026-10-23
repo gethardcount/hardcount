@@ -81,12 +81,10 @@ func TestSeedPolicy_RetriesOnDay3_7_14(t *testing.T) {
 	if first < 72*time.Hour || first > 72*time.Hour+time.Minute {
 		t.Fatalf("first retry %v after the failure, want 3 days", first)
 	}
-	day := 3
 	var days []int
-	days = append(days, day)
-	for _, entry := range seed.RetrySchedule {
-		d, _ := time.ParseDuration(entry)
-		day += int(d / (24 * time.Hour))
+	day := 0
+	for _, wait := range seed.RetryDays {
+		day += wait
 		days = append(days, day)
 	}
 	if len(days) != 3 || days[0] != 3 || days[1] != 7 || days[2] != 14 {

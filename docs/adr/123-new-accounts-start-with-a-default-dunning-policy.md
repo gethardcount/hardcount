@@ -60,6 +60,8 @@ subscription or write-off action the account did not choose.
 - **The policy.** `dunning.DefaultSeedPolicy()`: name `Default retries`,
   enabled, 3 attempts, grace 3 days, `retry_schedule` `["96h","168h"]`
   (retries on day 3, 7 and 14), `final_subscription_action` `none`,
+  *(2026-10-23: the same schedule is now `retry_days` `[3, 4, 7]`; see
+  [ADR-036](036-dunning-campaigns-model.md#amendment-2026-10-23--the-schedule-is-one-list-of-days).)*
   `final_invoice_action` `none`. Both final actions are set explicitly,
   because an empty value normalizes to `pause`.
 - **One writer.** `dunning.Service.SeedDefaultPoliciesTx` validates the

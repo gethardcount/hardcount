@@ -124,8 +124,9 @@ A park with no hold is always counted.
    - Find the run with `GET /v1/dunning/runs?invoice_id=<invoice id>`, then
      the policy it runs on with `GET /v1/dunning/policies/<policy_id>`. A run
      keeps the policy it started on, even if the customer moved to another.
-   - If the run's `attempt_count` has reached the policy's
-     `max_retry_attempts` and its `final_subscription_action` is `cancel` or
+   - If the run's `attempt_count` has reached its `max_retry_attempts` (the
+     number of entries in the policy's `retry_days`) and the policy's
+     `final_subscription_action` is `cancel` or
      `pause`, apply that action by hand on the subscription page. Dunning
      held it because a payment was in flight.
    - With no run, or with retries left, the final action was never due. The

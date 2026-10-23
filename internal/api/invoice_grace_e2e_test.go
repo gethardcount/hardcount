@@ -260,8 +260,8 @@ func (r *lagRig) exhaustedDunning(subAction domain.DunningSubscriptionAction, in
 	ctx := leadertest.Token(r.t, testutil.AdminPool(r.t), postgres.WithLivemode(context.Background(), true), leader.RoleDunning)
 	d := &graceDunning{r: r, ctx: ctx, runs: dunning.NewPostgresStore(r.db)}
 	pol, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-		Name: "grace wait", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 1,
-		FinalSubscriptionAction: subAction, FinalInvoiceAction: invAction, GracePeriodDays: 3,
+		Name: "grace wait", Enabled: true, RetryDays: []int{3},
+		FinalSubscriptionAction: subAction, FinalInvoiceAction: invAction,
 	})
 	if err != nil {
 		r.t.Fatalf("upsert policy: %v", err)
@@ -280,7 +280,7 @@ func (r *lagRig) exhaustedDunning(subAction domain.DunningSubscriptionAction, in
 	d.invID = inv.ID
 	run, err := d.runs.CreateRun(ctx, r.tenantID, domain.InvoiceDunningRun{
 		InvoiceID: inv.ID, CustomerID: r.custID, PolicyID: pol.ID,
-		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: pol.MaxRetryAttempts, NextActionAt: &due,
+		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: pol.Retries(), NextActionAt: &due,
 	})
 	if err != nil {
 		r.t.Fatalf("create run: %v", err)
@@ -345,9 +345,9 @@ func (d *graceDunning) waiting(when string, until time.Time) {
 		d.r.t.Fatalf("%s: GET /v1/dunning/runs returned %d rows, want 1", when, len(rows))
 	}
 	row, _ := rows[0].(map[string]any)
-	if row["max_retry_attempts"] != float64(d.pol.MaxRetryAttempts) || row["attempt_count"] != float64(d.pol.MaxRetryAttempts) {
+	if row["max_retry_attempts"] != float64(d.pol.Retries()) || row["attempt_count"] != float64(d.pol.Retries()) {
 		d.r.t.Fatalf("%s: listed run attempt_count=%v max_retry_attempts=%v, want both %d: every retry is used",
-			when, row["attempt_count"], row["max_retry_attempts"], d.pol.MaxRetryAttempts)
+			when, row["attempt_count"], row["max_retry_attempts"], d.pol.Retries())
 	}
 	if n := d.escalations(); n != 0 {
 		d.r.t.Fatalf("%s: %d escalated rows, want none while the action waits", when, n)

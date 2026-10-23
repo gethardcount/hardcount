@@ -323,8 +323,8 @@ Velox sends to your configured endpoints.
    policy that bootstrap creates in each mode (ADR-123). Its first retry is
    due three days after the failure.
 
-Retries follow the default policy's grace period and `retry_schedule`: day 3,
-7 and 14 for "Default retries". Each retry is a fresh PaymentIntent: on the
+Retries follow the default policy's `retry_days`, `[3, 4, 7]` for "Default
+retries": day 3, 7 and 14. Each retry is a fresh PaymentIntent: on the
 Stripe dashboard's Payments page, the PI (PaymentIntent) ID changes per
 attempt.
 

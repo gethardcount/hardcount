@@ -75,6 +75,44 @@ row that holds one was written outside Velox, for example by hand in
 **Fix:** find the rows the error lists. Set each to a value that is true
 for it, or delete it if nothing needs it. Then run `velox migrate` again.
 
+## 00206: a dunning schedule is not whole days
+
+**Symptom:**
+
+```
+migration 00206_dunning_retry_days.sql failed: ERROR: migration 00206 writes each dunning schedule as whole days, and these policies cannot be converted exactly:
+  dunning policy vlx_dpol_...: retry_schedule entry 1 (36h) is not a whole number of days from 1 to 30
+```
+
+**Why:** migration 206 rewrites each dunning policy's schedule as
+`retry_days`, a list of whole days from 1 to 30. A wait one of the
+policy's retries uses, such as `"36h"`, or a wait over 30 days, has no
+exact value in days. The error also lists values Velox's own policy form
+never saved, such as a retry count over 15. Rounding would retry on a day
+nobody chose, so the migration changed nothing. A one-retry policy saved
+without a schedule (stored as `null`) is not an error: it converts to its
+grace period.
+
+**Fix:** choose the days yourself. For each policy the error lists,
+change only the value it names. Do not delete the policy: one that has
+had a dunning run cannot be deleted, and without the account's default
+policy, customers with no policy of their own are not dunned at all.
+
+For a wait, entry 1 of `retry_schedule` is index 0. In `psql` as the
+database owner, this sets entry 1 to `72h` (3 days) and keeps the others:
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+UPDATE dunning_policies SET retry_schedule = jsonb_set(retry_schedule, '{0}', '"72h"') WHERE id = '<policy id>';
+COMMIT;
+```
+
+For a count or first wait, set `max_retry_attempts` (1 to 15) or
+`grace_period_days` (1 to 30) the same way.
+
+Then run `velox migrate` again.
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).
