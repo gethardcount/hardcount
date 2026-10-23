@@ -133,6 +133,7 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 			expiresAt := tc.expiresAt
 			atGrant := clock.WithSim(r.ctx, clock.Sim{At: tc.grantedAt, TestClockID: clockID})
 			grant, err := credits.Grant(atGrant, r.tenantID, credit.GrantInput{
+				Currency:   "USD",
 				CustomerID: cust.ID, AmountCents: 5000, Description: "goodwill", ExpiresAt: &expiresAt,
 			})
 			if err != nil {

@@ -314,7 +314,7 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsT
 	if got.Status != domain.CreditNoteIssued || got.CreditAmountCents != 4000 {
 		t.Fatalf("note %s crediting %dc, want issued crediting 4000c to the balance", got.Status, got.CreditAmountCents)
 	}
-	bal, err := credits.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(credits.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

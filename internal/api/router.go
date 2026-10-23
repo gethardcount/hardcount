@@ -998,6 +998,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// net_payment_term_days inherits the tenant's configured default (then 30),
 	// mirroring the cycle engine. settingsStore satisfies TenantSettingsReader.
 	invoiceSvc.SetTenantSettingsReader(settingsStore)
+	// The currency a manual invoice must agree with, or takes when none is
+	// sent (ADR-100, ADR-129): billing profile, then live subscription plans.
+	invoiceSvc.SetCustomerCurrencyFacts(customerCurrencyFactsAdapter{profiles: customerStore, subs: subStore})
 	testClockSvc.SetBillingRunner(engine)
 	// Phase 0.5 (Bug #8): trial expiry — flip status='trialing' subs
 	// to active at trial_end_at when sim time elapses past it, BEFORE

@@ -110,9 +110,9 @@ brings them back).
 | Method | Path | What it does |
 |---|---|---|
 | `POST` | `/v1/credit-notes` | Issue a credit note: lower what a customer owes, as a balance credit or a refund |
-| `POST` | `/v1/credits/grant` | Give a customer prepaid credit |
-| `GET` | `/v1/credits/balance/{customer_id}` | The settled balance: changes when an invoice, grant, adjustment or expiry is written |
-| `GET` | `/v1/credits/balance/{customer_id}/live` | The balance you can spend now: settled, without expired grants, minus usage not yet invoiced. Poll it and cache it. |
+| `POST` | `/v1/credits/grant` | Give a customer prepaid credit in one currency. It pays only invoices in that currency |
+| `GET` | `/v1/credits/balance/{customer_id}` | The settled balance, one per currency: changes when an invoice, grant, adjustment or expiry is written |
+| `GET` | `/v1/credits/balance/{customer_id}/live` | The balance you can spend now, per currency: settled, without expired grants, minus usage not yet invoiced. Poll it and cache it. |
 
 To stop serving a customer when credit runs out, use the live balance. See
 [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md).

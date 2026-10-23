@@ -76,7 +76,7 @@ func TestDunningRetry_CreditCovered_SettledAndHoldReleased_RealStore(t *testing.
 	custID := r.customerWithCard("covered", "pm_covered")
 	inv := r.finalizedInvoice(custID, "INV-RETRY-COVERED")
 	credits := credit.NewService(credit.NewPostgresStore(r.db))
-	if _, err := credits.Grant(r.ctx, r.tenantID, credit.GrantInput{CustomerID: custID, AmountCents: 5000, Description: "goodwill"}); err != nil {
+	if _, err := credits.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: custID, AmountCents: 5000, Description: "goodwill"}); err != nil {
 		t.Fatalf("grant credit: %v", err)
 	}
 	retrier := &paymentRetrierAdapter{charger: r.charger, invoiceStore: r.invoices, paymentSetups: r.retrier.paymentSetups, credits: credits}

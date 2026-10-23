@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { api, formatCents, formatCentsBare, formatDate, formatDateTime, getActiveCurrency, getCurrencySymbol } from '@/lib/api'
 import { amountInputToCents, amountsByCurrencyText, sumByCurrency } from '@/lib/money'
+import { CURRENCIES as GEO_CURRENCIES } from '@/lib/geo'
 import { useCustomerCurrency } from '@/hooks/useCustomerCurrency'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
 import { creditExpiryLabel, startOfNextDayInTZ } from '@/lib/dates'
@@ -25,6 +26,9 @@ import { cn } from '@/lib/utils'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -234,14 +238,14 @@ export default function CreditsPage() {
     setUrlState({ customer: '' })
   }
 
-  // Each balance is in its customer's currency (CreditBalance.currency), so
-  // the page total is one figure per currency, never one sum.
+  // One balance row per customer and currency (ADR-129): the page total is
+  // one figure per currency, never one sum.
   const totalOutstanding = amountsByCurrencyText(sumByCurrency(balances.map(b => ({ currency: b.currency, amount_cents: b.balance_cents }))))
     ?? formatCents(0, getActiveCurrency())
-  const selectedBalance = balances.find(b => b.customer_id === selectedCustomerId) || null
-  // A customer with no ledger row has no balance row either: amounts are bare.
-  const selectedMoney = (cents: number) =>
-    selectedBalance ? formatCents(cents, selectedBalance.currency) : formatCentsBare(cents)
+  // The selected customer's balances, one per currency, ordered by currency.
+  const selectedBalances = balances
+    .filter(b => b.customer_id === selectedCustomerId)
+    .sort((a, b) => a.currency.localeCompare(b.currency))
   const selectedCustomer = selectedCustomerId ? customerMap[selectedCustomerId] : null
 
   // entry-type filtering happens SERVER-SIDE now (query param above);
@@ -285,9 +289,20 @@ export default function CreditsPage() {
               </Link>
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">Credit balance</p>
-            <p className={cn('text-3xl font-semibold mt-1', (selectedBalance?.balance_cents || 0) > 0 ? 'text-emerald-600' : 'text-muted-foreground')}>
-              {selectedMoney(selectedBalance?.balance_cents || 0)}
-            </p>
+            {selectedBalances.length === 0 ? (
+              // No ledger row yet: no currency either, so the zero is bare.
+              <p className="text-3xl font-semibold mt-1 text-muted-foreground">{formatCentsBare(0)}</p>
+            ) : (
+              // One figure per currency: credit pays only invoices in its own
+              // currency and is never converted.
+              <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mt-1">
+                {selectedBalances.map(b => (
+                  <p key={b.currency} className={cn('text-3xl font-semibold tabular-nums', b.balance_cents > 0 ? 'text-emerald-600' : 'text-muted-foreground')}>
+                    {formatCents(b.balance_cents, b.currency)}
+                  </p>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2 mt-1">
             <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowDeduct(true) }}>
@@ -349,7 +364,7 @@ export default function CreditsPage() {
                       e.description,
                       (e.amount_cents / 100).toFixed(2),
                       (e.balance_after / 100).toFixed(2),
-                      selectedBalance?.currency ?? '',
+                      e.currency,
                       e.invoice_id || '',
                     ])
                     downloadCSV(`credits-${selectedCustomer?.external_id || 'customer'}.csv`,
@@ -420,9 +435,10 @@ export default function CreditsPage() {
                           })()}
                         </TableCell>
                         <TableCell className={cn('text-right tabular-nums font-mono text-sm', entry.amount_cents >= 0 ? 'text-emerald-600' : 'text-destructive')}>
-                          {entry.amount_cents >= 0 ? '+' : ''}{selectedMoney(entry.amount_cents)}
+                          {entry.amount_cents >= 0 ? '+' : ''}{formatCents(entry.amount_cents, entry.currency)}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums font-mono text-sm">{selectedMoney(entry.balance_after)}</TableCell>
+                        {/* The balance in this entry's own currency. */}
+                        <TableCell className="text-right tabular-nums font-mono text-sm">{formatCents(entry.balance_after, entry.currency)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -500,12 +516,15 @@ export default function CreditsPage() {
   }
 
   // ---- List View ----
-  const balMap: Record<string, CreditBalance> = {}
-  balances.forEach(b => { balMap[b.customer_id] = b })
-  const customersWithCredits = customers
-    .filter(c => balMap[c.id])
-    .map(c => ({ customer: c, balance: balMap[c.id] }))
-    .sort((a, b) => b.balance.balance_cents - a.balance.balance_cents)
+  // One row per customer and currency: a customer with credit in two
+  // currencies has two rows, each in its own currency.
+  const creditRows: { customer: Customer; balance: CreditBalance }[] = balances
+    .filter(b => customerMap[b.customer_id])
+    .map(b => ({ customer: customerMap[b.customer_id], balance: b }))
+    .sort((a, b) => b.balance.balance_cents - a.balance.balance_cents
+      || a.customer.display_name.localeCompare(b.customer.display_name)
+      || a.balance.currency.localeCompare(b.balance.currency))
+  const customersWithCredits = new Set(creditRows.map(r => r.customer.id))
 
   return (
     <Layout>
@@ -513,10 +532,10 @@ export default function CreditsPage() {
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Balance a customer can spend. Velox uses it to pay their invoices before charging their card{customersWithCredits.length > 0 ? ` · ${totalOutstanding} across ${customersWithCredits.length} customer${customersWithCredits.length !== 1 ? 's' : ''}` : ''}
+            Balance a customer can spend. Velox uses it to pay their invoices in the same currency before charging their card{customersWithCredits.size > 0 ? ` · ${totalOutstanding} across ${customersWithCredits.size} customer${customersWithCredits.size !== 1 ? 's' : ''}` : ''}
           </p>
         </div>
-        {customersWithCredits.length > 0 && (
+        {customersWithCredits.size > 0 && (
           <Button size="sm" onClick={() => { setModalCustomerId(''); setShowGrant(true) }}>
             <Plus size={16} className="mr-2" /> Grant credits
           </Button>
@@ -530,7 +549,7 @@ export default function CreditsPage() {
             <LoadError what="credits" error={firstErr} onRetry={loadData} />
           ) : loading ? (
             <TableSkeleton columns={3} widths={['60%', '30%', '20%']} />
-          ) : customersWithCredits.length === 0 ? (
+          ) : creditRows.length === 0 ? (
             <EmptyState
               icon={Coins}
               title="No credit activity"
@@ -551,9 +570,9 @@ export default function CreditsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {customersWithCredits.map(({ customer, balance }) => (
+                {creditRows.map(({ customer, balance }) => (
                   <TableRow
-                    key={customer.id}
+                    key={`${customer.id}:${balance.currency}`}
                     className="cursor-pointer hover:bg-muted/50 transition-colors"
                     onClick={() => openCustomerDetail(customer.id)}
                   >
@@ -602,8 +621,10 @@ export default function CreditsPage() {
 // ---- Grant / Deduct Dialog ----
 
 // Exported for the customer page's Credits section (Grant credits there).
-// currency: the customer's currency when the caller knows it; otherwise the
-// dialog resolves it for the picked customer.
+// currency: the customer's billing currency when the caller knows it;
+// otherwise the dialog resolves it for the picked customer. A grant defaults
+// to it; a deduction offers only the currencies the customer holds credit in.
+// Credit pays only invoices in its own currency (ADR-129).
 export function CreditDialog({ mode, customerId, customerName, customers, currency, open, onOpenChange, onDone }: {
   mode: 'grant' | 'deduct'
   customerId: string
@@ -659,12 +680,32 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
   const [idemKey] = useState(() => crypto.randomUUID())
 
   const effectiveCustomerId = selectedCustomer || customerId
-  // The currency the Amount field and the confirm name: the caller's when it
-  // knows it, else the picked customer's (lib/customerCurrency). Credit has no
-  // currency of its own; it pays the customer's invoices 1:1 (ADR-100). With
-  // no customer picked, or a read failed, the amount has no symbol.
+  // The customer's billing currency: the caller's when it knows it, else the
+  // picked customer's (lib/customerCurrency). Undefined with no customer
+  // picked, or while a read is loading or failed.
   const resolvedCurrency = useCustomerCurrency(effectiveCustomerId || undefined)
-  const dialogCurrency = effectiveCustomerId ? (currency ?? resolvedCurrency?.currency) : undefined
+  const customerCurrency = effectiveCustomerId ? (currency ?? resolvedCurrency?.currency) : undefined
+  // A deduction draws on the credit in one currency, so it offers only the
+  // currencies with a positive balance. Same key as the customer page's
+  // balance, so the read is shared.
+  const balancesQuery = useQuery({
+    queryKey: ['customer-balance', effectiveCustomerId],
+    queryFn: () => api.getBalance(effectiveCustomerId),
+    enabled: isDeduct && !!effectiveCustomerId,
+  })
+  const deductable = (balancesQuery.data?.data ?? [])
+    .filter(b => b.balance_cents > 0)
+    .sort((a, b) => a.currency.localeCompare(b.currency))
+  const [pickedCurrency, setPickedCurrency] = useState<string>()
+  // The currency the credit is written in, the Amount field is labeled with
+  // and the confirm names. A grant defaults to the customer's currency; a
+  // deduction to it when it has credit, else the first currency that does.
+  const dialogCurrency = isDeduct
+    ? (deductable.find(b => b.currency === pickedCurrency)
+      ?? deductable.find(b => b.currency === customerCurrency)
+      ?? deductable[0])?.currency
+    : (pickedCurrency ?? customerCurrency)
+  const [currencyError, setCurrencyError] = useState('')
   // The confirm step names the customer; with the server-searched picker
   // there's no local list to look it up in, so fetch the picked one.
   const { data: pickedData } = useQuery({
@@ -686,12 +727,14 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
       if (isDeduct) {
         return api.adjustCredits({
           customer_id: effectiveCustomerId,
+          currency: dialogCurrency!,
           amount_cents: -amountCents,
           description,
         }, idemKey)
       } else {
         return api.grantCredits({
           customer_id: effectiveCustomerId,
+          currency: dialogCurrency!,
           amount_cents: amountCents,
           description,
           ...(expiresAt ? { expires_at: startOfNextDayInTZ(expiresAt) } : {}),
@@ -715,6 +758,8 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
   const onFormSubmit = form.handleSubmit(() => {
     if (!effectiveCustomerId) { setCustomerError('Select a customer'); return }
     setCustomerError('')
+    if (!dialogCurrency) { setCurrencyError(isDeduct ? 'This customer has no credit to deduct' : 'Select a currency'); return }
+    setCurrencyError('')
     setShowConfirm(true)
   })
 
@@ -747,7 +792,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   <div className="mt-2">
                     <CustomerCombobox
                       value={selectedCustomer}
-                      onChange={(v) => { setSelectedCustomer(v); setCustomerError('') }}
+                      onChange={(v) => { setSelectedCustomer(v); setCustomerError(''); setPickedCurrency(undefined); setCurrencyError('') }}
                       placeholder="Search customers..."
                     />
                   </div>
@@ -760,6 +805,46 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   <p className="text-sm font-medium text-foreground mt-0.5">{effectiveCustomerName}</p>
                 </div>
               )}
+
+              <div className="space-y-2">
+                <Label htmlFor="credit-currency">Currency</Label>
+                {isDeduct && effectiveCustomerId && !balancesQuery.isLoading && deductable.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {balancesQuery.isError ? "Couldn't load this customer's balances." : 'This customer has no credit to deduct.'}
+                  </p>
+                ) : (
+                  <Select
+                    items={isDeduct
+                      ? deductable.map(b => ({ value: b.currency, label: `${b.currency} — ${formatCents(b.balance_cents, b.currency)} available` }))
+                      : GEO_CURRENCIES.map(c => ({ value: c.code, label: `${c.symbol} ${c.code} — ${c.label}` }))}
+                    value={dialogCurrency ?? null}
+                    onValueChange={(v) => { if (v) { setPickedCurrency(v); setCurrencyError('') } }}
+                  >
+                    <SelectTrigger id="credit-currency" className="w-full">
+                      <SelectValue placeholder="Select currency..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {isDeduct
+                        ? deductable.map(b => (
+                          <SelectItem key={b.currency} value={b.currency}>
+                            {b.currency} — {formatCents(b.balance_cents, b.currency)} available
+                          </SelectItem>
+                        ))
+                        : GEO_CURRENCIES.map(c => (
+                          <SelectItem key={c.code} value={c.code}>
+                            {c.symbol} {c.code} — {c.label}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  {isDeduct
+                    ? 'Removed from the balance in this currency only.'
+                    : "Pays only this customer's invoices in this currency. It is never converted."}
+                </p>
+                {currencyError && <p className="text-destructive text-sm">{currencyError}</p>}
+              </div>
 
               <FormField
                 control={form.control}
@@ -840,7 +925,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={saveMutation.isPending} variant={isDeduct ? 'destructive' : 'default'}>
+                <Button type="submit" disabled={saveMutation.isPending || (isDeduct && !!effectiveCustomerId && !balancesQuery.isLoading && deductable.length === 0)} variant={isDeduct ? 'destructive' : 'default'}>
                   {saveMutation.isPending ? (
                     <>
                       <Loader2 size={14} className="animate-spin mr-2" />
@@ -859,7 +944,10 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
           <AlertDialogHeader>
             <AlertDialogTitle>{isDeduct ? 'Confirm deduction' : 'Confirm credit grant'}</AlertDialogTitle>
             <AlertDialogDescription>
-              {isDeduct ? 'Deduct' : 'Grant'} {dialogCurrency ? formatCents(confirmCents, dialogCurrency) : formatCentsBare(confirmCents)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
+              {isDeduct ? 'Deduct' : 'Grant'} {dialogCurrency ? `${formatCents(confirmCents, dialogCurrency)} ${dialogCurrency}` : formatCentsBare(confirmCents)} {isDeduct ? 'from' : 'to'} {effectiveCustomerName}?
+              {dialogCurrency && (isDeduct
+                ? ` It comes off the ${dialogCurrency} balance.`
+                : ` It pays only ${dialogCurrency} invoices.`)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

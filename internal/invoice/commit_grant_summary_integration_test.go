@@ -6,6 +6,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/creditnote"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // The grant summary behind the customer page's credit rows splits a grant's
@@ -22,7 +23,7 @@ import (
 // add up to what was granted.
 func assertRetiredTotal(t *testing.T, h *commitHarness, ctx context.Context, wantRetired int64) {
 	t.Helper()
-	bal, err := h.creditSvc.GetBalance(ctx, h.tenantID, h.custID)
+	bal, err := testutil.BalanceUSD(h.creditSvc.GetBalance(ctx, h.tenantID, h.custID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

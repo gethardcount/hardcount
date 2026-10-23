@@ -3,6 +3,8 @@ package billing
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/shopspring/decimal"
 
@@ -10,13 +12,13 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
-// CreditBalanceReader reads the credit a customer can spend right now: the
-// ledger sum, less what is left of any grant that is past its expiry but has
-// not been written off by the expiry sweep yet. A draw skips such a grant, so
-// counting it would promise credit no invoice can use. Implemented by
-// *credit.Service.
+// CreditBalanceReader reads the credit a customer can spend right now, per
+// currency: the ledger sum, less what is left of any grant that is past its
+// expiry but has not been written off by the expiry sweep yet. A draw skips
+// such a grant, so counting it would promise credit no invoice can use.
+// Implemented by *credit.Service.
 type CreditBalanceReader interface {
-	SpendableBalance(ctx context.Context, tenantID, customerID string) (int64, error)
+	SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error)
 }
 
 // CustomerSubscriptionLister lists a customer's subscriptions, hydrated with
@@ -34,9 +36,15 @@ func (e *Engine) SetLiveBalanceReaders(credits CreditBalanceReader, subs Custome
 
 // LiveCreditBalance is the one place a customer's live credit figure is
 // computed (issue #1019). The secret-key read and the public cost dashboard
-// both call it, so the two can never disagree.
+// both call it, so the two can never disagree. The figure is per currency
+// (ADR-129); in each one:
 //
 //	estimated remaining = max(spendable balance - unbilled usage, 0)
+//
+// A subscription's unbilled usage counts in the currency its close invoice
+// will be issued in (Engine.invoiceCurrency, the function that stamps it), so
+// it is set against the credit that invoice can draw. The result lists the
+// sorted union of the ledger's currencies and the subscriptions'.
 //
 // Unbilled usage is what the period close would bill for usage if every
 // billable subscription closed now: each subscription over its OWN current
@@ -50,8 +58,7 @@ func (e *Engine) SetLiveBalanceReaders(credits CreditBalanceReader, subs Custome
 // Left out on purpose, so the figure can read HIGH: tax, base fees billed in
 // arrears (until the period closes), amounts due on unpaid invoices, and a
 // grant that will expire before the period closes (it is spendable now, but
-// will not be there for the close to draw on). Currencies are added as raw
-// cents; the ledger has no currency.
+// will not be there for the close to draw on).
 //
 // The reads are separate transactions (balance, subscriptions, then per
 // subscription the watermark and intervals, and per meter the aggregation).
@@ -68,7 +75,7 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 	if e.creditBalances == nil || e.customerSubs == nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: readers not wired")
 	}
-	balance, err := e.creditBalances.SpendableBalance(ctx, tenantID, customerID)
+	balances, err := e.creditBalances.SpendableBalance(ctx, tenantID, customerID)
 	if err != nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: read balance: %w", err)
 	}
@@ -76,23 +83,44 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 	if err != nil {
 		return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: list subscriptions: %w", err)
 	}
-	var unbilled int64
+	unbilled := map[string]int64{}
 	for _, sub := range subs {
-		cents, err := e.unbilledUsageCents(ctx, sub)
+		cents, planCurrency, err := e.unbilledUsageCents(ctx, sub)
 		if err != nil {
 			// No partial figure: leaving one subscription out would report
 			// more credit than the customer has.
 			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: subscription %s: %w", sub.ID, err)
 		}
-		unbilled += cents
+		currency, err := e.invoiceCurrency(ctx, sub, planCurrency)
+		if err != nil {
+			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: subscription %s currency: %w", sub.ID, err)
+		}
+		unbilled[strings.ToUpper(currency)] += cents
 	}
-	return domain.CreditLiveBalance{
-		CustomerID:              customerID,
-		BalanceCents:            balance,
-		UnbilledUsageCents:      unbilled,
-		EstimatedRemainingCents: max(balance-unbilled, 0),
-		ComputedAt:              e.clock.Now(ctx),
-	}, nil
+	currencies := make([]string, 0, len(balances)+len(unbilled))
+	for c := range balances {
+		currencies = append(currencies, c)
+	}
+	for c := range unbilled {
+		if _, ok := balances[c]; !ok {
+			currencies = append(currencies, c)
+		}
+	}
+	sort.Strings(currencies)
+	out := domain.CreditLiveBalance{
+		CustomerID: customerID,
+		Balances:   make([]domain.CreditLiveCurrency, 0, len(currencies)),
+		ComputedAt: e.clock.Now(ctx),
+	}
+	for _, c := range currencies {
+		out.Balances = append(out.Balances, domain.CreditLiveCurrency{
+			Currency:                c,
+			BalanceCents:            balances[c],
+			UnbilledUsageCents:      unbilled[c],
+			EstimatedRemainingCents: max(balances[c]-unbilled[c], 0),
+		})
+	}
+	return out, nil
 }
 
 // billableSubscriptions returns the customer's subscriptions whose stored
@@ -182,15 +210,18 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 // same events, which is why the subscription service refuses that setup
 // (rejectMeterOverlap); if such rows exist the estimate counts the usage
 // once per subscription, as the closes will.
-func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, error) {
+//
+// It also returns the currency of the subscription's first item's plan, the
+// input Engine.invoiceCurrency takes to name the close invoice's currency.
+func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, string, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return 0, nil
+		return 0, "", nil
 	}
 	periodStart, periodEnd := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
 
 	wm, err := e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	plans := map[string]domain.Plan{}
@@ -207,7 +238,7 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 	}
 	for _, it := range sub.Items {
 		if err := loadPlan(it.PlanID); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 	}
 	// A trialing subscription has no billing intervals yet: conversion opens
@@ -218,19 +249,19 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 	if sub.Status != domain.SubscriptionTrialing {
 		segsByItem, err = e.windowSegments(ctx, sub, periodStart, periodEnd)
 		if err != nil {
-			return 0, fmt.Errorf("resolve segments: %w", err)
+			return 0, "", fmt.Errorf("resolve segments: %w", err)
 		}
 		for _, segs := range segsByItem {
 			for _, seg := range segs {
 				if err := loadPlan(seg.planID); err != nil {
-					return 0, err
+					return 0, "", err
 				}
 			}
 		}
 	}
 	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	clamped, full := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
 	meterIDs := map[string]struct{}{}
@@ -265,7 +296,7 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 			return nil
 		}
 		if err := sum(clamped[meterID], false); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 
 		// Full-window pass. Skipped for a meter that cannot have a deferred
@@ -277,16 +308,20 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 		}
 		nonAdditive, err := e.meterHasNonAdditiveBucket(ctx, sub.TenantID, meterID)
 		if err != nil {
-			return 0, err
+			return 0, "", err
 		}
 		if !nonAdditive {
 			continue
 		}
 		if err := sum(full[meterID], true); err != nil {
-			return 0, err
+			return 0, "", err
 		}
 	}
-	return total, nil
+	planCurrency := ""
+	if len(sub.Items) > 0 {
+		planCurrency = plans[sub.Items[0].PlanID].Currency
+	}
+	return total, planCurrency, nil
 }
 
 // meterHasNonAdditiveBucket reports whether any bucket of the meter (its

@@ -96,6 +96,7 @@ func TestManualInvoice_CreditBalanceApplied_E2E(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 	if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 2000, Description: "seed", At: time.Now().UTC().Add(-time.Hour),
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -122,7 +123,7 @@ func TestManualInvoice_CreditBalanceApplied_E2E(t *testing.T) {
 		t.Errorf("due=%d creditsApplied=%d, want 3000/2000 (card would charge exactly the remainder)",
 			applied.AmountDueCents, applied.CreditsAppliedCents)
 	}
-	bal, err := creditSvc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(creditSvc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}

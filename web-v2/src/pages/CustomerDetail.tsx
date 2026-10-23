@@ -29,6 +29,7 @@ import { NO_CARD_SENTENCE, NO_CARD_TITLE } from '@/lib/subscriptionNotices'
 import { cardLabel, removeCardSentence } from '@/lib/paymentMethodCopy'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { useCustomerCurrency, useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
+import { invoiceCurrencyPin, type CustomerCurrency } from '@/lib/customerCurrency'
 import { creditTotalsLine, invoiceCreditNote, outstandingIncludesCredit } from '@/lib/customerCredits'
 import { CustomerCreditsSection } from '@/components/customer/CustomerCreditsSection'
 import { statusBadgeVariant } from '@/lib/status'
@@ -239,7 +240,9 @@ export default function CustomerDetailPage() {
     queryFn: () => api.getBalance(id!),
     enabled: !!id,
   })
-  const balance = balanceData?.balance_cents
+  // One balance per currency (ADR-129), ordered by currency.
+  const creditBalances = [...(balanceData?.data ?? [])].sort((a, b) => a.currency.localeCompare(b.currency))
+  const anyCredit = creditBalances.some(b => b.balance_cents > 0)
   const outstandingAmounts = amountsByCurrencyText(overview?.outstanding_balance?.by_currency ?? [])
 
   // Only a 404 means "no profile". Any other failure must not offer Set Up:
@@ -257,13 +260,12 @@ export default function CustomerDetailPage() {
   // One currency for every figure on this page that has none of its own, in
   // the order the engine picks an invoice's currency: the billing profile,
   // then the live subscription's plan, then the latest invoice, then the
-  // workspace default (lib/customerCurrency). Credits have no currency
-  // either; they are drawn 1:1 against the invoice (ADR-100). Undefined
-  // while it loads or if a read failed: figures read "—" and New invoice
-  // stays disabled rather than use a wrong currency.
+  // workspace default (lib/customerCurrency). Credit is not one of them: each
+  // ledger row carries its own currency (ADR-129). Undefined while it loads
+  // or if a read failed: figures read "—" and New invoice stays disabled
+  // rather than use a wrong currency.
   const customerCurrency = useCustomerCurrency(id)
   const creditCurrency = customerCurrency?.currency
-  const creditMoney = (cents: number) => (creditCurrency ? formatCents(cents, creditCurrency) : '—')
 
   const { data: metersData } = useQuery({
     queryKey: ['meters'],
@@ -595,13 +597,19 @@ export default function CustomerDetailPage() {
             ) : (
               <Link to={`/credits?customer=${id}`} className="flex-1 min-w-0 px-6 py-4 hover:bg-accent/50 transition-colors">
                 <p className="text-sm text-muted-foreground">Credit balance</p>
-                <p className={cn('text-sm font-medium mt-1', (balance ?? 0) > 0 ? 'text-emerald-600' : 'text-foreground')}>
-                  {balance === undefined ? '—' : creditMoney(balance)}
+                {/* One figure per currency, never added together. A customer
+                    with no credit yet reads zero in its billing currency. */}
+                <p className={cn('text-sm font-medium mt-1', anyCredit ? 'text-emerald-600' : 'text-foreground')}>
+                  {!balanceData
+                    ? '—'
+                    : creditBalances.length === 0
+                      ? (creditCurrency ? formatCents(0, creditCurrency) : '—')
+                      : creditBalances.map(b => formatCents(b.balance_cents, b.currency)).join(' · ')}
                 </p>
-                {/* Kind split — money-backed commit liability must not read
-                    as one number with free promo credits. */}
-                {balanceData && creditCurrency && creditTotalsLine(balanceData, creditCurrency) && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{creditTotalsLine(balanceData, creditCurrency)}</p>
+                {/* Where the credit went, when it is in one currency; the
+                    Credits section below has the line for each currency. */}
+                {creditBalances.length === 1 && creditTotalsLine(creditBalances[0], creditBalances[0].currency) && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{creditTotalsLine(creditBalances[0], creditBalances[0].currency)}</p>
                 )}
               </Link>
             )}
@@ -880,10 +888,11 @@ export default function CustomerDetailPage() {
         <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
       </div>
 
-      {/* Credits: balance with granted/used/expired, every grant including
-          used-up ones, the latest ledger entries, and Grant credits. It waits
-          for the customer's currency, so no figure shows in the wrong one. */}
-      {creditCurrency && <div className="mt-6">
+      {/* Credits: balance per currency with granted/used/expired, every
+          grant including used-up ones, the latest ledger entries, and Grant
+          credits. Each amount carries its own currency; the customer's
+          currency is only the grant dialog's default. */}
+      <div className="mt-6">
         <CustomerCreditsSection
           customerId={id!}
           customerName={customer.display_name}
@@ -891,7 +900,7 @@ export default function CustomerDetailPage() {
           testClockId={customer.test_clock_id}
           readOnly={isArchived}
         />
-      </div>}
+      </div>
 
       {/* Public cost-dashboard token — ADR-031 / MANUAL_TEST CU8. Operator
           rotates to mint a shareable URL the customer can embed (iframe
@@ -1270,8 +1279,7 @@ export default function CustomerDetailPage() {
         <NewInvoiceDialog
           customerId={id}
           customer={customer}
-          billingProfile={billingProfile ?? null}
-          defaultCurrency={customerCurrency.currency}
+          customerCurrency={customerCurrency}
           onClose={() => setShowNewInvoice(false)}
           onCreated={({ invoice, result }) => {
             setShowNewInvoice(false)
@@ -1761,17 +1769,18 @@ const blankLine = (): ComposerLine => ({
   commitExpiresAt: '',
 })
 
-function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrency, onClose, onCreated }: {
+function NewInvoiceDialog({ customerId, customer, customerCurrency, onClose, onCreated }: {
   customerId: string
   customer: Customer
-  billingProfile: BillingProfile | null
-  defaultCurrency: string
+  customerCurrency: CustomerCurrency
   onClose: () => void
   onCreated: (result: { invoice: Invoice; result: NewInvoiceResult }) => void
 }) {
   // Default currency: the customer's currency (lib/customerCurrency), so a
-  // customer on a EUR plan opens in EUR. The operator can switch in one click.
-  const initialCurrency = defaultCurrency.toUpperCase()
+  // customer on a EUR plan opens in EUR. When the billing profile or a live
+  // plan sets it, the server refuses any other (409), so the picker is fixed.
+  const initialCurrency = customerCurrency.currency.toUpperCase()
+  const currencyPin = invoiceCurrencyPin(customerCurrency)
   const [currency, setCurrency] = useState(initialCurrency)
   const [memo, setMemo] = useState('')
   // Service period (optional) — the inclusive dates this invoice covers.
@@ -2008,6 +2017,7 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                 items={GEO_CURRENCIES.map(c => ({ value: c.code, label: `${c.symbol} ${c.code} — ${c.label}` }))}
                 value={currency}
                 onValueChange={(v) => setCurrency((v ?? 'USD').toUpperCase())}
+                disabled={currencyPin !== null}
               >
                 <SelectTrigger id="composer-currency" className="w-full">
                   <SelectValue />
@@ -2020,8 +2030,8 @@ function NewInvoiceDialog({ customerId, customer, billingProfile, defaultCurrenc
                   ))}
                 </SelectContent>
               </Select>
-              {billingProfile?.currency && billingProfile.currency.toUpperCase() === currency && (
-                <p className="text-xs text-muted-foreground">From customer billing profile.</p>
+              {currencyPin && (
+                <p className="text-xs text-muted-foreground">{currencyPin}</p>
               )}
             </div>
 

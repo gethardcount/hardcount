@@ -34,7 +34,7 @@ func TestGrantSummary_SplitsExpiredFromUsed(t *testing.T) {
 	}
 
 	// Control: a grant with no expiry, fully applied, has nothing expired.
-	used, err := svc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: cust.ID, AmountCents: 2000, Description: "no expiry"})
+	used, err := svc.Grant(ctx, tenantID, credit.GrantInput{Currency: "USD", CustomerID: cust.ID, AmountCents: 2000, Description: "no expiry"})
 	if err != nil {
 		t.Fatalf("grant: %v", err)
 	}

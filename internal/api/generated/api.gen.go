@@ -3371,10 +3371,13 @@ type AnalyticsOverview struct {
 	// AvgInvoiceValue Average total of invoices paid in the window.
 	AvgInvoiceValue int64 `json:"avg_invoice_value"`
 
-	// CreditBalanceTotal Sum of all customers' credit balances. Not limited to `currency`.
-	CreditBalanceTotal int64 `json:"credit_balance_total"`
+	// CreditBalanceByCurrency Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted.
+	CreditBalanceByCurrency []struct {
+		AmountCents int64  `json:"amount_cents"`
+		Currency    string `json:"currency"`
+	} `json:"credit_balance_by_currency"`
 
-	// Currency The tenant's default currency. Every money field uses it, except `credit_balance_total` and `outstanding_by_currency`.
+	// Currency The tenant's default currency. Every money field uses it, except `credit_balance_by_currency` and `outstanding_by_currency`, which carry their own.
 	Currency string `json:"currency"`
 
 	// DunningActive Dunning runs (automatic payment retries) still in progress.
@@ -3815,11 +3818,11 @@ type BootstrapResult struct {
 	Tenant        Tenant `json:"tenant"`
 }
 
-// CreditBalance A customer's credit balance and where the credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
+// CreditBalance A customer's credit balance in one currency and where that credit went. Every cent granted is either still in the balance or in one of the totals: total_granted = total_used + total_expired + total_retired + total_deducted + balance_cents.
 type CreditBalance struct {
 	BalanceCents int64 `json:"balance_cents"`
 
-	// Currency The currency the customer is billed in, uppercase. Credit has no currency of its own: it pays the customer's invoices one cent for one cent, so its amounts read in this currency. The first of: the billing profile's currency, the plan of the customer's active or trialing subscription, the newest invoice's currency, the workspace default.
+	// Currency The currency of this balance, uppercase. Each credit ledger entry stores its own currency, and credit pays only invoices in that currency. A customer with credit in two currencies has two balances; they are never added together or converted.
 	Currency   string `json:"currency"`
 	CustomerId string `json:"customer_id"`
 
@@ -3849,6 +3852,9 @@ type CreditGrantBlock struct {
 	// retired and deducted.
 	ConsumedCents int64     `json:"consumed_cents"`
 	CreatedAt     time.Time `json:"created_at"`
+
+	// Currency The block's currency, uppercase.
+	Currency string `json:"currency"`
 
 	// DeductedCents The part an operator removed with a negative adjustment.
 	DeductedCents int64  `json:"deducted_cents"`
@@ -3884,17 +3890,22 @@ type CreditGrantBlock struct {
 type CreditGrantBlockGrantKind string
 
 // CreditGrants A customer's credit blocks, newest first, with the remaining credit
-// added up by kind.
+// added up by currency and kind.
 type CreditGrants struct {
-	// CommitRemainingCents Remaining credit the customer paid for (`commit`).
-	CommitRemainingCents int64              `json:"commit_remaining_cents"`
-	Grants               []CreditGrantBlock `json:"grants"`
+	Grants []CreditGrantBlock `json:"grants"`
 
-	// OtherRemainingCents Remaining credit with no kind, such as adjustments and proration credits.
-	OtherRemainingCents int64 `json:"other_remaining_cents"`
+	// RemainingByCurrency One entry per currency with credit left, ordered by currency.
+	RemainingByCurrency []struct {
+		// CommitRemainingCents Remaining credit the customer paid for (`commit`).
+		CommitRemainingCents int64  `json:"commit_remaining_cents"`
+		Currency             string `json:"currency"`
 
-	// PromotionalRemainingCents Remaining free credit (`promotional`).
-	PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
+		// OtherRemainingCents Remaining credit with no kind, such as adjustments and credit-note credit.
+		OtherRemainingCents int64 `json:"other_remaining_cents"`
+
+		// PromotionalRemainingCents Remaining free credit (`promotional`).
+		PromotionalRemainingCents int64 `json:"promotional_remaining_cents"`
+	} `json:"remaining_by_currency"`
 }
 
 // CreditLedgerEntry defines model for CreditLedgerEntry.
@@ -3902,15 +3913,18 @@ type CreditLedgerEntry struct {
 	// AmountCents Positive adds credit, negative removes it.
 	AmountCents int64 `json:"amount_cents"`
 
-	// BalanceAfter Customer's credit balance after this entry, in cents.
+	// BalanceAfter The customer's credit balance in this entry's currency after it, in cents.
 	BalanceAfter int64 `json:"balance_after"`
 
 	// ConsumedCents For entries that add credit, how much has been used or expired.
-	ConsumedCents int64                      `json:"consumed_cents,omitempty"`
-	CreatedAt     time.Time                  `json:"created_at"`
-	CustomerId    string                     `json:"customer_id"`
-	Description   string                     `json:"description"`
-	EntryType     CreditLedgerEntryEntryType `json:"entry_type"`
+	ConsumedCents int64     `json:"consumed_cents,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// Currency The entry's currency, uppercase. Credit pays only invoices in its own currency.
+	Currency    string                     `json:"currency"`
+	CustomerId  string                     `json:"customer_id"`
+	Description string                     `json:"description"`
+	EntryType   CreditLedgerEntryEntryType `json:"entry_type"`
 
 	// ExpiresAt On a grant, its expiry. The credit can be drawn up to and
 	// including this instant; a period invoice draws it when its
@@ -3951,19 +3965,26 @@ type CreditLedgerEntryEntryType string
 // CreditLedgerEntryGrantKind defines model for CreditLedgerEntry.GrantKind.
 type CreditLedgerEntryGrantKind string
 
-// CreditLiveBalance A customer's credit position right now. `balance_cents` is the credit the customer can spend: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet. `estimated_remaining_cents` is the first minus the second, never below zero.
+// CreditLiveBalance A customer's credit position right now, one entry per currency: every currency the customer holds credit in, and every currency a live subscription will invoice usage in. Amounts in two currencies are never added together.
 type CreditLiveBalance struct {
-	// BalanceCents Settled ledger balance, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
-	BalanceCents int64 `json:"balance_cents"`
+	// Balances Ordered by currency.
+	Balances []CreditLiveCurrency `json:"balances"`
 
 	// ComputedAt When the server computed these figures.
 	ComputedAt time.Time `json:"computed_at"`
 	CustomerId string    `json:"customer_id"`
+}
+
+// CreditLiveCurrency The live position in one currency. `balance_cents` is the credit the customer can spend in it: the settled ledger balance, which moves only when an invoice, grant, adjustment or expiry is written, less any grant that is past its expiry date and not yet written off. `unbilled_usage_cents` is the usage of the current period that no invoice has billed yet and that will be invoiced in this currency. `estimated_remaining_cents` is the first minus the second, never below zero.
+type CreditLiveCurrency struct {
+	// BalanceCents Settled ledger balance in this currency, less what is left of any grant past its expiry date that the hourly expiry run has not written off yet (an invoice cannot draw on such a grant). Can be negative.
+	BalanceCents int64  `json:"balance_cents"`
+	Currency     string `json:"currency"`
 
 	// EstimatedRemainingCents `balance_cents` minus `unbilled_usage_cents`, floored at zero. To see how far past zero a customer is, subtract the two parts yourself.
 	EstimatedRemainingCents int64 `json:"estimated_remaining_cents"`
 
-	// UnbilledUsageCents Metered usage that the next invoice of each subscription will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
+	// UnbilledUsageCents Metered usage that the next invoice of each subscription invoiced in this currency will bill, priced as the period close prices it. Usage that a mid-period threshold invoice already billed is not counted again. After a mid-period plan change each meter is counted for the time a plan carrying it was on the subscription. For a trialing subscription only usage inside its first paid period counts; that period starts at the beginning of the day the trial ends.
 	UnbilledUsageCents int64 `json:"unbilled_usage_cents"`
 }
 
@@ -5100,7 +5121,7 @@ type InvoiceCreateRequest struct {
 	BillingPeriodEnd   time.Time `json:"billing_period_end,omitempty"`
 	BillingPeriodStart time.Time `json:"billing_period_start,omitempty"`
 
-	// Currency ISO 4217 code. Defaults to the customer's billing currency, then the tenant default.
+	// Currency ISO 4217 code. Must be the customer's currency (see 409). Defaults to the billing-profile currency, then the live subscriptions' plan currency, then the tenant default.
 	Currency   string `json:"currency,omitempty"`
 	CustomerId string `json:"customer_id"`
 
@@ -6350,8 +6371,10 @@ type TenantSettings struct {
 	// CreatedAt Zero time when the tenant has never saved settings.
 	CreatedAt time.Time `json:"created_at"`
 
-	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
-	// `credit.balance_low` webhook fires. null turns it off.
+	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
+	// amount, in that currency's minor units, the `credit.balance_low`
+	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+	// credit. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
 	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
@@ -6447,8 +6470,10 @@ type TenantSettingsInput struct {
 	CompanyPostalCode string `json:"company_postal_code,omitempty"`
 	CompanyState      string `json:"company_state,omitempty"`
 
-	// CreditBalanceLowThresholdCents When a customer's credit balance drops below this amount, the
-	// `credit.balance_low` webhook fires. null turns it off.
+	// CreditBalanceLowThresholdCents When a customer's credit in one currency drops below this
+	// amount, in that currency's minor units, the `credit.balance_low`
+	// webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+	// credit. null turns it off.
 	CreditBalanceLowThresholdCents int64 `json:"credit_balance_low_threshold_cents,omitempty"`
 
 	// CreditNotePrefix Starts every credit note number, such as `CN-000001`. A change
@@ -7252,7 +7277,10 @@ type VoidCreditNoteParams struct {
 // AdjustCreditsJSONBody defines parameters for AdjustCredits.
 type AdjustCreditsJSONBody struct {
 	// AmountCents Positive adds credit, negative removes it. Not zero.
-	AmountCents int64  `json:"amount_cents"`
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency ISO 4217 code of the balance to change. Case-insensitive; stored uppercase.
+	Currency    string `json:"currency"`
 	CustomerId  string `json:"customer_id"`
 	Description string `json:"description"`
 }
@@ -7269,7 +7297,12 @@ type AdjustCreditsParams struct {
 
 // PostV1CreditsGrantJSONBody defines parameters for PostV1CreditsGrant.
 type PostV1CreditsGrantJSONBody struct {
-	AmountCents int64  `json:"amount_cents"`
+	AmountCents int64 `json:"amount_cents"`
+
+	// Currency ISO 4217 code of the credit. Required. Case-insensitive;
+	// stored uppercase. Zero-decimal currencies (such as JPY)
+	// are not supported yet.
+	Currency    string `json:"currency"`
 	CustomerId  string `json:"customer_id"`
 	Description string `json:"description,omitempty"`
 

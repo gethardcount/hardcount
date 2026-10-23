@@ -237,6 +237,7 @@ type creditGrantAdapter struct {
 func (a *creditGrantAdapter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input creditnote.CreditGrantInput) error {
 	_, err := a.svc.GrantForCreditNoteTx(ctx, tx, tenantID, creditNoteID, credit.GrantInput{
 		CustomerID:  input.CustomerID,
+		Currency:    input.Currency,
 		AmountCents: input.AmountCents,
 		Description: input.Description,
 		InvoiceID:   input.InvoiceID,
@@ -1648,23 +1649,33 @@ func (a *memberTenantNamerAdapter) GetTenantName(ctx context.Context, tenantID s
 // the usage package does not import the credit domain.
 type costDashboardCredits struct{ svc *credit.Service }
 
-// CreditSummary returns the customer's ledger balance and what is left of
-// their prepaid commit and promotional credit. Both reads run on a
-// tenant-scoped transaction in the mode already pinned on ctx.
-func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, customerID string) (usage.CostDashboardCredits, error) {
-	bal, err := a.svc.GetBalance(ctx, tenantID, customerID)
+// CreditSummary returns, per currency (ADR-129), the customer's ledger
+// balance and what is left of their prepaid commit and promotional credit.
+// Both reads run on a tenant-scoped transaction in the mode already pinned on
+// ctx.
+func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, customerID string) ([]usage.CostDashboardCredits, error) {
+	balances, err := a.svc.GetBalance(ctx, tenantID, customerID)
 	if err != nil {
-		return usage.CostDashboardCredits{}, fmt.Errorf("credit balance: %w", err)
+		return nil, fmt.Errorf("credit balance: %w", err)
 	}
 	grants, err := a.svc.ListGrants(ctx, tenantID, customerID, false)
 	if err != nil {
-		return usage.CostDashboardCredits{}, fmt.Errorf("credit grants: %w", err)
+		return nil, fmt.Errorf("credit grants: %w", err)
 	}
-	return usage.CostDashboardCredits{
-		BalanceCents:              bal.BalanceCents,
-		CommitRemainingCents:      grants.CommitRemainingCents,
-		PromotionalRemainingCents: grants.PromotionalRemainingCents,
-	}, nil
+	remaining := map[string]credit.CurrencyRemaining{}
+	for _, r := range grants.RemainingByCurrency {
+		remaining[r.Currency] = r
+	}
+	out := make([]usage.CostDashboardCredits, 0, len(balances))
+	for _, b := range balances {
+		out = append(out, usage.CostDashboardCredits{
+			Currency:                  b.Currency,
+			BalanceCents:              b.BalanceCents,
+			CommitRemainingCents:      remaining[b.Currency].CommitRemainingCents,
+			PromotionalRemainingCents: remaining[b.Currency].PromotionalRemainingCents,
+		})
+	}
+	return out, nil
 }
 
 // usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest
@@ -1732,4 +1743,39 @@ func (a usageOpenPeriods) MeterBuckets(ctx context.Context, tenantID, meterID st
 		return usage.MeterBuckets{}, fmt.Errorf("list meter pricing rules: %w", err)
 	}
 	return usage.BucketsOf(m, rules), nil
+}
+
+// customerCurrencyFactsAdapter is invoice.CustomerCurrencyFacts: the stored
+// facts a manual invoice's currency must agree with (ADR-100, ADR-129), as
+// plain strings so the invoice package imports neither domain.
+type customerCurrencyFactsAdapter struct {
+	profiles interface {
+		GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
+	}
+	subs interface {
+		CustomerSubPlanCurrencies(ctx context.Context, tenantID, customerID, excludeSubID string) ([]subscription.SubPlanCurrency, error)
+	}
+}
+
+// CustomerCurrencyFacts returns the billing profile's currency ("" when there
+// is no profile) and the plan currencies of the customer's non-terminal
+// subscriptions, pending plan swaps included. A read error is returned.
+func (a customerCurrencyFactsAdapter) CustomerCurrencyFacts(ctx context.Context, tenantID, customerID string) (string, []string, error) {
+	profile := ""
+	bp, err := a.profiles.GetBillingProfile(ctx, tenantID, customerID)
+	switch {
+	case err == nil:
+		profile = bp.Currency
+	case !errors.Is(err, errs.ErrNotFound):
+		return "", nil, fmt.Errorf("read billing profile: %w", err)
+	}
+	subs, err := a.subs.CustomerSubPlanCurrencies(ctx, tenantID, customerID, "")
+	if err != nil {
+		return "", nil, fmt.Errorf("read subscription plan currencies: %w", err)
+	}
+	plans := make([]string, 0, len(subs))
+	for _, s := range subs {
+		plans = append(plans, s.Currency)
+	}
+	return profile, plans, nil
 }

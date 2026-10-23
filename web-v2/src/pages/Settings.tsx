@@ -39,7 +39,6 @@ import {
   COUNTRIES,
   COUNTRY_NAME,
   CURRENCIES as GEO_CURRENCIES,
-  CURRENCY_BY_CODE,
   TIMEZONES,
   timezoneOption,
   normalizeTimezone,
@@ -56,7 +55,7 @@ import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { COMPANY_EMAIL_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
+import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -336,8 +335,6 @@ export default function SettingsPage() {
     </Layout>
   )
 
-  const currencyObj = CURRENCY_BY_CODE[form.default_currency]
-  const symbol = currencyObj?.symbol || '$'
   const statesList = statesForCountry(form.company_country)
   const stateLabel = stateLabelForCountry(form.company_country)
   const postalPlaceholder = postalPlaceholderForCountry(form.company_country)
@@ -661,19 +658,17 @@ export default function SettingsPage() {
                   </div>
                   <div>
                     <Label htmlFor="settings-credit-balance-low-threshold">Credit low-balance alert</Label>
-                    <div className="relative mt-1 max-w-[200px]">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">{symbol}</span>
+                    {/* No currency symbol: the amount applies in each
+                        currency's own units (settingsCopy). */}
+                    <div className="mt-1 max-w-[200px]">
                       <Input id="settings-credit-balance-low-threshold" inputMode="decimal"
                         {...register('credit_balance_low_threshold')}
                         className={cn(formErrors.credit_balance_low_threshold && 'border-destructive')}
-                        // The prefix runs from "$" to "CA$": pad by its length
-                        // so the value and placeholder start after it.
-                        style={{ paddingLeft: `calc(0.75rem + ${symbol.length}ch + 0.25rem)` }}
                         placeholder="Off" />
                     </div>
                     {formErrors.credit_balance_low_threshold
                       ? <p className="text-xs text-destructive mt-1">{formErrors.credit_balance_low_threshold.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1.5">Velox tells your app (by webhook) when a customer's credit balance drops below this amount. Leave blank to turn off. A balance that runs out always sends its own message.</p>}
+                      : <p className="text-xs text-muted-foreground mt-1.5">{CREDIT_LOW_THRESHOLD_HINT}</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-invoice-footer">Invoice footer</Label>

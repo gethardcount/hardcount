@@ -22,7 +22,7 @@ import (
 type ledgerGranter struct{ svc *credit.Service }
 
 func (g ledgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
-	return credit.GrantInput{CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
+	return credit.GrantInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
 }
 func (g ledgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
@@ -83,7 +83,7 @@ func (r *overCreditRig) draft(t *testing.T, cents int64) domain.CreditNote {
 // applyCredits grants the customer `cents` of credit and applies it to the invoice.
 func (r *overCreditRig) applyCredits(t *testing.T, cents int64) {
 	t.Helper()
-	if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{CustomerID: r.cust.ID, AmountCents: cents, Description: "goodwill"}); err != nil {
+	if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: r.cust.ID, AmountCents: cents, Description: "goodwill"}); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	applied, err := r.credits.ApplyToInvoice(r.ctx, r.tenantID, r.cust.ID, r.inv.ID, 10000)
@@ -103,7 +103,7 @@ func (r *overCreditRig) invoiceNow(t *testing.T) domain.Invoice {
 
 func (r *overCreditRig) balance(t *testing.T) int64 {
 	t.Helper()
-	b, err := r.credits.GetBalance(r.ctx, r.tenantID, r.cust.ID)
+	b, err := testutil.BalanceUSD(r.credits.GetBalance(r.ctx, r.tenantID, r.cust.ID))
 	if err != nil {
 		t.Fatalf("balance: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestIssue_RacingCreditApplication_ConservesInvoiceAndCredits(t *testing.T) 
 	for i := 0; i < 8; i++ {
 		r := newOverCreditRig(t, "CN Race")
 		draft := r.draft(t, 10000)
-		if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{CustomerID: r.cust.ID, AmountCents: 6000, Description: "goodwill"}); err != nil {
+		if _, err := r.credits.Grant(r.ctx, r.tenantID, credit.GrantInput{Currency: "USD", CustomerID: r.cust.ID, AmountCents: 6000, Description: "goodwill"}); err != nil {
 			t.Fatalf("Grant: %v", err)
 		}
 

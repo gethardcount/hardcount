@@ -69,7 +69,7 @@ func TestGrantAndAdjust_UnknownFieldRefused(t *testing.T) {
 		return env.Error.Param
 	}
 
-	base := `"customer_id":"` + cust.ID + `","amount_cents":5000,"description":"promo"`
+	base := `"customer_id":"` + cust.ID + `","currency":"USD","amount_cents":5000,"description":"promo"`
 
 	rr := post("/grant", `{`+base+`,"expiry":"2027-01-01T00:00:00Z"}`, "idem-grant-1")
 	if rr.Code != http.StatusUnprocessableEntity {

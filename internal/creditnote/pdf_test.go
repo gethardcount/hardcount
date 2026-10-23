@@ -181,7 +181,7 @@ func TestSettlementLines(t *testing.T) {
 		{
 			name:    "credit grant",
 			cn:      domain.CreditNote{CreditAmountCents: 1000, Currency: "USD"},
-			want:    "account credit",
+			want:    "credit balance",
 			wantAll: 1,
 		},
 		{
@@ -207,7 +207,7 @@ func TestSettlementLines(t *testing.T) {
 			// settled credit line.
 			name:    "mixed failed-card + credit describes both channels",
 			cn:      domain.CreditNote{RefundAmountCents: 1000, RefundStatus: domain.RefundFailed, CreditAmountCents: 2000, TotalCents: 3000, Currency: "USD"},
-			want:    "account credit",
+			want:    "credit balance",
 			wantAll: 3, // failed line + reach-out line + credit line
 		},
 	}
@@ -225,6 +225,18 @@ func TestSettlementLines(t *testing.T) {
 				t.Errorf("expected %q in output, got %q", tc.want, joined)
 			}
 		})
+	}
+}
+
+// A credit note to the balance credits the invoice's currency, and that
+// credit pays only invoices in it (ADR-129). The line says so: "applied to
+// future invoices" was false for a customer who has moved to another currency.
+func TestSettlementLines_CreditNamesItsCurrency(t *testing.T) {
+	t.Parallel()
+	got := settlementLines(domain.CreditNote{CreditAmountCents: 1000, Currency: "EUR"}, "€")
+	want := "€10.00 added to your EUR credit balance. Applied automatically to future invoices in EUR."
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("lines = %q, want [%q]", got, want)
 	}
 }
 

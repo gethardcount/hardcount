@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect, type Locator } from '@playwright/test'
 import { env, seedFile } from './fixtures/env'
-import { api, usd, uniq } from './fixtures/api'
+import { api, usd, usdBalance, uniq } from './fixtures/api'
 import {
   billedCustomer, createClock, createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
   type Customer, type Invoice, type Seed, type Subscription,
@@ -511,7 +511,7 @@ test('grant credits and see the balance', async ({ page }) => {
   await page.getByRole('alertdialog', { name: 'Confirm credit grant' }).getByRole('button', { name: 'Grant credits' }).click()
   await expect(page.getByRole('row').filter({ hasText: 'E2E goodwill credit' })).toBeVisible()
 
-  const balance = await api<{ balance_cents: number }>('GET', `/credits/balance/${customer.id}`)
+  const balance = usdBalance(await api<{ data: { currency: string; balance_cents: number }[] }>('GET', `/credits/balance/${customer.id}`))
   expect(balance.balance_cents).toBe(2500)
   await expect(page.getByText('Credit balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
 })
@@ -604,7 +604,7 @@ test('a commit line valid through a picked day is sent as the next midnight and 
   // An API grant that stops at 17:17 UTC, a midnight in no zone.
   const midDay = new Date(Date.now() + 50 * 86_400_000)
   midDay.setUTCHours(17, 17, 0, 0)
-  await api('POST', '/credits/grant', { customer_id: customer.id, amount_cents: 1000, description: 'E2E mid-day expiry', expires_at: midDay.toISOString() })
+  await api('POST', '/credits/grant', { customer_id: customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E mid-day expiry', expires_at: midDay.toISOString() })
 
   // A fresh load reads the grant the finalize just wrote.
   await page.reload()
@@ -641,6 +641,10 @@ test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => 
   await expect(balance).toContainText('€0.00')
   await newInvoice.click()
   await expect(page.getByRole('dialog').getByLabel('Currency')).toContainText('EUR')
+  // The plan fixes the currency: the server refuses any other (409), so the
+  // picker is fixed and says why.
+  await expect(page.getByRole('dialog').getByLabel('Currency')).toBeDisabled()
+  await expect(page.getByRole('dialog').getByText('This customer is billed in EUR (subscription plan), so the invoice is too.')).toBeVisible()
 })
 
 test("Margin shows no margin without a provider cost, and each model's margin with one", async ({ page }) => {
@@ -711,7 +715,7 @@ test('grant credits from the customer page', async ({ page }) => {
   // The section refreshes in place: the grant row, then the balance and the
   // totals match what the API holds.
   await expect(credits.getByRole('row').filter({ hasText: 'E2E customer-page credit' })).toContainText(usd(2500))
-  const balance = await api<{ balance_cents: number }>('GET', `/credits/balance/${customer.id}`)
+  const balance = usdBalance(await api<{ data: { currency: string; balance_cents: number }[] }>('GET', `/credits/balance/${customer.id}`))
   expect(balance.balance_cents).toBe(2500)
   await expect(credits.getByText('Balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
   await expect(credits.getByText(`Granted ${usd(2500)} · Used ${usd(0)}`)).toBeVisible()
@@ -780,7 +784,7 @@ test('Home defines MRR on its card', async ({ page }) => {
 
 test('a promotional grant explains commit and promotional credit', async ({ page }) => {
   const customer = await createCustomer()
-  await api('POST', '/credits/grant', { customer_id: customer.id, amount_cents: 1000, description: 'E2E promo credit', grant_kind: 'promotional' })
+  await api('POST', '/credits/grant', { customer_id: customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E promo credit', grant_kind: 'promotional' })
   await page.goto(`/customers/${customer.id}`)
   const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
   await expect(credits.getByRole('row').filter({ hasText: 'E2E promo credit' })).toBeVisible()

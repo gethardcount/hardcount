@@ -247,6 +247,7 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 	t.Run("grant credits", func(t *testing.T) {
 		resp := doPost(t, ts, "/v1/credits/grant", auth, map[string]any{
 			"customer_id":  customerID,
+			"currency":     "USD",
 			"amount_cents": 5000,
 			"description":  "Welcome credit",
 		})
@@ -255,8 +256,10 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		resp = doGet(t, ts, "/v1/credits/balance/"+customerID, auth)
 		assertStatus(t, resp, 200)
 		body := readJSON(t, resp)
-		if body["balance_cents"].(float64) != 5000 {
-			t.Errorf("balance: got %v, want 5000", body["balance_cents"])
+		// One balance per currency (ADR-129).
+		rows, _ := body["data"].([]any)
+		if len(rows) != 1 || rows[0].(map[string]any)["balance_cents"].(float64) != 5000 || rows[0].(map[string]any)["currency"] != "USD" {
+			t.Errorf("balances: got %v, want one USD balance of 5000", body["data"])
 		}
 	})
 

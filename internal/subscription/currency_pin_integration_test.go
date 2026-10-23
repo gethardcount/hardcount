@@ -14,9 +14,8 @@ import (
 
 // TestCurrencyPin is the real-Postgres proof of the ADR-100 customer
 // currency pin. The engine relabels rule-computed cents under one invoice
-// currency without conversion, and the credit ledger is a currency-blind
-// per-customer pot — so every write that binds a plan to a subscription
-// must keep the customer's billing in ONE currency. Each clause is proven
+// currency without conversion, so every write that binds a plan to a
+// subscription must keep the customer's billing in ONE currency. Each clause is proven
 // in both directions (refusal + coherent twin), including the two bypass
 // windows the design panel found: profile-set-first ordering and the
 // pre-existing divergent draft at Activate.

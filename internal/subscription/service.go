@@ -514,11 +514,11 @@ func (s *Service) guardSwapCurrency(ctx context.Context, tenantID string, sub do
 // label without conversion, so every currency source in a customer's billing
 // must agree: the candidate plans among themselves, the outgoing plan on a
 // swap (proration subtracts old cents from new cents raw), the customer's
-// billing-profile currency (highest-precedence invoice label), and the
-// customer's other non-terminal subs (the credit ledger is a currency-blind
-// per-customer pot — mixed-currency subs would drain it across
-// denominations 1:1). Skipped when PlanReader isn't wired (narrow unit
-// tests), mirroring every sibling guard.
+// billing-profile currency (highest-precedence invoice label, so a mismatch
+// relabels plan prices), and the customer's other non-terminal subs (a
+// customer is billed in one currency; manual invoices take it too, and a
+// credit pays only invoices in its own currency, ADR-129). Skipped when
+// PlanReader isn't wired (narrow unit tests), mirroring every sibling guard.
 func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customerID, excludeSubID string, planIDs []string, outgoingPlanID string) error {
 	if s.plans == nil {
 		return nil
@@ -580,7 +580,7 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 		oc := strings.ToUpper(strings.TrimSpace(o.Currency))
 		if oc != "" && oc != target {
 			return errs.InvalidState(fmt.Sprintf(
-				"this customer already has subscription %q billing in %s — a customer's subscriptions share one currency (credits and balances don't convert); use a %s plan or a separate customer",
+				"this customer already has subscription %q billing in %s — a customer's subscriptions share one currency; use a %s plan or a separate customer",
 				o.SubCode, oc, oc))
 		}
 	}

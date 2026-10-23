@@ -38,8 +38,10 @@ export interface TenantSettingsInput {
      */
   net_payment_terms?: number;
   /**
-     * When a customer's credit balance drops below this amount, the
-     * `credit.balance_low` webhook fires. null turns it off.
+     * When a customer's credit in one currency drops below this
+     * amount, in that currency's minor units, the `credit.balance_low`
+     * webhook fires: 1000 means $10.00 of USD credit and €10.00 of EUR
+     * credit. null turns it off.
      * @minimum 1
      * @nullable
      */

@@ -41,11 +41,14 @@ func (r *lagRig) invoiceAction(id, action string, at time.Time) {
 func (r *lagRig) liveUnbilledUsage(at time.Time) int64 {
 	r.t.Helper()
 	out := r.must(http.MethodGet, "/v1/credits/balance/"+r.custID+"/live", at, nil, http.StatusOK)
-	n, ok := out["unbilled_usage_cents"].(float64)
-	if !ok {
-		r.t.Fatalf("live balance has no unbilled_usage_cents: %v", out)
+	// One entry per currency (ADR-129); the rig bills in USD.
+	for _, b := range flowList(out, "balances") {
+		if flowStr(b, "currency") == "USD" {
+			return flowInt(b, "unbilled_usage_cents")
+		}
 	}
-	return int64(n)
+	r.t.Fatalf("live balance has no USD entry: %v", out)
+	return 0
 }
 
 // wantSubUsageBilledOnce runs the doctor and wants no usage instant of the
