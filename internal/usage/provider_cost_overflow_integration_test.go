@@ -2,8 +2,6 @@ package usage_test
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,7 +9,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -20,10 +17,15 @@ import (
 
 // The ingest INSERT stamps provider_cost_micros = cost_per_token × quantity ×
 // 10^6, a BIGINT. A quantity inside its limits, at a rate inside its limits,
-// can give a cost that does not fit. Such an event is refused with a 422
-// naming quantity (in a batch, the batch is refused and nothing is written);
-// before, the INSERT failed with a raw Postgres error.
-func TestIngest_ProviderCostPastBigintRefusedNamingQuantity(t *testing.T) {
+// can give a cost that does not fit. The stamp is the operator's cost, not
+// what the customer is billed, so such an event is still stored and billed:
+// it gets no cost and counts as unresolved, which leaves the margin out
+// (ADR-079). Every door shares the INSERT, so each is checked here: a single
+// ingest, a batch, a LiteLLM call and a held-usage release.
+//
+// Mutation-verify: drop the BIGINT range guard in ingestOneTx's stamp → every
+// door below fails with a database error.
+func TestIngest_ProviderCostTooLargeIsStoredWithNoCost(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Provider Cost Overflow")
@@ -37,54 +39,135 @@ func TestIngest_ProviderCostPastBigintRefusedNamingQuantity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("meter: %v", err)
 	}
-	// 0.00003 dollars = 30 micros per token. MaxInt64 / 30 = 307445734561825860.2.
+	// 0.00003 dollars = 30 micros per token. MaxInt64 / 30 = 307445734561825860.2,
+	// and MinInt64 / 30 = -307445734561825860.3.
 	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.00003")
-	svc := usage.NewService(usage.NewPostgresStore(db))
+	store := usage.NewPostgresStore(db)
+	svc := usage.NewService(store)
 	dims := map[string]any{"provider": "anthropic", "model": "claude-3.5-sonnet", "token_type": "input"}
-	ts := time.Now().UTC().Add(-time.Minute)
+	ts := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 	in := func(qty, key string) usage.IngestInput {
 		return usage.IngestInput{
 			CustomerID: cust.ID, MeterID: meter.ID, Quantity: decimal.RequireFromString(qty),
 			Dimensions: dims, Timestamp: &ts, IdempotencyKey: key,
 		}
 	}
-	count := func() int {
+	type stamp struct {
+		qty    string
+		micros *int64
+		source string
+	}
+	stored := func(key string) stamp {
 		t.Helper()
 		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
 		defer postgres.Rollback(tx)
-		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM usage_events`).Scan(&n); err != nil {
-			t.Fatalf("count: %v", err)
+		var s stamp
+		if err := tx.QueryRowContext(ctx,
+			`SELECT quantity::text, provider_cost_micros, COALESCE(provider_cost_source,'') FROM usage_events WHERE idempotency_key = $1`,
+			key).Scan(&s.qty, &s.micros, &s.source); err != nil {
+			t.Fatalf("event %s: %v", key, err)
 		}
-		return n
+		return s
+	}
+	wantNoCost := func(key, qty string) {
+		t.Helper()
+		s := stored(key)
+		if !decimal.RequireFromString(s.qty).Equal(decimal.RequireFromString(qty)) || s.micros != nil || s.source != "" {
+			t.Errorf("%s: stored %s with cost %v/%q, want %s with no cost (unresolved)", key, s.qty, s.micros, s.source, qty)
+		}
 	}
 
-	// The largest quantity whose cost fits is stamped exactly.
-	ev, err := svc.Ingest(ctx, tenantID, in("307445734561825860", "fits"))
+	// The largest costs that fit, either sign, are stamped exactly.
+	for _, tc := range []struct {
+		qty  string
+		want int64
+	}{
+		{"307445734561825860", 9_223_372_036_854_775_800},
+		{"-307445734561825860", -9_223_372_036_854_775_800},
+	} {
+		ev, err := svc.Ingest(ctx, tenantID, in(tc.qty, "edge"+tc.qty))
+		if err != nil {
+			t.Fatalf("ingest %s: %v", tc.qty, err)
+		}
+		if ev.ProviderCostMicros == nil || *ev.ProviderCostMicros != tc.want || ev.ProviderCostSource != "table" {
+			t.Errorf("edge %s stamp = %v/%s, want %d/table", tc.qty, ev.ProviderCostMicros, ev.ProviderCostSource, tc.want)
+		}
+	}
+
+	// Past either edge, and far past it, the event is stored with no cost.
+	for _, qty := range []string{"307445734561825861", "-307445734561825861", "1000000000000000000000"} {
+		ev, err := svc.Ingest(ctx, tenantID, in(qty, "single"+qty))
+		if err != nil {
+			t.Fatalf("ingest %s: %v", qty, err)
+		}
+		if ev.ProviderCostMicros != nil || ev.ProviderCostSource != "" {
+			t.Errorf("ingest %s answered cost %v/%q, want none", qty, ev.ProviderCostMicros, ev.ProviderCostSource)
+		}
+		wantNoCost("single"+qty, qty)
+	}
+
+	// A batch writes both events.
+	if _, batchErrs := svc.BatchIngest(ctx, tenantID, []usage.IngestInput{in("1", "batch-0"), in("307445734561825861", "batch-1")}); len(batchErrs) != 0 {
+		t.Fatalf("batch errs = %v, want none", batchErrs)
+	}
+	if s := stored("batch-0"); s.micros == nil || *s.micros != 30 || s.source != "table" {
+		t.Errorf("batch-0 stamp = %v/%q, want 30/table", s.micros, s.source)
+	}
+	wantNoCost("batch-1", "307445734561825861")
+
+	// A LiteLLM call is written whole.
+	res, err := svc.IngestCall(ctx, tenantID, usage.CallInput{
+		CustomerID: cust.ID, MeterID: meter.ID,
+		Events: []usage.CallEvent{
+			{Quantity: decimal.RequireFromString("1000000000000000000000"), Dimensions: dims, IdempotencyKey: "call-1:input", Timestamp: &ts},
+		},
+	})
 	if err != nil {
-		t.Fatalf("ingest at the edge: %v", err)
+		t.Fatalf("ingest call: %v", err)
 	}
-	if ev.ProviderCostMicros == nil || *ev.ProviderCostMicros != 9_223_372_036_854_775_800 || ev.ProviderCostSource != "table" {
-		t.Fatalf("edge stamp = %v/%s, want 9223372036854775800/table", ev.ProviderCostMicros, ev.ProviderCostSource)
+	if res.Inserted != 1 {
+		t.Fatalf("call inserted %d, want 1", res.Inserted)
 	}
+	wantNoCost("call-1:input", "1000000000000000000000")
 
-	// One more token, and a quantity far inside the quantity limit, are refused.
-	for _, qty := range []string{"307445734561825861", "1000000000000000000000"} {
-		_, err := svc.Ingest(ctx, tenantID, in(qty, "single-"+qty))
-		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "quantity" {
-			t.Errorf("ingest %s: err = %v, want a validation error naming quantity", qty, err)
-		}
+	// A held row is released, not refused.
+	if _, err := svc.Hold(ctx, tenantID, usage.HoldInput{
+		Source:             domain.HeldUsageSourceLiteLLM,
+		ExternalCustomerID: "cus_late",
+		EventName:          "tokens",
+		Quantity:           decimal.RequireFromString("1000000000000000000000"),
+		Dimensions:         dims,
+		IdempotencyKey:     "held-1:input",
+		EventAt:            &ts,
+		Reason:             domain.HeldReasonCustomerNotFound,
+	}); err != nil {
+		t.Fatalf("hold: %v", err)
 	}
+	late, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_late", DisplayName: "Late"})
+	if err != nil {
+		t.Fatalf("late customer: %v", err)
+	}
+	rel, err := svc.Release(ctx, tenantID, usage.ReleaseInput{
+		ExternalCustomerID: "cus_late", CustomerID: late.ID,
+		MeterIDs: map[string]string{"tokens": meter.ID},
+	})
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if rel.Released != 1 {
+		t.Fatalf("release = %+v, want 1 released", rel)
+	}
+	wantNoCost("held-1:input", "1000000000000000000000")
 
-	// In a batch the second event is named and nothing is written.
-	_, batchErrs := svc.BatchIngest(ctx, tenantID, []usage.IngestInput{in("1", "batch-0"), in("307445734561825861", "batch-1")})
-	if len(batchErrs) != 1 || !errors.Is(batchErrs[0], errs.ErrValidation) || !strings.Contains(batchErrs[0].Error(), "event[1]") {
-		t.Errorf("batch errs = %v, want one validation error naming event[1]", batchErrs)
+	// The margin report counts each uncosted event as unresolved.
+	from, to := ts.Add(-time.Hour), ts.Add(time.Hour)
+	if _, unresolved, err := store.CustomerProviderCost(ctx, tenantID, cust.ID, from, to); err != nil || unresolved != 5 {
+		t.Errorf("cus_big unresolved = %d (err %v), want 5", unresolved, err)
 	}
-	if n := count(); n != 1 {
-		t.Errorf("%d events stored, want 1 (only the edge event)", n)
+	if _, unresolved, err := store.CustomerProviderCost(ctx, tenantID, late.ID, from, to); err != nil || unresolved != 1 {
+		t.Errorf("cus_late unresolved = %d (err %v), want 1", unresolved, err)
 	}
 }
