@@ -134,6 +134,9 @@ func (e *Engine) previewWithWindow(ctx context.Context, sub domain.Subscription,
 // for [periodStart, periodEnd] (previewCycle); asClose=false is the flat
 // window estimate (previewWithWindow).
 func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error) {
+	if tapped(ctx) {
+		return rateTap.previewWindow(ctx, e, sub, periodStart, periodEnd, asClose)
+	}
 	plans := make(map[string]domain.Plan, len(sub.Items))
 	planNames := make([]string, 0, len(sub.Items))
 	var allMeterIDs []string
@@ -220,22 +223,22 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		})
 	}
 
-	// Usage lines per (meter, rule). The priority+claim LATERAL JOIN inside
-	// AggregateByPricingRules is the canonical pricing identity — the
-	// cycle scan calls the same path, so a multi-dim tenant's preview
-	// matches what its actual invoice will be.
+	// Usage lines per (meter, rule), priced by the one rater (rate.go). The
+	// priority+claim LATERAL JOIN inside AggregateByPricingRules is the
+	// canonical pricing identity — the cycle scan calls the same path, so a
+	// multi-dim tenant's preview matches what its actual invoice will be.
 	//
-	// A rateMeterWindow ERROR aborts the whole preview (ADR-070,
+	// A rating ERROR aborts the whole preview (ADR-070,
 	// no-silent-fallbacks). Only a meter with no rule binding at all and a
 	// net-negative bucket (usage corrections) are soft cases, surfaced as
-	// warnings from INSIDE rateMeterWindow. A missing pinned rule, a rating
+	// warnings by the rater. A missing pinned rule, a rating
 	// failure and store or resolution errors all reach this err, and a
 	// partial preview built from those is a lie — worse, the threshold
 	// scan PERSISTS these lines as a fire invoice, and a silently
 	// dropped meter's pre-fire usage would then be billed by nobody:
 	// the cycle close clamps every meter's window to the fire
 	// watermark, deferral only exists for non-additive buckets. The
-	// pre-ADR-070 warning-degradation here defeated rateMeterWindow's own
+	// pre-ADR-070 warning-degradation here defeated the rater's own
 	// fail-loud contract for exactly the money path it matters on.
 	//
 	// Each meter's window opens at its usage floor (trial end, another
@@ -250,19 +253,24 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		return PreviewResult{}, err
 	}
 	result.floors = floors
+	windows := make([]rateWindow, 0, len(allMeterIDs))
 	for _, meterID := range allMeterIDs {
 		from := floors.start(meterID, periodStart, periodEnd)
 		if !from.Before(periodEnd) {
 			continue
 		}
-		meterLines, warnings, leftOut, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, from, periodEnd, periodStart, nil)
-		if err != nil {
-			return PreviewResult{}, fmt.Errorf("preview meter %q: %w", meterID, err)
-		}
-		result.Lines = append(result.Lines, meterLines...)
-		result.Warnings = append(result.Warnings, warnings...)
-		result.leftOut = append(result.leftOut, leftOut...)
+		windows = append(windows, rateWindow{meterID: meterID, iv: usageInterval{start: from, end: periodEnd}, pass: passEvery})
 	}
+	// No ladder: each bucket is priced on its own. The threshold evaluation
+	// runs only while the period has no threshold invoice (the fire-once
+	// probe), and the explicit-window estimate continues none.
+	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, windows, periodStart, nil)
+	if err != nil {
+		return PreviewResult{}, err
+	}
+	result.Lines = append(result.Lines, usageLines...)
+	result.Warnings = append(result.Warnings, warnings...)
+	result.leftOut = append(result.leftOut, leftOut...)
 
 	// Estimate-scope warning (ADR-045): create_preview is a full-period
 	// estimate that does NOT replicate the cycle's mid-period segment
@@ -403,25 +411,23 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 		return PreviewResult{}, err
 	}
 	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
-	// The tier ladder continues from a threshold fire, as in the close.
-	ladder := newUsageLadder(wm)
+	var windows []rateWindow
 	for _, meterID := range order {
-		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-			return ladder.price(rule, meterID, bucketKey, mode, qty)
-		}
 		for _, iv := range mergeUsageIntervals(meterIntervals[meterID]) {
-			lines, warnings, leftOut, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
-			if err != nil {
-				return PreviewResult{}, fmt.Errorf("preview meter %q: %w", meterID, err)
-			}
-			for i := range lines {
-				lines[i].Currency = currency
-			}
-			result.Lines = append(result.Lines, lines...)
-			result.Warnings = append(result.Warnings, warnings...)
-			result.leftOut = append(result.leftOut, leftOut...)
+			windows = append(windows, rateWindow{meterID: meterID, iv: iv, pass: passEvery})
 		}
 	}
+	// The tier ladder continues from a threshold fire, as in the close.
+	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, windows, periodStart, newUsageLadder(wm))
+	if err != nil {
+		return PreviewResult{}, err
+	}
+	for i := range usageLines {
+		usageLines[i].Currency = currency
+	}
+	result.Lines = append(result.Lines, usageLines...)
+	result.Warnings = append(result.Warnings, warnings...)
+	result.leftOut = append(result.leftOut, leftOut...)
 
 	if wm.billedThrough != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf(
@@ -494,142 +500,6 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, p
 	}
 	result.Totals = computePreviewTotals(result.Lines)
 	return result, true, nil
-}
-
-// bucketPricer prices qty units of one usage bucket under its resolved rule.
-// bucketKey is the closer's bucket identity (meter + pricing rule), the key
-// usageLadder.price continues tiers under.
-type bucketPricer func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error)
-
-// rateMeterWindow rates one meter's events for the customer over [from, to)
-// and emits one PreviewLine per rule bucket, through the same
-// AggregateByPricingRules + pricing path the closers use, so each line
-// matches the invoice line a closer would persist. A window that does not
-// start at the period open (after a usage floor or a threshold watermark)
-// needs two more things: pinAt, the instant rules and overrides are resolved
-// at (always the period start, ADR-070, even when the window opens later),
-// and price, which lets the caller continue a tier ladder across a fire the
-// way the period close does. A nil price rates the bucket on its own, which
-// is the preview and threshold-fire behavior.
-// The buckets priced at nothing (unpriced, or below zero) come back both as
-// a warning (for people) and as data (for the threshold fire, which reports
-// them).
-func (e *Engine) rateMeterWindow(ctx context.Context, tenantID, customerID, meterID string, from, to, pinAt time.Time, price bucketPricer) ([]PreviewLine, []string, []leftOutBucket, error) {
-	meter, err := e.pricing.GetMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("get meter: %w", err)
-	}
-
-	defaultMode := mapMeterAggregation(meter.Aggregation)
-	aggs, err := e.usage.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("aggregate by pricing rules: %w", err)
-	}
-
-	rules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("list pricing rules: %w", err)
-	}
-	rulesByID := make(map[string]domain.MeterPricingRule, len(rules))
-	for _, rule := range rules {
-		rulesByID[rule.ID] = rule
-	}
-
-	var lines []PreviewLine
-	var warnings []string
-	var leftOut []leftOutBucket
-
-	for _, agg := range aggs {
-		if agg.Quantity.IsZero() {
-			continue
-		}
-		// Ingest accepts negative corrections, so a bucket's period-to-date
-		// total can be negative until new usage overtakes it. That is a
-		// legitimate state, not a pricing error: it contributes nothing to
-		// a preview or a threshold, with a warning — the rule every invoice
-		// path follows (net_negative.go, #1193). (Pricing it would fail —
-		// ComputeAmountCents refuses negative quantities.)
-		if agg.Quantity.IsNegative() {
-			warnings = append(warnings, fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", meter.Key, agg.Quantity.String()))
-			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity, BelowZero: true})
-			continue
-		}
-
-		ratingRuleID := agg.RatingRuleVersionID
-		if ratingRuleID == "" {
-			ratingRuleID = meter.RatingRuleVersionID
-		}
-		if ratingRuleID == "" {
-			// The quantity is what the operator needs to bill it by hand
-			// (a one-off invoice), so the warning carries it (#981).
-			warnings = append(warnings, fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", meter.Key, agg.Quantity.String(), meter.Unit))
-			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity})
-			continue
-		}
-
-		// Same resolution rule as the cycle scan and cancel finalize
-		// (resolveRatedRule; ADR-070 pin-at-period-start): version and
-		// override in force at the period open — pinAt, the period start
-		// for every caller, including the threshold scan (which persists
-		// these lines as a real invoice). This is
-		// what makes preview == invoice hold across a mid-period
-		// publish, and a threshold fire agree with the later close.
-		// Both failures abort, as the cycle close does for the same rule: a
-		// threshold fire persists these lines as a real invoice, and a
-		// skipped line under-billed the fire (the bucket was then not on
-		// the watermark either). A missing PINNED version is not "not set" —
-		// usage is bound to it — so it fails like any other error.
-		ratingRule, err := e.resolveRatedRule(ctx, tenantID, customerID, ratingRuleID, pinAt)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("resolve pricing for meter %q rule %q: %w", meter.Key, ratingRuleID, err)
-		}
-
-		var amount int64
-		if price != nil {
-			amount, err = price(ratingRule, meterID+"|"+agg.RuleID, agg.AggregationMode, agg.Quantity)
-		} else {
-			amount, err = domain.ComputeAmountCents(ratingRule, agg.Quantity)
-		}
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("compute amount for meter %q rule %q: %w", meter.Key, ratingRule.RuleKey, err)
-		}
-
-		// Unit amount is amount / quantity, rounded to nearest cent. The
-		// IsZero short-circuit above guarantees the divisor is non-zero.
-		unitAmount := decimal.NewFromInt(amount).Div(agg.Quantity).RoundBank(0).IntPart()
-
-		var dimMatch map[string]any
-		if agg.RuleID != "" {
-			if rule, ok := rulesByID[agg.RuleID]; ok && len(rule.DimensionMatch) > 0 {
-				dimMatch = rule.DimensionMatch
-			}
-		}
-
-		// Use the exact description the cycle scan persists (meter + dimension
-		// match, e.g. "Tokens (claude-3.5-sonnet · input)") so a preview line
-		// reads identically to the invoice_line_item it predicts. The quantity
-		// lives in the Quantity field, not the description.
-		desc := usageLineDescription(meter, rulesByID[agg.RuleID])
-
-		lines = append(lines, PreviewLine{
-			LineType:                 "usage",
-			Description:              desc,
-			MeterID:                  meterID,
-			MeterUnit:                meter.Unit,
-			RatingRuleVersionID:      ratingRule.ID,
-			RuleKey:                  ratingRule.RuleKey,
-			DimensionMatch:           dimMatch,
-			Currency:                 ratingRule.Currency,
-			Quantity:                 agg.Quantity,
-			UnitAmountCents:          unitAmount,
-			AmountCents:              amount,
-			PricingMode:              string(ratingRule.Mode),
-			AggregationMode:          agg.AggregationMode,
-			NominalUnitAmountDecimal: nominalRate(ratingRule),
-		})
-	}
-
-	return lines, warnings, leftOut, nil
 }
 
 // computePreviewTotals groups each line's amount by currency and emits

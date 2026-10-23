@@ -2763,7 +2763,7 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 // figure ($0.000003) instead of the effective amount÷quantity rate, which the
 // line's cent-rounding turns into a repeating, slightly-inflated decimal
 // ($0.00000333333333) (ADR-054 re-examination). rule is the OVERRIDE-APPLIED
-// rule (resolveRatedRule applies any CustomerPriceOverride on top), so this
+// rule (PriceSource.Price applies any CustomerPriceOverride on top), so this
 // captures the negotiated rate, not list price — reading rating_rule_versions
 // back would yield list price because the override preserves the row id.
 // Returns nil for graduated/package modes: no single nominal rate exists, so
@@ -2777,7 +2777,7 @@ func nominalRate(rule domain.RatingRuleVersion) *decimal.Decimal {
 
 // buildLineItems computes the invoice line items and subtotal for one
 // billing period: per-item base-fee segments (change-log aware) plus
-// per-meter usage charges (multi-dimensional and single-rule paths),
+// per-meter usage charges (priced by the one rater, rate.go),
 // honoring thresholds already billed this cycle and scheduled-cancel
 // terminal-cycle skips. Extracted whole from
 // billOnePeriod (behavior-preserving) to separate the pricing
@@ -2787,6 +2787,9 @@ func nominalRate(rule domain.RatingRuleVersion) *decimal.Decimal {
 // commits. Usage below zero bills 0 and is added to belowZero, which the
 // caller writes on the closer tx (net_negative.go).
 func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, *time.Time, error) {
+	if tapped(ctx) {
+		return rateTap.buildLineItems(ctx, e, sub, now, periodStart, periodEnd, plans, invoiceCurrency, billingLoc, unpriced, belowZero)
+	}
 	var lineItems []domain.InvoiceLineItem
 	subtotal := int64(0)
 
@@ -2899,223 +2902,17 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, thresholdBilledThrough, floors)
 
 	// Usage is read once per window (one read covers every meter for a
-	// window; a pricing-rule meter reads its buckets per window).
+	// window; a pricing-rule meter reads its buckets per window) and priced
+	// by the one rater (rate.go): the clamped pass, then after a threshold
+	// invoice the full-window pass for the buckets it deferred, with one tier
+	// ladder per bucket continuing from that invoice (P21, ADR-066 amendment).
 	reads := newWindowUsage(e, sub, meterAggs)
-
-	// Union of meters with billable windows. When a watermark exists, a
-	// meter whose clamped intervals vanished entirely (all usage inside the
-	// fire's window) can still owe a full-window bill for a deferred
-	// non-additive bucket — so iterate the full map's keys too.
-	meterIDSet := make(map[string]struct{}, len(meterIntervals))
-	for mid := range meterIntervals {
-		meterIDSet[mid] = struct{}{}
+	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, reads, rateSite{}, meterIntervals, meterIntervalsFull, wm, periodStart, invoiceCurrency, "", "cycle", unpriced, belowZero)
+	if err != nil {
+		return nil, 0, nil, err
 	}
-	for mid := range meterIntervalsFull {
-		meterIDSet[mid] = struct{}{}
-	}
-	// A meterWindow is one aggregation pass: the clamped pass
-	// (nonAdditiveOnly=false) bills every bucket EXCEPT deferred
-	// non-additive ones; the full pass (nonAdditiveOnly=true, only when a
-	// watermark exists) bills ONLY deferred non-additive buckets over the
-	// unclamped window.
-	type meterWindow struct {
-		iv              usageInterval
-		nonAdditiveOnly bool
-	}
-	// One tier ladder per usage bucket for the whole close, continuing from
-	// what a threshold fire already billed (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm)
-	for meterID := range meterIDSet {
-		meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-		if err != nil {
-			return nil, 0, nil, fmt.Errorf("get meter %s: %w", meterID, err)
-		}
-
-		// Does this meter price via dimension-match pricing rules (the
-		// multi-dim shape: e.g. the AI `tokens` meter carries one rule per
-		// {model, token_type})? If so we MUST use the same
-		// AggregateByPricingRules + per-bucket pricing path that preview and
-		// the threshold scan use — a single meter-linked rating rule can't
-		// express N rates, so the legacy single-rule branch below would skip
-		// the meter and emit a $0 invoice (the wedge breakage, ADR-044).
-		// rateMeterWindow is the mirror of this loop: same path → preview ==
-		// invoice. Meters with no pricing rules keep the single-rule path.
-		pricingRules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, sub.TenantID, meterID)
-		if err != nil {
-			return nil, 0, nil, fmt.Errorf("list pricing rules for meter %s: %w", meterID, err)
-		}
-		rulesByID := make(map[string]domain.MeterPricingRule, len(pricingRules))
-		for _, r := range pricingRules {
-			rulesByID[r.ID] = r
-		}
-		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, ladder); err != nil {
-			return nil, 0, nil, err
-		}
-
-		windows := make([]meterWindow, 0, 4)
-		for _, iv := range mergeUsageIntervals(meterIntervals[meterID]) {
-			windows = append(windows, meterWindow{iv: iv})
-		}
-		if thresholdBilledThrough != nil {
-			for _, iv := range mergeUsageIntervals(meterIntervalsFull[meterID]) {
-				windows = append(windows, meterWindow{iv: iv, nonAdditiveOnly: true})
-			}
-		}
-		for _, w := range windows {
-			iv := w.iv
-			ivStart := iv.start
-			ivEnd := iv.end
-
-			// ---- Multi-dim path: one billable bucket per claimed rule. ----
-			if len(pricingRules) > 0 {
-				aggs, err := reads.ruleBuckets(ctx, meterID, iv)
-				if err != nil {
-					return nil, 0, nil, err
-				}
-				for _, agg := range aggs {
-					qty := agg.Quantity
-					if qty.IsZero() {
-						continue
-					}
-					ratingRuleID := agg.RatingRuleVersionID
-					if ratingRuleID == "" {
-						ratingRuleID = meter.RatingRuleVersionID
-					}
-					// ADR-066 §4 pass routing, per RULE BUCKET: a deferred
-					// non-additive bucket (max/last with NO line on the
-					// watermark fire) bills ONLY on the full-window pass —
-					// billing it from the clamped window drops pre-fire peaks,
-					// and billing it on both passes double-bills. Every other
-					// bucket (additive, or non-additive that already rode the
-					// fire — the accepted partial-window degradation) bills
-					// ONLY on the clamped pass. No watermark ⇒ deferred is
-					// always false and no full pass exists: unchanged.
-					// It runs before the unpriced check below so an unpriced
-					// bucket is reported on the one pass that would have
-					// billed it: the full pass re-reads the whole period, and
-					// reporting there too counted the pre-fire usage that the
-					// threshold invoice already reported (#981).
-					if wm.deferredBucket(agg.AggregationMode, meterID, ratingRuleID) != w.nonAdditiveOnly {
-						continue
-					}
-					// Corrections larger than the bucket's usage in this
-					// window: it bills 0 and the invoice is still built
-					// (#1193). After the pass routing, so it is reported on
-					// one pass only; before the unpriced check, as preview.
-					if qty.IsNegative() {
-						slog.Warn("cycle: usage below zero after corrections — billed as 0",
-							"meter", meter.Key, "quantity", qty.String(),
-							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, meter.Name, qty, ivStart, ivEnd)
-						continue
-					}
-					if ratingRuleID == "" {
-						// Usage that matched no rule and the meter has no
-						// default binding — bill nothing, but loudly (a
-						// silent skip would hide unbilled revenue).
-						slog.Warn("cycle: usage matched no rating rule and meter has no default binding — not billed",
-							"meter", meter.Key, "quantity", qty.String(),
-							"subscription_id", sub.ID)
-						unpriced.add(meterID, qty)
-						continue
-					}
-					rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, ratingRuleID, periodStart)
-					if err != nil {
-						return nil, 0, nil, fmt.Errorf("resolve pricing for meter %s rule %s: %w", meterID, ratingRuleID, err)
-					}
-					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, agg.AggregationMode, qty)
-					if err != nil {
-						return nil, 0, nil, fmt.Errorf("compute amount for meter %s rule %s: %w", meterID, ratingRuleID, err)
-					}
-					unitAmount := decimal.NewFromInt(amount).Div(qty).RoundBank(0).IntPart()
-					lineItems = append(lineItems, domain.InvoiceLineItem{
-						LineType:                 domain.LineTypeUsage,
-						MeterID:                  meterID,
-						MeterUnit:                meter.Unit,
-						Description:              usageLineDescription(meter, rulesByID[agg.RuleID]),
-						Quantity:                 qty.IntPart(),
-						QuantityDecimal:          qty,
-						UnitAmountCents:          unitAmount,
-						AmountCents:              amount,
-						TotalAmountCents:         amount,
-						Currency:                 invoiceCurrency,
-						PricingMode:              string(rule.Mode),
-						RatingRuleVersionID:      rule.ID,
-						NominalUnitAmountDecimal: nominalRate(rule),
-						BillingPeriodStart:       &ivStart,
-						BillingPeriodEnd:         &ivEnd,
-					})
-					subtotal += amount
-				}
-				continue
-			}
-
-			// ---- Single-rule path (pre-multi-dim meters). ----
-			// Same ADR-066 §4 pass routing as the multi-dim branch, at meter
-			// granularity (a single-rule meter has exactly one bucket, whose
-			// mode is the meter's own aggregation).
-			if wm.deferredBucket(mapMeterAggregation(meter.Aggregation), meterID, meter.RatingRuleVersionID) != w.nonAdditiveOnly {
-				continue
-			}
-			quantity, err := reads.meterTotal(ctx, meterID, iv)
-			if err != nil {
-				return nil, 0, nil, err
-			}
-			if quantity.IsZero() {
-				continue
-			}
-			// Below zero after corrections: bills 0, the invoice is still
-			// built (#1193). Same rule and order as the multi-dim branch.
-			if quantity.IsNegative() {
-				slog.Warn("cycle: usage below zero after corrections — billed as 0",
-					"meter", meter.Key, "quantity", quantity.String(),
-					"subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, meter.Name, quantity, ivStart, ivEnd)
-				continue
-			}
-
-			if meter.RatingRuleVersionID == "" {
-				// Unpriced meter → its usage can't be rated. Never silent
-				// (ADR-096): the plan-attach guard blocks this at authoring,
-				// so reaching it means a rule was unbound out from under a
-				// live sub. Loud log, no revenue billed — matches the
-				// multi-dim sibling above.
-				slog.Warn("cycle: usage on a meter with no rating rule — not billed (unpriced meter on plan; ADR-096)",
-					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
-				unpriced.add(meterID, quantity)
-				continue
-			}
-			rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, meter.RatingRuleVersionID, periodStart)
-			if err != nil {
-				return nil, 0, nil, fmt.Errorf("resolve pricing for meter %s: %w", meterID, err)
-			}
-			amount, err := ladder.price(rule, meterID, meterID+"|", mapMeterAggregation(meter.Aggregation), quantity)
-			if err != nil {
-				return nil, 0, nil, fmt.Errorf("compute amount for meter %s: %w", meterID, err)
-			}
-			unitAmount := decimal.NewFromInt(amount).Div(quantity).RoundBank(0).IntPart()
-
-			lineItems = append(lineItems, domain.InvoiceLineItem{
-				LineType:                 domain.LineTypeUsage,
-				MeterID:                  meterID,
-				MeterUnit:                meter.Unit,
-				Description:              fmt.Sprintf("%s (%s)", meter.Name, meter.Unit),
-				Quantity:                 quantity.IntPart(),
-				QuantityDecimal:          quantity,
-				UnitAmountCents:          unitAmount,
-				AmountCents:              amount,
-				TotalAmountCents:         amount,
-				Currency:                 invoiceCurrency,
-				PricingMode:              string(rule.Mode),
-				RatingRuleVersionID:      rule.ID,
-				NominalUnitAmountDecimal: nominalRate(rule),
-				BillingPeriodStart:       &ivStart,
-				BillingPeriodEnd:         &ivEnd,
-			})
-			subtotal += amount
-		}
-	}
-
+	lineItems = append(lineItems, usageLines...)
+	subtotal += usageSubtotal
 	return lineItems, subtotal, thresholdBilledThrough, nil
 }
 
@@ -4047,48 +3844,6 @@ func (e *Engine) BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, s
 	return inv, func() { unpriced.record(ctx, sub) }, err
 }
 
-// resolveRatedRule is the single pricing-resolution path every rater
-// shares (ADR-070): from a pinned rule-version binding (meter default or
-// pricing-rule row), resolve the version of that rule_key in force at
-// the period open, then patch the customer's override in force at the
-// same instant on top. One period, one price — cycle close, cancel
-// finalize, threshold fire, and preview all call this (preview via its
-// mirror in rateMeterWindow), so they agree by construction and a
-// mid-close publish or override edit can't mix prices inside one
-// invoice.
-//
-// Error contract (no-silent-fallbacks): a missing override
-// (errs.ErrNotFound) means list price; ANY other failure — including
-// version resolution — aborts the rating path; the caller's failure handling
-// decides the retry (cycle billing: attemptSub, ADR-119).
-// The pre-ADR-070 code treated every override error as absence and fell
-// back to the pinned version on resolution errors: a transient DB blip
-// silently billed a negotiated customer at list price.
-func (e *Engine) resolveRatedRule(ctx context.Context, tenantID, customerID, pinnedRuleVersionID string, periodStart time.Time) (domain.RatingRuleVersion, error) {
-	linked, err := e.pricing.GetRatingRule(ctx, tenantID, pinnedRuleVersionID)
-	if err != nil {
-		return domain.RatingRuleVersion{}, fmt.Errorf("get rating rule %s: %w", pinnedRuleVersionID, err)
-	}
-	rule, err := e.pricing.GetRuleByKeyAsOf(ctx, tenantID, linked.RuleKey, periodStart)
-	if err != nil {
-		if !errors.Is(err, errs.ErrNotFound) {
-			return domain.RatingRuleVersion{}, fmt.Errorf("resolve rule %q as of %s: %w", linked.RuleKey, periodStart.Format(time.RFC3339), err)
-		}
-		// Key has no ACTIVE versions (all archived) but a binding still
-		// points at one — rate at the pinned version rather than
-		// refusing to bill usage the meter admitted.
-		rule = linked
-	}
-	override, err := e.pricing.GetOverrideByKeyAsOf(ctx, tenantID, customerID, rule.RuleKey, periodStart)
-	if err == nil {
-		return override.ApplyTo(rule), nil
-	}
-	if errors.Is(err, errs.ErrNotFound) {
-		return rule, nil
-	}
-	return domain.RatingRuleVersion{}, fmt.Errorf("resolve override for rule %q: %w", rule.RuleKey, err)
-}
-
 // The usage-line suffixes of a partial window: an immediate cancel ended it,
 // or a cross-interval plan swap did (BillOnPlanSwapTx).
 const (
@@ -4110,6 +3865,9 @@ const (
 // description and says why the window ended early: cancelUsageSuffix or
 // swapUsageSuffix.
 func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscription, wm thresholdWatermark, plans map[string]domain.Plan, invoiceCurrency string, periodStart, canceledAt time.Time, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage, usageSuffix string) ([]domain.InvoiceLineItem, int64, error) {
+	if tapped(ctx) {
+		return rateTap.buildCancelLineItems(ctx, e, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced, belowZero, usageSuffix)
+	}
 	// Build base lines: segment-aware in_arrears billing over the
 	// partial period [periodStart, canceledAt]. in_advance items are
 	// explicitly skipped — their base for the just-canceled period
@@ -4224,202 +3982,15 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	}
 	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, plans, periodStart, canceledAt, wm.billedThrough, floors)
 
-	// The lines read usage through reads, once per window.
+	// The lines read usage through reads, once per window, and are priced by
+	// the one rater, with the same passes and ladder as the period close.
 	reads := newWindowUsage(e, sub, meterAggs)
-
-	// Union of meters with billable windows (a meter fully clamped away can
-	// still owe a full-window bill for a deferred non-additive bucket) +
-	// the clamped/full pass work-list — same shape as billOnePeriod.
-	cancelMeterIDSet := make(map[string]struct{}, len(meterIntervals))
-	for mid := range meterIntervals {
-		cancelMeterIDSet[mid] = struct{}{}
+	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, reads, rateSite{cancel: true}, meterIntervals, meterIntervalsFull, wm, periodStart, invoiceCurrency, usageSuffix, "cancel", unpriced, belowZero)
+	if err != nil {
+		return nil, 0, err
 	}
-	for mid := range meterIntervalsFull {
-		cancelMeterIDSet[mid] = struct{}{}
-	}
-	type meterWindow struct {
-		iv              usageInterval
-		nonAdditiveOnly bool
-	}
-	// Same per-bucket tier ladder as the cycle close (P21, ADR-066 amendment).
-	ladder := newUsageLadder(wm)
-	for meterID := range cancelMeterIDSet {
-		// Does this meter price via dimension-match pricing rules (the
-		// multi-dim shape: e.g. the AI `tokens` meter, one rule per
-		// {model, token_type})? Same fork billOnePeriod / preview / the
-		// threshold scan take — a single meter-linked rating rule can't
-		// express N rates, so for these meters RatingRuleVersionID is
-		// empty and the single-rule branch below would silently skip
-		// them. Pre-fix this fork was MISSING here: a mid-period
-		// immediate cancel emitted $0 for all token usage (the ADR-044
-		// wedge breakage, on the cancel path).
-		pricingRules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, sub.TenantID, meterID)
-		if err != nil {
-			return nil, 0, fmt.Errorf("list pricing rules for meter %s on cancel: %w", meterID, err)
-		}
-		if err := e.checkLadderSeeds(ctx, sub, meterID, pricingRules, periodStart, ladder); err != nil {
-			return nil, 0, err
-		}
-
-		windows := make([]meterWindow, 0, 4)
-		for _, iv := range mergeUsageIntervals(meterIntervals[meterID]) {
-			windows = append(windows, meterWindow{iv: iv})
-		}
-		if wm.exists() {
-			for _, iv := range mergeUsageIntervals(meterIntervalsFull[meterID]) {
-				windows = append(windows, meterWindow{iv: iv, nonAdditiveOnly: true})
-			}
-		}
-
-		// ---- Multi-dim path: one billable bucket per claimed rule. ----
-		if len(pricingRules) > 0 {
-			meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err != nil {
-				return nil, 0, fmt.Errorf("get meter %s on cancel: %w", meterID, err)
-			}
-			rulesByID := make(map[string]domain.MeterPricingRule, len(pricingRules))
-			for _, r := range pricingRules {
-				rulesByID[r.ID] = r
-			}
-			for _, mw := range windows {
-				iv := mw.iv
-				ivStart := iv.start
-				ivEnd := iv.end
-				aggs, err := reads.ruleBuckets(ctx, meterID, iv)
-				if err != nil {
-					return nil, 0, fmt.Errorf("cancel: %w", err)
-				}
-				for _, agg := range aggs {
-					qty := agg.Quantity
-					if qty.IsZero() {
-						continue
-					}
-					ratingRuleID := agg.RatingRuleVersionID
-					if ratingRuleID == "" {
-						ratingRuleID = meter.RatingRuleVersionID
-					}
-					// ADR-066 §4 pass routing — see billOnePeriod. Before the
-					// unpriced check, as there, so an unpriced bucket is
-					// reported on one pass only.
-					if wm.deferredBucket(agg.AggregationMode, meterID, ratingRuleID) != mw.nonAdditiveOnly {
-						continue
-					}
-					// Below zero after corrections: bills 0 (#1193) — see
-					// billOnePeriod's multi-dim branch.
-					if qty.IsNegative() {
-						slog.Warn("cancel: usage below zero after corrections — billed as 0",
-							"meter", meter.Key, "quantity", qty.String(),
-							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, meter.Name, qty, ivStart, ivEnd)
-						continue
-					}
-					if ratingRuleID == "" {
-						// Usage that matched no rule and the meter has no
-						// default binding — bill nothing, but loudly (a
-						// silent skip would hide unbilled revenue).
-						slog.Warn("cancel: usage matched no rating rule and meter has no default binding — not billed",
-							"meter", meter.Key, "quantity", qty.String(),
-							"subscription_id", sub.ID)
-						unpriced.add(meterID, qty)
-						continue
-					}
-					rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, ratingRuleID, periodStart)
-					if err != nil {
-						return nil, 0, fmt.Errorf("resolve pricing for meter %s rule %s on cancel: %w", meterID, ratingRuleID, err)
-					}
-					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, agg.AggregationMode, qty)
-					if err != nil {
-						return nil, 0, fmt.Errorf("compute amount for meter %s rule %s on cancel: %w", meterID, ratingRuleID, err)
-					}
-					unitAmount := decimal.NewFromInt(amount).Div(qty).RoundBank(0).IntPart()
-					lineItems = append(lineItems, domain.InvoiceLineItem{
-						LineType:                 domain.LineTypeUsage,
-						MeterID:                  meterID,
-						MeterUnit:                meter.Unit,
-						Description:              usageLineDescription(meter, rulesByID[agg.RuleID]) + usageSuffix,
-						Quantity:                 qty.IntPart(),
-						QuantityDecimal:          qty,
-						UnitAmountCents:          unitAmount,
-						AmountCents:              amount,
-						TotalAmountCents:         amount,
-						Currency:                 invoiceCurrency,
-						PricingMode:              string(rule.Mode),
-						RatingRuleVersionID:      rule.ID,
-						NominalUnitAmountDecimal: nominalRate(rule),
-						BillingPeriodStart:       &ivStart,
-						BillingPeriodEnd:         &ivEnd,
-					})
-					subtotal += amount
-				}
-			}
-			continue
-		}
-
-		// ---- Single-rule path (pre-multi-dim meters). ----
-		for _, mw := range windows {
-			iv := mw.iv
-			meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-			if err != nil {
-				return nil, 0, fmt.Errorf("get meter %s on cancel: %w", meterID, err)
-			}
-			// ADR-066 §4 pass routing at meter granularity — see billOnePeriod.
-			if wm.deferredBucket(mapMeterAggregation(meter.Aggregation), meterID, meter.RatingRuleVersionID) != mw.nonAdditiveOnly {
-				continue
-			}
-			quantity, err := reads.meterTotal(ctx, meterID, iv)
-			if err != nil {
-				return nil, 0, fmt.Errorf("cancel: %w", err)
-			}
-			if quantity.IsZero() {
-				continue
-			}
-			// Below zero after corrections: bills 0 (#1193).
-			if quantity.IsNegative() {
-				slog.Warn("cancel: usage below zero after corrections — billed as 0",
-					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, meter.Name, quantity, iv.start, iv.end)
-				continue
-			}
-			if meter.RatingRuleVersionID == "" {
-				// Unpriced meter → its usage can't be rated. Never silent
-				// (ADR-096); see the cycle-path sibling. Loud log, no revenue
-				// billed.
-				slog.Warn("cancel: usage on a meter with no rating rule — not billed (unpriced meter on plan; ADR-096)",
-					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
-				unpriced.add(meterID, quantity)
-				continue
-			}
-			rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, meter.RatingRuleVersionID, periodStart)
-			if err != nil {
-				return nil, 0, fmt.Errorf("resolve pricing for meter %s on cancel: %w", meterID, err)
-			}
-			amount, err := ladder.price(rule, meterID, meterID+"|", mapMeterAggregation(meter.Aggregation), quantity)
-			if err != nil {
-				return nil, 0, fmt.Errorf("compute amount for meter %s on cancel: %w", meterID, err)
-			}
-			unitAmount := decimal.NewFromInt(amount).Div(quantity).RoundBank(0).IntPart()
-			ivStart := iv.start
-			ivEnd := iv.end
-			lineItems = append(lineItems, domain.InvoiceLineItem{
-				LineType:                 domain.LineTypeUsage,
-				MeterID:                  meterID,
-				MeterUnit:                meter.Unit,
-				Description:              fmt.Sprintf("%s (%s)", meter.Name, meter.Unit) + usageSuffix,
-				Quantity:                 quantity.IntPart(),
-				QuantityDecimal:          quantity,
-				UnitAmountCents:          unitAmount,
-				AmountCents:              amount,
-				TotalAmountCents:         amount,
-				Currency:                 invoiceCurrency,
-				PricingMode:              string(rule.Mode),
-				RatingRuleVersionID:      rule.ID,
-				NominalUnitAmountDecimal: nominalRate(rule),
-				BillingPeriodStart:       &ivStart,
-				BillingPeriodEnd:         &ivEnd,
-			})
-			subtotal += amount
-		}
-	}
+	lineItems = append(lineItems, usageLines...)
+	subtotal += usageSubtotal
 	return lineItems, subtotal, nil
 }
 

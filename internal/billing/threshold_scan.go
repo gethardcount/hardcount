@@ -607,7 +607,7 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		//     refires one invoice + card charge per scheduler tick.
 		//
 		// Classification is per RULE BUCKET (pl.AggregationMode rides from
-		// AggregateByPricingRules through rateMeterWindow), never per meter — one
+		// AggregateByPricingRules through the rater), never per meter — one
 		// meter can carry sum and max rules simultaneously.
 		if pl.LineType == "usage" && nonAdditiveMode(pl.AggregationMode) {
 			if !reset {

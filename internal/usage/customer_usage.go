@@ -467,7 +467,7 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 			continue
 		}
 
-		// ADR-070 resolution — mirrors billing's resolveRatedRule so
+		// ADR-070 resolution — mirrors billing's rulePrices.Price so
 		// this view matches the invoice: the pinned binding supplies the
 		// rule_key; the version in force at the period open prices the
 		// window; the customer's override in force at the same instant

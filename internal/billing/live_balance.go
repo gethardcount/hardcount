@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
@@ -214,6 +212,9 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 // It also returns the currency of the subscription's first item's plan, the
 // input Engine.invoiceCurrency takes to name the close invoice's currency.
 func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, string, error) {
+	if tapped(ctx) {
+		return rateTap.unbilledUsageCents(ctx, e, sub)
+	}
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return 0, "", nil
 	}
@@ -272,25 +273,37 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 		meterIDs[mid] = struct{}{}
 	}
 
+	// The one rater (rate.go), reading every window as the previews do,
+	// with one tier ladder continuing from the threshold invoice.
 	ladder := newUsageLadder(wm)
+	r := rater{
+		prices: e.prices(),
+		reads:  ruleReads{usage: e.usage, tenantID: sub.TenantID, customerID: sub.CustomerID},
+		site: rateSite{preview: func(w rateWindow, err error) error {
+			return fmt.Errorf("rate meter %s [%v, %v): %w", w.meterID, w.iv.start, w.iv.end, err)
+		}},
+		tenantID:   sub.TenantID,
+		customerID: sub.CustomerID,
+	}
+	pin := pinFor(sub, periodStart)
 	var total int64
 	for meterID := range meterIDs {
-		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-			return ladder.price(rule, meterID, bucketKey, mode, qty)
-		}
-		// sum adds the lines of one pass over the given windows: the clamped
-		// pass takes every bucket except those the fire deferred, the full
-		// pass only those. Rules are pinned at the period start (ADR-070).
+		// sum adds the priced buckets of one pass over the given windows: the
+		// clamped pass takes every bucket except those the fire deferred, the
+		// full pass only those. Rules are pinned at the period start
+		// (ADR-070). A bucket is routed by its resolved price version.
 		sum := func(windows []usageInterval, deferred bool) error {
+			ws := make([]rateWindow, 0, len(windows))
 			for _, iv := range mergeUsageIntervals(windows) {
-				lines, _, _, err := e.rateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
-				if err != nil {
-					return fmt.Errorf("rate meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
-				}
-				for _, l := range lines {
-					if wm.deferredBucket(l.AggregationMode, meterID, l.RatingRuleVersionID) == deferred {
-						total += l.AmountCents
-					}
+				ws = append(ws, rateWindow{meterID: meterID, iv: iv, pass: passEvery})
+			}
+			buckets, err := r.rateUsageWindows(ctx, ws, pin, ladder)
+			if err != nil {
+				return err
+			}
+			for _, b := range buckets {
+				if b.priced && wm.deferredBucket(b.agg.AggregationMode, meterID, b.price.ID) == deferred {
+					total += b.amount
 				}
 			}
 			return nil
