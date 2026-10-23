@@ -72,8 +72,9 @@ Words used in the Velox docs and dashboard. For the big picture, read
   key means the same operation, so it takes effect once. The main kinds
   are the `Idempotency-Key` HTTP header, the key on each usage event, and
   the key Velox sends to Stripe on each charge. The header keeps one
-  response for 24 hours. The usage-event key is required and kept forever,
-  so a key used twice stores only the first event. [More](api-surface.md)
+  response for 24 hours; the usage routes ignore it. The usage-event key is
+  required and kept forever, so a key used twice stores only the first
+  event. [More](api-surface.md)
 
 ## Subscriptions and invoices
 

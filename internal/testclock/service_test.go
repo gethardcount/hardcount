@@ -513,12 +513,6 @@ func TestAdvance_InjectFailureEnv(t *testing.T) {
 	}
 }
 
-// Note: pacing-knob tests (VELOX_TEST_CLOCK_CATCHUP_DELAY_MS) moved
-// to internal/billing alongside catchupDelayFromEnvBilling per
-// ADR-028. The pacing now lives inside the engine's per-period
-// loop, not the test-clock service's outer loop (which no longer
-// exists).
-
 // --- Mocks ---
 
 type mockStore struct {

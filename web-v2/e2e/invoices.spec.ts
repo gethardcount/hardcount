@@ -17,7 +17,7 @@ interface InvoiceDetail extends Invoice {
   voided_at?: string
   billing_timezone?: string
 }
-interface LineItem { description: string; quantity: number; unit_amount_cents: number; amount_cents: number }
+interface LineItem { description: string; quantity: string; unit_amount_decimal: string; amount_cents: number }
 interface CreditNote {
   id: string
   credit_note_number: string
@@ -144,7 +144,7 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   const draft = await getInvoice(created[0].id)
   const number = draft.invoice.invoice_number
   expect(draft.invoice.status).toBe('draft')
-  expect(draft.line_items.map(l => [l.description, l.quantity, l.unit_amount_cents])).toEqual([[`E2E onboarding ${id}`, 2, 1250]])
+  expect(draft.line_items.map(l => [l.description, l.quantity, l.unit_amount_decimal])).toEqual([[`E2E onboarding ${id}`, '2', '1250']])
   expect(savedText).toBe(`Draft ${number} saved`)
   const recent = recentInvoice(page, number)
   await expect(recent).toContainText('Draft')
@@ -165,7 +165,7 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   const twoLines = await getInvoice(draft.invoice.id)
   expect(twoLines.line_items).toHaveLength(2)
   const added = twoLines.line_items.find(l => l.description === `E2E support hours ${id}`)
-  expect(added && [added.quantity, added.unit_amount_cents]).toEqual([3, 4000])
+  expect(added && [added.quantity, added.unit_amount_decimal]).toEqual(['3', '4000'])
   await expect(page.getByRole('row').filter({ hasText: `E2E support hours ${id}` })).toContainText(usd(added!.amount_cents))
   await expect(figure(page, 'Subtotal')).toContainText(usd(twoLines.invoice.subtotal_cents))
 

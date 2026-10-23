@@ -4760,16 +4760,14 @@ type HostedInvoice struct {
 		Currency    string `json:"currency"`
 		Description string `json:"description"`
 		MeterUnit   string `json:"meter_unit,omitempty"`
-		Quantity    int64  `json:"quantity"`
 
-		// QuantityDecimal The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities.
-		QuantityDecimal  string `json:"quantity_decimal,omitempty"`
+		// Quantity The exact quantity as a decimal string, for example `3` or `1.5`.
+		Quantity         string `json:"quantity"`
 		TaxAmountCents   int64  `json:"tax_amount_cents,omitempty"`
 		TotalAmountCents int64  `json:"total_amount_cents"`
-		UnitAmountCents  int64  `json:"unit_amount_cents"`
 
 		// UnitAmountDecimal The unit price in cents at full precision, for example `0.3` for $0.003.
-		UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+		UnitAmountDecimal string `json:"unit_amount_decimal"`
 	} `json:"line_items"`
 
 	// Livemode False for a test-mode invoice. The page shows a test-mode banner.
@@ -5145,10 +5143,9 @@ type InvoiceLineItem struct {
 	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
 	MeterUnit   string `json:"meter_unit,omitempty"`
 	PricingMode string `json:"pricing_mode,omitempty"`
-	Quantity    int64  `json:"quantity"`
 
-	// QuantityDecimal Exact (possibly fractional) usage quantity as a decimal string (e.g. "1.5"). The integer `quantity` is this truncated, kept for back-compat (Stripe quantity_decimal parity). "0" means none — use `quantity`. Line amounts stay whole cents.
-	QuantityDecimal     string `json:"quantity_decimal,omitempty"`
+	// Quantity The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents.
+	Quantity            string `json:"quantity"`
 	RatingRuleVersionId string `json:"rating_rule_version_id,omitempty"`
 	TaxAmountCents      int64  `json:"tax_amount_cents"`
 	TaxCode             string `json:"tax_code,omitempty"`
@@ -5169,10 +5166,9 @@ type InvoiceLineItem struct {
 	// TenantId Owning tenant. Omitted when empty.
 	TenantId         string `json:"tenant_id,omitempty"`
 	TotalAmountCents int64  `json:"total_amount_cents"`
-	UnitAmountCents  int64  `json:"unit_amount_cents"`
 
-	// UnitAmountDecimal Full-precision per-unit price in DECIMAL CENTS (e.g. "0.3" = $0.003 per unit), the Stripe unit_amount_decimal model. Derived on read as amount_cents ÷ quantity, so it reconciles with the rounded line amount and, unlike the whole-cent `unit_amount_cents`, never collapses a sub-cent rate to 0. Render with the decimal-aware rate formatter; line amounts/totals stay whole cents.
-	UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+	// UnitAmountDecimal The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced at one flat rate it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents.
+	UnitAmountDecimal string `json:"unit_amount_decimal"`
 }
 
 // InvoiceLineItemInput A line to add to a draft invoice.
@@ -6861,7 +6857,8 @@ type CreateApiKeyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6880,7 +6877,8 @@ type RotateApiKeyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -6978,7 +6976,8 @@ type PostV1BillingRunParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7083,7 +7082,8 @@ type PostV1CreditNotesParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7096,7 +7096,8 @@ type IssueCreditNoteParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7106,7 +7107,8 @@ type RetryCreditNoteRefundParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7122,7 +7124,8 @@ type PostV1CreditNotesIdSendParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7135,7 +7138,8 @@ type VoidCreditNoteParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7156,7 +7160,8 @@ type AdjustCreditsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7192,7 +7197,8 @@ type PostV1CreditsGrantParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7268,7 +7274,8 @@ type PostV1CustomersParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7285,7 +7292,8 @@ type SendCustomerPaymentSetupEmailParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7302,7 +7310,8 @@ type CreateCustomerPaymentSetupSessionParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7312,7 +7321,8 @@ type SetCustomerDefaultPaymentMethodParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7333,7 +7343,8 @@ type UpdateCustomerParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7346,7 +7357,8 @@ type UpsertCustomerBillingProfileParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7365,7 +7377,8 @@ type PostV1CustomersIdRotateCostDashboardTokenParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7384,7 +7397,8 @@ type CreateDunningPolicyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7397,7 +7411,8 @@ type UpdateDunningPolicyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7407,7 +7422,8 @@ type SetDefaultDunningPolicyParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7438,7 +7454,8 @@ type ResolveDunningRunParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7517,16 +7534,6 @@ type IngestLitellmSpendJSONBody struct {
 	union json.RawMessage
 }
 
-// IngestLitellmSpendParams defines parameters for IngestLitellmSpend.
-type IngestLitellmSpendParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
 // IngestLitellmSpendJSONBody1 defines parameters for IngestLitellmSpend.
 type IngestLitellmSpendJSONBody1 = []LitellmSpendLog
 
@@ -7581,7 +7588,8 @@ type CreateInvoiceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7610,7 +7618,8 @@ type PostV1InvoicesCreatePreviewParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7620,7 +7629,8 @@ type CollectInvoicePaymentParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7630,7 +7640,8 @@ type PostV1InvoicesIdFinalizeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7640,7 +7651,8 @@ type AddInvoiceLineItemParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7650,7 +7662,8 @@ type MarkInvoiceUncollectibleParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7666,7 +7679,8 @@ type RecordInvoicePaymentParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7686,7 +7700,8 @@ type RefundInvoiceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7699,7 +7714,8 @@ type ResendInvoiceSetupLinkParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7712,7 +7728,8 @@ type PostV1InvoicesIdRetryTaxParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7722,7 +7739,8 @@ type RotateInvoicePublicTokenParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7738,7 +7756,8 @@ type PostV1InvoicesIdSendParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7751,7 +7770,8 @@ type VoidInvoiceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7766,7 +7786,8 @@ type InviteMemberParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7785,7 +7806,8 @@ type PostV1MetersParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7808,7 +7830,8 @@ type PatchV1MetersIdParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7838,7 +7861,8 @@ type UpsertMeterPricingRuleParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7874,7 +7898,8 @@ type PostV1PlansParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7922,7 +7947,8 @@ type UpdatePlanParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -7975,7 +8001,8 @@ type CreatePriceOverrideParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8008,7 +8035,8 @@ type PutV1ProviderCostsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8058,7 +8086,8 @@ type PostV1RatingRulesParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8076,7 +8105,8 @@ type InstantiateRecipeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8091,7 +8121,8 @@ type PreviewRecipeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8101,7 +8132,8 @@ type UpdateTenantSettingsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8117,7 +8149,8 @@ type SendTestEmailParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8142,7 +8175,8 @@ type ConnectStripeParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8161,7 +8195,8 @@ type SetStripeWebhookSecretParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8250,7 +8285,8 @@ type PostV1SubscriptionsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8266,7 +8302,8 @@ type PostV1SubscriptionsIdActivateParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8289,7 +8326,8 @@ type SetSubscriptionBillingThresholdsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8299,7 +8337,8 @@ type CancelSubscriptionParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8309,7 +8348,8 @@ type EndSubscriptionTrialParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8325,7 +8365,8 @@ type ExtendSubscriptionTrialParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8341,7 +8382,8 @@ type AddSubscriptionItemParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8363,7 +8405,8 @@ type UpdateSubscriptionItemParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8381,7 +8424,8 @@ type PauseSubscriptionCollectionParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8394,7 +8438,8 @@ type PostV1SubscriptionsIdRetryBillingParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8413,7 +8458,8 @@ type ScheduleSubscriptionCancelParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8443,7 +8489,8 @@ type PostV1TestClocksParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8461,7 +8508,8 @@ type PostV1TestClocksIdAdvanceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8471,7 +8519,8 @@ type PostV1TestClocksIdRetryAdvanceParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8520,27 +8569,18 @@ type PostV1UsageEventsJSONBody struct {
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
 	// keys are refused with 422, and so are keys longer than
-	// 255 characters. The `Idempotency-Key` header does not
-	// count as this key: it caches one HTTP response for 24
-	// hours.
+	// 255 characters. This is the only dedup key: the usage
+	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
-	Properties map[string]interface{} `json:"properties,omitempty"`
-
-	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
+	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
+	// for exact decimals). At most 12 decimal places; trailing
+	// zeros do not count. Its size must be under 10^26. A
+	// negative value is a correction. A missing quantity, or
+	// any other value, is refused with 422 and `param:
+	// quantity`.
 	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                          `json:"timestamp,omitempty"`
-}
-
-// PostV1UsageEventsParams defines parameters for PostV1UsageEvents.
-type PostV1UsageEventsParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1UsageEventsJSONBodyQuantity0 defines parameters for PostV1UsageEvents.
@@ -8595,29 +8635,20 @@ type BackfillUsageEventJSONBody struct {
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
 	// keys are refused with 422, and so are keys longer than
-	// 255 characters. The `Idempotency-Key` header does not
-	// count as this key: it caches one HTTP response for 24
-	// hours.
+	// 255 characters. This is the only dedup key: the usage
+	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// Properties Older name for `dimensions`. Used only when `dimensions` is absent.
-	Properties map[string]interface{} `json:"properties,omitempty"`
-
-	// Quantity Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections.
-	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity,omitempty"`
+	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
+	// for exact decimals). At most 12 decimal places; trailing
+	// zeros do not count. Its size must be under 10^26. A
+	// negative value is a correction. A missing quantity, or
+	// any other value, is refused with 422 and `param:
+	// quantity`.
+	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity"`
 
 	// Timestamp RFC 3339. Must not be in the future.
 	Timestamp time.Time `json:"timestamp"`
-}
-
-// BackfillUsageEventParams defines parameters for BackfillUsageEvent.
-type BackfillUsageEventParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // BackfillUsageEventJSONBodyQuantity0 defines parameters for BackfillUsageEvent.
@@ -8650,27 +8681,17 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// event, such as a batch index or a timestamp that can
 	// repeat, or that usage is lost. Empty or whitespace-only
 	// keys are refused with 422, and so are keys longer than
-	// 255 characters. The `Idempotency-Key` header does not
-	// count as this key: it caches one HTTP response for 24
-	// hours.
+	// 255 characters. This is the only dedup key: the usage
+	// routes ignore the `Idempotency-Key` header.
 	IdempotencyKey string `json:"idempotency_key"`
 
-	// Properties Older name for `dimensions`. When both are sent, `dimensions` wins.
-	Properties map[string]interface{} `json:"properties,omitempty"`
-
-	// Quantity Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
+	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
+	// for exact decimals). At most 12 decimal places;
+	// trailing zeros do not count. Its size must be under
+	// 10^26. A negative value is a correction. A missing
+	// quantity, or any other value, fails validation.
 	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                               `json:"timestamp,omitempty"`
-}
-
-// PostV1UsageEventsBatchParams defines parameters for PostV1UsageEventsBatch.
-type PostV1UsageEventsBatchParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1UsageEventsBatchJSONBodyQuantity0 defines parameters for PostV1UsageEventsBatch.
@@ -8692,16 +8713,6 @@ type DiscardHeldUsageJSONBody struct {
 	MeterKey string `json:"meter_key,omitempty"`
 }
 
-// DiscardHeldUsageParams defines parameters for DiscardHeldUsage.
-type DiscardHeldUsageParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
-}
-
 // ReleaseHeldUsageJSONBody defines parameters for ReleaseHeldUsage.
 type ReleaseHeldUsageJSONBody struct {
 	// CustomerId Release into this customer (a `vlx_cus_` id) instead of
@@ -8711,16 +8722,6 @@ type ReleaseHeldUsageJSONBody struct {
 
 	// ExternalCustomerId The external ID the rows were held under.
 	ExternalCustomerId string `json:"external_customer_id"`
-}
-
-// ReleaseHeldUsageParams defines parameters for ReleaseHeldUsage.
-type ReleaseHeldUsageParams struct {
-	// IdempotencyKey Makes the call safe to retry. Send a unique value (a UUID works) and
-	// the same value on every retry. For 24 hours, a repeat with the same
-	// key, method, path and body gets the first response again, with an
-	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
-	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
 // PostV1WebhookEndpointsEndpointsJSONBody defines parameters for PostV1WebhookEndpointsEndpoints.
@@ -8736,7 +8737,8 @@ type PostV1WebhookEndpointsEndpointsParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8757,7 +8759,8 @@ type PatchV1WebhookEndpointsEndpointsIdParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8767,7 +8770,8 @@ type ReplayWebhookDeliveryParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8777,7 +8781,8 @@ type PostV1WebhookEndpointsEndpointsIdRotateSecretParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -8787,7 +8792,8 @@ type ReplayWebhookEventParams struct {
 	// the same value on every retry. For 24 hours, a repeat with the same
 	// key, method, path and body gets the first response again, with an
 	// `Idempotent-Replayed: true` header, instead of running again. The
-	// error cases are in docs/api-surface.md.
+	// error cases are in docs/api-surface.md. The usage routes do not take
+	// it: each usage event carries its own `idempotency_key`.
 	IdempotencyKey IdempotencyKey `json:"Idempotency-Key,omitempty"`
 }
 
@@ -9479,7 +9485,7 @@ type ServerInterface interface {
 	ExportUsageEventsCsv(w http.ResponseWriter, r *http.Request, params ExportUsageEventsCsvParams)
 	// Ingest LiteLLM spend logs
 	// (POST /v1/integrations/litellm/spend)
-	IngestLitellmSpend(w http.ResponseWriter, r *http.Request, params IngestLitellmSpendParams)
+	IngestLitellmSpend(w http.ResponseWriter, r *http.Request)
 	// List invoices
 	// (GET /v1/invoices)
 	GetV1Invoices(w http.ResponseWriter, r *http.Request, params GetV1InvoicesParams)
@@ -9764,25 +9770,25 @@ type ServerInterface interface {
 	GetV1UsageEvents(w http.ResponseWriter, r *http.Request, params GetV1UsageEventsParams)
 	// Ingest usage event
 	// (POST /v1/usage-events)
-	PostV1UsageEvents(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsParams)
+	PostV1UsageEvents(w http.ResponseWriter, r *http.Request)
 	// Usage totals
 	// (GET /v1/usage-events/aggregate)
 	AggregateUsageEvents(w http.ResponseWriter, r *http.Request, params AggregateUsageEventsParams)
 	// Backfill a past usage event
 	// (POST /v1/usage-events/backfill)
-	BackfillUsageEvent(w http.ResponseWriter, r *http.Request, params BackfillUsageEventParams)
+	BackfillUsageEvent(w http.ResponseWriter, r *http.Request)
 	// Batch ingest usage events (max 1000, all-or-nothing)
 	// (POST /v1/usage-events/batch)
-	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsBatchParams)
+	PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request)
 	// List held usage
 	// (GET /v1/usage-events/held)
 	ListHeldUsage(w http.ResponseWriter, r *http.Request)
 	// Discard held usage
 	// (POST /v1/usage-events/held/discard)
-	DiscardHeldUsage(w http.ResponseWriter, r *http.Request, params DiscardHeldUsageParams)
+	DiscardHeldUsage(w http.ResponseWriter, r *http.Request)
 	// Release held usage
 	// (POST /v1/usage-events/held/release)
-	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request, params ReleaseHeldUsageParams)
+	ReleaseHeldUsage(w http.ResponseWriter, r *http.Request)
 	// List webhook endpoints
 	// (GET /v1/webhook-endpoints/endpoints)
 	GetV1WebhookEndpointsEndpoints(w http.ResponseWriter, r *http.Request)
@@ -10256,7 +10262,7 @@ func (_ Unimplemented) ExportUsageEventsCsv(w http.ResponseWriter, r *http.Reque
 
 // Ingest LiteLLM spend logs
 // (POST /v1/integrations/litellm/spend)
-func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request, params IngestLitellmSpendParams) {
+func (_ Unimplemented) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10826,7 +10832,7 @@ func (_ Unimplemented) GetV1UsageEvents(w http.ResponseWriter, r *http.Request, 
 
 // Ingest usage event
 // (POST /v1/usage-events)
-func (_ Unimplemented) PostV1UsageEvents(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsParams) {
+func (_ Unimplemented) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10838,13 +10844,13 @@ func (_ Unimplemented) AggregateUsageEvents(w http.ResponseWriter, r *http.Reque
 
 // Backfill a past usage event
 // (POST /v1/usage-events/backfill)
-func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request, params BackfillUsageEventParams) {
+func (_ Unimplemented) BackfillUsageEvent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Batch ingest usage events (max 1000, all-or-nothing)
 // (POST /v1/usage-events/batch)
-func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request, params PostV1UsageEventsBatchParams) {
+func (_ Unimplemented) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -10856,13 +10862,13 @@ func (_ Unimplemented) ListHeldUsage(w http.ResponseWriter, r *http.Request) {
 
 // Discard held usage
 // (POST /v1/usage-events/held/discard)
-func (_ Unimplemented) DiscardHeldUsage(w http.ResponseWriter, r *http.Request, params DiscardHeldUsageParams) {
+func (_ Unimplemented) DiscardHeldUsage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
 // Release held usage
 // (POST /v1/usage-events/held/release)
-func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request, params ReleaseHeldUsageParams) {
+func (_ Unimplemented) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14233,41 +14239,14 @@ func (siw *ServerInterfaceWrapper) ExportUsageEventsCsv(w http.ResponseWriter, r
 // IngestLitellmSpend operation middleware
 func (siw *ServerInterfaceWrapper) IngestLitellmSpend(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params IngestLitellmSpendParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.IngestLitellmSpend(w, r, params)
+		siw.Handler.IngestLitellmSpend(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18489,41 +18468,14 @@ func (siw *ServerInterfaceWrapper) GetV1UsageEvents(w http.ResponseWriter, r *ht
 // PostV1UsageEvents operation middleware
 func (siw *ServerInterfaceWrapper) PostV1UsageEvents(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1UsageEventsParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEvents(w, r, params)
+		siw.Handler.PostV1UsageEvents(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18640,41 +18592,14 @@ func (siw *ServerInterfaceWrapper) AggregateUsageEvents(w http.ResponseWriter, r
 // BackfillUsageEvent operation middleware
 func (siw *ServerInterfaceWrapper) BackfillUsageEvent(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params BackfillUsageEventParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.BackfillUsageEvent(w, r, params)
+		siw.Handler.BackfillUsageEvent(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18687,41 +18612,14 @@ func (siw *ServerInterfaceWrapper) BackfillUsageEvent(w http.ResponseWriter, r *
 // PostV1UsageEventsBatch operation middleware
 func (siw *ServerInterfaceWrapper) PostV1UsageEventsBatch(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params PostV1UsageEventsBatchParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PostV1UsageEventsBatch(w, r, params)
+		siw.Handler.PostV1UsageEventsBatch(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18754,41 +18652,14 @@ func (siw *ServerInterfaceWrapper) ListHeldUsage(w http.ResponseWriter, r *http.
 // DiscardHeldUsage operation middleware
 func (siw *ServerInterfaceWrapper) DiscardHeldUsage(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params DiscardHeldUsageParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DiscardHeldUsage(w, r, params)
+		siw.Handler.DiscardHeldUsage(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18801,41 +18672,14 @@ func (siw *ServerInterfaceWrapper) DiscardHeldUsage(w http.ResponseWriter, r *ht
 // ReleaseHeldUsage operation middleware
 func (siw *ServerInterfaceWrapper) ReleaseHeldUsage(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-	_ = err
-
 	ctx := r.Context()
 
 	ctx = context.WithValue(ctx, BearerAuthScopes, []string{})
 
 	r = r.WithContext(ctx)
 
-	// Parameter object where we will unmarshal all parameters from the context
-	var params ReleaseHeldUsageParams
-
-	headers := r.Header
-
-	// ------------- Optional header parameter "Idempotency-Key" -------------
-	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
-		var IdempotencyKey IdempotencyKey
-		n := len(valueList)
-		if n != 1 {
-			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "Idempotency-Key", Count: n})
-			return
-		}
-
-		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
-		if err != nil {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "Idempotency-Key", Err: err})
-			return
-		}
-
-		params.IdempotencyKey = IdempotencyKey
-
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ReleaseHeldUsage(w, r, params)
+		siw.Handler.ReleaseHeldUsage(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
