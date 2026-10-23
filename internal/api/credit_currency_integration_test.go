@@ -231,12 +231,19 @@ func TestCreditCurrency_DeductOnlyFromItsCurrency(t *testing.T) {
 		t.Errorf("after the refused EUR deduction: balances %v, want USD 5000 only", got)
 	}
 
-	e.call(t, "POST", "/v1/credits/adjust", map[string]any{
+	// balance_after is the balance in the entry's own currency.
+	eurUp := e.call(t, "POST", "/v1/credits/adjust", map[string]any{
 		"customer_id": cust, "currency": "EUR", "amount_cents": 700, "description": "EUR top up",
-	}).want(t, 201, "positive EUR adjust")
-	e.call(t, "POST", "/v1/credits/adjust", map[string]any{
+	}).want(t, 201, "positive EUR adjust").body
+	if flowStr(eurUp, "currency") != "EUR" || flowInt(eurUp, "balance_after") != 700 {
+		t.Errorf("EUR adjust = %v, want currency EUR, balance_after 700", eurUp)
+	}
+	usdDown := e.call(t, "POST", "/v1/credits/adjust", map[string]any{
 		"customer_id": cust, "currency": "USD", "amount_cents": -2000, "description": "USD correction",
-	}).want(t, 201, "USD deduction")
+	}).want(t, 201, "USD deduction").body
+	if flowStr(usdDown, "currency") != "USD" || flowInt(usdDown, "balance_after") != 3000 {
+		t.Errorf("USD deduction = %v, want currency USD, balance_after 3000", usdDown)
+	}
 	if got := e.balances(t, cust); got["USD"] != 3000 || got["EUR"] != 700 {
 		t.Errorf("balances %v, want USD 3000, EUR 700", got)
 	}
