@@ -327,6 +327,10 @@ func TestCreateSubscription_RefusesAmbiguousStart(t *testing.T) {
 		// status takes only "draft" on create.
 		{"status active", "status", map[string]any{"status": "active"}},
 		{"status trialing", "status", map[string]any{"status": "trialing"}},
+		// An empty or null status is not a third way to say "start now": a
+		// template that left the value unset must not start and bill.
+		{"status empty", "status", map[string]any{"status": ""}},
+		{"status null", "status", map[string]any{"status": nil}},
 	}
 	for i, tc := range cases {
 		code, raw := r.do(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody(fmt.Sprintf("refused-%d", i), "calendar", tc.extra))
