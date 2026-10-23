@@ -14,6 +14,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,4 +266,100 @@ func TestRelease_AgainstAnAggregationPatch(t *testing.T) {
 		f.psvc.SetAuditLogger(nil)
 		wantMeterHasUsage(t, "PATCH after the release", f.patch("sum"))
 	})
+}
+
+// racingPeriods is the concurrent resolver for a release's counts. It
+// answers one open period whose paid threshold invoice billed through after
+// the held rows. Its meter read, the first time it runs, starts an
+// aggregation PATCH and gives it up to 500 ms to commit before it answers
+// with what it read.
+type racingPeriods struct {
+	f         heldAggFixture
+	period    usage.OpenPeriod
+	to        string
+	once      sync.Once
+	patchErr  error
+	patchDone chan struct{}
+}
+
+func (r *racingPeriods) OpenPeriods(context.Context, string, string) ([]usage.OpenPeriod, error) {
+	return []usage.OpenPeriod{r.period}, nil
+}
+
+func (r *racingPeriods) MeterBuckets(ctx context.Context, tenantID, meterID string) (usage.MeterBuckets, error) {
+	m, err := r.f.psvc.GetMeter(ctx, tenantID, meterID)
+	if err != nil {
+		return usage.MeterBuckets{}, err
+	}
+	r.once.Do(func() {
+		go func() {
+			r.patchErr = r.f.patch(r.to)
+			close(r.patchDone)
+		}()
+		select {
+		case <-r.patchDone:
+		case <-time.After(500 * time.Millisecond):
+		}
+	})
+	return usage.BucketsOf(m), nil
+}
+
+// A release's counts follow the aggregation its events are counted under,
+// even when an aggregation PATCH races the release of the meter's first
+// events. The rows are before a paid threshold invoice's end: under sum the
+// close does not count them (outside_open_period), under max it does
+// (in_open_period).
+//
+// Mutation-verify: read the meter's buckets before the release's write
+// again → the PATCH commits between that read and the write, and the counts
+// follow the old aggregation.
+func TestRelease_CountsFollowTheAggregationItsEventsAreCountedUnder(t *testing.T) {
+	for _, tc := range []struct{ from, to string }{{"sum", "max"}, {"max", "sum"}} {
+		t.Run(tc.from+" to "+tc.to, func(t *testing.T) {
+			f := newHeldAggFixture(t, "Held agg counts "+tc.from, "tokens_counts_"+tc.from)
+			if tc.from != "sum" {
+				if err := f.patch(tc.from); err != nil {
+					t.Fatalf("PATCH to %s before any event: %v", tc.from, err)
+				}
+			}
+			customerID := insertTestCustomer(t, f.db, f.tenantID, "ext_"+f.eventName)
+
+			now := time.Now().UTC()
+			at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
+			meters := map[string]bool{f.meter.ID: true}
+			r := &racingPeriods{f: f, to: tc.to, patchDone: make(chan struct{}), period: usage.OpenPeriod{
+				Start: now.Add(-2 * time.Hour), End: now.Add(24 * time.Hour), Floor: at(-3 * time.Hour),
+				Meters: meters, NextMeters: meters,
+				ThresholdWatermark: usage.ThresholdWatermark{BilledThrough: at(-30 * time.Minute), PaidThrough: at(-30 * time.Minute)},
+			}}
+			f.svc.SetOpenPeriodReader(r)
+
+			res, err := f.svc.Release(f.ctx, f.tenantID, usage.ReleaseInput{
+				ExternalCustomerID: "ext_" + f.eventName,
+				CustomerID:         customerID,
+				MeterIDs:           map[string]string{f.eventName: f.meter.ID},
+			})
+			if err != nil {
+				t.Fatalf("release: %v", err)
+			}
+			select {
+			case <-r.patchDone:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the PATCH never finished")
+			}
+
+			agg := f.aggregation(t)
+			want := usage.ReleaseResult{CustomerID: customerID, Released: 2, OutsideOpenPeriod: 2}
+			if !usage.BucketsOf(domain.Meter{Aggregation: agg}).Additive {
+				want = usage.ReleaseResult{CustomerID: customerID, Released: 2, InOpenPeriod: 2}
+			}
+			if res != want {
+				t.Errorf("release = %+v, want %+v: the events are counted under %s", res, want, agg)
+			}
+			wantMeterHasUsage(t, "the PATCH that ran into the release", r.patchErr)
+			if agg != tc.from {
+				t.Errorf("aggregation = %q, want %s: the released events were written under it", agg, tc.from)
+			}
+		})
+	}
 }
