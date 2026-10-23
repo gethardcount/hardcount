@@ -6,9 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 **Pre-1.0 versioning:** we're on `0.MINOR.PATCH`. MINOR bumps for new
-features, PATCH for fixes. The public API is stabilising but not yet
-frozen; breaking changes land on MINOR until `1.0.0`. What can break, and how
-it is announced: [Versioning before 1.0](docs/versioning.md).
+features and can break things. PATCH is for fixes, and a fix can still change
+something you rely on, so read **Before upgrading** for every release. What
+can break, and how it is announced: [Versioning before 1.0](docs/versioning.md).
 
 How to write an entry (one bold outcome, who is affected, any action needed,
 a link; at most about 50 words): [docs/dev/writing-style.md](docs/dev/writing-style.md#shapes-for-common-docs).
@@ -98,8 +98,8 @@ original text.
 - **A manual invoice uses the customer's currency (2026-10-23).** One in another currency is refused, and an invoice with no currency takes the live subscription's plan currency when the customer has no billing-profile currency; before, it took the workspace default. In the dashboard, New invoice then shows the currency fixed ([#1361](https://github.com/getvelox/velox/pull/1361)).
 - **New page: what can break before 1.0, and where each break is announced (2026-10-23).** See [Versioning before 1.0](docs/versioning.md). `SECURITY.md` now says only the latest release gets security fixes. ([#1363](https://github.com/getvelox/velox/pull/1363))
 - **The roadmap is now Now, Next, Later and Not building (2026-10-23).** Usage prices set per plan are planned for v0.9.0; spend alerts and generated Go and TypeScript SDKs come next, in v0.10.0 ([roadmap](docs/roadmap.md)). ([#1363](https://github.com/getvelox/velox/pull/1363))
-- **Twenty claims about Lago, OpenMeter, Flexprice and Kill Bill are corrected against their code (2026-10-23).** [How Velox compares](docs/comparison.md) names the commits read. ADRs keep their text and gain a dated correction. ([#1363](https://github.com/getvelox/velox/pull/1363))
-- **Docs no longer overstate Velox (2026-10-23).** Row-level security covers most API requests, not all ([list](docs/architecture.md#design-rules)). Grant entries in the credit ledger are updated in place. There is no `volume` pricing mode. The docs no longer suggest archiving old usage events, which would break dedup, and [Scale](docs/scale.md) says how dedup would survive a split by month. ([#1363](https://github.com/getvelox/velox/pull/1363))
+- **Twenty claims about Lago, OpenMeter, Flexprice and Kill Bill are corrected against their code (2026-10-23).** Each correction names the commit it was checked in, on [How Velox compares](docs/comparison.md) or in the ADR. ADRs keep their text and gain a dated correction. ([#1363](https://github.com/getvelox/velox/pull/1363))
+- **Docs no longer overstate Velox (2026-10-23).** Row-level security covers most API requests, not all ([list](docs/architecture.md#design-rules)); for contributors, a new `TxBypass` use fails a test until it is on that list. Grant entries in the credit ledger are updated in place. There is no `volume` pricing mode. The docs no longer suggest archiving old usage events, which would break dedup, and [Scale](docs/scale.md) says how dedup would survive a split by month. ([#1363](https://github.com/getvelox/velox/pull/1363))
 - Docs: internal records, audits and design notes moved to docs/dev/; overlapping pages merged; two runbook steps corrected.
 - Docs: the self-host, ops, benchmark and runbook pages lead with the short path, with repeats and analogies cut. Claims corrected include the email rate, the shutdown worst case and the parked-invoice gauge.
 - Docs: the front-door pages and guides lead with the short path, with repeats, analogies and padding cut. Claims corrected include tenant isolation, which webhooks are never lost, and what the LiteLLM integration stores.

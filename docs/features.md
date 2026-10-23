@@ -28,8 +28,9 @@ labels on a usage event, such as `model` or `token_type`.
 | Audit log that cannot be edited | A log of who changed what in your account. The database refuses to change or delete any entry in it. | [Architecture](architecture.md) |
 | Data kept apart | On most API requests, each account's data, and its test and live data, are kept apart by Postgres Row-Level Security (RLS) as well as by the application code. Some work runs outside RLS and filters by account in the application code. That includes background jobs, sign-in and sessions, public links such as the hosted invoice page, incoming webhooks, Stripe credential settings, and team members and invites ([full list](architecture.md#design-rules)). With `APP_ENV` set to `staging` or `production`, Velox will not start without RLS. | [Postgres requirements](ops/postgres-requirements.md#the-two-database-users) |
 
-Velox has no SSO. It has no roles either: every team member has full
-access ([Roadmap](roadmap.md#later)).
+Velox has no SSO; [ADR-014](adr/014-sso-direction-embedded-oidc-saml.md)
+says how it would be added. It has no roles either: every team member has
+full access ([Roadmap](roadmap.md#later)).
 
 ## Subscriptions and invoices
 

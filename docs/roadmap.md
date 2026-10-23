@@ -16,8 +16,18 @@ first. Every shipped change, with its date, is in the
 - **Done:** each prepaid credit carries its own currency and pays only
   invoices in that currency. Grant and adjust take a `currency`
   ([ADR-129](adr/129-credit-carries-its-own-currency.md)).
-- **In review:** while live subscriptions use a meter, a pricing edit that
-  would change the price of a billing period already open is refused.
+- **Done:** while a draft, trialing or active subscription uses a meter,
+  Velox refuses four edits that would reprice the billing period already
+  open. A new price version applies from the next period
+  ([how](ai-pricing.md#change-a-price)). The four edits:
+  - editing or deleting a pricing rule;
+  - a new rule that could take usage from a price that bills it now;
+  - pointing the default price at another price, or removing it;
+  - changing the meter's aggregation.
+- **Planned:** public names change once, before the release: API key
+  prefixes, header names, environment variables and the session cookie.
+  Publishable keys are removed. Code that calls the API or checks webhook
+  signatures must change.
 - **Planned:** the commands in the [first-invoice guide](first-invoice.md)
   run in CI, so a change that breaks them fails.
 - **Planned: usage prices set per plan.** Today a usage price is set on the

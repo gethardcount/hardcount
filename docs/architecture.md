@@ -54,12 +54,13 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
 ## Design rules
 
 - **Per-domain packages.** Each domain owns its store, service, and handler. No peer domain touches another's internals. The imports that legitimately cross domains are listed edge by edge in an allowlist, enforced by an [architecture test](../internal/arch/boundaries_test.go).
-- **Row-Level Security (RLS).** Most tenant-scoped work runs inside a transaction where Postgres enforces tenant isolation (`postgres.TxTenant`). A tenant is one account's data in the shared database. Integration tests prove it. Some work runs under `postgres.TxBypass`, where RLS does not apply, and those queries must filter by tenant themselves:
-  - background jobs;
+- **Row-Level Security (RLS).** Most tenant-scoped work runs inside a transaction where Postgres enforces tenant isolation (`postgres.TxTenant`). A tenant is one account's data in the shared database. Integration tests prove it. Some work runs under `postgres.TxBypass`, where RLS does not apply, and those queries must filter by tenant themselves. A test ([`txbypass_allowlist_test.go`](../internal/arch/txbypass_allowlist_test.go)) fails when code adds a new use without listing it:
+  - background jobs, and the metrics that count their queues;
   - sign-in, sessions, API key lookup and creating an account;
   - public links, such as the hosted invoice page;
   - incoming webhooks;
-  - two signed-in areas: Stripe credential settings (`internal/tenantstripe`) and team members and invites (`internal/dashmembers`).
+  - two signed-in areas: Stripe credential settings (`internal/tenantstripe`) and team members and invites (`internal/dashmembers`);
+  - `velox-bench-seed`, which sets up a database for a benchmark.
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
 - **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: the database refuses any change or delete in it.

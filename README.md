@@ -112,7 +112,7 @@ Small AI teams kept running into the same gaps. Velox is built for them.
 
 Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Every claim above has a source in [Why Velox exists](docs/why-velox.md), and [How it compares](docs/comparison.md) lists where the other projects are ahead.
 
-**Pre-1.0.** Velox is young: one maintainer, Stripe and cards only, no SDKs yet. Until 1.0.0, breaking API changes land on minor releases ([versioning before 1.0](docs/versioning.md)).
+**Pre-1.0.** Velox is young: one maintainer, Stripe and cards only, no SDKs yet. Until 1.0.0, a minor release can break the API, and a patch release can change something you rely on ([versioning before 1.0](docs/versioning.md)).
 
 ---
 

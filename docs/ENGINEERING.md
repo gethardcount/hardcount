@@ -32,7 +32,7 @@ comes with its proof and a link to where you can check it.
 
 These run on every pull request and every push to main:
 
-- **Tenant isolation:** tests fail if a query reaches another tenant's rows ([`rls_isolation_test.go`](../internal/platform/postgres/rls_isolation_test.go)).
+- **Tenant isolation:** tests check the RLS policies ([`rls_isolation_test.go`](../internal/platform/postgres/rls_isolation_test.go)). Code that skips RLS (`TxBypass`) fails a test until it is listed ([`txbypass_allowlist_test.go`](../internal/arch/txbypass_allowlist_test.go)).
 - **One auto-charge per invoice:** when two claimers race, exactly one wins ([`auto_charge_claim_integration_test.go`](../internal/invoice/auto_charge_claim_integration_test.go)).
 - **Package boundaries:** a new import between domain packages fails until it is allowlisted ([`boundaries_test.go`](../internal/arch/boundaries_test.go)).
 - **Test-clock time:** a bare `time.Now()` in clock-aware packages fails lint unless the line says why ([`.golangci.yml`](../.golangci.yml)).
