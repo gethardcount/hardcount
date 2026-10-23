@@ -88,6 +88,68 @@ func TestThresholdInAdvanceBase_FireThenCloseBillsEveryMonth(t *testing.T) {
 	}
 }
 
+// TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays: a spend
+// threshold must not change what the base fee costs. A subscription starts
+// April 1 on a 3000c in_arrears base. Canceled at once on April 25 with no
+// threshold, it pays 24 of 30 days: 2400c. With a threshold that fired on
+// April 20, the same cancel must also bill 2400c of base, in all.
+//
+// Before the fix the fire billed the full month's base (3000c) and the
+// cancel billed none, so the threshold cost the customer 600c more.
+func TestThresholdInArrearsBase_FireThenCancelBillsTheUsedDays(t *testing.T) {
+	skipShort(t)
+	cancelAt := lagP0.AddDate(0, 0, 24)
+
+	control := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
+	peak := control.newMeter("peak", "max")
+	control.newSub("ctl", control.planWith("plan_p", 3000, control.meterID, peak), lagP0, nil)
+	control.cancelNow(cancelAt)
+	var want int64
+	for _, i := range control.invoices() {
+		want += i.sum("base_fee")
+	}
+	if want != 2400 {
+		control.logInvoices(control.invoices())
+		t.Fatalf("control: an immediate cancel on April 25 billed %dc of base, want 2400c (24 of 30 days)", want)
+	}
+
+	r, _, _ := keepAnchorFired(t)
+	r.cancelNow(cancelAt)
+	var got int64
+	invs := r.invoices()
+	for _, i := range invs {
+		got += i.sum("base_fee")
+		if i.reason == string(domain.BillingReasonThreshold) && i.sum("base_fee") != 0 {
+			t.Errorf("threshold invoice billed base %dc, want 0c: the base is billed by the period's own invoice", i.sum("base_fee"))
+		}
+	}
+	if got != want {
+		r.logInvoices(invs)
+		t.Errorf("fire on April 20, cancel on April 25: base billed %dc in all, want %dc (the same as without the threshold)", got, want)
+	}
+}
+
+// TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose: after a fire,
+// the April close bills April's whole in_arrears base, once. The threshold
+// invoice bills usage only.
+func TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose(t *testing.T) {
+	skipShort(t)
+	r, _, _ := keepAnchorFired(t)
+	r.run(lagB.Add(2 * time.Hour))
+	invs := r.invoices()
+	var total int64
+	for _, i := range invs {
+		total += i.sum("base_fee")
+		if i.reason == string(domain.BillingReasonThreshold) && i.sum("base_fee") != 0 {
+			t.Errorf("threshold invoice billed base %dc, want 0c", i.sum("base_fee"))
+		}
+	}
+	if got := r.cycleInvoice(invs, lagP0).sum("base_fee"); got != 3000 || total != 3000 {
+		r.logInvoices(invs)
+		t.Errorf("April close billed base %dc (%dc in all), want 3000c on the close and 3000c in all", got, total)
+	}
+}
+
 // TestThresholdKeepAnchor_InvoicesUnchanged is the control for the removal:
 // what a spend threshold bills when it keeps the anchor must not change by a
 // single byte. Each case drives the real server and writes every invoice of

@@ -361,11 +361,13 @@ func TestEvaluateThresholds_InAdvanceBaseExcluded(t *testing.T) {
 	}
 }
 
-// TestEvaluateThresholds_InArrearsBaseIncluded is the control: an in_arrears
-// base fee is NOT prepaid, so it must still count toward the running total and
-// appear on the early-finalize line items.
-func TestEvaluateThresholds_InArrearsBaseIncluded(t *testing.T) {
-	// The full in_arrears base counts.
+// TestEvaluateThresholds_InArrearsBaseExcluded: a threshold counts and
+// bills usage only. An in_arrears base fee neither counts toward the running
+// total nor rides the threshold invoice; the period's own invoice (its close
+// or an immediate cancel) bills it, prorated as it would be without a fire.
+// When the fire billed the full base, a cancel after it charged the whole
+// month's base for part of a month.
+func TestEvaluateThresholds_InArrearsBaseExcluded(t *testing.T) {
 	thresholds := &domain.BillingThresholds{
 		AmountGTE: 100000,
 	}
@@ -380,19 +382,38 @@ func TestEvaluateThresholds_InArrearsBaseIncluded(t *testing.T) {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
 
-	// $49 base (4900) + 1000 calls × 100 cents (100000) = 104900.
-	wantSubtotal := int64(4900 + 1000*100)
+	// 1000 calls × 100 cents = 100000; the $49 base is not counted.
+	wantSubtotal := int64(1000 * 100)
 	if eval.RunningSubtotal != wantSubtotal {
-		t.Errorf("running subtotal: got %d, want %d (in_arrears base must be included)", eval.RunningSubtotal, wantSubtotal)
+		t.Errorf("running subtotal: got %d, want %d (usage only, the in_arrears base excluded)", eval.RunningSubtotal, wantSubtotal)
 	}
-	var baseFeeLines int
+	if eval.BilledSubtotal != wantSubtotal {
+		t.Errorf("billed subtotal: got %d, want %d", eval.BilledSubtotal, wantSubtotal)
+	}
 	for _, li := range eval.LineItems {
 		if li.LineType == domain.LineTypeBaseFee {
-			baseFeeLines++
+			t.Errorf("threshold line items carry a base fee (%dc), want none", li.AmountCents)
 		}
 	}
-	if baseFeeLines != 1 {
-		t.Errorf("base_fee line items: got %d, want 1", baseFeeLines)
+}
+
+// TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross: a cap below the
+// base fee, with no usage yet, does not fire. Counting the base made such a
+// cap fire on the first scan of every period, billing the base in advance.
+func TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross(t *testing.T) {
+	thresholds := &domain.BillingThresholds{
+		AmountGTE: 4000, // below the $49 base
+	}
+	engine, _, _ := setupThresholdEngineWithTiming(thresholds, 0, domain.BillInArrears)
+
+	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
+	periodStart := *sub.CurrentBillingPeriodStart
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatalf("evaluateThresholds: %v", err)
+	}
+	if eval.CrossedAny || eval.RunningSubtotal != 0 {
+		t.Errorf("crossed=%v running=%d with no usage, want not crossed and 0", eval.CrossedAny, eval.RunningSubtotal)
 	}
 }
 
