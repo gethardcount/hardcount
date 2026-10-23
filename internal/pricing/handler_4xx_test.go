@@ -100,3 +100,28 @@ func TestPricingHandler_NotFound_Returns404(t *testing.T) {
 		})
 	}
 }
+
+// A pricing rule has no aggregation of its own (ADR-130 §2): a request that
+// still sends aggregation_mode is refused by name, not silently ignored, and
+// nothing is written. A meter is created by event_name; the old key field is
+// refused the same way when it is the only name given.
+func TestPricingHandler_RemovedMeterFieldsRefused(t *testing.T) {
+	store := newMemStore()
+	h := NewHandler(NewService(store))
+	rr := doJSON(t, h.upsertMeterPricingRule, http.MethodPost, "/",
+		`{"rating_rule_version_id": "vlx_rrv_x", "aggregation_mode": "max"}`, map[string]string{"meter_id": "vlx_mtr_x"})
+	if rr.Code != http.StatusUnprocessableEntity || !bytes.Contains(rr.Body.Bytes(), []byte(`aggregation_mode`)) {
+		t.Errorf("rule with aggregation_mode: got %d %s, want 422 naming aggregation_mode", rr.Code, rr.Body.String())
+	}
+	if len(store.meterRules) != 0 {
+		t.Errorf("a refused rule was written: %+v", store.meterRules)
+	}
+
+	rr = doJSON(t, h.createMeter, http.MethodPost, "/", `{"key": "calls", "name": "Calls"}`, nil)
+	if rr.Code != http.StatusUnprocessableEntity || !bytes.Contains(rr.Body.Bytes(), []byte(`event_name`)) {
+		t.Errorf("meter with key and no event_name: got %d %s, want 422 naming event_name", rr.Code, rr.Body.String())
+	}
+	if len(store.meters) != 0 {
+		t.Errorf("a refused meter was written: %+v", store.meters)
+	}
+}

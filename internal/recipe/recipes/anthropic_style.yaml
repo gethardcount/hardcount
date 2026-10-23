@@ -1,5 +1,5 @@
 key: anthropic_style
-version: 6.0.0
+version: 7.0.0
 name: Anthropic (Claude) token pricing
 summary: |
   Ready-made pricing for reselling Claude (Anthropic) API access. Bills each
@@ -43,7 +43,7 @@ overridable:
     pattern: '^[a-z][a-z0-9_]*$'
 
 meters:
-  - key: tokens
+  - event_name: tokens
     name: Tokens
     unit: tokens
     aggregation: sum
@@ -747,485 +747,390 @@ pricing_rules:
   - meter: tokens
     rating_rule: opus45_input
     dimension_match: { model: claude-opus-4.5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus45_output
     dimension_match: { model: claude-opus-4.5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus45_cache_read
     dimension_match: { model: claude-opus-4.5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus45_cache_write_5m
     dimension_match: { model: claude-opus-4.5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus45_cache_write_1h
     dimension_match: { model: claude-opus-4.5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
   - meter: tokens
     rating_rule: sonnet45_input
     dimension_match: { model: claude-sonnet-4.5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet45_output
     dimension_match: { model: claude-sonnet-4.5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet45_cache_read
     dimension_match: { model: claude-sonnet-4.5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet45_cache_write_5m
     dimension_match: { model: claude-sonnet-4.5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet45_cache_write_1h
     dimension_match: { model: claude-sonnet-4.5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
   - meter: tokens
     rating_rule: haiku45_input
     dimension_match: { model: claude-haiku-4.5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku45_output
     dimension_match: { model: claude-haiku-4.5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku45_cache_read
     dimension_match: { model: claude-haiku-4.5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku45_cache_write_5m
     dimension_match: { model: claude-haiku-4.5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku45_cache_write_1h
     dimension_match: { model: claude-haiku-4.5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
   - meter: tokens
     rating_rule: c35_sonnet_input
     dimension_match: { model: claude-3.5-sonnet, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: c35_sonnet_output
     dimension_match: { model: claude-3.5-sonnet, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: c35_sonnet_cache_read
     dimension_match: { model: claude-3.5-sonnet, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: c35_sonnet_cache_write_5m
     dimension_match: { model: claude-3.5-sonnet, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: c35_sonnet_cache_write_1h
     dimension_match: { model: claude-3.5-sonnet, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
   - meter: tokens
     rating_rule: opus_input
     dimension_match: { model: claude-3-opus, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus_output
     dimension_match: { model: claude-3-opus, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus_cache_read
     dimension_match: { model: claude-3-opus, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus_cache_write_5m
     dimension_match: { model: claude-3-opus, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus_cache_write_1h
     dimension_match: { model: claude-3-opus, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
   - meter: tokens
     rating_rule: sonnet_input
     dimension_match: { model: claude-3-sonnet, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet_output
     dimension_match: { model: claude-3-sonnet, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet_cache_read
     dimension_match: { model: claude-3-sonnet, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet_cache_write_5m
     dimension_match: { model: claude-3-sonnet, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet_cache_write_1h
     dimension_match: { model: claude-3-sonnet, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
   - meter: tokens
     rating_rule: haiku_input
     dimension_match: { model: claude-3-haiku, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku_output
     dimension_match: { model: claude-3-haiku, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku_cache_read
     dimension_match: { model: claude-3-haiku, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku_cache_write_5m
     dimension_match: { model: claude-3-haiku, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku_cache_write_1h
     dimension_match: { model: claude-3-haiku, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
 
   - meter: tokens
     rating_rule: fable5_input
     dimension_match: { model: claude-fable-5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable5_output
     dimension_match: { model: claude-fable-5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable5_cache_read
     dimension_match: { model: claude-fable-5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable5_cache_write_5m
     dimension_match: { model: claude-fable-5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable5_cache_write_1h
     dimension_match: { model: claude-fable-5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos5_input
     dimension_match: { model: claude-mythos-5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos5_output
     dimension_match: { model: claude-mythos-5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos5_cache_read
     dimension_match: { model: claude-mythos-5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos5_cache_write_5m
     dimension_match: { model: claude-mythos-5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos5_cache_write_1h
     dimension_match: { model: claude-mythos-5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus5_input
     dimension_match: { model: claude-opus-5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus5_output
     dimension_match: { model: claude-opus-5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus5_cache_read
     dimension_match: { model: claude-opus-5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus5_cache_write_5m
     dimension_match: { model: claude-opus-5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus5_cache_write_1h
     dimension_match: { model: claude-opus-5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus48_input
     dimension_match: { model: claude-opus-4.8, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus48_output
     dimension_match: { model: claude-opus-4.8, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus48_cache_read
     dimension_match: { model: claude-opus-4.8, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus48_cache_write_5m
     dimension_match: { model: claude-opus-4.8, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus48_cache_write_1h
     dimension_match: { model: claude-opus-4.8, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus47_input
     dimension_match: { model: claude-opus-4.7, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus47_output
     dimension_match: { model: claude-opus-4.7, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus47_cache_read
     dimension_match: { model: claude-opus-4.7, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus47_cache_write_5m
     dimension_match: { model: claude-opus-4.7, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus47_cache_write_1h
     dimension_match: { model: claude-opus-4.7, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus46_input
     dimension_match: { model: claude-opus-4.6, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus46_output
     dimension_match: { model: claude-opus-4.6, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus46_cache_read
     dimension_match: { model: claude-opus-4.6, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus46_cache_write_5m
     dimension_match: { model: claude-opus-4.6, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus46_cache_write_1h
     dimension_match: { model: claude-opus-4.6, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet5_input
     dimension_match: { model: claude-sonnet-5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet5_output
     dimension_match: { model: claude-sonnet-5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet5_cache_read
     dimension_match: { model: claude-sonnet-5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet5_cache_write_5m
     dimension_match: { model: claude-sonnet-5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet5_cache_write_1h
     dimension_match: { model: claude-sonnet-5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet46_input
     dimension_match: { model: claude-sonnet-4.6, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet46_output
     dimension_match: { model: claude-sonnet-4.6, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet46_cache_read
     dimension_match: { model: claude-sonnet-4.6, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet46_cache_write_5m
     dimension_match: { model: claude-sonnet-4.6, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet46_cache_write_1h
     dimension_match: { model: claude-sonnet-4.6, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus41_input
     dimension_match: { model: claude-opus-4.1, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus41_output
     dimension_match: { model: claude-opus-4.1, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus41_cache_read
     dimension_match: { model: claude-opus-4.1, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus41_cache_write_5m
     dimension_match: { model: claude-opus-4.1, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus41_cache_write_1h
     dimension_match: { model: claude-opus-4.1, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus4_input
     dimension_match: { model: claude-opus-4, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus4_output
     dimension_match: { model: claude-opus-4, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus4_cache_read
     dimension_match: { model: claude-opus-4, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus4_cache_write_5m
     dimension_match: { model: claude-opus-4, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus4_cache_write_1h
     dimension_match: { model: claude-opus-4, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet4_input
     dimension_match: { model: claude-sonnet-4, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet4_output
     dimension_match: { model: claude-sonnet-4, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet4_cache_read
     dimension_match: { model: claude-sonnet-4, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet4_cache_write_5m
     dimension_match: { model: claude-sonnet-4, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet4_cache_write_1h
     dimension_match: { model: claude-sonnet-4, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku35_input
     dimension_match: { model: claude-3.5-haiku, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku35_output
     dimension_match: { model: claude-3.5-haiku, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku35_cache_read
     dimension_match: { model: claude-3.5-haiku, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku35_cache_write_5m
     dimension_match: { model: claude-3.5-haiku, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku35_cache_write_1h
     dimension_match: { model: claude-3.5-haiku, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
   # Claude Haiku 5.5 rules name context_tier, which the LiteLLM mapper sets
@@ -1234,152 +1139,122 @@ pricing_rules:
   - meter: tokens
     rating_rule: fable51_input
     dimension_match: { model: claude-fable-5.1, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable51_output
     dimension_match: { model: claude-fable-5.1, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable51_cache_read
     dimension_match: { model: claude-fable-5.1, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable51_cache_write_5m
     dimension_match: { model: claude-fable-5.1, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: fable51_cache_write_1h
     dimension_match: { model: claude-fable-5.1, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos51_input
     dimension_match: { model: claude-mythos-5.1, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos51_output
     dimension_match: { model: claude-mythos-5.1, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos51_cache_read
     dimension_match: { model: claude-mythos-5.1, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos51_cache_write_5m
     dimension_match: { model: claude-mythos-5.1, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: mythos51_cache_write_1h
     dimension_match: { model: claude-mythos-5.1, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus55_input
     dimension_match: { model: claude-opus-5.5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus55_output
     dimension_match: { model: claude-opus-5.5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus55_cache_read
     dimension_match: { model: claude-opus-5.5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus55_cache_write_5m
     dimension_match: { model: claude-opus-5.5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: opus55_cache_write_1h
     dimension_match: { model: claude-opus-5.5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet55_input
     dimension_match: { model: claude-sonnet-5.5, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet55_output
     dimension_match: { model: claude-sonnet-5.5, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet55_cache_read
     dimension_match: { model: claude-sonnet-5.5, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet55_cache_write_5m
     dimension_match: { model: claude-sonnet-5.5, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: sonnet55_cache_write_1h
     dimension_match: { model: claude-sonnet-5.5, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_std_input
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_std_output
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_std_cache_read
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_std_cache_write_5m
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_std_cache_write_1h
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_long_input
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: input }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_long_output
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: output }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_long_cache_read
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_read }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_long_cache_write_5m
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_write_5m }
-    aggregation_mode: sum
     priority: 100
   - meter: tokens
     rating_rule: haiku55_long_cache_write_1h
     dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_write_1h }
-    aggregation_mode: sum
     priority: 100
 
 plans:

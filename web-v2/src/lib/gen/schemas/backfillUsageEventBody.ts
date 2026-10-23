@@ -13,7 +13,7 @@ import type { BackfillUsageEventBodyProperties } from './backfillUsageEventBodyP
 export type BackfillUsageEventBody = {
   /** The customer's external_id (your identifier), not the internal vlx_cus_ id. */
   external_customer_id: string;
-  /** The meter key (e.g. "tokens"). */
+  /** The meter's `event_name` (e.g. "tokens"). */
   event_name: string;
   /** Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections. */
   quantity?: number | string;

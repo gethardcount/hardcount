@@ -26,10 +26,10 @@ type CustomerLookup interface {
 }
 
 // MeterLookup is the narrow surface the adapter uses to resolve the
-// meter_key ("tokens_input" / "tokens_output") to a Velox internal
+// event_name ("tokens_input" / "tokens_output") to a Velox internal
 // meter_id. Implemented by *pricing.Service.
 type MeterLookup interface {
-	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
+	GetMeterByEventName(ctx context.Context, tenantID, key string) (domain.Meter, error)
 }
 
 // Ingester is the narrow surface the adapter calls to persist one call's
@@ -134,7 +134,7 @@ type SpendRowError struct {
 // Flow:
 //  1. Decode body; normalize single | batch to []StandardLoggingPayload
 //  2. For each payload: MapPayload → the call's events, or a skip
-//  3. Resolve external_customer_id + meter_key once for the call
+//  3. Resolve external_customer_id + event_name once for the call
 //  4. Write the call in one transaction (usage.Service.IngestCall, or
 //     HoldCall when the customer or meter does not exist yet), idempotent
 //     via the usage_events UNIQUE (tenant_id, livemode, idempotency_key) —
@@ -265,7 +265,7 @@ func (h *Handler) persist(ctx context.Context, tenantID string, m Mapping) (call
 		}
 		return callOutcome{}, fmt.Errorf("%w: customer lookup: %w", errIngestUnavailable, err)
 	}
-	meter, err := h.meters.GetMeterByKey(ctx, tenantID, first.MeterKey)
+	meter, err := h.meters.GetMeterByEventName(ctx, tenantID, first.EventName)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return h.hold(ctx, tenantID, m, domain.HeldReasonMeterNotFound)
@@ -305,7 +305,7 @@ func (h *Handler) hold(ctx context.Context, tenantID string, m Mapping, reason d
 	res, err := h.holder.HoldCall(ctx, tenantID, usage.HoldCallInput{
 		Source:             domain.HeldUsageSourceLiteLLM,
 		ExternalCustomerID: first.ExternalCustomerID,
-		MeterKey:           first.MeterKey,
+		EventName:          first.EventName,
 		Reason:             reason,
 		Events:             callEvents(m.Events),
 		Legacy:             callEvents(m.Legacy),

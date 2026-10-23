@@ -7,7 +7,6 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { MeterPricingRuleAggregationMode } from './meterPricingRuleAggregationMode';
 import type { MeterPricingRuleDimensionMatch } from './meterPricingRuleDimensionMatch';
 
 export interface MeterPricingRule {
@@ -15,9 +14,8 @@ export interface MeterPricingRule {
   tenant_id?: string;
   meter_id: string;
   rating_rule_version_id: string;
-  /** Dimensions an event must have for this rule to bill it. `{}` matches every event. */
+  /** Dimensions an event must have for this rule to bill it. `{}` matches every event. The rule bills them under the meter's `aggregation`. */
   dimension_match: MeterPricingRuleDimensionMatch;
-  aggregation_mode: MeterPricingRuleAggregationMode;
   /** Rules are tried highest first. */
   priority: number;
   created_at: string;

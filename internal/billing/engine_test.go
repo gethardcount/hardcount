@@ -752,7 +752,7 @@ type mockUsage struct {
 	// Missing keys fall back to totals.
 	perInterval map[string]int64
 	// ruleAggs lets multi-dim tests stub per-pricing-rule buckets the way
-	// the real AggregateByPricingRules returns them (one RuleAggregation
+	// the real AggregateClaims returns them (one RuleAggregation
 	// per claimed rule). Keyed by meterID; when unset, the legacy
 	// single-bucket fallback below applies.
 	ruleAggs map[string][]domain.RuleAggregation
@@ -793,12 +793,12 @@ func (m *mockUsage) AggregateForBillingPeriodByAgg(_ context.Context, _, _ strin
 	return result, nil
 }
 
-// AggregateByPricingRules is a minimal stub — engine_test.go's existing
+// AggregateClaims is a minimal stub — engine_test.go's existing
 // preview tests don't exercise the multi-dim path; the create_preview
 // integration tests cover that against real Postgres. We return one
 // aggregation per known meter so the new preview path produces the same
 // totals the legacy tests expect.
-func (m *mockUsage) AggregateByPricingRules(_ context.Context, _, _, meterID string, _ domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error) {
+func (m *mockUsage) AggregateClaims(_ context.Context, _, _, meterID, _ string, _ []domain.UsageClaim, from, to time.Time) ([]domain.RuleAggregation, error) {
 	if aggs, ok := m.ruleAggsByWindow[mockIntervalKey(meterID, from, to)]; ok {
 		return aggs, nil
 	}
@@ -826,7 +826,7 @@ type mockPricing struct {
 	// failure must ABORT the close, never bill list price; ADR-070).
 	overrideErr error
 	// meterPricingRules drives the multi-dim fork (ADR-044): meters with
-	// entries here take the AggregateByPricingRules path. Keyed by meterID;
+	// entries here take the AggregateClaims path. Keyed by meterID;
 	// nil/missing keeps the meter on the legacy single-rule path.
 	meterPricingRules map[string][]domain.MeterPricingRule
 }

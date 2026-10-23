@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
@@ -135,7 +134,7 @@ func timeLiveRead(t *testing.T, events int) {
 	} {
 		rule := lf.seededRule(t, lf.ctx)
 		if _, err := lf.pricingSvc.UpsertMeterPricingRule(lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-			MeterID: lf.meterID, RatingRuleVersionID: rule.ID, DimensionMatch: m, AggregationMode: domain.AggSum,
+			MeterID: lf.meterID, RatingRuleVersionID: rule.ID, DimensionMatch: m,
 		}); err != nil {
 			t.Fatalf("pricing rule %v: %v", m, err)
 		}

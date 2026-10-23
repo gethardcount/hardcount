@@ -2753,15 +2753,20 @@ export const getPatchV1MetersIdUrl = (id: string,) => {
  * unmatched usage); pass an empty string to clear it. The rule must
  * exist on the tenant.
  *
+ * `aggregation` can change until the meter has usage, then it is
+ * fixed: a change is refused with 409 `meter_has_usage`, because the
+ * usage so far was counted under the aggregation it has. Make a new
+ * meter to count differently. Usage is a usage event of the meter, or
+ * a held usage row for its `event_name` that is still held.
+ *
  * While a draft, trialing or active subscription uses the meter,
- * changing `aggregation`, pointing the default at another rating
- * rule, or clearing it is refused with 409 `meter_in_use`: the
- * change would reprice the billing period already open. A first
- * default, or another version of the same rating rule, is allowed. To
- * change a rate, publish a new version of the rating rule; it applies
- * from each subscription's next period (on a test clock, it can apply
- * to the current simulated period). `name` and `unit` can always
- * change.
+ * pointing the default at another rating rule, or clearing it, is
+ * refused with 409 `meter_in_use`: the change would reprice the
+ * billing period already open. A first default, or another version of
+ * the same rating rule, is allowed. To change a rate, publish a new
+ * version of the rating rule; it applies from each subscription's next
+ * period (on a test clock, it can apply to the current simulated
+ * period). `name` and `unit` can always change.
  * @summary Update meter (incl. the default rating-rule binding)
  */
 export const patchV1MetersId = async (id: string,
@@ -3042,9 +3047,10 @@ export const getUpsertMeterPricingRuleUrl = (meterId: string,) => {
  * Binds a rating rule to the part of the meter's usage whose dimensions
  * match `dimension_match`. The rule is identified by the meter and
  * `rating_rule_version_id`: posting the same pair again updates
- * `dimension_match`, `aggregation_mode` and `priority` on the existing
- * rule and keeps its id. Both cases return 201. The meter id in the
- * path is used; a `meter_id` in the body is ignored.
+ * `dimension_match` and `priority` on the existing rule and keeps its
+ * id. Both cases return 201. The meter id in the path is used; a
+ * `meter_id` in the body is ignored. A rule has no aggregation of its
+ * own: it bills its events under the meter's `aggregation`.
  *
  * While a draft, trialing or active subscription uses the meter, the
  * change must not reprice the billing period already open, or it is
@@ -7907,7 +7913,7 @@ export const getListHeldUsageUrl = () => {
  * Usage rows the LiteLLM integration received for a customer or meter
  * that did not exist yet. They are kept with their idempotency keys,
  * not billed, until you release or discard them. Grouped by external
- * customer ID, meter key and reason, most recent arrival first. Lists
+ * customer ID, event name and reason, most recent arrival first. Lists
  * the 200 external customer IDs with the most recent arrivals, with
  * every group for each; `total_customers` and `total_rows` count all
  * held rows, listed or not. Requires usage read permission.

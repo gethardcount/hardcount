@@ -66,10 +66,10 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 					{UpTo: 0, UnitAmountCents: decimal.RequireFromString("0.5")},
 				}))
 				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-					MeterID: lf.meterID, RatingRuleVersionID: pkg.ID, DimensionMatch: map[string]any{"model": "a"}, AggregationMode: domain.AggSum, Priority: 10,
+					MeterID: lf.meterID, RatingRuleVersionID: pkg.ID, DimensionMatch: map[string]any{"model": "a"}, Priority: 10,
 				})
 				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-					MeterID: lf.meterID, RatingRuleVersionID: grad.ID, DimensionMatch: map[string]any{"model": "b"}, AggregationMode: domain.AggSum, Priority: 10,
+					MeterID: lf.meterID, RatingRuleVersionID: grad.ID, DimensionMatch: map[string]any{"model": "b"}, Priority: 10,
 				})
 			},
 			events: []event{

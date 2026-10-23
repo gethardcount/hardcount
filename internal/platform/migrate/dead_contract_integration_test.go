@@ -267,7 +267,10 @@ func TestDeadContract_UpNarrowsAndDownRestores(t *testing.T) {
 	if err := up(ctx, dsn, migrationFiles()); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if err := deadContractExec(ctx, db, deadContractSeed); err != nil {
+	// The seed is written for the schema before 00208, which names a
+	// meter's key event_name.
+	seed := strings.Replace(deadContractSeed, "INSERT INTO meters (id, tenant_id, key, name)", "INSERT INTO meters (id, tenant_id, event_name, name)", 1)
+	if err := deadContractExec(ctx, db, seed); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 

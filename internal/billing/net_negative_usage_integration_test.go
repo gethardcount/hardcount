@@ -82,7 +82,7 @@ func seatsMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key stri
 		t.Fatalf("create rule: %v", err)
 	}
 	m, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: key, Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: rr.ID,
+		EventName: key, Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: rr.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)

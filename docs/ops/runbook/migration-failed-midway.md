@@ -75,6 +75,34 @@ row that holds one was written outside Velox, for example by hand in
 **Fix:** find the rows the error lists. Set each to a value that is true
 for it, or delete it if nothing needs it. Then run `velox migrate` again.
 
+## 00208 found pricing rules that aggregate differently
+
+**Symptom:**
+
+```
+migration 00208_meter_one_aggregation.sql failed: ERROR: migration 00208 gives each meter one aggregation for all its pricing rules, and this database has rows it cannot keep as they bill:
+  2 pricing rule(s) whose aggregation_mode is not their meter's aggregation
+```
+
+**Why:** from this release a meter has one aggregation, and every pricing
+rule of the meter bills under it. A rule whose own mode differed from its
+meter's aggregation, or was `last_ever`, would bill differently, so the
+migration stops instead of converting it. Nothing was changed. This
+release has no upgrade path from Velox 0.8.x, so a production database
+never reaches this step: install fresh (see the v0.9.0 release notes).
+
+**Fix:** on a development database, find the rules (as the database owner,
+with `SET LOCAL app.bypass_rls = 'on'` in a transaction):
+
+```sql
+SELECT r.id, r.meter_id, r.aggregation_mode, m.aggregation
+FROM meter_pricing_rules r JOIN meters m ON m.id = r.meter_id
+WHERE r.aggregation_mode IS DISTINCT FROM CASE m.aggregation WHEN 'last' THEN 'last_during_period' ELSE m.aggregation END;
+```
+
+Delete each rule, or put it on a meter with the aggregation it needs. Then
+run `velox migrate` again. Or re-create the database.
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).

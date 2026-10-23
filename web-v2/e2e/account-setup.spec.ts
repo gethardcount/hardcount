@@ -21,11 +21,12 @@ interface RatingRule {
 }
 interface Meter {
   id: string
-  key: string
+  event_name: string
   name: string
   unit: string
   aggregation: string
   rating_rule_version_id?: string
+  has_usage?: boolean
 }
 interface PlanDetail extends Plan {
   currency: string
@@ -118,7 +119,7 @@ test('create a price, a meter that bills at it, and a plan with both; a meter wi
   const planCode = `e2e-ui-plan-${id}`
   // Usage on a meter with no price would bill nothing, so a plan refuses it
   // (ADR-096).
-  const unpriced = await api<Meter>('POST', '/meters', { key: `e2e_unpriced_${id}`, name: `E2E Unpriced ${id}`, unit: 'call', aggregation: 'sum' })
+  const unpriced = await api<Meter>('POST', '/meters', { event_name: `e2e_unpriced_${id}`, name: `E2E Unpriced ${id}`, unit: 'call', aggregation: 'sum' })
 
   // A flat price of $0.002 per unit.
   await page.goto('/pricing?tab=rules')
@@ -144,9 +145,9 @@ test('create a price, a meter that bills at it, and a plan with both; a meter wi
   await page.getByRole('button', { name: 'Add Meter' }).click()
   const meterDialog = page.getByRole('dialog', { name: 'Create meter' })
   await field(meterDialog, 'Name').getByRole('textbox').fill(meterName)
-  await field(meterDialog, 'Key').getByRole('textbox').fill(meterKey)
+  await field(meterDialog, 'Event name').getByRole('textbox').fill(meterKey)
   await field(meterDialog, 'Unit Label').getByRole('textbox').fill('call')
-  await expect(meterDialog.getByText('Add up all values in the billing period', { exact: true })).toBeVisible()
+  await expect(meterDialog.getByText('Adds up the event values in the billing period. Fixed once the meter has usage.', { exact: true })).toBeVisible()
   await meterDialog.getByRole('button', { name: 'None (assign later)' }).click()
   await pick(page, priceName, `${priceName} — $0.002 / call`)
   const creatingMeter = apiCall(page, 'POST', /\/meters$/)
@@ -154,7 +155,7 @@ test('create a price, a meter that bills at it, and a plan with both; a meter wi
   const meterRes = await creatingMeter
   expect(meterRes.status()).toBe(201)
   const meter = (await meterRes.json()) as Meter
-  expect([meter.key, meter.name, meter.unit, meter.aggregation, meter.rating_rule_version_id]).toEqual([meterKey, meterName, 'call', 'sum', rule.id])
+  expect([meter.event_name, meter.name, meter.unit, meter.aggregation, meter.rating_rule_version_id, meter.has_usage]).toEqual([meterKey, meterName, 'call', 'sum', rule.id, false])
   await expect(toasts(page).getByText('Meter created', { exact: true })).toBeVisible()
   await expect(page).toHaveURL(new RegExp(`/meters/${meter.id}$`))
   await expect(page.getByRole('heading', { level: 1, name: meterName, exact: true })).toBeVisible()
@@ -173,7 +174,7 @@ test('create a price, a meter that bills at it, and a plan with both; a meter wi
   await planDialog.getByLabel('Code', { exact: true }).fill(planCode)
   await field(planDialog, /^Base Price/).getByRole('spinbutton').fill('29.00')
   await planDialog.getByRole('checkbox', { name: new RegExp(meterKey) }).check()
-  await planDialog.getByRole('checkbox', { name: new RegExp(unpriced.key) }).check()
+  await planDialog.getByRole('checkbox', { name: new RegExp(unpriced.event_name) }).check()
   const refusing = apiCall(page, 'POST', /\/plans$/)
   await planDialog.getByRole('button', { name: 'Create plan' }).click()
   const refusal = await refusing
@@ -186,7 +187,7 @@ test('create a price, a meter that bills at it, and a plan with both; a meter wi
   expect((await api<{ data: Plan[] }>('GET', '/plans')).data.filter(p => p.code === planCode)).toEqual([])
 
   // Without it, the plan is made with the priced meter.
-  await planDialog.getByRole('checkbox', { name: new RegExp(unpriced.key) }).uncheck()
+  await planDialog.getByRole('checkbox', { name: new RegExp(unpriced.event_name) }).uncheck()
   const creatingPlan = apiCall(page, 'POST', /\/plans$/)
   await planDialog.getByRole('button', { name: 'Create plan' }).click()
   const planRes = await creatingPlan
@@ -237,13 +238,46 @@ async function advancePastFirstPeriod(clock: TestClock) {
   await waitForClockReady(clock.id)
 }
 
+// A meter's aggregation is fixed once the meter has usage (ADR-130 §2). The
+// meter page says so before any edit, and the edit dialog then offers the
+// aggregation read-only; before the first event it can change.
+test('the meter page shows the aggregation lock before an edit: free with no usage, fixed once usage arrives', async ({ page }) => {
+  const id = uniq()
+  const rule = await api<RatingRule>('POST', '/rating-rules', {
+    rule_key: `e2e_lock_${id}`, name: `E2E Lock price ${id}`, mode: 'flat', currency: 'USD', flat_amount_cents: '1',
+  })
+  const meter = await api<Meter>('POST', '/meters', {
+    event_name: `e2e_lock_${id}`, name: `E2E Lock ${id}`, unit: 'call', aggregation: 'sum', rating_rule_version_id: rule.id,
+  })
+  expect(meter.has_usage).toBe(false)
+
+  await page.goto(`/meters/${meter.id}`)
+  const lock = page.getByTestId('meter-aggregation-lock')
+  await expect(lock).toHaveText('Adds up the event values in the billing period. The aggregation can change until this meter has usage.')
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  let dialog = page.getByRole('dialog', { name: 'Edit meter' })
+  await expect(dialog.getByRole('combobox', { name: 'Aggregation' })).toBeEnabled()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  const customer = await createCustomer()
+  await api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: meter.event_name, quantity: '3', idempotency_key: `e2e_${uniq()}` })
+  expect((await api<Meter>('GET', `/meters/${meter.id}`)).has_usage).toBe(true)
+
+  await page.reload()
+  await expect(lock).toHaveText('Adds up the event values in the billing period. This meter has usage, so its aggregation is fixed. Make a new meter to count differently.')
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: 'Edit meter' })
+  await expect(dialog.getByRole('combobox', { name: 'Aggregation' })).toBeDisabled()
+  await expect(dialog.getByText('This meter has usage, so its aggregation is fixed. Make a new meter to count differently.', { exact: true })).toBeVisible()
+})
+
 test('a price override for one customer: the upcoming invoice bills the negotiated rate while it lasts, and the list rate once it ends', async ({ page }) => {
   const id = uniq()
   const rule = await api<RatingRule>('POST', '/rating-rules', {
     rule_key: `e2e_deal_${id}`, name: `E2E Deal price ${id}`, mode: 'flat', currency: 'USD', flat_amount_cents: '2',
   })
   const meter = await api<Meter>('POST', '/meters', {
-    key: `e2e_deal_${id}`, name: `E2E Deal calls ${id}`, unit: 'call', aggregation: 'sum', rating_rule_version_id: rule.id,
+    event_name: `e2e_deal_${id}`, name: `E2E Deal calls ${id}`, unit: 'call', aggregation: 'sum', rating_rule_version_id: rule.id,
   })
   const plan = await api<Plan>('POST', '/plans', {
     code: `e2e-deal-${id}`, name: `E2E Deal plan ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0, meter_ids: [meter.id],
@@ -255,7 +289,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   // On a test clock moved past real time, that is the period in progress:
   // the dialog says so, and it lets this journey see the change at once.
   await advancePastFirstPeriod(clock)
-  await api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: meter.key, quantity: '500', idempotency_key: `e2e_${uniq()}` })
+  await api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: meter.event_name, quantity: '500', idempotency_key: `e2e_${uniq()}` })
 
   // Control: the list rate, 2 cents a call.
   expect(usageRate(await expectUpcomingInvoiceMatchesAPI(page, subscription.id))).toEqual([2])
@@ -390,7 +424,7 @@ test.describe('the default dunning policy', () => {
     const plans = (await api<{ data: PlanDetail[] }>('GET', '/plans')).data
     expect(plans.filter(p => p.name === planName).map(p => p.id)).toEqual(instance.created_objects.plan_ids)
     const meters = (await api<{ data: Meter[] }>('GET', '/meters')).data
-    expect(meters.filter(m => m.key === 'gpu_seconds').map(m => m.id)).toEqual(instance.created_objects.meter_ids)
+    expect(meters.filter(m => m.event_name === 'gpu_seconds').map(m => m.id)).toEqual(instance.created_objects.meter_ids)
   })
 
   test('dunning policies: create one turned off, turn it on and edit it, give it to a customer (it cannot be deleted then), and make it the default', async ({ page }) => {

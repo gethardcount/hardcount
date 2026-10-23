@@ -15,7 +15,8 @@
 > 5. `seed_sample_data` and the YAML `sample_data` block were never wired to a writer and stay unused.
 > 6. A plan is never adopted by code, so ADR-083's plan conformance gate no longer exists. Rating rules and the shared `tokens` meter are still adopted by natural key. Apply is refused with a 409 when an existing rule's money fields differ (ADR-085, 2026-07-26 amendment), when the meter's aggregation differs, or when it would mix currencies on the meter (ADR-100). Adopted rules are never republished (ADR-070).
 > 7. Re-applying a recipe already installed in the same mode (test or live) is always a no-op that returns the existing instance (`201`, same `id`, same `created_objects`). The install record is per mode (ADR-085, 2026-07-26 amendment), so a test-mode install does not count as a live-mode one.
-> 8. The dunning policy's `final_action` was removed from the recipe format (ADR-112); the built-ins are now at 5.0.0 (anthropic/openai) and 3.0.0 (replicate), not the `1.0.0` shown.
+> 8. The dunning policy's `final_action` was removed from the recipe format (ADR-112).
+> 9. A recipe meter is named by `event_name`, not `key`, and a pricing rule has no `aggregation_mode`: it bills under its meter's aggregation ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §2). In the preview, a pricing rule names its meter by `event_name` and a plan lists `event_names`. The built-ins are now at 7.0.0 (anthropic), 6.0.0 (openai) and 4.0.0 (replicate), not the `1.0.0` shown.
 
 ## Motivation
 

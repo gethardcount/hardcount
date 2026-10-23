@@ -22,7 +22,7 @@ func (c *countingCustomer) GetByExternalID(_ context.Context, _, externalID stri
 
 type countingMeter struct{ calls int }
 
-func (m *countingMeter) GetMeterByKey(_ context.Context, _, key string) (domain.Meter, error) {
+func (m *countingMeter) GetMeterByEventName(_ context.Context, _, key string) (domain.Meter, error) {
 	m.calls++
 	return domain.Meter{ID: "mtr_" + key}, nil
 }

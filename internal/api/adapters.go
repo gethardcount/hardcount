@@ -1693,7 +1693,6 @@ type usageLiveSubscriptions interface {
 
 type usageMeterReader interface {
 	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
-	ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error)
 }
 
 type usageThresholdReader interface {
@@ -1731,17 +1730,14 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 	return out, nil
 }
 
-// MeterBuckets reads the meter and its pricing rules.
+// MeterBuckets reads the meter: its one aggregation decides its buckets
+// (ADR-130 §2).
 func (a usageOpenPeriods) MeterBuckets(ctx context.Context, tenantID, meterID string) (usage.MeterBuckets, error) {
 	m, err := a.pricing.GetMeter(ctx, tenantID, meterID)
 	if err != nil {
 		return usage.MeterBuckets{}, fmt.Errorf("get meter: %w", err)
 	}
-	rules, err := a.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return usage.MeterBuckets{}, fmt.Errorf("list meter pricing rules: %w", err)
-	}
-	return usage.BucketsOf(m, rules), nil
+	return usage.BucketsOf(m), nil
 }
 
 // customerCurrencyFactsAdapter is invoice.CustomerCurrencyFacts: the stored

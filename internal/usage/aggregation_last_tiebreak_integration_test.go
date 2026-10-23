@@ -62,7 +62,7 @@ func TestAggregateLast_TimestampTieBreaksByID(t *testing.T) {
 		if !totals[meterID].Equal(want) {
 			t.Errorf("the close's read = %s, want %s (the higher id)", totals[meterID], want)
 		}
-		aggs, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggLastDuringPeriod, from, to)
+		aggs, err := store.AggregateClaims(ctx, tenantID, customerID, meterID, domain.AggregationLast, nil, from, to)
 		if err != nil {
 			t.Fatalf("claim path: %v", err)
 		}
@@ -72,8 +72,8 @@ func TestAggregateLast_TimestampTieBreaksByID(t *testing.T) {
 	t.Run("a meter whose pricing rule claims the events", func(t *testing.T) {
 		tenantID, customerID, meterID := setup(t, "Last tie, rule")
 		rrvID := insertTestRatingRule(t, db, tenantID, "gauge_rate")
-		insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "a"}, domain.AggLastDuringPeriod, 100)
-		aggs, err := store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, domain.AggLastDuringPeriod, from, to)
+		c := insertTestPricingRule(t, db, tenantID, meterID, rrvID, map[string]any{"model": "a"}, 100)
+		aggs, err := store.AggregateClaims(ctx, tenantID, customerID, meterID, domain.AggregationLast, []domain.UsageClaim{c}, from, to)
 		if err != nil {
 			t.Fatalf("claim path: %v", err)
 		}

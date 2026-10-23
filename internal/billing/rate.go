@@ -137,29 +137,30 @@ type usageReads interface {
 }
 
 // windowBuckets is how the closers read a window. A meter with pricing rules is
-// read per rule (AggregateByPricingRules). A meter without is read by its own
+// read per rule (AggregateClaims). A meter without is read by its own
 // aggregation, in the one read that covers every meter of the invoice for the
 // window (AggregateForBillingPeriodByAgg); its total is the unclaimed bucket.
+// Both read under the meter's one aggregation (ADR-130 §2).
 func (w *windowUsage) windowBuckets(ctx context.Context, meterID string, meter domain.Meter, rules []domain.MeterPricingRule, iv usageInterval) ([]domain.RuleAggregation, error) {
 	if len(rules) > 0 {
-		return w.ruleBuckets(ctx, meterID, iv)
+		return w.ruleBuckets(ctx, meterID, meter, rules, iv)
 	}
 	total, err := w.meterTotal(ctx, meterID, iv)
 	if err != nil {
 		return nil, err
 	}
-	return []domain.RuleAggregation{{AggregationMode: mapMeterAggregation(meter.Aggregation), Quantity: total}}, nil
+	return []domain.RuleAggregation{{Quantity: total}}, nil
 }
 
 // ruleReads is how the previews and the live balance read a window: every
-// meter through AggregateByPricingRules, rules or not.
+// meter through AggregateClaims, rules or not.
 type ruleReads struct {
 	usage                UsageAggregator
 	tenantID, customerID string
 }
 
-func (r ruleReads) windowBuckets(ctx context.Context, meterID string, meter domain.Meter, _ []domain.MeterPricingRule, iv usageInterval) ([]domain.RuleAggregation, error) {
-	aggs, err := r.usage.AggregateByPricingRules(ctx, r.tenantID, r.customerID, meterID, mapMeterAggregation(meter.Aggregation), iv.start, iv.end)
+func (r ruleReads) windowBuckets(ctx context.Context, meterID string, meter domain.Meter, rules []domain.MeterPricingRule, iv usageInterval) ([]domain.RuleAggregation, error) {
+	aggs, err := r.usage.AggregateClaims(ctx, r.tenantID, r.customerID, meterID, meter.Aggregation, domain.ClaimsOfRules(rules), iv.start, iv.end)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate by pricing rules: %w", err)
 	}
@@ -251,7 +252,7 @@ func (r rater) rateUsageWindows(ctx context.Context, windows []rateWindow, pin r
 		// binding are the meter's own: it is routed before it is read, so a
 		// closer's full pass reads the whole period only for a bucket the
 		// threshold invoice deferred (ADR-066 §4).
-		if w.pass != passEvery && len(mp.list) == 0 && !routedHere(w, ladder, mapMeterAggregation(mp.meter.Aggregation), mp.meter.RatingRuleVersionID) {
+		if w.pass != passEvery && len(mp.list) == 0 && !routedHere(w, ladder, mp.meter.Aggregation, mp.meter.RatingRuleVersionID) {
 			continue
 		}
 		aggs, err := r.reads.windowBuckets(ctx, w.meterID, mp.meter, mp.list, w.iv)
@@ -316,7 +317,7 @@ func (r rater) rateBucket(ctx context.Context, w rateWindow, mp meterPricing, ag
 	// pass, over the unclamped window; every other bucket only on the clamped
 	// pass. It runs before the checks below so a bucket left out is reported
 	// on one pass only (#981). With no watermark nothing is deferred.
-	if w.pass != passEvery && !routedHere(w, ladder, agg.AggregationMode, pinned) {
+	if w.pass != passEvery && !routedHere(w, ladder, mp.meter.Aggregation, pinned) {
 		return ratedBucket{}, false, nil
 	}
 	// Corrections larger than the bucket's usage in this window: it counts as
@@ -340,7 +341,7 @@ func (r rater) rateBucket(ctx context.Context, w rateWindow, mp meterPricing, ag
 	if err != nil {
 		switch {
 		case r.site.preview != nil:
-			return ratedBucket{}, false, fmt.Errorf("resolve pricing for meter %q rule %q: %w", mp.meter.Key, pinned, err)
+			return ratedBucket{}, false, fmt.Errorf("resolve pricing for meter %q rule %q: %w", mp.meter.EventName, pinned, err)
 		case b.hasRules:
 			return ratedBucket{}, false, fmt.Errorf("resolve pricing for meter %s rule %s%s: %w", w.meterID, pinned, r.site.on(), err)
 		default:
@@ -349,14 +350,14 @@ func (r rater) rateBucket(ctx context.Context, w rateWindow, mp meterPricing, ag
 	}
 	var amount int64
 	if ladder != nil {
-		amount, err = ladder.price(price, w.meterID, w.meterID+"|"+agg.RuleID, agg.AggregationMode, qty)
+		amount, err = ladder.price(price, w.meterID, w.meterID+"|"+agg.RuleID, mp.meter.Aggregation, qty)
 	} else {
 		amount, err = domain.ComputeAmountCents(price, qty)
 	}
 	if err != nil {
 		switch {
 		case r.site.preview != nil:
-			return ratedBucket{}, false, fmt.Errorf("compute amount for meter %q rule %q: %w", mp.meter.Key, price.RuleKey, err)
+			return ratedBucket{}, false, fmt.Errorf("compute amount for meter %q rule %q: %w", mp.meter.EventName, price.RuleKey, err)
 		case b.hasRules:
 			return ratedBucket{}, false, fmt.Errorf("compute amount for meter %s rule %s%s: %w", w.meterID, pinned, r.site.on(), err)
 		default:
@@ -367,11 +368,12 @@ func (r rater) rateBucket(ctx context.Context, w rateWindow, mp meterPricing, ag
 	return b, true, nil
 }
 
-// routedHere reports whether a closer's pass w prices a bucket of mode bound
-// to pinned: a bucket the threshold invoice deferred only on the full pass,
-// every other bucket only on the clamped pass.
-func routedHere(w rateWindow, ladder *usageLadder, mode domain.AggregationMode, pinned string) bool {
-	return ladder.wm.deferredBucket(mode, w.meterID, pinned) == (w.pass == passFull)
+// routedHere reports whether a closer's pass w prices a bucket of a meter
+// aggregated by aggregation, bound to pinned: a bucket the threshold invoice
+// deferred only on the full pass, every other bucket only on the clamped
+// pass.
+func routedHere(w rateWindow, ladder *usageLadder, aggregation, pinned string) bool {
+	return ladder.wm.deferredBucket(aggregation, w.meterID, pinned) == (w.pass == passFull)
 }
 
 // unitAmount is the line's amount over its quantity, rounded to a whole
@@ -413,17 +415,17 @@ func (b ratedBucket) noteLeftOut(prefix string, sub domain.Subscription, unprice
 	switch {
 	case qty.IsNegative():
 		slog.Warn(prefix+": usage below zero after corrections — billed as 0",
-			"meter", b.meter.Key, "quantity", qty.String(), "subscription_id", sub.ID)
-		belowZero.add(b.w.meterID, b.meter.Key, b.meter.Name, qty, b.w.iv.start, b.w.iv.end)
+			"meter", b.meter.EventName, "quantity", qty.String(), "subscription_id", sub.ID)
+		belowZero.add(b.w.meterID, b.meter.EventName, b.meter.Name, qty, b.w.iv.start, b.w.iv.end)
 	case b.hasRules:
 		slog.Warn(prefix+": usage matched no rating rule and meter has no default binding — not billed",
-			"meter", b.meter.Key, "quantity", qty.String(), "subscription_id", sub.ID)
+			"meter", b.meter.EventName, "quantity", qty.String(), "subscription_id", sub.ID)
 		unpriced.add(b.w.meterID, qty)
 	default:
 		// The plan-attach guard (ADR-096) blocks this at authoring, so
 		// reaching it means a rule was unbound out from under a live sub.
 		slog.Warn(prefix+": usage on a meter with no rating rule — not billed (unpriced meter on plan; ADR-096)",
-			"meter", b.meter.Key, "quantity", qty.String(), "subscription_id", sub.ID)
+			"meter", b.meter.EventName, "quantity", qty.String(), "subscription_id", sub.ID)
 		unpriced.add(b.w.meterID, qty)
 	}
 }
@@ -449,7 +451,7 @@ func (b ratedBucket) previewLine() PreviewLine {
 		UnitAmountCents:          b.unitAmount(),
 		AmountCents:              b.amount,
 		PricingMode:              string(b.price.Mode),
-		AggregationMode:          b.agg.AggregationMode,
+		Aggregation:              b.meter.Aggregation,
 		NominalUnitAmountDecimal: nominalRate(b.price),
 	}
 }
@@ -458,15 +460,15 @@ func (b ratedBucket) previewLine() PreviewLine {
 // and as data (for the threshold fire, which reports it).
 func (b ratedBucket) previewLeftOut() (string, leftOutBucket) {
 	qty := b.agg.Quantity
-	out := leftOutBucket{MeterID: b.w.meterID, MeterKey: b.meter.Key, MeterName: b.meter.Name, Mode: b.agg.AggregationMode, Quantity: qty}
+	out := leftOutBucket{MeterID: b.w.meterID, EventName: b.meter.EventName, MeterName: b.meter.Name, Aggregation: b.meter.Aggregation, Quantity: qty}
 	if qty.IsNegative() {
 		// A legitimate state, not a pricing error: corrections can put a
 		// bucket's total below zero until new usage overtakes it.
 		out.BelowZero = true
-		return fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", b.meter.Key, qty.String()), out
+		return fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", b.meter.EventName, qty.String()), out
 	}
 	// The quantity is what the operator needs to bill it by hand (#981).
-	return fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", b.meter.Key, qty.String(), b.meter.Unit), out
+	return fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", b.meter.EventName, qty.String(), b.meter.Unit), out
 }
 
 // rateCloseUsage prices a closer's usage: each meter over its clamped

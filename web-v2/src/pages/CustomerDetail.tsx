@@ -273,7 +273,7 @@ export default function CustomerDetailPage() {
   })
 
   const meterMap: Record<string, { name: string; unit: string }> = {}
-  metersData?.data?.forEach(m => { meterMap[m.id] = { name: m.name, unit: m.unit }; meterMap[m.key] = { name: m.name, unit: m.unit } })
+  metersData?.data?.forEach(m => { meterMap[m.id] = { name: m.name, unit: m.unit }; meterMap[m.event_name] = { name: m.name, unit: m.unit } })
 
   const { data: plans } = useQuery({
     queryKey: ['plans-active'],

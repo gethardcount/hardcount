@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -46,8 +48,15 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Swap Plan Lock Order")
 	pricingSvc := pricing.NewService(pricingStore)
 	pricingSvc.SetSubscriptionPlanUsageReader(subStore)
+	// A default price, so that clearing it is an edit the D05 guard checks.
+	defaultPrice, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
+		RuleKey: "swap-lockord-default", Name: "swap-lockord", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+	})
+	if err != nil {
+		t.Fatalf("create default price: %v", err)
+	}
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		Key: "swap-lockord", Name: "swap-lockord", Unit: "tokens", Aggregation: "sum",
+		EventName: "swap-lockord", Name: "swap-lockord", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: defaultPrice.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -161,11 +170,12 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 		t.Fatal("the activation never reached its invoice")
 	}
 
-	// 2. The meter edit locks lo and waits for hi.
+	// 2. The meter edit locks lo and waits for hi. Clearing the default
+	// price is an edit the D05 guard checks.
 	editDone := make(chan error, 1)
 	go func() {
-		agg := "max"
-		_, err := pricingSvc.UpdateMeter(ctx, tenantID, meter.ID, pricing.UpdateMeterInput{Aggregation: &agg})
+		none := ""
+		_, err := pricingSvc.UpdateMeter(ctx, tenantID, meter.ID, pricing.UpdateMeterInput{RatingRuleVersionID: &none})
 		editDone <- err
 	}()
 	testutil.WaitForLockWaiter(t, ctx, admin, "meter_ids @>")

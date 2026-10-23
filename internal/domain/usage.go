@@ -102,7 +102,7 @@ type HeldUsageEvent struct {
 	ID                 string          `json:"id"`
 	Source             string          `json:"source"`
 	ExternalCustomerID string          `json:"external_customer_id"`
-	MeterKey           string          `json:"meter_key"`
+	EventName          string          `json:"event_name"`
 	Quantity           decimal.Decimal `json:"quantity"`
 	Dimensions         map[string]any  `json:"dimensions,omitempty"`
 	IdempotencyKey     string          `json:"idempotency_key"`

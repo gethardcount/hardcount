@@ -64,7 +64,7 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 						}{{a.ID, "a"}, {b.ID, "b"}} {
 							seedPricingRule(t, lf.db, ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
 								MeterID: lf.meterID, RatingRuleVersionID: r.id, DimensionMatch: map[string]any{"model": r.model},
-								AggregationMode: ruleModeOf(agg), Priority: 10,
+								Priority: 10,
 							})
 						}
 					}
@@ -165,20 +165,6 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 			}
 		}
 	}
-}
-
-// ruleModeOf is the per-rule aggregation mode a rule had when it agreed with
-// a meter aggregated by agg.
-func ruleModeOf(agg string) domain.AggregationMode {
-	switch agg {
-	case "count":
-		return domain.AggCount
-	case "max":
-		return domain.AggMax
-	case "last":
-		return domain.AggLastDuringPeriod
-	}
-	return domain.AggSum
 }
 
 func writePreview(out *strings.Builder, stage string, p billing.PreviewResult) {

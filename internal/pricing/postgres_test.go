@@ -96,7 +96,7 @@ func TestPostgresStore_Meters(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Test")
 
 	meter, err := store.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "api_calls", Name: "API Calls", Unit: "calls", Aggregation: "sum",
+		EventName: "api_calls", Name: "API Calls", Unit: "calls", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -106,13 +106,13 @@ func TestPostgresStore_Meters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Key != "api_calls" {
-		t.Errorf("key: got %q", got.Key)
+	if got.EventName != "api_calls" {
+		t.Errorf("event_name: got %q", got.EventName)
 	}
 
 	// Unique key per tenant
 	_, err = store.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "api_calls", Name: "Dup", Unit: "x", Aggregation: "sum",
+		EventName: "api_calls", Name: "Dup", Unit: "x", Aggregation: "sum",
 	})
 	if err == nil {
 		t.Fatal("expected unique violation for duplicate meter key")
@@ -207,7 +207,7 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 		t.Fatalf("seed rrv2: %v", err)
 	}
 	meter, err := store.CreateMeter(ctx, tenantID, domain.Meter{
-		Key: "tokens", Name: "Tokens", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrv1.ID,
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 	// Insert default rule (no dimension match, low priority).
 	defRule, err := store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
 		MeterID: meter.ID, RatingRuleVersionID: rrv1.ID,
-		DimensionMatch: map[string]any{}, AggregationMode: domain.AggSum, Priority: 0,
+		DimensionMatch: map[string]any{}, Priority: 0,
 	}, nil)
 	if err != nil {
 		t.Fatalf("upsert default: %v", err)
@@ -229,8 +229,7 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 	// Insert specific rule, higher priority.
 	specRule, err := store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
 		MeterID: meter.ID, RatingRuleVersionID: rrv2.ID,
-		DimensionMatch:  map[string]any{"model": "gpt-4", "cached": true},
-		AggregationMode: domain.AggSum, Priority: 100,
+		DimensionMatch: map[string]any{"model": "gpt-4", "cached": true}, Priority: 100,
 	}, nil)
 	if err != nil {
 		t.Fatalf("upsert specific: %v", err)
@@ -262,8 +261,7 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 	// the same row instead of inserting a duplicate.
 	updated, err := store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
 		MeterID: meter.ID, RatingRuleVersionID: rrv2.ID,
-		DimensionMatch:  map[string]any{"model": "gpt-4-turbo"},
-		AggregationMode: domain.AggMax, Priority: 200,
+		DimensionMatch: map[string]any{"model": "gpt-4-turbo"}, Priority: 200,
 	}, nil)
 	if err != nil {
 		t.Fatalf("upsert update: %v", err)
@@ -271,8 +269,8 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 	if updated.ID != specRule.ID {
 		t.Errorf("upsert created a new row instead of updating: first=%s now=%s", specRule.ID, updated.ID)
 	}
-	if updated.AggregationMode != domain.AggMax || updated.Priority != 200 {
-		t.Errorf("updated fields not persisted: mode=%s priority=%d", updated.AggregationMode, updated.Priority)
+	if updated.Priority != 200 || updated.DimensionMatch["model"] != "gpt-4-turbo" {
+		t.Errorf("updated fields not persisted: match=%v priority=%d", updated.DimensionMatch, updated.Priority)
 	}
 
 	// Delete and verify.
@@ -306,12 +304,12 @@ func TestPostgresStore_MeterPricingRules_RLS(t *testing.T) {
 		Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
 	})
 	meterA, _ := store.CreateMeter(ctx, tenantA, domain.Meter{
-		Key: "tokens", Name: "Tokens", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrvA.ID,
 	})
 	ruleA, err := store.UpsertMeterPricingRule(ctx, tenantA, domain.MeterPricingRule{
 		MeterID: meterA.ID, RatingRuleVersionID: rrvA.ID,
-		DimensionMatch: map[string]any{}, AggregationMode: domain.AggSum,
+		DimensionMatch: map[string]any{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("seed tenant A rule: %v", err)

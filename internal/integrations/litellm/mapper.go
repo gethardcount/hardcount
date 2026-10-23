@@ -17,12 +17,12 @@ import (
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
-// MeterKeyTokens is the single canonical meter every provider mapper writes
+// EventNameTokens is the single canonical meter every provider mapper writes
 // to (ADR-044). Token ROLE rides on the `token_type` dimension, NOT on the
-// meter key — so the anthropic_style / openai_style recipes (and the cost
+// event name — so the anthropic_style / openai_style recipes (and the cost
 // dashboard) see one `tokens` meter grouped by {model, token_type}, and a new
 // provider never re-opens a meter-shape mismatch.
-const MeterKeyTokens = "tokens"
+const EventNameTokens = "tokens"
 
 // Canonical token-role values for the `token_type` dimension (ADR-044). The
 // vocabulary is shared by the recipes and every provider mapper. The LiteLLM
@@ -549,7 +549,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	ev := func(tokenType string, qty int64, cost *int64) ExternalIngest {
 		return ExternalIngest{
 			ExternalCustomerID: user,
-			MeterKey:           MeterKeyTokens,
+			EventName:          EventNameTokens,
 			Quantity:           decimal.NewFromInt(qty),
 			Dimensions:         dimsWithTokenType(dims, tokenType),
 			IdempotencyKey:     prefix + ":" + tokenType,
@@ -669,12 +669,12 @@ var ErrMissingID = fmt.Errorf("litellm: payload.id is required (each event's ded
 var ErrMissingUser = fmt.Errorf("litellm: payload.user is required (set user=<external_customer_id> on the litellm call)")
 
 // ExternalIngest is the adapter's intermediate shape — uses the
-// EXTERNAL customer id and meter key. The handler resolves these to
+// EXTERNAL customer id and event name. The handler resolves these to
 // internal IDs via the existing usage ingest path. Mirrors the
 // existing usage.IngestRequest body shape so the resolver is shared.
 type ExternalIngest struct {
 	ExternalCustomerID string          `json:"external_customer_id"`
-	MeterKey           string          `json:"meter_key"`
+	EventName          string          `json:"event_name"`
 	Quantity           decimal.Decimal `json:"quantity"`
 	Dimensions         map[string]any  `json:"dimensions,omitempty"`
 	IdempotencyKey     string          `json:"idempotency_key,omitempty"`

@@ -204,7 +204,7 @@ func TestCreatePreview_SingleMeterFlatParity(t *testing.T) {
 	}
 
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
@@ -288,7 +288,7 @@ func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
 	}
 
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "tokens_dim", Name: "Tokens Dim", Unit: "tokens",
+		EventName: "tokens_dim", Name: "Tokens Dim", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrvIn.ID,
 	})
 	if err != nil {
@@ -297,15 +297,13 @@ func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
 
 	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: meter.ID, RatingRuleVersionID: rrvIn.ID,
-		DimensionMatch:  map[string]any{"operation": "input"},
-		AggregationMode: domain.AggSum, Priority: 10,
+		DimensionMatch: map[string]any{"operation": "input"}, Priority: 10,
 	}); err != nil {
 		t.Fatalf("upsert mpr input: %v", err)
 	}
 	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: meter.ID, RatingRuleVersionID: rrvOut.ID,
-		DimensionMatch:  map[string]any{"operation": "output"},
-		AggregationMode: domain.AggSum, Priority: 10,
+		DimensionMatch: map[string]any{"operation": "output"}, Priority: 10,
 	}); err != nil {
 		t.Fatalf("upsert mpr output: %v", err)
 	}
@@ -389,7 +387,7 @@ func TestCreatePreview_NoWrites(t *testing.T) {
 		t.Fatalf("create rrv: %v", err)
 	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -441,7 +439,7 @@ func TestCreatePreview_CrossTenantIsolation(t *testing.T) {
 		t.Fatalf("create rrv: %v", err)
 	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -504,7 +502,7 @@ func TestCreatePreview_ExplicitSubscriptionWrongCustomer(t *testing.T) {
 		t.Fatalf("create rrv: %v", err)
 	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -575,7 +573,7 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 		t.Fatalf("create rrv: %v", err)
 	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "warn_tokens", Name: "Warn Tokens", Unit: "tokens",
+		EventName: "warn_tokens", Name: "Warn Tokens", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {

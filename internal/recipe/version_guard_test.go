@@ -26,10 +26,14 @@ import (
 // anthropic_style 6.0.0 on 2026-10-22: the new lineup's prices, Haiku 5.5's
 // two prompt tiers (rules on context_tier), and Sonnet 5 at $2 / $10. A
 // MAJOR bump because an install of 5.0.0 does not get these on re-apply.
+// MAJOR bumps on 2026-10-23 (anthropic 7.0.0, openai 6.0.0, replicate
+// 4.0.0): a meter is named by `event_name`, not `key`, and a pricing rule has
+// no `aggregation_mode` (ADR-130 §2). parseRecipe refuses both old keys, so
+// a recipe at the previous version no longer parses. Prices are unchanged.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@6.0.0": "ccb1e014a9d574b159ddbd52863fba54b63448f007a7df5d1707ca10b705a984",
-	"openai_style@5.0.0":    "9e340351b37677c8e79215e9bd8fcd90d198756ecdf4b5a34bd5a706af28af58",
-	"replicate_style@3.0.0": "8abd33097c29909d3bc53c51b0aacab9b9f8c27b984c94724030247b05b8796a",
+	"anthropic_style@7.0.0": "88d563162ebf13ba08a5aecd11a7b1ec817c330538d9dffcb86ac927cedef77f",
+	"openai_style@6.0.0":    "479dc1c969652bcfda9f57ccd9f5d2d7a9abdc36e4f385af9615baed5ce2c4b7",
+	"replicate_style@4.0.0": "59ad79463f2f497c98784d29513609fd8dd146caff13bdb0232f170012f468e0",
 }
 
 // TestRecipeCatalog_VersionMovesWithContent asserts every embedded recipe's

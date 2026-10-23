@@ -11,7 +11,7 @@ const minimalRecipe = `key: strict_check
 version: 1.0.0
 name: Strict check
 meters:
-  - key: calls
+  - event_name: calls
     name: Calls
     unit: call
     aggregation: sum
@@ -31,6 +31,40 @@ dunning:
     final_subscription_action: pause
     final_invoice_action: none
 `
+
+// TestParseRecipe_RefusesRemovedMeterFields: a meter is named by event_name,
+// not key, and a pricing rule has no aggregation of its own (ADR-130 §2).
+// A recipe that still uses either fails the load instead of installing a
+// meter without its event name or a rule whose aggregation is ignored.
+func TestParseRecipe_RefusesRemovedMeterFields(t *testing.T) {
+	withRule := strings.Replace(minimalRecipe, "plans:\n", `rating_rules:
+  - key: calls_rate
+    name: Calls
+    mode: flat
+    currency: USD
+    flat_amount_cents: '1'
+pricing_rules:
+  - meter: calls
+    rating_rule: calls_rate
+    dimension_match: {}
+    priority: 100
+plans:
+`, 1)
+	if _, err := parseRecipe([]byte(withRule)); err != nil {
+		t.Fatalf("control: a recipe with a pricing rule should parse, got %v", err)
+	}
+	for name, yaml := range map[string]string{
+		"meter key":                 strings.Replace(minimalRecipe, "  - event_name: calls", "  - key: calls", 1),
+		"pricing rule aggregation":  strings.Replace(withRule, "    priority: 100", "    priority: 100\n    aggregation_mode: sum", 1),
+		"meter aggregation unknown": strings.Replace(minimalRecipe, "    aggregation: sum", "    aggregation: last_ever", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseRecipe([]byte(yaml)); err == nil {
+				t.Fatalf("parseRecipe accepted it:\n%s", yaml)
+			}
+		})
+	}
+}
 
 // TestParseRecipe_RejectsUnknownKey: a misspelled key must fail the load,
 // not decode to the field's zero value. Before strict decoding,

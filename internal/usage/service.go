@@ -513,29 +513,19 @@ func (s *Service) AggregateDailyBuckets(ctx context.Context, tenantID, customerI
 	return s.store.AggregateDailyBuckets(ctx, tenantID, customerID, meterIDs, from, to)
 }
 
-// AggregateByPricingRules resolves a single (customer, meter, period) into
-// per-rule aggregations using the priority+claim algorithm. The defaultMode
-// applies to events that match no rule; it must be one of the four
-// period-bounded modes (sum, count, max, last_during_period) — last_ever
-// as a meter-default is rejected because it would silently break the
-// "current state" semantics for unclaimed events.
-//
-// See docs/dev/design/multi-dim-meters.md for the resolution semantics; this
-// method is the runtime entry point that billing-finalize will call.
-func (s *Service) AggregateByPricingRules(
+// AggregateClaims rolls one customer's events of one meter in [from, to)
+// into one quantity per claim, under the meter's aggregation (see the Store
+// contract). An unknown aggregation is refused, never read as a sum: a
+// meter's events must not bill under an aggregation the meter does not
+// have.
+func (s *Service) AggregateClaims(
 	ctx context.Context,
-	tenantID, customerID, meterID string,
-	defaultMode domain.AggregationMode,
+	tenantID, customerID, meterID, aggregation string,
+	claims []domain.UsageClaim,
 	from, to time.Time,
 ) ([]domain.RuleAggregation, error) {
-	if defaultMode == "" {
-		defaultMode = domain.AggSum
+	if !domain.ValidAggregation(aggregation) {
+		return nil, errs.Invalid("aggregation", fmt.Sprintf("must be one of sum, count, max, last; got %q", aggregation))
 	}
-	switch defaultMode {
-	case domain.AggSum, domain.AggCount, domain.AggMax, domain.AggLastDuringPeriod:
-		// ok
-	default:
-		return nil, errs.Invalid("default_mode", fmt.Sprintf("must be one of sum/count/max/last_during_period, got %q", defaultMode))
-	}
-	return s.store.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+	return s.store.AggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 }

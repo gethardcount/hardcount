@@ -48,7 +48,7 @@ type PricingReader interface {
 // /v1/customers/{id}/usage. See docs/dev/design/customer-usage.md.
 //
 // The hard work — dimension-match-aware aggregation in
-// usage.AggregateByPricingRules — already exists. This service is a
+// usage.AggregateClaims — already exists. This service is a
 // composition: customer existence, subscription set, period resolution,
 // per-meter rating, totals roll-up, warnings collection.
 type CustomerUsageService struct {
@@ -131,7 +131,7 @@ type CustomerUsageSubscription struct {
 // the slice is length 1 with no DimensionMatch.
 type CustomerUsageMeter struct {
 	MeterID          string              `json:"meter_id"`
-	MeterKey         string              `json:"meter_key"`
+	EventName        string              `json:"event_name"`
 	MeterName        string              `json:"meter_name"`
 	Unit             string              `json:"unit"`
 	Currency         string              `json:"currency"`
@@ -193,7 +193,7 @@ type CustomerUsageBucket struct {
 //  3. Period resolution (current cycle from primary sub, or explicit
 //     ?from=&to= validated for partial bounds, ordering, 1-year cap).
 //  4. Walk the meter union across subscribed plans, calling
-//     usage.AggregateByPricingRules per meter then ComputeAmountCents per
+//     usage.AggregateClaims per meter then ComputeAmountCents per
 //     rule. Same code path the cycle scan uses → dashboard math == invoice
 //     math.
 //  5. Per-currency totals roll-up, warnings collection, subscription
@@ -412,13 +412,11 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 		return CustomerUsageMeter{}, nil, fmt.Errorf("get meter %q: %w", meterID, err)
 	}
 
-	defaultMode := mapMeterAggregation(meter.Aggregation)
-	aggs, err := s.usage.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
+	rules, err := s.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
 	if err != nil {
 		return CustomerUsageMeter{}, nil, err
 	}
-
-	rules, err := s.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
+	aggs, err := s.usage.AggregateClaims(ctx, tenantID, customerID, meterID, meter.Aggregation, domain.ClaimsOfRules(rules), from, to)
 	if err != nil {
 		return CustomerUsageMeter{}, nil, err
 	}
@@ -429,7 +427,7 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 
 	out := CustomerUsageMeter{
 		MeterID:   meter.ID,
-		MeterKey:  meter.Key,
+		EventName: meter.EventName,
 		MeterName: meter.Name,
 		Unit:      meter.Unit,
 		Rules:     []CustomerUsageRule{},
@@ -443,7 +441,7 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 		// (#1193), so it counts as 0 here, with a warning. Pricing it would
 		// fail: the rater refuses a negative quantity.
 		if agg.Quantity.IsNegative() {
-			warnings = append(warnings, fmt.Sprintf("meter %q: usage below zero (%s) after corrections — counted as 0, as on the invoice", meter.Key, agg.Quantity.String()))
+			warnings = append(warnings, fmt.Sprintf("meter %q: usage below zero (%s) after corrections — counted as 0, as on the invoice", meter.EventName, agg.Quantity.String()))
 			continue
 		}
 		ratingRuleID := agg.RatingRuleVersionID
@@ -462,7 +460,7 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 					Unmatched: true,
 					Quantity:  agg.Quantity,
 				})
-				warnings = append(warnings, fmt.Sprintf("meter %q has usage matching no pricing rule — not billed (see the unmatched row)", meter.Key))
+				warnings = append(warnings, fmt.Sprintf("meter %q has usage matching no pricing rule — not billed (see the unmatched row)", meter.EventName))
 			}
 			continue
 		}
@@ -495,13 +493,13 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 
 		cents, err := domain.ComputeAmountCents(ratingRule, agg.Quantity)
 		if err != nil {
-			return CustomerUsageMeter{}, nil, fmt.Errorf("rate meter %q rule %q: %w", meter.Key, ratingRuleID, err)
+			return CustomerUsageMeter{}, nil, fmt.Errorf("rate meter %q rule %q: %w", meter.EventName, ratingRuleID, err)
 		}
 
 		if out.Currency == "" {
 			out.Currency = ratingRule.Currency
 		} else if out.Currency != ratingRule.Currency {
-			warnings = append(warnings, fmt.Sprintf("meter %q has rating rules with mismatched currencies (%s vs %s)", meter.Key, out.Currency, ratingRule.Currency))
+			warnings = append(warnings, fmt.Sprintf("meter %q has rating rules with mismatched currencies (%s vs %s)", meter.EventName, out.Currency, ratingRule.Currency))
 		}
 
 		var dimMatch map[string]any
@@ -532,26 +530,6 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 	out.TotalQuantity = totalQty
 	out.TotalAmountCents = totalCents
 	return out, warnings, nil
-}
-
-// mapMeterAggregation translates the meter's stored aggregation string
-// ("sum"/"count"/"max"/"last") to the AggregationMode the priority+claim
-// resolver accepts. The "last" UI value maps to last_during_period —
-// last_ever as a meter default would silently break "current state"
-// semantics for unclaimed events (also rejected by the service layer).
-func mapMeterAggregation(agg string) domain.AggregationMode {
-	switch agg {
-	case "sum":
-		return domain.AggSum
-	case "count":
-		return domain.AggCount
-	case "max":
-		return domain.AggMax
-	case "last":
-		return domain.AggLastDuringPeriod
-	default:
-		return domain.AggSum
-	}
 }
 
 // filterActiveSubs returns only active and trialing subs. Paused / canceled

@@ -29,13 +29,13 @@ type CustomerResolver interface {
 	GetByExternalID(ctx context.Context, tenantID, externalID string) (domain.Customer, error)
 }
 
-// MeterResolver looks up a meter by key.
+// MeterResolver looks up a meter by the event_name its events send.
 type MeterResolver interface {
-	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
+	GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error)
 }
 
 // MeterLister lists the tenant's meters and their pricing rules. The
-// aggregate endpoint works out each meter's aggregation from them (see
+// aggregate endpoint reads each meter's aggregation from them (see
 // BillingModes) so a Maximum meter reports its peak, not a sum of
 // readings. Wired in router.go (pricing.Service).
 type MeterLister interface {
@@ -122,7 +122,7 @@ type APIEvent struct {
 // request that staleness window does not exist.
 type resolveCache struct {
 	customers map[string]string // external customer id -> internal id
-	meters    map[string]string // meter key -> meter id
+	meters    map[string]string // event name -> meter id
 }
 
 func newResolveCache() *resolveCache {
@@ -223,7 +223,7 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 
 	meterID, ok := cache.meter(eventName)
 	if !ok {
-		meter, err := h.meters.GetMeterByKey(ctx, tenantID, eventName)
+		meter, err := h.meters.GetMeterByEventName(ctx, tenantID, eventName)
 		if err != nil {
 			if !errors.Is(err, errs.ErrNotFound) {
 				return IngestInput{}, fmt.Errorf("%w: meter lookup: %w", errIngestUnavailable, err)

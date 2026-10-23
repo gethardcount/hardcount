@@ -686,7 +686,7 @@ func previewFeatures(ctx context.Context, e *Engine, sub domain.Subscription, pe
 		if !l.Quantity.IsInteger() {
 			feats = append(feats, "fractional quantity")
 		}
-		if nonAdditiveMode(l.AggregationMode) {
+		if nonAdditive(l.Aggregation) {
 			feats = append(feats, "max/last bucket")
 		}
 		feats = append(feats, ruleFeatures(ctx, e, sub, l.MeterID, l.RatingRuleVersionID)...)
@@ -896,7 +896,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 		// Does this meter price via dimension-match pricing rules (the
 		// multi-dim shape: e.g. the AI `tokens` meter carries one rule per
 		// {model, token_type})? If so we MUST use the same
-		// AggregateByPricingRules + per-bucket pricing path that preview and
+		// AggregateClaims + per-bucket pricing path that preview and
 		// the threshold scan use — a single meter-linked rating rule can't
 		// express N rates, so the legacy single-rule branch below would skip
 		// the meter and emit a $0 invoice (the wedge breakage, ADR-044).
@@ -930,7 +930,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 
 			// ---- Multi-dim path: one billable bucket per claimed rule. ----
 			if len(pricingRules) > 0 {
-				aggs, err := reads.ruleBuckets(ctx, meterID, iv)
+				aggs, err := reads.ruleBuckets(ctx, meterID, meter, pricingRules, iv)
 				if err != nil {
 					return nil, 0, nil, err
 				}
@@ -957,7 +957,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 					// billed it: the full pass re-reads the whole period, and
 					// reporting there too counted the pre-fire usage that the
 					// threshold invoice already reported (#981).
-					if wm.deferredBucket(agg.AggregationMode, meterID, ratingRuleID) != w.nonAdditiveOnly {
+					if wm.deferredBucket(meter.Aggregation, meterID, ratingRuleID) != w.nonAdditiveOnly {
 						continue
 					}
 					// Corrections larger than the bucket's usage in this
@@ -966,9 +966,9 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 					// one pass only; before the unpriced check, as preview.
 					if qty.IsNegative() {
 						slog.Warn("cycle: usage below zero after corrections — billed as 0",
-							"meter", meter.Key, "quantity", qty.String(),
+							"meter", meter.EventName, "quantity", qty.String(),
 							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, meter.Name, qty, ivStart, ivEnd)
+						belowZero.add(meterID, meter.EventName, meter.Name, qty, ivStart, ivEnd)
 						continue
 					}
 					if ratingRuleID == "" {
@@ -976,7 +976,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 						// default binding — bill nothing, but loudly (a
 						// silent skip would hide unbilled revenue).
 						slog.Warn("cycle: usage matched no rating rule and meter has no default binding — not billed",
-							"meter", meter.Key, "quantity", qty.String(),
+							"meter", meter.EventName, "quantity", qty.String(),
 							"subscription_id", sub.ID)
 						unpriced.add(meterID, qty)
 						continue
@@ -985,7 +985,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 					if err != nil {
 						return nil, 0, nil, fmt.Errorf("resolve pricing for meter %s rule %s: %w", meterID, ratingRuleID, err)
 					}
-					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, agg.AggregationMode, qty)
+					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, meter.Aggregation, qty)
 					if err != nil {
 						return nil, 0, nil, fmt.Errorf("compute amount for meter %s rule %s: %w", meterID, ratingRuleID, err)
 					}
@@ -1016,7 +1016,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 			// Same ADR-066 §4 pass routing as the multi-dim branch, at meter
 			// granularity (a single-rule meter has exactly one bucket, whose
 			// mode is the meter's own aggregation).
-			if wm.deferredBucket(mapMeterAggregation(meter.Aggregation), meterID, meter.RatingRuleVersionID) != w.nonAdditiveOnly {
+			if wm.deferredBucket(meter.Aggregation, meterID, meter.RatingRuleVersionID) != w.nonAdditiveOnly {
 				continue
 			}
 			quantity, err := reads.meterTotal(ctx, meterID, iv)
@@ -1030,9 +1030,9 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 			// built (#1193). Same rule and order as the multi-dim branch.
 			if quantity.IsNegative() {
 				slog.Warn("cycle: usage below zero after corrections — billed as 0",
-					"meter", meter.Key, "quantity", quantity.String(),
+					"meter", meter.EventName, "quantity", quantity.String(),
 					"subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, meter.Name, quantity, ivStart, ivEnd)
+				belowZero.add(meterID, meter.EventName, meter.Name, quantity, ivStart, ivEnd)
 				continue
 			}
 
@@ -1043,7 +1043,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 				// live sub. Loud log, no revenue billed — matches the
 				// multi-dim sibling above.
 				slog.Warn("cycle: usage on a meter with no rating rule — not billed (unpriced meter on plan; ADR-096)",
-					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
+					"meter", meter.EventName, "quantity", quantity.String(), "subscription_id", sub.ID)
 				unpriced.add(meterID, quantity)
 				continue
 			}
@@ -1051,7 +1051,7 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 			if err != nil {
 				return nil, 0, nil, fmt.Errorf("resolve pricing for meter %s: %w", meterID, err)
 			}
-			amount, err := ladder.price(rule, meterID, meterID+"|", mapMeterAggregation(meter.Aggregation), quantity)
+			amount, err := ladder.price(rule, meterID, meterID+"|", meter.Aggregation, quantity)
 			if err != nil {
 				return nil, 0, nil, fmt.Errorf("compute amount for meter %s: %w", meterID, err)
 			}
@@ -1280,7 +1280,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 				iv := mw.iv
 				ivStart := iv.start
 				ivEnd := iv.end
-				aggs, err := reads.ruleBuckets(ctx, meterID, iv)
+				aggs, err := reads.ruleBuckets(ctx, meterID, meter, pricingRules, iv)
 				if err != nil {
 					return nil, 0, fmt.Errorf("cancel: %w", err)
 				}
@@ -1296,16 +1296,16 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 					// ADR-066 §4 pass routing — see billOnePeriod. Before the
 					// unpriced check, as there, so an unpriced bucket is
 					// reported on one pass only.
-					if wm.deferredBucket(agg.AggregationMode, meterID, ratingRuleID) != mw.nonAdditiveOnly {
+					if wm.deferredBucket(meter.Aggregation, meterID, ratingRuleID) != mw.nonAdditiveOnly {
 						continue
 					}
 					// Below zero after corrections: bills 0 (#1193) — see
 					// billOnePeriod's multi-dim branch.
 					if qty.IsNegative() {
 						slog.Warn("cancel: usage below zero after corrections — billed as 0",
-							"meter", meter.Key, "quantity", qty.String(),
+							"meter", meter.EventName, "quantity", qty.String(),
 							"subscription_id", sub.ID)
-						belowZero.add(meterID, meter.Key, meter.Name, qty, ivStart, ivEnd)
+						belowZero.add(meterID, meter.EventName, meter.Name, qty, ivStart, ivEnd)
 						continue
 					}
 					if ratingRuleID == "" {
@@ -1313,7 +1313,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 						// default binding — bill nothing, but loudly (a
 						// silent skip would hide unbilled revenue).
 						slog.Warn("cancel: usage matched no rating rule and meter has no default binding — not billed",
-							"meter", meter.Key, "quantity", qty.String(),
+							"meter", meter.EventName, "quantity", qty.String(),
 							"subscription_id", sub.ID)
 						unpriced.add(meterID, qty)
 						continue
@@ -1322,7 +1322,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 					if err != nil {
 						return nil, 0, fmt.Errorf("resolve pricing for meter %s rule %s on cancel: %w", meterID, ratingRuleID, err)
 					}
-					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, agg.AggregationMode, qty)
+					amount, err := ladder.price(rule, meterID, meterID+"|"+agg.RuleID, meter.Aggregation, qty)
 					if err != nil {
 						return nil, 0, fmt.Errorf("compute amount for meter %s rule %s on cancel: %w", meterID, ratingRuleID, err)
 					}
@@ -1358,7 +1358,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 				return nil, 0, fmt.Errorf("get meter %s on cancel: %w", meterID, err)
 			}
 			// ADR-066 §4 pass routing at meter granularity — see billOnePeriod.
-			if wm.deferredBucket(mapMeterAggregation(meter.Aggregation), meterID, meter.RatingRuleVersionID) != mw.nonAdditiveOnly {
+			if wm.deferredBucket(meter.Aggregation, meterID, meter.RatingRuleVersionID) != mw.nonAdditiveOnly {
 				continue
 			}
 			quantity, err := reads.meterTotal(ctx, meterID, iv)
@@ -1371,8 +1371,8 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 			// Below zero after corrections: bills 0 (#1193).
 			if quantity.IsNegative() {
 				slog.Warn("cancel: usage below zero after corrections — billed as 0",
-					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
-				belowZero.add(meterID, meter.Key, meter.Name, quantity, iv.start, iv.end)
+					"meter", meter.EventName, "quantity", quantity.String(), "subscription_id", sub.ID)
+				belowZero.add(meterID, meter.EventName, meter.Name, quantity, iv.start, iv.end)
 				continue
 			}
 			if meter.RatingRuleVersionID == "" {
@@ -1380,7 +1380,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 				// (ADR-096); see the cycle-path sibling. Loud log, no revenue
 				// billed.
 				slog.Warn("cancel: usage on a meter with no rating rule — not billed (unpriced meter on plan; ADR-096)",
-					"meter", meter.Key, "quantity", quantity.String(), "subscription_id", sub.ID)
+					"meter", meter.EventName, "quantity", quantity.String(), "subscription_id", sub.ID)
 				unpriced.add(meterID, quantity)
 				continue
 			}
@@ -1388,7 +1388,7 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 			if err != nil {
 				return nil, 0, fmt.Errorf("resolve pricing for meter %s on cancel: %w", meterID, err)
 			}
-			amount, err := ladder.price(rule, meterID, meterID+"|", mapMeterAggregation(meter.Aggregation), quantity)
+			amount, err := ladder.price(rule, meterID, meterID+"|", meter.Aggregation, quantity)
 			if err != nil {
 				return nil, 0, fmt.Errorf("compute amount for meter %s on cancel: %w", meterID, err)
 			}
@@ -1506,7 +1506,7 @@ func (e *Engine) legacyPreviewWindow(ctx context.Context, sub domain.Subscriptio
 	}
 
 	// Usage lines per (meter, rule). The priority+claim LATERAL JOIN inside
-	// AggregateByPricingRules is the canonical pricing identity — the
+	// AggregateClaims is the canonical pricing identity — the
 	// cycle scan calls the same path, so a multi-dim tenant's preview
 	// matches what its actual invoice will be.
 	//
@@ -1684,8 +1684,8 @@ func (e *Engine) legacyPreviewAsClose(ctx context.Context, sub domain.Subscripti
 	// The tier ladder continues from a threshold fire, as in the close.
 	ladder := newLegacyUsageLadder(wm)
 	for _, meterID := range order {
-		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-			return ladder.price(rule, meterID, bucketKey, mode, qty)
+		price := func(rule domain.RatingRuleVersion, bucketKey string, aggregation string, qty decimal.Decimal) (int64, error) {
+			return ladder.price(rule, meterID, bucketKey, aggregation, qty)
 		}
 		for _, iv := range mergeUsageIntervals(meterIntervals[meterID]) {
 			lines, warnings, leftOut, err := e.legacyRateMeterWindow(ctx, sub.TenantID, sub.CustomerID, meterID, iv.start, iv.end, periodStart, price)
@@ -1711,7 +1711,7 @@ func (e *Engine) legacyPreviewAsClose(ctx context.Context, sub domain.Subscripti
 	return result, nil
 }
 
-type legacyBucketPricer func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error)
+type legacyBucketPricer func(rule domain.RatingRuleVersion, bucketKey string, aggregation string, qty decimal.Decimal) (int64, error)
 
 func (e *Engine) legacyRateMeterWindow(ctx context.Context, tenantID, customerID, meterID string, from, to, pinAt time.Time, price legacyBucketPricer) ([]PreviewLine, []string, []leftOutBucket, error) {
 	meter, err := e.pricing.GetMeter(ctx, tenantID, meterID)
@@ -1719,15 +1719,13 @@ func (e *Engine) legacyRateMeterWindow(ctx context.Context, tenantID, customerID
 		return nil, nil, nil, fmt.Errorf("get meter: %w", err)
 	}
 
-	defaultMode := mapMeterAggregation(meter.Aggregation)
-	aggs, err := e.usage.AggregateByPricingRules(ctx, tenantID, customerID, meterID, defaultMode, from, to)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("aggregate by pricing rules: %w", err)
-	}
-
 	rules, err := e.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("list pricing rules: %w", err)
+	}
+	aggs, err := e.usage.AggregateClaims(ctx, tenantID, customerID, meterID, meter.Aggregation, domain.ClaimsOfRules(rules), from, to)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("aggregate by pricing rules: %w", err)
 	}
 	rulesByID := make(map[string]domain.MeterPricingRule, len(rules))
 	for _, rule := range rules {
@@ -1749,8 +1747,8 @@ func (e *Engine) legacyRateMeterWindow(ctx context.Context, tenantID, customerID
 		// path follows (net_negative.go, #1193). (Pricing it would fail —
 		// ComputeAmountCents refuses negative quantities.)
 		if agg.Quantity.IsNegative() {
-			warnings = append(warnings, fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", meter.Key, agg.Quantity.String()))
-			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity, BelowZero: true})
+			warnings = append(warnings, fmt.Sprintf("meter %q: net-negative usage so far (%s) after corrections — counted as 0", meter.EventName, agg.Quantity.String()))
+			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, EventName: meter.EventName, MeterName: meter.Name, Aggregation: meter.Aggregation, Quantity: agg.Quantity, BelowZero: true})
 			continue
 		}
 
@@ -1761,8 +1759,8 @@ func (e *Engine) legacyRateMeterWindow(ctx context.Context, tenantID, customerID
 		if ratingRuleID == "" {
 			// The quantity is what the operator needs to bill it by hand
 			// (a one-off invoice), so the warning carries it (#981).
-			warnings = append(warnings, fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", meter.Key, agg.Quantity.String(), meter.Unit))
-			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, MeterKey: meter.Key, MeterName: meter.Name, Mode: agg.AggregationMode, Quantity: agg.Quantity})
+			warnings = append(warnings, fmt.Sprintf("meter %q: %s %s matched no pricing rule and the meter has no default price — not billed", meter.EventName, agg.Quantity.String(), meter.Unit))
+			leftOut = append(leftOut, leftOutBucket{MeterID: meterID, EventName: meter.EventName, MeterName: meter.Name, Aggregation: meter.Aggregation, Quantity: agg.Quantity})
 			continue
 		}
 
@@ -1780,17 +1778,17 @@ func (e *Engine) legacyRateMeterWindow(ctx context.Context, tenantID, customerID
 		// usage is bound to it — so it fails like any other error.
 		ratingRule, err := e.legacyResolveRatedRule(ctx, tenantID, customerID, ratingRuleID, pinAt)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("resolve pricing for meter %q rule %q: %w", meter.Key, ratingRuleID, err)
+			return nil, nil, nil, fmt.Errorf("resolve pricing for meter %q rule %q: %w", meter.EventName, ratingRuleID, err)
 		}
 
 		var amount int64
 		if price != nil {
-			amount, err = price(ratingRule, meterID+"|"+agg.RuleID, agg.AggregationMode, agg.Quantity)
+			amount, err = price(ratingRule, meterID+"|"+agg.RuleID, meter.Aggregation, agg.Quantity)
 		} else {
 			amount, err = domain.ComputeAmountCents(ratingRule, agg.Quantity)
 		}
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("compute amount for meter %q rule %q: %w", meter.Key, ratingRule.RuleKey, err)
+			return nil, nil, nil, fmt.Errorf("compute amount for meter %q rule %q: %w", meter.EventName, ratingRule.RuleKey, err)
 		}
 
 		// Unit amount is amount / quantity, rounded to nearest cent. The
@@ -1823,7 +1821,7 @@ func (e *Engine) legacyRateMeterWindow(ctx context.Context, tenantID, customerID
 			UnitAmountCents:          unitAmount,
 			AmountCents:              amount,
 			PricingMode:              string(ratingRule.Mode),
-			AggregationMode:          agg.AggregationMode,
+			Aggregation:              meter.Aggregation,
 			NominalUnitAmountDecimal: nominalRate(ratingRule),
 		})
 	}
@@ -1893,8 +1891,8 @@ func (e *Engine) legacyUnbilledUsageCents(ctx context.Context, sub domain.Subscr
 	ladder := newLegacyUsageLadder(wm)
 	var total int64
 	for _, meterID := range slices.Sorted(maps.Keys(meterIDs)) {
-		price := func(rule domain.RatingRuleVersion, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-			return ladder.price(rule, meterID, bucketKey, mode, qty)
+		price := func(rule domain.RatingRuleVersion, bucketKey string, aggregation string, qty decimal.Decimal) (int64, error) {
+			return ladder.price(rule, meterID, bucketKey, aggregation, qty)
 		}
 		// sum adds the lines of one pass over the given windows: the clamped
 		// pass takes every bucket except those the fire deferred, the full
@@ -1906,7 +1904,7 @@ func (e *Engine) legacyUnbilledUsageCents(ctx context.Context, sub domain.Subscr
 					return fmt.Errorf("rate meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
 				}
 				for _, l := range lines {
-					if wm.deferredBucket(l.AggregationMode, meterID, l.RatingRuleVersionID) == deferred {
+					if wm.deferredBucket(l.Aggregation, meterID, l.RatingRuleVersionID) == deferred {
 						total += l.AmountCents
 					}
 				}
@@ -1956,15 +1954,15 @@ func newLegacyUsageLadder(wm thresholdWatermark) *legacyUsageLadder {
 }
 
 // continues reports whether a bucket priced under rule continues a ladder.
-func (l *legacyUsageLadder) continues(rule domain.RatingRuleVersion, mode domain.AggregationMode) bool {
-	return l.on && !nonAdditiveMode(mode) && rule.Mode != domain.PricingFlat
+func (l *legacyUsageLadder) continues(rule domain.RatingRuleVersion, aggregation string) bool {
+	return l.on && !nonAdditive(aggregation) && rule.Mode != domain.PricingFlat
 }
 
 // price returns the amount for qty more units of the bucket under rule.
 // bucketKey identifies the closer's bucket (meter + pricing rule); rule is
 // the RESOLVED rule, whose id is how the fire's line is found.
-func (l *legacyUsageLadder) price(rule domain.RatingRuleVersion, meterID, bucketKey string, mode domain.AggregationMode, qty decimal.Decimal) (int64, error) {
-	if !l.continues(rule, mode) {
+func (l *legacyUsageLadder) price(rule domain.RatingRuleVersion, meterID, bucketKey string, aggregation string, qty decimal.Decimal) (int64, error) {
+	if !l.continues(rule, aggregation) {
 		return domain.ComputeAmountCents(rule, qty)
 	}
 	if _, seen := l.qty[bucketKey]; !seen {

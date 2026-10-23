@@ -130,7 +130,7 @@ func insertTestMeter(t *testing.T, db *postgres.DB, tenantID, name, key string) 
 	defer postgres.Rollback(tx)
 
 	_, err = tx.ExecContext(context.Background(), `
-		INSERT INTO meters (id, tenant_id, name, key, unit, aggregation)
+		INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation)
 		VALUES ($1, $2, $3, $4, 'requests', 'sum')
 	`, id, tenantID, name, key)
 	if err != nil {

@@ -47,13 +47,14 @@ func (w *windowUsage) meterTotal(ctx context.Context, meterID string, iv usageIn
 	return t[meterID], nil
 }
 
-// ruleBuckets is the meter's pricing-rule buckets over iv.
-func (w *windowUsage) ruleBuckets(ctx context.Context, meterID string, iv usageInterval) ([]domain.RuleAggregation, error) {
+// ruleBuckets is the meter's pricing-rule buckets over iv, under the meter's
+// aggregation.
+func (w *windowUsage) ruleBuckets(ctx context.Context, meterID string, meter domain.Meter, rules []domain.MeterPricingRule, iv usageInterval) ([]domain.RuleAggregation, error) {
 	k := meterID + "|" + windowKey(iv)
 	if b, ok := w.buckets[k]; ok {
 		return b, nil
 	}
-	b, err := w.e.usage.AggregateByPricingRules(ctx, w.sub.TenantID, w.sub.CustomerID, meterID, mapMeterAggregation(w.meterAggs[meterID]), iv.start, iv.end)
+	b, err := w.e.usage.AggregateClaims(ctx, w.sub.TenantID, w.sub.CustomerID, meterID, meter.Aggregation, domain.ClaimsOfRules(rules), iv.start, iv.end)
 	if err != nil {
 		return nil, fmt.Errorf("aggregate by pricing rules for meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
 	}

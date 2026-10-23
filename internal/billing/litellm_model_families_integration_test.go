@@ -148,8 +148,7 @@ func (rt *recipeTenant) priceRule(key, cents string, match map[string]any, prior
 		rt.t.Fatalf("create rating rule %s: %v", key, err)
 	}
 	seedPricingRule(rt.t, rt.db, rt.ctx, rt.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: rt.meterID, RatingRuleVersionID: rr.ID, DimensionMatch: match,
-		AggregationMode: domain.AggSum, Priority: priority,
+		MeterID: rt.meterID, RatingRuleVersionID: rr.ID, DimensionMatch: match, Priority: priority,
 	})
 }
 

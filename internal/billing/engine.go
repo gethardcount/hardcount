@@ -579,13 +579,17 @@ type SubscriptionReader interface {
 // ratios) round-trip without precision loss; the engine converts to cents
 // at the multiplication step.
 //
-// AggregateByPricingRules is the multi-dim-aware path (priority+claim
-// LATERAL JOIN across the 5 aggregation modes). The cycle scan, the
-// customer-usage endpoint, and the create_preview surface all call it —
-// preview math == invoice math by construction.
+// AggregateClaims is the multi-dim-aware path: each event goes to the first
+// claim (pricing rule) it matches, and each bucket is aggregated under the
+// meter's one aggregation (ADR-130 §2). The cycle scan, the customer-usage
+// endpoint, and the create_preview surface all call it — preview math ==
+// invoice math by construction. AggregateForBillingPeriodByAgg is the
+// closers' read for meters with no pricing rules: one query for every
+// meter of an invoice's window, with the same aggregates, the `last`
+// tie-break included.
 type UsageAggregator interface {
 	AggregateForBillingPeriodByAgg(ctx context.Context, tenantID, customerID string, meters map[string]string, from, to time.Time) (map[string]decimal.Decimal, error)
-	AggregateByPricingRules(ctx context.Context, tenantID, customerID, meterID string, defaultMode domain.AggregationMode, from, to time.Time) ([]domain.RuleAggregation, error)
+	AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.RuleAggregation, error)
 }
 
 // PricingReader reads plan, rating rule, and override data.

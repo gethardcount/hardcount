@@ -163,7 +163,7 @@ func TestCustomerUsage_SingleMeterFlatParity(t *testing.T) {
 	}
 
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "tokens", Name: "Tokens", Unit: "tokens",
+		EventName: "tokens", Name: "Tokens", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	if err != nil {
@@ -241,7 +241,7 @@ func TestCustomerUsage_MultiDimDimensionMatchEcho(t *testing.T) {
 	// Default rating rule on the meter (used for unclaimed events) — set
 	// to the input rule so unclaimed events would still rate sensibly.
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "tokens_dim", Name: "Tokens Dim", Unit: "tokens",
+		EventName: "tokens_dim", Name: "Tokens Dim", Unit: "tokens",
 		Aggregation: "sum", RatingRuleVersionID: rrvIn.ID,
 	})
 	if err != nil {
@@ -250,15 +250,13 @@ func TestCustomerUsage_MultiDimDimensionMatchEcho(t *testing.T) {
 
 	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: meter.ID, RatingRuleVersionID: rrvIn.ID,
-		DimensionMatch:  map[string]any{"operation": "input"},
-		AggregationMode: domain.AggSum, Priority: 10,
+		DimensionMatch: map[string]any{"operation": "input"}, Priority: 10,
 	}); err != nil {
 		t.Fatalf("upsert mpr input: %v", err)
 	}
 	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
 		MeterID: meter.ID, RatingRuleVersionID: rrvOut.ID,
-		DimensionMatch:  map[string]any{"operation": "output"},
-		AggregationMode: domain.AggSum, Priority: 10,
+		DimensionMatch: map[string]any{"operation": "output"}, Priority: 10,
 	}); err != nil {
 		t.Fatalf("upsert mpr output: %v", err)
 	}
@@ -326,7 +324,7 @@ func TestCustomerUsage_CrossTenantIsolation(t *testing.T) {
 		RuleKey: "x", Name: "x", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
 	})
 	meter, _ := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		Key: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
 	})
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)

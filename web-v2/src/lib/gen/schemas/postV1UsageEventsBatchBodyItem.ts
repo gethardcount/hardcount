@@ -13,7 +13,7 @@ import type { PostV1UsageEventsBatchBodyItemProperties } from './postV1UsageEven
 export type PostV1UsageEventsBatchBodyItem = {
   /** The customer's external_id (your identifier), not the internal vlx_cus_ id. */
   external_customer_id: string;
-  /** The meter key (e.g. "tokens"). */
+  /** The meter's `event_name` (e.g. "tokens"). */
   event_name: string;
   /** Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
   quantity: number | string;

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
 import { api, formatDateTime } from '@/lib/api'
+import { meterAggregationLabel } from '@/lib/meterLabels'
 import type { RecipeListItem } from '@/lib/gen/schemas/recipeListItem'
 import type { RecipeDetail } from '@/lib/gen/schemas/recipeDetail'
 import type { RecipeOverride } from '@/lib/gen/schemas/recipeOverride'
@@ -379,13 +380,13 @@ function ObjectsList({ preview }: { preview: RecipePreviewResult }) {
   const currentPolicies = policiesData?.data
   // Rules don't carry their meter; the bindings do. rule key → meter unit so
   // each price renders in that meter's units (tokens vs seconds vs calls).
-  const unitByMeterKey = new Map((preview.objects.meters ?? []).map(m => [m.key, m.unit]))
+  const unitByEventName = new Map((preview.objects.meters ?? []).map(m => [m.event_name, m.unit]))
   const unitByRuleKey = new Map(
-    (preview.objects.pricing_rules ?? []).map(pr => [pr.rating_rule_key, unitByMeterKey.get(pr.meter_key) ?? '']),
+    (preview.objects.pricing_rules ?? []).map(pr => [pr.rating_rule_key, unitByEventName.get(pr.event_name) ?? '']),
   )
 
   const sections: { label: string; items: string[] }[] = []
-  if (preview.objects.meters?.length) sections.push({ label: 'What gets counted', items: preview.objects.meters.map(m => `${m.name} (${m.aggregation} of ${m.unit})`) })
+  if (preview.objects.meters?.length) sections.push({ label: 'What gets counted', items: preview.objects.meters.map(m => `${m.name} (${meterAggregationLabel(m.aggregation).toLowerCase()} of ${m.unit})`) })
   if (preview.objects.rating_rules?.length) sections.push({
     label: 'Prices',
     items: preview.objects.rating_rules.map(r => `${r.name || r.key} — ${priceRate(r, unitByRuleKey.get(r.key) ?? '')}`),

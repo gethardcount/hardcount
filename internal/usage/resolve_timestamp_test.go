@@ -20,7 +20,7 @@ func (stubCustomer) GetByExternalID(_ context.Context, _, _ string) (domain.Cust
 
 type stubMeter struct{}
 
-func (stubMeter) GetMeterByKey(_ context.Context, _, _ string) (domain.Meter, error) {
+func (stubMeter) GetMeterByEventName(_ context.Context, _, _ string) (domain.Meter, error) {
 	return domain.Meter{ID: "mtr_1"}, nil
 }
 

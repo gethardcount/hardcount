@@ -113,7 +113,7 @@ func seedMeter(t *testing.T, db *postgres.DB, tenantID, name, key string) string
 	t.Helper()
 	id := postgres.NewID("vlx_mtr")
 	execInTenantTx(t, db, tenantID, `
-		INSERT INTO meters (id, tenant_id, name, key, unit, aggregation)
+		INSERT INTO meters (id, tenant_id, name, event_name, unit, aggregation)
 		VALUES ($1, $2, $3, $4, 'requests', 'sum')
 	`, id, tenantID, name, key)
 	return id

@@ -9,10 +9,17 @@ package pricing_test
 // writing the meter's first event (C5).
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
@@ -63,7 +70,7 @@ func (f meterEditFixture) held(t *testing.T, eventName, status string) {
 	tx := f.begin(t)
 	defer postgres.Rollback(tx)
 	if _, err := tx.ExecContext(f.ctx, `
-		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, meter_key, quantity,
+		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, event_name, quantity,
 			idempotency_key, event_at, reason, status)
 		VALUES ($1, $2, 'litellm', 'ext_not_yet', $3, 5, $4, now(), 'customer_not_found', $5)
 	`, postgres.NewID("vlx_hue"), f.tenantID, eventName, postgres.NewID("idem"), status); err != nil {
@@ -208,4 +215,39 @@ func TestMeterAggregation_PatchAgainstTheFirstIngest(t *testing.T) {
 		_, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("sum")})
 		wantHasUsage(t, "PATCH after the event", err)
 	})
+}
+
+// What an API caller sees: 409 with code meter_has_usage, and GET says
+// has_usage before the edit, so the dashboard can show the lock up front.
+func TestMeterAggregation_HTTP(t *testing.T) {
+	f := newMeterEditFixture(t)
+	h := pricing.NewHandler(f.svc)
+	r := chi.NewRouter()
+	r.Mount("/v1/meters", h.MeterRoutes())
+	do := func(method, path, body string) (int, map[string]any) {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(auth.WithTenantID(f.ctx, f.tenantID))
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		var out map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &out)
+		return rec.Code, out
+	}
+
+	m := f.meter(t, "agg_http", "")
+	if code, body := do(http.MethodGet, "/v1/meters/"+m.ID, ""); code != http.StatusOK || body["has_usage"] != false {
+		t.Fatalf("GET before any event: %d %v, want 200 with has_usage false", code, body)
+	}
+	f.event(t, m.ID)
+	if code, body := do(http.MethodGet, "/v1/meters/"+m.ID, ""); code != http.StatusOK || body["has_usage"] != true || body["event_name"] != "agg_http" {
+		t.Fatalf("GET after an event: %d %v, want 200 with has_usage true and event_name agg_http", code, body)
+	}
+	code, body := do(http.MethodPatch, "/v1/meters/"+m.ID, `{"aggregation":"max"}`)
+	errBody, _ := body["error"].(map[string]any)
+	if code != http.StatusConflict || errBody["code"] != codeMeterHasUsage {
+		t.Fatalf("PATCH aggregation with usage: %d %v, want 409 %s", code, body, codeMeterHasUsage)
+	}
+	if code, body := do(http.MethodPatch, "/v1/meters/"+m.ID, `{"name":"Renamed"}`); code != http.StatusOK || body["name"] != "Renamed" || body["has_usage"] != true {
+		t.Fatalf("PATCH name with usage: %d %v, want 200 renamed with has_usage true", code, body)
+	}
 }

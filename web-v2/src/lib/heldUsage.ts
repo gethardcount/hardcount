@@ -32,7 +32,7 @@ export function groupHeldByCustomer(groups: HeldUsageGroup[]): HeldCustomer[] {
       out.set(g.external_customer_id, c)
     }
     c.rows += g.rows
-    if (!g.meter_exists && !c.missingMeters.includes(g.meter_key)) c.missingMeters.push(g.meter_key)
+    if (!g.meter_exists && !c.missingMeters.includes(g.event_name)) c.missingMeters.push(g.event_name)
     if (g.first_event_at < c.firstEventAt) c.firstEventAt = g.first_event_at
     if (g.last_event_at > c.lastEventAt) c.lastEventAt = g.last_event_at
   }

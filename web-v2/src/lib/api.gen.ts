@@ -631,7 +631,7 @@ export interface paths {
                                 current_period_end?: string;
                             }[];
                             usage?: {
-                                meter_key?: string;
+                                event_name?: string;
                                 meter_name?: string;
                                 unit?: string;
                                 currency?: string;
@@ -875,11 +875,13 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        key: string;
+                        /** @description The `event_name` usage events will send for this meter. Letters, digits, `-` and `_`; at most 100 characters. */
+                        event_name: string;
                         name: string;
                         /** @default unit */
                         unit?: string;
                         /**
+                         * @description How the meter rolls its events into one quantity per billing period. Fixed once the meter has usage.
                          * @default sum
                          * @enum {string}
                          */
@@ -928,15 +930,20 @@ export interface paths {
          *     unmatched usage); pass an empty string to clear it. The rule must
          *     exist on the tenant.
          *
+         *     `aggregation` can change until the meter has usage, then it is
+         *     fixed: a change is refused with 409 `meter_has_usage`, because the
+         *     usage so far was counted under the aggregation it has. Make a new
+         *     meter to count differently. Usage is a usage event of the meter, or
+         *     a held usage row for its `event_name` that is still held.
+         *
          *     While a draft, trialing or active subscription uses the meter,
-         *     changing `aggregation`, pointing the default at another rating
-         *     rule, or clearing it is refused with 409 `meter_in_use`: the
-         *     change would reprice the billing period already open. A first
-         *     default, or another version of the same rating rule, is allowed. To
-         *     change a rate, publish a new version of the rating rule; it applies
-         *     from each subscription's next period (on a test clock, it can apply
-         *     to the current simulated period). `name` and `unit` can always
-         *     change.
+         *     pointing the default at another rating rule, or clearing it, is
+         *     refused with 409 `meter_in_use`: the change would reprice the
+         *     billing period already open. A first default, or another version of
+         *     the same rating rule, is allowed. To change a rate, publish a new
+         *     version of the rating rule; it applies from each subscription's next
+         *     period (on a test clock, it can apply to the current simulated
+         *     period). `name` and `unit` can always change.
          */
         patch: {
             parameters: {
@@ -986,11 +993,13 @@ export interface paths {
                     content?: never;
                 };
                 /**
-                 * @description `meter_in_use`: subscriptions use the meter and the change would
-                 *     reprice their current period. The message gives the number of
-                 *     subscriptions. `invalid_state`: the new default's currency
-                 *     conflicts with the meter's other prices or with a plan that uses
-                 *     the meter, or another write changed the meter during this one.
+                 * @description `meter_has_usage`: the meter has usage, so its `aggregation`
+                 *     cannot change. `meter_in_use`: subscriptions use the meter and
+                 *     the change would reprice their current period. The message gives
+                 *     the number of subscriptions. `invalid_state`: the new default's
+                 *     currency conflicts with the meter's other prices or with a plan
+                 *     that uses the meter, or another write changed the meter during
+                 *     this one.
                  */
                 409: {
                     headers: {
@@ -1031,9 +1040,10 @@ export interface paths {
          * @description Binds a rating rule to the part of the meter's usage whose dimensions
          *     match `dimension_match`. The rule is identified by the meter and
          *     `rating_rule_version_id`: posting the same pair again updates
-         *     `dimension_match`, `aggregation_mode` and `priority` on the existing
-         *     rule and keeps its id. Both cases return 201. The meter id in the
-         *     path is used; a `meter_id` in the body is ignored.
+         *     `dimension_match` and `priority` on the existing rule and keeps its
+         *     id. Both cases return 201. The meter id in the path is used; a
+         *     `meter_id` in the body is ignored. A rule has no aggregation of its
+         *     own: it bills its events under the meter's `aggregation`.
          *
          *     While a draft, trialing or active subscription uses the meter, the
          *     change must not reprice the billing period already open, or it is
@@ -2926,7 +2936,7 @@ export interface paths {
                     "application/json": {
                         /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
                         external_customer_id: string;
-                        /** @description The meter key (e.g. "tokens"). */
+                        /** @description The meter's `event_name` (e.g. "tokens"). */
                         event_name: string;
                         /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
                         quantity: number | string;
@@ -3061,7 +3071,7 @@ export interface paths {
                     "application/json": {
                         /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
                         external_customer_id: string;
-                        /** @description The meter key (e.g. "tokens"). */
+                        /** @description The meter's `event_name` (e.g. "tokens"). */
                         event_name: string;
                         /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
                         quantity: number | string;
@@ -3200,7 +3210,7 @@ export interface paths {
          * @description Usage rows the LiteLLM integration received for a customer or meter
          *     that did not exist yet. They are kept with their idempotency keys,
          *     not billed, until you release or discard them. Grouped by external
-         *     customer ID, meter key and reason, most recent arrival first. Lists
+         *     customer ID, event name and reason, most recent arrival first. Lists
          *     the 200 external customer IDs with the most recent arrivals, with
          *     every group for each; `total_customers` and `total_rows` count all
          *     held rows, listed or not. Requires usage read permission.
@@ -6990,11 +7000,25 @@ export interface components {
         Meter: {
             id?: string;
             tenant_id?: string;
-            key?: string;
+            /** @description The `event_name` usage events send for this meter. */
+            event_name?: string;
             name?: string;
             unit?: string;
-            /** @enum {string} */
+            /**
+             * @description How the meter rolls its events into one quantity per billing
+             *     period. Every pricing rule of the meter bills under it. `last`
+             *     is the latest event by timestamp, then by id. Fixed once the
+             *     meter has usage (see `has_usage`).
+             * @enum {string}
+             */
             aggregation?: "sum" | "count" | "max" | "last";
+            /**
+             * @description Whether the meter has events: usage events, or held usage rows
+             *     for its `event_name` that are still held. Once it has, its
+             *     `aggregation` cannot change. Returned when you create, get or
+             *     update one meter; the meter list leaves it out.
+             */
+            has_usage?: boolean;
             rating_rule_version_id?: string;
             /** Format: date-time */
             created_at?: string;
@@ -7966,7 +7990,7 @@ export interface components {
             pattern?: string;
         };
         RecipeMeter: {
-            key: string;
+            event_name: string;
             name: string;
             unit: string;
             aggregation: string;
@@ -7992,13 +8016,12 @@ export interface components {
             overage_unit_amount_cents: string;
         };
         RecipePricingRule: {
-            meter_key: string;
+            /** @description The recipe meter the rule prices. */
+            event_name: string;
             rating_rule_key: string;
             dimension_match: {
                 [key: string]: unknown;
             };
-            /** @enum {string} */
-            aggregation_mode: "sum" | "count" | "last_during_period" | "last_ever" | "max";
             priority: number;
         };
         RecipePlan: {
@@ -8014,7 +8037,8 @@ export interface components {
              * @enum {string}
              */
             base_bill_timing?: "in_advance" | "in_arrears";
-            meter_keys: string[];
+            /** @description The recipe meters the plan bills. */
+            event_names: string[];
         };
         RecipeDunningPolicy: {
             name: string;
@@ -8231,7 +8255,7 @@ export interface components {
         };
         CustomerUsageMeter: {
             meter_id: string;
-            meter_key: string;
+            event_name: string;
             meter_name: string;
             unit: string;
             currency: string;
@@ -8552,7 +8576,7 @@ export interface components {
         AnalyticsTopMeter: {
             meter_id: string;
             meter_name: string;
-            key: string;
+            event_name: string;
             /** Format: int64 */
             events: number;
             /** @description Summed quantity, as a decimal string. */
@@ -9200,12 +9224,10 @@ export interface components {
             tenant_id?: string;
             meter_id: string;
             rating_rule_version_id: string;
-            /** @description Dimensions an event must have for this rule to bill it. `{}` matches every event. */
+            /** @description Dimensions an event must have for this rule to bill it. `{}` matches every event. The rule bills them under the meter's `aggregation`. */
             dimension_match: {
                 [key: string]: unknown;
             };
-            /** @enum {string} */
-            aggregation_mode: "sum" | "count" | "last_during_period" | "last_ever" | "max";
             /** @description Rules are tried highest first. */
             priority: number;
             /** Format: date-time */
@@ -9338,14 +9360,13 @@ export interface components {
                 /** @description Plain sum of reported quantities, as a decimal string. */
                 total: string;
                 /**
-                 * @description The aggregation billing uses for this meter's events (`sum`,
-                 *     `count`, `max`, `last`), read from its pricing rules and, for
-                 *     events no rule claims, the meter's own aggregation. `mixed`
-                 *     when those differ, or when a `max` or `last` meter is billed
-                 *     in more than one part (several rules, or a rule plus the
-                 *     events no rule claims), since peaks of the parts added up
-                 *     are not one peak: `value` is then the plain sum, which
-                 *     billing may not use. Empty when unknown.
+                 * @description The meter's aggregation (`sum`, `count`, `max`, `last`),
+                 *     which every pricing rule of the meter bills under. `mixed`
+                 *     when a `max` or `last` meter is billed in more than one
+                 *     part (several rules, or a rule plus the events no rule
+                 *     claims), since peaks of the parts added up are not one
+                 *     peak: `value` is then the plain sum, which billing does not
+                 *     use. Empty when unknown.
                  */
                 aggregation: string;
                 /**
@@ -9477,11 +9498,12 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** @description The usage rows still held for one external customer ID, meter key and reason. */
+        /** @description The usage rows still held for one external customer ID, event name and reason. */
         HeldUsageGroup: {
             /** @description The LiteLLM `user` value the rows carried. */
             external_customer_id: string;
-            meter_key: string;
+            /** @description The `event_name` the rows carried. */
+            event_name: string;
             /**
              * @description What was missing when the rows arrived.
              * @enum {string}
@@ -9501,7 +9523,7 @@ export interface components {
             last_received_at: string;
             /** @description The customer whose external ID now matches, or empty when none does yet. */
             customer_id: string;
-            /** @description Whether a meter with this key exists now. */
+            /** @description Whether a meter with this `event_name` exists now. */
             meter_exists: boolean;
         };
         HeldUsageReleaseResult: {
@@ -11359,12 +11381,6 @@ export interface operations {
                         [key: string]: unknown;
                     };
                     /**
-                     * @description How the matched events become one quantity for the period.
-                     * @default sum
-                     * @enum {string}
-                     */
-                    aggregation_mode?: "sum" | "count" | "last_during_period" | "last_ever" | "max";
-                    /**
                      * @description Higher wins when an event matches more than one rule.
                      * @default 0
                      */
@@ -11407,9 +11423,10 @@ export interface operations {
                 };
             };
             /**
-             * @description `validation_error`: unknown meter or rating rule, unknown
-             *     `aggregation_mode`, more than 16 `dimension_match` keys, or a
-             *     non-scalar `dimension_match` value.
+             * @description `validation_error`: unknown meter or rating rule, a field the
+             *     body does not define (such as `aggregation_mode`: a rule bills
+             *     under its meter's aggregation), more than 16 `dimension_match`
+             *     keys, or a non-scalar `dimension_match` value.
              */
             422: {
                 headers: {
@@ -13183,7 +13200,7 @@ export interface operations {
                 "application/json": {
                     /** @description The customer's external_id (your identifier), not the internal vlx_cus_ id. */
                     external_customer_id: string;
-                    /** @description The meter key (e.g. "tokens"). */
+                    /** @description The meter's `event_name` (e.g. "tokens"). */
                     event_name: string;
                     /** @description Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections. */
                     quantity?: number | string;
@@ -13379,8 +13396,8 @@ export interface operations {
             content: {
                 "application/json": {
                     external_customer_id: string;
-                    /** @description Discard only this meter's rows. Omit for all. */
-                    meter_key?: string;
+                    /** @description Discard only the rows with this `event_name`. Omit for all. */
+                    event_name?: string;
                 };
             };
         };
@@ -14849,7 +14866,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description An existing meter with the same key diverges from the recipe (aggregation mismatch) — reconcile the meter before instantiating. Or `meter_in_use`: subscriptions use that meter, and a recipe pricing rule would reprice their current period (the meter has a default rating rule, or the rule outranks one that matches the same events). Nothing is installed. */
+            /** @description An existing meter with the same `event_name` diverges from the recipe (aggregation mismatch) — reconcile the meter before instantiating. Or `meter_in_use`: subscriptions use that meter, and a recipe pricing rule would reprice their current period (the meter has a default rating rule, or the rule outranks one that matches the same events). Nothing is installed. */
             409: {
                 headers: {
                     [name: string]: unknown;

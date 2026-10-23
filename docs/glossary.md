@@ -33,9 +33,11 @@ Words used in the Velox docs and dashboard. For the big picture, read
 ## Pricing and usage
 
 - **meter**: A counter for one kind of usage you charge for, such as tokens
-  or API requests. Each meter has a unique key, a unit, a way to combine
-  readings (its aggregation), and optionally a default rating rule. Usage
-  events name the meter by its key in `event_name`.
+  or API requests. Each meter has a unique `event_name`, a unit, one way to
+  combine readings (its aggregation: `sum`, `count`, `max` or `last`), and
+  optionally a default rating rule. Every price of the meter bills under its
+  aggregation, which is fixed once the meter has usage. Usage events name the
+  meter by its `event_name`.
   [More](how-velox-works.md)
 - **usage event**: One "this customer used this much" record that your app
   sends to `POST /v1/usage-events`. It names the customer and the meter and

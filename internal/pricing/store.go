@@ -29,7 +29,7 @@ type Store interface {
 	CreateMeter(ctx context.Context, tenantID string, m domain.Meter) (domain.Meter, error)
 	CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error)
 	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
-	GetMeterByKey(ctx context.Context, tenantID, key string) (domain.Meter, error)
+	GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error)
 	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
 	UpdateMeter(ctx context.Context, tenantID string, m domain.Meter) (domain.Meter, error)
 	// UpdateMeterAudited runs the caller-supplied audit emission on the SAME
@@ -99,6 +99,13 @@ type Store interface {
 	// now. Every guarded edit on a meter takes it first, so two edits on one
 	// meter run one after the other and each sees the other's result.
 	LockMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (domain.Meter, error)
+	// MeterHasUsageTx reports whether the meter has events: rows in
+	// usage_events, or held rows (status held) for its event name. Once it
+	// has, its aggregation is fixed (ADR-130 §2). Read after LockMeterTx, it
+	// sees every event whose insert the lock waited for.
+	MeterHasUsageTx(ctx context.Context, tx *sql.Tx, m domain.Meter) (bool, error)
+	// MeterHasUsage is MeterHasUsageTx on its own transaction, for reads.
+	MeterHasUsage(ctx context.Context, tenantID string, m domain.Meter) (bool, error)
 	// CountSubsUsingMeterTx locks every plan whose meter_ids holds the meter
 	// (FOR UPDATE), then counts the draft, trialing and active subscriptions
 	// that bill it: an item on such a plan, or an item change to or from
