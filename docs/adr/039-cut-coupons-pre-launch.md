@@ -8,7 +8,7 @@ shipped between Week 4 and Week 8.
 
 ## Summary
 
-Coupons are removed: the `internal/coupon` package, its API endpoints, its billing-engine hooks and its dashboard pages were deleted. Velox targets AI and usage-based billing, where peers use credits rather than promo codes, and the credit ledger already covers every discount need seen so far. The `coupons`, `coupon_redemptions` and `customer_discounts` tables stayed until migration 00201 dropped them on 2026-10-23 (amendment below). Status: active.
+Coupons are removed: the `internal/coupon` package, its API endpoints, its billing-engine hooks and its dashboard pages were deleted. Velox targets AI and usage-based billing, where peers use credits rather than promo codes, and the credit ledger already covers every discount need seen so far. The `coupons`, `coupon_redemptions` and `customer_discounts` tables stay, so a rebuild can start from them if a signed design partner needs promo codes. Status: active.
 
 ## Context
 
@@ -94,13 +94,6 @@ remain in place. Destructive drops have asymmetric risk pre-launch
 keep, and a future rebuild would start from the existing schema if
 a DP names a coupon use case.
 
-**Amendment 2026-10-23: the tables are dropped.** No code has
-written them since coupons were cut, so migration 00201 drops
-`coupons`, `coupon_redemptions` and `customer_discounts` (and
-`billed_entries`). It refuses to run while
-any of them holds a row. A rebuild starts from the schema that
-00201's Down recreates.
-
 ## Consequences
 
 - **Dashboard simplifies.** Coupons nav entry, customer-detail
@@ -111,8 +104,8 @@ any of them holds a row. A rebuild starts from the schema that
   `/v1/invoices/{id}/apply-coupon` gone. SDK surface shrinks.
 - **Net code reduction.** ~2k lines deleted across Go + TypeScript
   + tests.
-- **Reversal cost.** A rebuild starts from the schema 00201's Down
-  recreates. Code-side rebuild would be ~1 week if a DP demands it.
+- **Reversal cost.** A rebuild starts from the existing schema (tables
+  intact). Code-side rebuild would be ~1 week if a DP demands it.
 - **Audit log historical rows.** Pre-cut `audit_log` rows carrying
   `action=apply_coupon` and `EventCoupon*` events remain readable
   but render as unknown action types in the dashboard's

@@ -247,6 +247,7 @@ Some tables matter more than others when you decide what a restore must bring ba
 | `invoice_dunning_runs`, `invoice_dunning_events` | Payment retries in progress. Losing them can charge a failed card again too soon. |
 | `tax_calculations` | Stripe Tax records that tie an invoice to Stripe's tax transaction |
 | `audit_log` | Who changed what. Audits such as SOC 2 often ask for 7 years. |
+| `coupons`, `customer_discounts`, `coupon_redemptions` | Discounts. Coupons are no longer offered, and the tables remain. |
 | `users`, `user_tenants`, `password_reset_tokens` | Dashboard users |
 | `api_keys` | API keys |
 | `tenant_settings`, `stripe_provider_credentials` | Account settings, including the encrypted Stripe keys |

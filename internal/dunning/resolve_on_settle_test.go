@@ -273,6 +273,9 @@ func TestProcessRun_TerminalInvoice_ResolutionNamesWhichTerminal(t *testing.T) {
 				t.Errorf("%s invoice: got state=%q resolution=%q, want resolved/%s",
 					tc.status, got.State, got.Resolution, tc.want)
 			}
+			if got.Resolution == domain.ResolutionManuallyResolved {
+				t.Errorf("no writer may emit the legacy manually_resolved value (0170)")
+			}
 			if retrier.calls != 0 {
 				t.Errorf("retrier must not run on a %s invoice: calls=%d", tc.status, retrier.calls)
 			}

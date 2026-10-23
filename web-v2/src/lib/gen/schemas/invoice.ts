@@ -198,6 +198,12 @@ export interface Invoice {
   source_change_type?: ItemChangeType;
   billing_reason?: InvoiceBillingReason;
   /**
+     * Source Stripe invoice id (`in_xxx`). Set only on invoices the
+     * Stripe importer wrote before it was removed on 2026-04-29.
+     * Empty on every other invoice.
+     */
+  stripe_invoice_id?: string;
+  /**
      * Whether this invoice's domain timestamps (created/issued/due/paid)
      * were stamped on a test clock's simulated time rather than
      * wall-clock. Captured at write time (engine: the subscription is

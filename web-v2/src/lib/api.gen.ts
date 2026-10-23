@@ -7875,6 +7875,12 @@ export interface components {
             source_change_type?: components["schemas"]["ItemChangeType"];
             billing_reason?: components["schemas"]["InvoiceBillingReason"];
             /**
+             * @description Source Stripe invoice id (`in_xxx`). Set only on invoices the
+             *     Stripe importer wrote before it was removed on 2026-04-29.
+             *     Empty on every other invoice.
+             */
+            stripe_invoice_id?: string;
+            /**
              * @description Whether this invoice's domain timestamps (created/issued/due/paid)
              *     were stamped on a test clock's simulated time rather than
              *     wall-clock. Captured at write time (engine: the subscription is
@@ -9273,12 +9279,13 @@ export interface components {
              * @description How the run ended, set when it is resolved. Exception:
              *     `action_failed` is set on a run that is still `active`. The
              *     final action (pause, cancel or mark uncollectible) failed and
-             *     will be retried at `next_action_at`. `amount_below_minimum`: a charge on the
+             *     will be retried at `next_action_at`. `manually_resolved` appears
+             *     only on older runs. `amount_below_minimum`: a charge on the
              *     invoice was refused by Stripe because the amount is below its
              *     minimum charge, so the run ended without its final action.
              * @enum {string}
              */
-            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "amount_below_minimum";
+            resolution?: "payment_recovered" | "invoice_voided" | "invoice_not_collectible" | "retries_exhausted" | "action_failed" | "manually_resolved" | "amount_below_minimum";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -15883,7 +15890,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description `resolution` is missing or not one of the three values. */
+            /**
+             * @description `resolution` is missing or not one of the three values. The
+             *     old value `manually_resolved` is refused with its own message.
+             */
             422: {
                 headers: {
                     [name: string]: unknown;

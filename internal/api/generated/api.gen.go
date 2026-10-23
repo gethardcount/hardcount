@@ -698,6 +698,7 @@ const (
 	DunningRunResolutionAmountBelowMinimum    DunningRunResolution = "amount_below_minimum"
 	DunningRunResolutionInvoiceNotCollectible DunningRunResolution = "invoice_not_collectible"
 	DunningRunResolutionInvoiceVoided         DunningRunResolution = "invoice_voided"
+	DunningRunResolutionManuallyResolved      DunningRunResolution = "manually_resolved"
 	DunningRunResolutionPaymentRecovered      DunningRunResolution = "payment_recovered"
 	DunningRunResolutionRetriesExhausted      DunningRunResolution = "retries_exhausted"
 )
@@ -712,6 +713,8 @@ func (e DunningRunResolution) Valid() bool {
 	case DunningRunResolutionInvoiceNotCollectible:
 		return true
 	case DunningRunResolutionInvoiceVoided:
+		return true
+	case DunningRunResolutionManuallyResolved:
 		return true
 	case DunningRunResolutionPaymentRecovered:
 		return true
@@ -4561,7 +4564,8 @@ type DunningRun struct {
 	// Resolution How the run ended, set when it is resolved. Exception:
 	// `action_failed` is set on a run that is still `active`. The
 	// final action (pause, cancel or mark uncollectible) failed and
-	// will be retried at `next_action_at`. `amount_below_minimum`: a charge on the
+	// will be retried at `next_action_at`. `manually_resolved` appears
+	// only on older runs. `amount_below_minimum`: a charge on the
 	// invoice was refused by Stripe because the amount is below its
 	// minimum charge, so the run ended without its final action.
 	Resolution DunningRunResolution `json:"resolution,omitempty"`
@@ -4581,7 +4585,8 @@ type DunningRun struct {
 // DunningRunResolution How the run ended, set when it is resolved. Exception:
 // `action_failed` is set on a run that is still `active`. The
 // final action (pause, cancel or mark uncollectible) failed and
-// will be retried at `next_action_at`. `amount_below_minimum`: a charge on the
+// will be retried at `next_action_at`. `manually_resolved` appears
+// only on older runs. `amount_below_minimum`: a charge on the
 // invoice was refused by Stripe because the amount is below its
 // minimum charge, so the run ended without its final action.
 type DunningRunResolution string
@@ -5013,8 +5018,13 @@ type Invoice struct {
 	// a dunning policy has given up collecting (no further retries) while
 	// keeping it on the books — distinct from `voided` (cancelled, owes
 	// nothing).
-	Status                InvoiceStatus `json:"status"`
-	StripePaymentIntentId string        `json:"stripe_payment_intent_id,omitempty"`
+	Status InvoiceStatus `json:"status"`
+
+	// StripeInvoiceId Source Stripe invoice id (`in_xxx`). Set only on invoices the
+	// Stripe importer wrote before it was removed on 2026-04-29.
+	// Empty on every other invoice.
+	StripeInvoiceId       string `json:"stripe_invoice_id,omitempty"`
+	StripePaymentIntentId string `json:"stripe_payment_intent_id,omitempty"`
 
 	// SubscriptionId Empty for one-off invoices not tied to a subscription.
 	SubscriptionId string `json:"subscription_id"`

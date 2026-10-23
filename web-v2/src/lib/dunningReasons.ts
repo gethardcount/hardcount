@@ -17,6 +17,7 @@ const LABELS: Record<string, string> = {
   invoice_voided: 'Invoice voided',
   invoice_uncollectible: 'Invoice written off',
   invoice_not_collectible: 'Invoice written off',
+  manually_resolved: 'Resolved by hand',
   retries_exhausted: 'All retries used',
   action_failed: 'Final step failed, will try again',
   amount_below_minimum: 'Below Stripe\u2019s minimum charge',

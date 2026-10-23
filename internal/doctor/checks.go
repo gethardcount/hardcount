@@ -9,6 +9,7 @@
 // suspenders). Exclusion fences you will see below and must not "simplify"
 // away:
 //
+//   - stripe_invoice_id IS NULL       — importer rows dropped components
 //   - id NOT LIKE 'vlx_inv_safe%%'     — old velox-migrate-safety seeder rows
 //   - created_at >= '2026-07-05'      — pre-#365/#347 grandfathered subs
 //   - grace intervals on sweeps       — post-commit stamps lag their tx
@@ -19,26 +20,26 @@ var Checks = []Check{
 	{
 		Name:   "invoice_total_identity",
 		Domain: "invoices",
-		Why:    "total must equal subtotal + tax - discount (the negative-clamp excluded); drift means a rated amount nobody computed",
-		SQL:    `SELECT id, tenant_id, status, subtotal_cents, discount_cents, tax_amount_cents, total_amount_cents FROM invoices WHERE total_amount_cents <> subtotal_cents + tax_amount_cents - discount_cents AND NOT (total_amount_cents = 0 AND subtotal_cents + tax_amount_cents - discount_cents < 0)`,
+		Why:    "total must equal subtotal + tax - discount (importer rows and the negative-clamp excluded); drift means a rated amount nobody computed",
+		SQL:    `SELECT id, tenant_id, status, subtotal_cents, discount_cents, tax_amount_cents, total_amount_cents FROM invoices WHERE stripe_invoice_id IS NULL AND total_amount_cents <> subtotal_cents + tax_amount_cents - discount_cents AND NOT (total_amount_cents = 0 AND subtotal_cents + tax_amount_cents - discount_cents < 0)`,
 	},
 	{
 		Name:   "invoice_due_conservation",
 		Domain: "invoices",
 		Why:    "an invoice's total is accounted for exactly once: amount_due = total - paid - credits_applied - the part of issued credit notes that reduced it (a note's total minus its refund/credit/out-of-band channels), and those three never exceed the total. Drift means money owed and money booked disagree. A row that is over its total was relieved twice (before 2026-10-12 a credit note issued after customer credits were applied clamped amount_due at zero and kept the credits); the customer is owed the excess as a manual credit grant",
-		SQL:    `SELECT i.id, i.tenant_id, i.status, i.payment_status, i.total_amount_cents, i.amount_paid_cents, i.credits_applied_cents, COALESCE(cn.reduced, 0) AS credit_notes_reduced_cents, i.amount_due_cents FROM invoices i LEFT JOIN LATERAL (SELECT SUM(total_cents - refund_amount_cents - credit_amount_cents - out_of_band_amount_cents) AS reduced FROM credit_notes WHERE invoice_id = i.id AND status = 'issued') cn ON true WHERE i.id NOT LIKE 'vlx_inv_safe%' AND (i.amount_due_cents <> GREATEST(i.total_amount_cents - i.amount_paid_cents - i.credits_applied_cents - COALESCE(cn.reduced, 0), 0) OR i.amount_paid_cents + i.credits_applied_cents + COALESCE(cn.reduced, 0) > i.total_amount_cents)`,
+		SQL:    `SELECT i.id, i.tenant_id, i.status, i.payment_status, i.total_amount_cents, i.amount_paid_cents, i.credits_applied_cents, COALESCE(cn.reduced, 0) AS credit_notes_reduced_cents, i.amount_due_cents FROM invoices i LEFT JOIN LATERAL (SELECT SUM(total_cents - refund_amount_cents - credit_amount_cents - out_of_band_amount_cents) AS reduced FROM credit_notes WHERE invoice_id = i.id AND status = 'issued') cn ON true WHERE i.stripe_invoice_id IS NULL AND i.id NOT LIKE 'vlx_inv_safe%' AND (i.amount_due_cents <> GREATEST(i.total_amount_cents - i.amount_paid_cents - i.credits_applied_cents - COALESCE(cn.reduced, 0), 0) OR i.amount_paid_cents + i.credits_applied_cents + COALESCE(cn.reduced, 0) > i.total_amount_cents)`,
 	},
 	{
 		Name:   "invoice_paid_settled_coherence",
 		Domain: "invoices",
 		Why:    "a paid/succeeded invoice must carry paid_at and zero due — the single settle writer stamps all three atomically",
-		SQL:    `SELECT id, tenant_id, status, payment_status, paid_at, amount_due_cents, amount_paid_cents FROM invoices WHERE status = 'paid' AND payment_status = 'succeeded' AND (paid_at IS NULL OR amount_due_cents <> 0)`,
+		SQL:    `SELECT id, tenant_id, status, payment_status, paid_at, amount_due_cents, amount_paid_cents FROM invoices WHERE stripe_invoice_id IS NULL AND status = 'paid' AND payment_status = 'succeeded' AND (paid_at IS NULL OR amount_due_cents <> 0)`,
 	},
 	{
 		Name:   "invoice_terminal_timestamp_coherence",
 		Domain: "invoices",
 		Why:    "voided=>voided_at, finalized=>issued_at, and uncollectible_at never on draft/finalized — the status machine stamps these in the same UPDATE",
-		SQL:    `SELECT id, tenant_id, status, issued_at, voided_at, uncollectible_at FROM invoices WHERE id NOT LIKE 'vlx_inv_safe%' AND ((status = 'voided' AND voided_at IS NULL) OR (status = 'finalized' AND issued_at IS NULL) OR (uncollectible_at IS NOT NULL AND status IN ('draft','finalized')))`,
+		SQL:    `SELECT id, tenant_id, status, issued_at, voided_at, uncollectible_at FROM invoices WHERE stripe_invoice_id IS NULL AND id NOT LIKE 'vlx_inv_safe%' AND ((status = 'voided' AND voided_at IS NULL) OR (status = 'finalized' AND issued_at IS NULL) OR (uncollectible_at IS NOT NULL AND status IN ('draft','finalized')))`,
 	},
 	{
 		Name:   "ledger_row_structural_bounds",
@@ -297,7 +298,8 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		Why:    "a finalized stripe_tax invoice carrying tax with a calculation but no committed transaction never reported that tax — and the ~24h calculation TTL means it can no longer be committed automatically",
 		SQL: `SELECT id, tenant_id, invoice_number, status, tax_amount_cents, tax_calculation_id, issued_at
 		FROM invoices
-		WHERE id NOT LIKE 'vlx_inv_safe%'
+		WHERE stripe_invoice_id IS NULL
+		  AND id NOT LIKE 'vlx_inv_safe%'
 		  AND is_simulated = false
 		  AND tax_provider = 'stripe_tax'
 		  AND tax_status = 'ok'

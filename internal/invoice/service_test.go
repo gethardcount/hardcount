@@ -156,6 +156,18 @@ func (m *memStore) GetByPublicToken(_ context.Context, token string) (domain.Inv
 	return domain.Invoice{}, false, errs.ErrNotFound
 }
 
+func (m *memStore) GetByStripeInvoiceID(_ context.Context, tenantID, stripeInvoiceID string) (domain.Invoice, error) {
+	if stripeInvoiceID == "" {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	for _, inv := range m.invoices {
+		if inv.TenantID == tenantID && inv.StripeInvoiceID == stripeInvoiceID {
+			return inv, nil
+		}
+	}
+	return domain.Invoice{}, errs.ErrNotFound
+}
+
 func (m *memStore) FindBaseInvoiceForPeriod(_ context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
 	var best domain.Invoice
 	found := false

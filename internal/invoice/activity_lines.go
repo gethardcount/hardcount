@@ -349,6 +349,11 @@ func recoveryOutcome(res domain.DunningResolution) (string, activity.Tone, bool)
 		return "Invoice marked uncollectible", activity.ToneNeutral, true
 	case domain.ResolutionAmountBelowMinimum:
 		return "Amount below Stripe's minimum charge", activity.ToneWarning, true
+	case domain.ResolutionManuallyResolved:
+		// Legacy, no writer since 0170. The one kind of run that still holds
+		// it is one whose invoice never changed state, so neither "voided"
+		// nor "marked uncollectible" is true for it (B16).
+		return "Closed unpaid", activity.ToneNeutral, true
 	}
 	return "", activity.ToneNeutral, false
 }
@@ -433,9 +438,10 @@ func dunningLine(evt domain.InvoiceDunningEvent, dc dunningContext) activity.Lin
 		}
 	case domain.DunningEventResolved:
 		l.Kind, l.Title = "payment_recovery.ended", "Payment recovery ended"
-		// Automatic unless the run's audit trail names an operator's resolve.
+		// Automatic unless the run's audit trail names an operator's resolve;
+		// a legacy run with no such row names no one.
 		l.Actor = dc.resolvedBy
-		if l.Actor == nil {
+		if l.Actor == nil && dc.run.Resolution != domain.ResolutionManuallyResolved {
 			l.Actor = activity.Automatic()
 		}
 		if outcome, tone, ok := recoveryOutcome(dc.run.Resolution); ok {

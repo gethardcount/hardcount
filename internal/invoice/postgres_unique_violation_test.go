@@ -30,6 +30,7 @@ func TestMapInvoiceUniqueViolation_RoutesByConstraint(t *testing.T) {
 		{"invoice number → invoice_number", idxInvoicesInvoiceNumberUnique, "invoice_number", "invoice_number_taken"},
 		{"public token → public_token", idxInvoicesPublicTokenUnique, "public_token", "invoice_public_token_collision"},
 		{"threshold cycle → threshold_cycle", idxInvoicesThresholdPerCycle, "threshold_cycle", "invoice_threshold_cycle_taken"},
+		{"stripe invoice id → stripe_invoice_id", idxInvoicesStripeInvoiceID, "stripe_invoice_id", "invoice_stripe_id_taken"},
 		{"unknown constraint → generic", "some_future_index", "", "invoice_unique_violation"},
 	}
 

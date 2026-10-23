@@ -409,6 +409,15 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 	switch domain.DunningResolution(input.Resolution) {
 	case domain.ResolutionPaymentRecovered, domain.ResolutionInvoiceVoided, domain.ResolutionInvoiceNotCollectible:
 	default:
+		// manually_resolved is deliberately NOT accepted: it is the legacy
+		// pre-0170 value that meant "voided OR uncollectible", and accepting
+		// it would reintroduce exactly the ambiguity the split removed. The
+		// message names it explicitly rather than letting an integrator who
+		// still sends it read a generic refusal and guess.
+		if domain.DunningResolution(input.Resolution) == domain.ResolutionManuallyResolved {
+			respond.ValidationField(w, r, "resolution", "manually_resolved is no longer accepted — it meant both 'voided' and 'written off'. Use invoice_voided to annul the invoice, or invoice_not_collectible to write it off.")
+			return
+		}
 		respond.ValidationField(w, r, "resolution", "resolution must be one of payment_recovered, invoice_voided, invoice_not_collectible")
 		return
 	}
