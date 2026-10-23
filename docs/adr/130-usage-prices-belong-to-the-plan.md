@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). Not built yet: PR-0b and PR-1 to PR-8 build it before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). The rest is not built yet: PR-1 to PR-8 build it before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -175,8 +175,12 @@ a new or changed price is compared with the prices on the same plan and
 meter that take part from now on. Two prices with the same number of keys
 and no shared key with different values could both take one event: 409
 `price_conflict`, naming the other price. An identical `dimension_match` is
-409 `price_exists`. So the winner for any event is unique: two matching
+409 `price_exists` while that price takes part; a removed one is added
+back (section 6). So the winner for any event is unique: two matching
 candidates agree on every shared key, and equal key counts were refused.
+A removed price and a later tying price are never in force at one pin,
+because versions on a plan take effect in the order their writes commit
+(section 7).
 The check is D05's compatibility clause without the priority term
 (`internal/pricing/postgres.go:1063-1087`).
 
@@ -188,7 +192,7 @@ names it.
 
 | What | Never-used plan | Used plan |
 |---|---|---|
-| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version. | Applies from each subscriber's next period. The write appends a version from now; a removal appends a tombstone. No period already open changes. |
+| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes. |
 | Base fee, if PR-7 ships | Applies at once. | Applies from each subscriber's next period. |
 | Base fee, if PR-7 is cut | Editable. | Refused while a live subscription uses the plan, as today (ADR-034). |
 | `base_bill_timing` | Editable. | Locked. |
@@ -207,11 +211,12 @@ names it.
   usage is `no_price`. There is no exception for a price that only prices
   unpriced usage (D05 allowed one): it would make an ingest `no_price`
   flag false later.
-- A PATCH can set the base fee to 0. Today it cannot: the update tests
-  `> 0` (`internal/pricing/service.go:637`, `:673`).
+- A PATCH can set the base fee to 0 (PR-4). Today it cannot: the update
+  tests `> 0` (`internal/pricing/service.go:637`, `:673`).
 - History stays internal: versions are kept once a plan is used, and every
-  price write records an audit row with the old and new content in its own
-  transaction.
+  price write records an audit row with the old and new content in the
+  same transaction as the write
+  ([ADR-090](090-audit-in-tx-emission.md)).
 
 The base fee next-period rule in PR-7 uses the same pin. An in_arrears
 base and proration pin at the period start. An in_advance base built at a
@@ -223,26 +228,48 @@ applies and the docs say so.
 
 - An override is keyed by (customer, price) and takes the price's shape
   plus a `reason`. Usage prices only; a negotiated base fee is a new plan.
-- It follows its price across content edits. It applies only while the
-  price takes part, so it stops when the price is removed, with no write to
-  the override.
-- A plan swap does not carry it: the new plan's price is another row.
+- It follows its price across content edits.
 - Its `[created_at, deactivated_at)` window is stamped in the customer's
   own time (section 7).
+- Removing the price ends it. In the removal's transaction, each open
+  override of the price is closed in its customer's own time: wall time,
+  or the customer's clock time plus 1 microsecond. The open period keeps the
+  negotiated rate, because its pin is earlier. On a never-used plan the
+  removal applies at once, so it empties every window of the price's
+  overrides.
+- Adding back a removed price (the same plan, meter and
+  `dimension_match`) appends a version to the same row, so the price keeps
+  its id. Its old overrides do not come back.
+- An override write takes the plan row `FOR KEY SHARE` and then the price
+  row, before it reads the customer's clock (section 8). So it waits for a
+  removal in progress. An override write on a removed price is refused
+  with 409 `invalid_state`.
+- A plan swap does not carry it: the new plan's price is another row.
 
 ### 7. Test clocks: every price resolves in the subscription's own time (PR-4)
 
-- A version's `valid_from` is wall time (or the beginning of time on a
-  never-used plan).
-- A write to a test-mode plan also writes, for every test clock of the
-  account, the clock's current time plus 1 microsecond
-  (`plan_price_version_clocks`). It reads the clocks `FOR SHARE`, which
-  orders the write against a clock advance (`MarkAdvancing`,
-  `internal/testclock/postgres.go:228-231`). The extra microsecond keeps
-  the old price for a period that opens exactly at the clock's time.
+- On a used plan, a version's `valid_from` is wall time read with
+  `clock_timestamp()` after the plan lock, and at least 1 microsecond after
+  the plan's latest `valid_from`. So versions on a plan take effect in the
+  order their writes commit. Postgres `now()` is not used: it is the
+  transaction's start, so of two racing edits the one saved last could get
+  the earlier time and never apply.
+- On a never-used plan, `valid_from` is the beginning of time.
+- A write to a used test-mode plan also writes, for every test clock of
+  the account, the clock's current time plus 1 microsecond
+  (`plan_price_version_clocks`). It reads the clocks `FOR SHARE` after the
+  plan lock, which orders the write against a clock advance
+  (`MarkAdvancing`, `internal/testclock/postgres.go:228-231`). The extra
+  microsecond keeps the old price for a period that opens exactly at the
+  clock's time. Two writes at one clock time get equal stamps; the later
+  `valid_from` wins.
+- A write to a never-used plan writes no stamps, so its version is in
+  force at every pin on every clock. A clock customer's first period
+  starts at midnight, before the clock's time; a stamp would leave that
+  period with no price.
 - A subscription on clock C compares its simulated pin with C's stamp. A
-  version with no stamp for C was written before C existed, so it counts
-  as always in force.
+  version with no stamp for C counts as always in force: it was written
+  before C existed, or on a never-used plan.
 - One stamp per clock is needed because a clock keeps only its current
   time; its time at a past wall instant cannot be recovered.
 - Override windows are stamped with the customer's clock time the same way.
@@ -252,23 +279,38 @@ applies and the docs say so.
   versions stay, as plans and meters do today
   ([ADR-086](086-simulated-data-lifecycle.md)).
 
-### 8. One lock order (PR-0b now; PR-4)
+### 8. One lock order (PR-0b shipped; PR-4)
 
-Every transaction takes rows in this order and never goes back up:
+A transaction takes these rows in this order. Once it holds a row of one
+step, it takes no row of an earlier step.
 
 1. the subscription row ([ADR-115](115-one-closer-for-the-billing-period.md));
 2. plan rows in ascending id, in one statement: `FOR KEY SHARE` for
-   subscription writers, `FOR UPDATE` for writers of plan content;
-3. price rows, only through foreign keys;
+   subscription writers and override writes, `FOR UPDATE` for writers of
+   plan content;
+3. price rows, `FOR KEY SHARE` only; no path locks a price row
+   exclusively;
 4. meter rows, ascending;
 5. test clocks, ascending, `FOR SHARE`;
-6. invoice rows.
+6. the rest a money path writes: override rows, the tenant's number row
+   (`tenant_settings`, which numbers invoices and credit notes) and
+   invoice rows.
 
-PR-0b (#1367, open) brings step 2 to every subscription writer now. It
-fixes a deadlock it reproduced on main. D05's meter edit takes plans in
-ascending id. An immediate swap from plan A to plan B takes B and then A
-through foreign keys. With id(A) < id(B), Postgres aborts one of them with
-`40P01`. PR-4 deletes D05's plan lock with the rule tables.
+So an override write takes its plan and its price before it reads the
+customer's clock, and a writer takes its plans before it numbers an
+invoice or a credit note. Until PR-4, D05's meter edit takes its meter and
+then plans; no writer takes a plan and then a meter before PR-4, so this
+makes no cycle.
+
+PR-0b (#1367, merged as `c234a364`) brought step 2 to every subscription
+writer. It fixed a deadlock it reproduced on main. D05's meter edit takes
+plans in ascending id. An immediate swap from plan A to plan B took B and
+then A through foreign keys. With id(A) < id(B), Postgres aborted one of
+them with `40P01`. It also found a cycle through the number row: an
+activation holds plan B and waits for the number row. So a swap takes its
+plans before it numbers its refund credit note
+(`internal/subscription/postgres.go:2084-2097`). PR-4 deletes D05's plan
+lock with the rule tables.
 
 ### 9. Windows and the spend threshold invoice (PR-4)
 
@@ -326,8 +368,10 @@ pin), G5 to G8 and ADR-129 stay.
   - `no_price`: the subscription's plan prices the meter at the pin, but
     no price matches the event's dimensions. New here.
 - `/batch` and the LiteLLM callback count each status. Held-usage release
-  gains `no_price` beside `not_on_plan`. The metric is
-  `velox_usage_unbilled_total{reason}`.
+  gains `no_price` beside `not_on_plan`.
+- One counter, `velox_usage_unbilled_total{reason, origin}`, counts every
+  status. It replaces ADR-120's `velox_usage_after_close_total{origin}`,
+  which becomes `reason="after_close"`.
 - Ingest pins at the open period's start, and at its end for an event in
   the grace after it.
 - Matching runs in Go. With string values, per-key equality is the same as
@@ -386,7 +430,9 @@ in_arrears.
 - `POST /v1/plans` takes `prices[]` and creates the plan and its prices in
   one transaction. `GET /v1/plans/{id}` returns `prices[]` and `used`.
 - `/v1/plans/{plan_id}/prices`: GET, POST, PATCH `/{id}` (content only;
-  meter and `dimension_match` are the identity) and DELETE `/{id}`.
+  meter and `dimension_match` are the identity) and DELETE `/{id}`. A POST
+  that names a removed price's meter and `dimension_match` adds it back
+  under the same id.
 - `/v1/price-overrides` keys on `price_id`.
 - Invoice and preview lines carry `price_id` and `dimension_match`.
   `pricing_mode` is `per_unit`, `graduated` or `package`.
@@ -490,7 +536,8 @@ part breaks:
   would point at terms other than those billed.
 - **Closing overrides at wall now on removal.** For a test-clock customer
   ahead of wall time, that ends the override before its open period's pin,
-  so the open period loses the negotiated price.
+  so the open period loses the negotiated price. A removal closes them in
+  each customer's own time instead (section 6).
 - **Numeric dimension values.** Normalized as float64 in Go but compared
   exactly in Postgres, so the ingest flag and the close could disagree on
   large numbers. Values are strings only.
@@ -536,9 +583,11 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   as two concurrent subscription creates today; it joins ADR-100's
   deferred locks. Trigger: the first account with several operators.
 - **A new subscriber later on the day of an edit** pays the old price for
-  the first period, because the pin is the period start, a midnight. (A
-  spend threshold with `reset_billing_cycle=true` starts a period at the
-  invoice's own instant, `internal/billing/threshold_scan.go:907-913`.)
+  the first period, because the pin is the period start, a midnight.
+  (Today a spend threshold with `reset_billing_cycle=true` starts a period
+  at the invoice's own instant,
+  `internal/billing/threshold_scan.go:907-913`. Its removal was approved on
+  2026-10-23 and ships in its own PR.)
 - **After a mid-period swap** between two plans that price one meter, the
   period bills two lines, and tiers restart in the second window.
 - **The threshold invoice becomes window-aware:** one line per plan window
@@ -561,8 +610,9 @@ The breaks that concerned moving 0.8.x data went with the clean break.
 
 ## ADRs this changes
 
-None of these changes is built yet. Each ADR's status line names the part
-that changes and the PR that changes it.
+None of these changes is built yet. Each ADR's status line links here,
+and a banner under it names the part that changes and the PR that changes
+it.
 
 | ADR | What ADR-130 changes |
 |---|---|
@@ -570,19 +620,19 @@ that changes and the PR that changes it.
 | [034](034-plan-billing-field-immutability.md) | The meter-set lock goes with `meter_ids` (PR-4). The base-fee lock becomes next-period edits (PR-7), or stays if PR-7 is cut. The `base_bill_timing` lock holds once a plan is used (PR-4). |
 | [044](044-canonical-ai-token-metering-model.md) | Decision 4: token prices are plan prices on the `tokens` meter, most specific wins, no priority (PR-4). |
 | [045](045-decimal-per-unit-pricing-rates.md) | `package_amount_cents` becomes a decimal too, rates take at most 12 decimal places, `flat` becomes `per_unit` and overage goes (PR-3). |
-| [066](066-threshold-money-semantics.md) | Decision 4's rule-bucket granularity becomes the meter (PR-2). The ladder seed keys on price id (PR-4). The package clamp goes (PR-3), and so does the ambiguous-config failure (PR-4). The fire prices per plan window (PR-4). |
-| [070](070-price-change-semantics.md) | Decision 1: overrides key on the price, not `rule_key`. Decision 4's earliest-version fallback and test-clock caveat go. Decision 5's currency guard goes. The 2026-10-23 meter-in-use amendment is replaced. All in PR-4. The period-start pin stays. |
+| [066](066-threshold-money-semantics.md) | Decision 4's rule-bucket granularity becomes the meter (PR-2). The ladder seed keys on price id, so the ambiguous-config failure goes (PR-4). The package clamp goes (PR-3). The fire prices per plan window (PR-4). |
+| [070](070-price-change-semantics.md) | Decision 1: overrides key on the price, not `rule_key`. Decision 4's earliest-version fallback and test-clock caveat go. Decision 5's currency guard goes. The 2026-10-23 meter-in-use amendment is replaced. Customer usage over an explicit window is priced at each subscription's current pin (section 10). All in PR-4. The period-start pin stays. |
 | [085](085-recipe-idempotent-apply.md) | Rule adoption, the rule conformance check, the currency taken from adopted rules and the 2026-10-23 amendment go (PR-4); recipes no longer create a dunning policy or webhook endpoint (PR-5). |
 | [096](096-unpriced-meter-plan-attach-guard.md) | The plan-attach guard and the meter-in-use guard that replaced the last-price guard go: a plan's meters are its prices' meters (PR-4). The WARN and counter stay; ingest adds `no_price` (PR-6). |
 | [100](100-currency-coherence-guard-ring.md) | G1, G2, G2b, the override currency clause and G4's recipe probe go; prices take the plan's currency (PR-4). |
-| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4); `no_price` adds one stated exception to "a flag is never false" (PR-6). |
+| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4). `no_price` adds one stated exception to "a flag is never false" (PR-6). The after_close counter becomes `velox_usage_unbilled_total{reason="after_close"}` (PR-6). |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default (PR-5). |
 
 ## References
 
 - ADR-031, ADR-034, ADR-044, ADR-045, ADR-066, ADR-070, ADR-085,
   ADR-086, ADR-096, ADR-100, ADR-101, ADR-115, ADR-120, ADR-123, ADR-129.
-- PR-0b: getvelox/velox#1367 (the lock order).
+- PR-0b: getvelox/velox#1367, merged as `c234a364` (the lock order).
 - Migrations: one per PR-2, PR-3, PR-4 and PR-7, numbered when each PR
   opens.
 - Design of record: velox-ops `design-plan-pricing-2026-10-23.md`

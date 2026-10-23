@@ -3,7 +3,7 @@
 **Date:** 2026-10-14
 **Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md), not built yet
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2). "Prices its meter" is read from the plan's prices at the period's start (PR-4). A new `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` flag wrong (PR-6). The grace and the after_close flag stay.
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2). "Prices its meter" is read from the plan's prices at the period's start (PR-4). A new `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` flag wrong (PR-6). Its counter `velox_usage_after_close_total{origin}` becomes `velox_usage_unbilled_total{reason="after_close", origin}`, one counter for every unbilled status (PR-6). The grace and the after_close flag stay.
 
 ## Summary
 

@@ -169,7 +169,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) | 2026-10-19 | Accepted (amended) | Payments | A charge whose result was lost or unclear blocks every new charge and irreversible action until a sweep has asked Stripe |
 | [128](128-activity-line-standard.md) | 2026-10-19 | Accepted | Test clocks & simulated time | Every activity line has one wording, names who acted and follows one clock rule; the backend builds the words |
 | [129](129-credit-carries-its-own-currency.md) | 2026-10-23 | Accepted | Credits | Each credit ledger row stores its currency; credit pays only invoices in it, never converted; a manual invoice uses the customer's currency |
-| [130](130-usage-prices-belong-to-the-plan.md) | 2026-10-23 | Accepted (not built yet) | Pricing & usage | Usage prices are rows on the plan; the most specific price wins; an edit on a used plan applies from each subscriber's next period |
+| [130](130-usage-prices-belong-to-the-plan.md) | 2026-10-23 | Accepted (lock order shipped; the rest not built yet) | Pricing & usage | Usage prices are rows on the plan; the most specific price wins; an edit on a used plan applies from each subscriber's next period |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.
