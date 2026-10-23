@@ -86,14 +86,22 @@ func TestSettleSucceeded_ResolverErrorDoesNotFailSettle(t *testing.T) {
 // recovered settlement must fire the SAME consequences (dunning, mark) as the
 // webhook, and inherit the out-of-order guard.
 
-// recordingEventDispatcher counts outbound events by type.
-type recordingEventDispatcher struct{ byType map[string]int }
+// recordingEventDispatcher counts outbound events by type and keeps the
+// last payload of each type.
+type recordingEventDispatcher struct {
+	byType map[string]int
+	last   map[string]map[string]any
+}
 
-func (r *recordingEventDispatcher) Dispatch(_ context.Context, _, eventType string, _ map[string]any) error {
+func (r *recordingEventDispatcher) Dispatch(_ context.Context, _, eventType string, payload map[string]any) error {
 	if r.byType == nil {
 		r.byType = map[string]int{}
 	}
+	if r.last == nil {
+		r.last = map[string]map[string]any{}
+	}
 	r.byType[eventType]++
+	r.last[eventType] = payload
 	return nil
 }
 

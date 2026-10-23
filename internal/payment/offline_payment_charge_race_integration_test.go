@@ -192,6 +192,15 @@ func TestOfflinePayment_RacedWithCardChargeAtTheStripeCall(t *testing.T) {
 			tenantID, domain.EventInvoicePaid, got.ID); n != 1 {
 			t.Errorf("invoice.paid rows = %d, want 1", n)
 		}
+		// The webhook says the first payment was made outside Velox: its
+		// recorded PaymentIntent is empty, as for a credits-paid invoice,
+		// and paid_out_of_band tells the two apart.
+		if n := rig.count(t, `SELECT count(*) FROM webhook_outbox WHERE tenant_id=$1 AND event_type=$2 AND payload->>'invoice_id'=$3
+			AND payload->>'recorded_payment_intent_id' = '' AND payload->>'incoming_payment_intent_id' = 'pi_oob_race_dup'
+			AND (payload->>'paid_out_of_band')::boolean`,
+			tenantID, domain.EventPaymentDuplicateCharge, got.ID); n != 1 {
+			t.Errorf("payment.duplicate_charge rows with paid_out_of_band true and no recorded PaymentIntent = %d, want 1", n)
+		}
 	})
 }
 
