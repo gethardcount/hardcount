@@ -25,7 +25,7 @@ export interface MarginReport {
   margin_bps?: number;
   by_model: MarginReportByModelItem[];
   unattributed_revenue_cents: number;
-  /** Token events with costable dims but no matching rate — add a rate to cost new events. */
+  /** Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `cost_per_token`, was too large to record (about $9.2 trillion or more, either sign). */
   unresolved_events: number;
   /** Events in the window that carry a stamped provider cost (zero cost included). 0 means the cost side is unknown. */
   costed_events: number;

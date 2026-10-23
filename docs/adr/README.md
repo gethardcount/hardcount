@@ -85,7 +85,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [042](042-tax-rate-decimal-precision.md) | 2026-05-31 | Accepted (partly superseded) | Tax | Store tax rates as `NUMERIC(7,4)` and prorate with a whole-day ratio |
 | [043](043-drop-tax-rate-bp.md) | 2026-05-31 | Accepted | Tax | Drop the basis-point tax rate column at once; the decimal rate is the only storage |
 | [044](044-canonical-ai-token-metering-model.md) | 2026-06-01 | Accepted; ADR-130 changes decision 4 (not built yet) | Pricing & usage | Meter all AI tokens on one `tokens` meter; token type, model and provider are dimensions |
-| [045](045-decimal-per-unit-pricing-rates.md) | 2026-06-01 | Accepted; amended 2026-10-24 (rate limits); ADR-130 changes the rate fields (not built yet) | Pricing & usage | Per-unit price rates are decimals (at most 12 places, under 10^18 cents); invoice amounts stay integer cents |
+| [045](045-decimal-per-unit-pricing-rates.md) | 2026-06-01 | Accepted; amended 2026-10-24 (rate limits); ADR-130 changes the rate fields (not built yet) | Pricing & usage | Per-unit price rates are decimals (new rates: at most 12 places, under 10^18 cents); invoice amounts stay integer cents |
 | [046](046-manual-tax-largest-remainder-apportionment.md) | 2026-06-03 | Accepted | Tax | Manual tax rounds the document total once and spreads the cents by largest remainder |
 | [047](047-invoice-tax-rate-displays-statutory-not-effective.md) | 2026-06-05 | Accepted | Tax | Invoices show the statutory tax rate when taxed lines share one; else the effective rate |
 | [048](048-credit-clawback-tax-reversal.md) | 2026-06-06 | Accepted | Credits | Credit clawbacks go through a credit note, so the proportional tax is reversed too |

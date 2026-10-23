@@ -5430,7 +5430,7 @@ type MarginReport struct {
 	To                       time.Time `json:"to"`
 	UnattributedRevenueCents int64     `json:"unattributed_revenue_cents"`
 
-	// UnresolvedEvents Token events with costable dims but no matching rate — add a rate to cost new events.
+	// UnresolvedEvents Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `cost_per_token`, was too large to record (about $9.2 trillion or more, either sign).
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
@@ -5599,7 +5599,7 @@ type RatingRule struct {
 	CreatedAt time.Time `json:"created_at,omitempty"`
 	Currency  string    `json:"currency,omitempty"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). At most 12 decimal places; invoice line amounts and totals still round to whole cents.
+	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents.
 	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
 	GraduatedTiers  []struct {
 		// UnitAmountCents Per-unit rate in cents, as a decimal string (see flat_amount_cents).
@@ -8505,12 +8505,9 @@ type PostV1UsageEventsJSONBody struct {
 	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
 	// for exact decimals). At most 12 decimal places; trailing
 	// zeros do not count. Its size must be under 10^26, and it
-	// is at most 100 characters. A
-	// negative value is a correction. When a provider cost
-	// rate matches the event, quantity × `cost_per_token`
-	// must be under 2^63 micro-dollars (about $9.2 trillion).
-	// A missing quantity, or any other value, is refused with
-	// 422 and `param: quantity`.
+	// is at most 100 characters. A negative value is a
+	// correction. A missing quantity, or any other value, is
+	// refused with 422 and `param: quantity`.
 	Quantity  PostV1UsageEventsJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                          `json:"timestamp,omitempty"`
 }
@@ -8574,12 +8571,9 @@ type BackfillUsageEventJSONBody struct {
 	// Quantity A JSON number (`5`) or a string holding one (`"5.5"`,
 	// for exact decimals). At most 12 decimal places; trailing
 	// zeros do not count. Its size must be under 10^26, and it
-	// is at most 100 characters. A
-	// negative value is a correction. When a provider cost
-	// rate matches the event, quantity × `cost_per_token`
-	// must be under 2^63 micro-dollars (about $9.2 trillion).
-	// A missing quantity, or any other value, is refused with
-	// 422 and `param: quantity`.
+	// is at most 100 characters. A negative value is a
+	// correction. A missing quantity, or any other value, is
+	// refused with 422 and `param: quantity`.
 	Quantity BackfillUsageEventJSONBody_Quantity `json:"quantity"`
 
 	// Timestamp RFC 3339. Must not be in the future.
@@ -8624,10 +8618,8 @@ type PostV1UsageEventsBatchJSONBody = []struct {
 	// for exact decimals). At most 12 decimal places;
 	// trailing zeros do not count. Its size must be under
 	// 10^26, and it is at most 100 characters. A negative
-	// value is a correction. When a provider cost rate
-	// matches the event, quantity × `cost_per_token` must be
-	// under 2^63 micro-dollars (about $9.2 trillion). A
-	// missing quantity, or any other value, fails validation.
+	// value is a correction. A missing quantity, or any
+	// other value, fails validation.
 	Quantity  PostV1UsageEventsBatchJSONBody_Quantity `json:"quantity"`
 	Timestamp time.Time                               `json:"timestamp,omitempty"`
 }

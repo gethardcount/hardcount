@@ -2949,12 +2949,9 @@ export interface paths {
                          * @description A JSON number (`5`) or a string holding one (`"5.5"`,
                          *     for exact decimals). At most 12 decimal places; trailing
                          *     zeros do not count. Its size must be under 10^26, and it
-                         *     is at most 100 characters. A
-                         *     negative value is a correction. When a provider cost
-                         *     rate matches the event, quantity × `cost_per_token`
-                         *     must be under 2^63 micro-dollars (about $9.2 trillion).
-                         *     A missing quantity, or any other value, is refused with
-                         *     422 and `param: quantity`.
+                         *     is at most 100 characters. A negative value is a
+                         *     correction. A missing quantity, or any other value, is
+                         *     refused with 422 and `param: quantity`.
                          */
                         quantity: number | string;
                         /** @description Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */
@@ -3084,10 +3081,8 @@ export interface paths {
                          *     for exact decimals). At most 12 decimal places;
                          *     trailing zeros do not count. Its size must be under
                          *     10^26, and it is at most 100 characters. A negative
-                         *     value is a correction. When a provider cost rate
-                         *     matches the event, quantity × `cost_per_token` must be
-                         *     under 2^63 micro-dollars (about $9.2 trillion). A
-                         *     missing quantity, or any other value, fails validation.
+                         *     value is a correction. A missing quantity, or any
+                         *     other value, fails validation.
                          */
                         quantity: number | string;
                         dimensions?: {
@@ -7086,7 +7081,7 @@ export interface components {
             /** @enum {string} */
             mode?: "flat" | "graduated" | "package";
             currency?: string;
-            /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). At most 12 decimal places; invoice line amounts and totals still round to whole cents. */
+            /** @description Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents. */
             flat_amount_cents?: string;
             graduated_tiers?: {
                 up_to?: number;
@@ -7912,7 +7907,7 @@ export interface components {
             unattributed_revenue_cents: number;
             /**
              * Format: int64
-             * @description Token events with costable dims but no matching rate — add a rate to cost new events.
+             * @description Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `cost_per_token`, was too large to record (about $9.2 trillion or more, either sign).
              */
             unresolved_events: number;
             /**
@@ -13231,12 +13226,9 @@ export interface operations {
                      * @description A JSON number (`5`) or a string holding one (`"5.5"`,
                      *     for exact decimals). At most 12 decimal places; trailing
                      *     zeros do not count. Its size must be under 10^26, and it
-                     *     is at most 100 characters. A
-                     *     negative value is a correction. When a provider cost
-                     *     rate matches the event, quantity × `cost_per_token`
-                     *     must be under 2^63 micro-dollars (about $9.2 trillion).
-                     *     A missing quantity, or any other value, is refused with
-                     *     422 and `param: quantity`.
+                     *     is at most 100 characters. A negative value is a
+                     *     correction. A missing quantity, or any other value, is
+                     *     refused with 422 and `param: quantity`.
                      */
                     quantity: number | string;
                     /** @description Scalar dimension values used to pick the pricing rule. */
@@ -13305,9 +13297,8 @@ export interface operations {
              *     or `timestamp`; unknown customer or meter; a future or badly
              *     formatted `timestamp`; more than 16 dimensions or a non-scalar
              *     dimension value; a missing or malformed `quantity`, one with
-             *     more than 12 decimal places, one of 10^26 or more, one longer
-             *     than 100 characters, or one whose provider cost is too large to
-             *     record; a
+             *     more than 12 decimal places, one of 10^26 or more, or one
+             *     longer than 100 characters; a
              *     `properties` field with a key (it was renamed `dimensions`).
              */
             422: {

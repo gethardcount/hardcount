@@ -160,8 +160,12 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	// = cost_per_token × quantity × 1e6, ROUND HALF UP. Source semantics:
 	// 'table' when a rate matched; 'not_applicable' when the event has no
 	// costable dims (non-token meters — keeps the honesty counter
-	// meaningful); NULL when costable dims exist but no rate matched
-	// ('unresolved' — the actionable signal).
+	// meaningful); NULL when costable dims exist but no rate matched, or
+	// when the cost does not fit BIGINT micros ('unresolved' — the
+	// actionable signal). A quantity and a rate inside their limits can
+	// price past BIGINT; the stamp is the operator's cost, not what the
+	// customer is billed, so the event is still stored and billed, and the
+	// margin report counts it as unresolved.
 	err = tx.QueryRowContext(ctx, `
 		WITH rate AS (
 			SELECT r.cost_per_token
@@ -172,6 +176,11 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 			  AND r.model IN ($6::jsonb->>'model_raw', $6::jsonb->>'model')
 			ORDER BY (r.model IS NOT DISTINCT FROM $6::jsonb->>'model_raw') DESC
 			LIMIT 1
+		), stamp AS (
+			SELECT micros FROM (
+				SELECT ROUND(cost_per_token * $5 * 1000000) AS micros FROM rate
+			) c
+			WHERE micros BETWEEN -9223372036854775808 AND 9223372036854775807
 		)
 		INSERT INTO usage_events (id, tenant_id, customer_id, meter_id,
 			quantity, properties, idempotency_key, timestamp, origin,
@@ -179,8 +188,8 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
 			CASE
 				WHEN $10::BIGINT IS NOT NULL THEN $10::BIGINT
-				WHEN (SELECT COUNT(*) FROM rate) = 1
-					THEN ROUND((SELECT cost_per_token FROM rate) * $5 * 1000000)::BIGINT
+				WHEN (SELECT COUNT(*) FROM stamp) = 1
+					THEN (SELECT micros FROM stamp)::BIGINT
 			END,
 			CASE
 				WHEN $10::BIGINT IS NOT NULL THEN 'observed'
@@ -188,7 +197,7 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 				  OR $6::jsonb->>'token_type' IS NULL
 				  OR ($6::jsonb->>'model' IS NULL AND $6::jsonb->>'model_raw' IS NULL)
 					THEN 'not_applicable'
-				WHEN (SELECT COUNT(*) FROM rate) = 1 THEN 'table'
+				WHEN (SELECT COUNT(*) FROM stamp) = 1 THEN 'table'
 			END
 		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
 		RETURNING id, tenant_id, customer_id, meter_id,
@@ -212,15 +221,6 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	// to the pre-batch unique-violation shape (callers branch on it).
 	if err == sql.ErrNoRows {
 		return domain.UsageEvent{}, fmt.Errorf("%w: idempotency_key %q", errs.ErrDuplicateKey, event.IdempotencyKey)
-	}
-	// The cost stamp is the one value in this INSERT that can be out of
-	// range: quantity was checked against its column before (domain
-	// QuantityLimits), and $10 is a Go int64. A quantity and a rate inside
-	// their limits can still price a cost past BIGINT micros, so the event
-	// is refused naming quantity, not answered with a database error.
-	if postgres.IsNumericOutOfRange(err) {
-		return domain.UsageEvent{}, errs.Invalid("quantity",
-			"quantity × the provider cost rate for this model is too large to record: the cost must be under 2^63 micro-dollars")
 	}
 	if err != nil {
 		return domain.UsageEvent{}, err

@@ -1012,10 +1012,9 @@ func (s *Service) pricingRuleDeleteEmission(ctx context.Context) func(tx *sql.Tx
 
 // ---------------------------------------------------------------------------
 // Tx variants — used by recipe.Service to compose pricing inserts inside a
-// single cross-domain transaction. Validation is intentionally skipped here
-// because the recipe template layer already validated the inputs against
-// the recipe schema; re-validating in the recipe path would only duplicate
-// what the template parser already enforced.
+// single cross-domain transaction. The recipe template layer validates
+// against the recipe schema; a Tx variant adds only the checks that layer
+// does not make (CreateRatingRuleTx: currency and rate limits).
 // ---------------------------------------------------------------------------
 
 // CreateRatingRuleTx forwards to the store's tx-aware insert. Caller owns
