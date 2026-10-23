@@ -283,6 +283,16 @@ Stripe event Velox receives is already the close, both events are sent with
 the closed status, in either order. What a dispute does and how to turn on
 Stripe's dispute events: [Card disputes](ops/runbook/card-disputes.md).
 
+`payment.duplicate_charge`, `payment.amount_mismatch`,
+`payment.currency_mismatch` and `payment.received_on_voided_invoice` carry
+`invoice_id`, `invoice_number`, `customer_id`, `currency` and
+`amount_paid_cents`. The charge that raised the event is
+`incoming_payment_intent_id`, with `captured_cents`. The PaymentIntent the
+invoice already holds is `recorded_payment_intent_id`, empty when it has
+none. `paid_out_of_band` is true when the invoice was recorded as paid
+outside Velox, such as by bank transfer; such an invoice has no
+PaymentIntent, like one paid by credits.
+
 ### `invoice.finalized` shows the amount before credit
 
 Velox uses the customer's credit when it collects the invoice. That is

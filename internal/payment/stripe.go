@@ -1204,6 +1204,7 @@ func logRefusedChargeOutcome(ctx context.Context, current domain.Invoice, attemp
 		"attempt_payment_intent_id", attemptPI,
 		"recorded_payment_status", current.PaymentStatus,
 		"recorded_payment_intent_id", current.StripePaymentIntentID,
+		"paid_out_of_band", current.PaidOutOfBand,
 		"invoice_status", current.Status,
 		"idempotency_key", idempotencyKey,
 	)

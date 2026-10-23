@@ -152,10 +152,12 @@ export interface Invoice {
   /** When the invoice was marked uncollectible. */
   uncollectible_at?: string;
   /**
-     * The Stripe PaymentIntent of the invoice's latest card charge.
-     * Absent when no charge was sent to Stripe: an invoice paid by
-     * credits, with nothing due, or paid outside Velox
-     * (`paid_out_of_band`).
+     * The Stripe PaymentIntent of the card charge that paid the
+     * invoice, or of its last charge that is in progress or failed. It
+     * can be absent after a charge was sent: for example when the
+     * invoice was then paid without a card (by credits, with nothing
+     * due, or outside Velox: `paid_out_of_band`), or when Stripe
+     * refused the last charge as below its minimum.
      */
   stripe_payment_intent_id?: string;
   /**

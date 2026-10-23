@@ -17,7 +17,12 @@
 -- The PaymentIntent columns then refuse the prefix, and an invoice paid out
 -- of band refuses a PaymentIntent, so a reader that checks "has a
 -- PaymentIntent" is always right about whether a card paid. NOT VALID here,
--- so this only takes a short lock; 00204 checks the rows already there.
+-- so adding them reads no rows; 00204 checks the rows already there.
+--
+-- Locks: the ADD COLUMN is instant, but its lock on invoices is held until
+-- this file commits. Reads and writes of invoices therefore wait while the
+-- UPDATE reads every invoice and the DELETE reads every charge attempt (no
+-- index serves the prefix).
 --
 -- These tables force row-level security, and the user that runs migrations
 -- may be subject to it, so the file turns the bypass on for its own
