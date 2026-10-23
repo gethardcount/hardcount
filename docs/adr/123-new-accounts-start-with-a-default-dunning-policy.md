@@ -1,7 +1,9 @@
 # ADR-123: New accounts start with a default dunning policy that retries three times and changes nothing
 
 **Date:** 2026-10-17
-**Status:** Accepted
+**Status:** Accepted; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (recipes no longer create a dunning policy), not built yet
+
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. Recipes no longer create a dunning policy (PR-5), so "by hand or from a recipe" becomes "by hand". The seeded default and its takeover rule stay.
 
 ## Summary
 
