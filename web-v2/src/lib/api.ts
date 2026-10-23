@@ -1505,14 +1505,15 @@ export interface DunningPolicy {
   // until it is edited or made the default (ADR-123). While true, the next
   // policy created takes over the default.
   seeded: boolean
-  retry_schedule: string[]
-  max_retry_attempts: number
+  // Days to wait before each retry: the first after the failed payment,
+  // each later one after the retry before it. Its length is the number of
+  // retries (lib/dunningSchedule).
+  retry_days: number[]
   // The two terminal decisions (ADR-112): 'none' | 'pause' | 'cancel' and
   // 'none' | 'mark_uncollectible'. They replaced a single `final_action`,
   // which could not express "cancel and write off".
   final_subscription_action: string
   final_invoice_action: string
-  grace_period_days: number
   created_at?: string
   updated_at?: string
 }
@@ -1549,7 +1550,8 @@ export interface DunningRun {
   // back to Date.now(). Authoritative; replaces prior heuristic.
   effective_now?: string
   test_clock_id?: string
-  // The run's policy's retry limit (list responses).
+  // How many retries the run's policy makes, the length of its retry_days
+  // (list responses).
   max_retry_attempts?: number
 }
 

@@ -61,7 +61,7 @@ interface RecipePreview {
     meters: { name: string; unit: string; aggregation: string }[]
     rating_rules: { key: string; name: string }[]
     plans: { code: string; name: string; currency: string; billing_interval: string; base_amount_cents: number }[]
-    dunning_policies: { name: string; max_retries: number }[]
+    dunning_policies: { name: string; retry_days: number[] }[]
     webhook_endpoints: { url_placeholder: string }[]
   }
 }
@@ -70,9 +70,7 @@ interface DunningPolicy {
   name: string
   enabled: boolean
   is_default: boolean
-  max_retry_attempts: number
-  grace_period_days: number
-  retry_schedule: string[]
+  retry_days: number[]
   final_subscription_action: string
   final_invoice_action: string
   assigned_customers: number
@@ -344,7 +342,7 @@ test.describe('the default dunning policy', () => {
       await expect(section('Prices')).toHaveText(objects.rating_rules.map(r => new RegExp(`^· ${escapeRegExp(r.name || r.key)} — `)))
       await expect(section('Plan')).toHaveText(objects.plans.map(p =>
         `· ${p.name} — ${p.billing_interval}, ${p.currency}${p.base_amount_cents > 0 ? `, ${usd(p.base_amount_cents)} base` : ''}`))
-      await expect(section('Payment retries')).toHaveText(objects.dunning_policies.map(d => new RegExp(`^· ${escapeRegExp(d.name)} — up to ${d.max_retries} retries`)))
+      await expect(section('Payment retries')).toHaveText(objects.dunning_policies.map(d => new RegExp(`^· ${escapeRegExp(d.name)} — ${d.retry_days.length} retries, on day `)))
       await expect(section('Notifications')).toHaveText(objects.webhook_endpoints.map(w => `· ${w.url_placeholder} — set your real URL after install`))
 
       // Install: the page lands on the new plan.
@@ -417,7 +415,10 @@ test.describe('the default dunning policy', () => {
       await field(create, 'Name').getByRole('textbox').fill(name)
       await create.getByRole('switch').click()
       await expect(create.getByRole('switch')).not.toBeChecked()
-      await field(create, 'Grace (days)').getByRole('spinbutton').fill('2')
+      // One list of waits in days: the first after the failed payment, each
+      // next one after the retry before it.
+      await field(create, 'Days before each retry').getByRole('textbox').fill('2, 3, 5')
+      await expect(create.getByText('3 retries, on day 2, 5 and 10 after the failed payment.', { exact: true })).toBeVisible()
       // The default, pause, keeps new invoices as drafts; runs already open on
       // other unpaid invoices keep retrying, so it must not say charging stops.
       await expect(create.getByText(/^Invoices created while collection is paused stay drafts, so nothing charges them\. Retries already running on other unpaid invoices continue\./)).toBeVisible()
@@ -430,35 +431,36 @@ test.describe('the default dunning policy', () => {
       expect(createdRes.status()).toBe(201)
       const created = (await createdRes.json()) as DunningPolicy
       expect(created).toMatchObject({
-        name, enabled: false, is_default: false, max_retry_attempts: 3, grace_period_days: 2,
-        retry_schedule: ['72h', '120h'], final_subscription_action: 'none', final_invoice_action: 'none',
+        name, enabled: false, is_default: false, retry_days: [2, 3, 5],
+        final_subscription_action: 'none', final_invoice_action: 'none',
       })
       await expect(toasts(page).getByText('Policy created', { exact: true })).toBeVisible()
       const row = policyRow(name)
-      for (const text of ['disabled', '0 assigned', 'Max retries: 3', 'Grace: 2d', 'Schedule: 72h · 120h', 'On exhaustion: no action']) {
+      for (const text of ['disabled', '0 assigned', '3 retries, on day 2, 5 and 10', 'On exhaustion: no action']) {
         await expect(row).toContainText(text)
       }
 
-      // Turn it on with four retries: the dialog asks for a third interval
-      // before the schedule covers them.
+      // Turn it on with four retries: a fourth wait is a fourth retry. A
+      // wait that is not whole days is refused before it is sent.
       await row.getByRole('button', { name: `Edit policy ${name}` }).click()
       const edit = page.getByRole('dialog', { name: 'Edit policy' })
       await edit.getByRole('switch').click()
       await expect(edit.getByRole('switch')).toBeChecked()
-      await field(edit, 'Max retry attempts').getByRole('spinbutton').fill('4')
-      await expect(edit.getByText('Missing 1 entries.', { exact: false })).toBeVisible()
-      await field(edit, 'Retry schedule').getByRole('textbox').fill('72h, 120h, 168h')
-      await expect(edit.getByText(/Missing \d+ entries/)).toHaveCount(0)
+      const days = field(edit, 'Days before each retry').getByRole('textbox')
+      await days.fill('2, 3, 36h')
+      await expect(edit.getByText('Each wait is a whole number of days from 1 to 30.', { exact: true })).toBeVisible()
+      await expect(edit.getByRole('button', { name: 'Save' })).toBeDisabled()
+      await days.fill('2, 3, 5, 7')
+      await expect(edit.getByText('4 retries, on day 2, 5, 10 and 17 after the failed payment.', { exact: true })).toBeVisible()
       const saving = apiCall(page, 'PATCH', new RegExp(`/dunning/policies/${created.id}$`))
       await edit.getByRole('button', { name: 'Save' }).click()
       expect((await saving).ok()).toBe(true)
       await expect(toasts(page).getByText('Policy saved', { exact: true })).toBeVisible()
       expect(await policy(created.id)).toMatchObject({
-        enabled: true, is_default: false, max_retry_attempts: 4, grace_period_days: 2, retry_schedule: ['72h', '120h', '168h'],
+        enabled: true, is_default: false, retry_days: [2, 3, 5, 7],
       })
       await expect(row).not.toContainText('disabled')
-      await expect(row).toContainText('Max retries: 4')
-      await expect(row).toContainText('Schedule: 72h · 120h · 168h')
+      await expect(row).toContainText('4 retries, on day 2, 5, 10 and 17')
 
       // Give it to one customer: their page names it instead of the default.
       await page.goto(`/customers/${customer.id}`)
@@ -475,8 +477,7 @@ test.describe('the default dunning policy', () => {
       expect((await api<{ dunning_policy_id?: string }>('GET', `/customers/${customer.id}`)).dunning_policy_id).toBe(created.id)
       await expect(dunning).toContainText(name)
       await expect(dunning.getByText('account default', { exact: true })).toHaveCount(0)
-      await expect(field(dunning, 'Max retry attempts')).toContainText('4')
-      await expect(field(dunning, 'Retry schedule')).toContainText('72h · 120h · 168h')
+      await expect(field(dunning, 'Schedule')).toContainText('4 retries, on day 2, 5, 10 and 17')
 
       // While a customer has it, the policy cannot be deleted: the page says
       // why and asks nothing.

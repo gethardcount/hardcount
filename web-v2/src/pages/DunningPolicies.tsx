@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/switch'
 import { finalActionSummary } from '@/lib/dunningActions'
 import { newPolicyDefaultNote, retriesOffNotice, SEEDED_POLICY_NOTE } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
+import { parseRetryDays, retryPlanText } from '@/lib/dunningSchedule'
 import {
   Select,
   SelectContent,
@@ -139,7 +140,7 @@ export default function DunningPoliciesPage() {
           <div className="max-w-3xl">
             <h1 className="text-2xl font-semibold text-foreground">Dunning policies</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              A policy sets how many times to retry a failed payment, how long to wait between tries, and what happens if every retry fails. Your default policy applies to every customer unless you pick another on their page.
+              A policy sets how many days to wait before each retry of a failed payment, and what happens if every retry fails. Your default policy applies to every customer unless you pick another on their page.
             </p>
           </div>
           <Button className="shrink-0 self-start" onClick={() => setShowCreate(true)}>
@@ -180,10 +181,8 @@ export default function DunningPoliciesPage() {
                       {!p.enabled && <Badge variant="outline">disabled</Badge>}
                       <Badge variant="outline">{p.assigned_customers} assigned</Badge>
                     </div>
-                    <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      <span>Max retries: <span className="text-foreground">{p.max_retry_attempts}</span></span>
-                      <span>Grace: <span className="text-foreground">{p.grace_period_days}d</span></span>
-                      <span>Schedule: <span className="text-foreground">{p.retry_schedule.join(' · ') || '—'}</span></span>
+                    <div className="mt-1 flex flex-col gap-y-1 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-6">
+                      <span className="text-foreground">{retryPlanText(p.retry_days)}</span>
                       <span>On exhaustion: <span className="text-foreground">{finalActionSummary(p)}</span></span>
                     </div>
                     {p.seeded && (
@@ -265,29 +264,23 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
   const [form, setForm] = useState({
     name: initial?.name ?? '',
     enabled: initial?.enabled ?? true,
-    max_retry_attempts: String(initial?.max_retry_attempts ?? 3),
-    grace_period_days: String(initial?.grace_period_days ?? 3),
-    retry_schedule: (initial?.retry_schedule ?? ['72h', '120h']).join(', '),
+    // The seeded default's schedule: day 3, 7 and 14.
+    retry_days: (initial?.retry_days ?? [3, 4, 7]).join(', '),
     final_subscription_action: initial?.final_subscription_action || 'pause',
     final_invoice_action: initial?.final_invoice_action || 'none',
   })
   const [saving, setSaving] = useState(false)
-
-  // Parse "72h, 120h" → ["72h", "120h"]. Empty entries dropped so
-  // trailing commas don't confuse the backend validator.
-  const parseSchedule = (raw: string): string[] =>
-    raw.split(',').map(s => s.trim()).filter(Boolean)
+  const schedule = parseRetryDays(form.retry_days)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (schedule.error) return
     setSaving(true)
     try {
       const payload: Partial<DunningPolicy> = {
         name: form.name.trim(),
         enabled: form.enabled,
-        max_retry_attempts: parseInt(form.max_retry_attempts, 10) || 0,
-        grace_period_days: parseInt(form.grace_period_days, 10) || 0,
-        retry_schedule: parseSchedule(form.retry_schedule),
+        retry_days: schedule.days,
         final_subscription_action: form.final_subscription_action,
         final_invoice_action: form.final_invoice_action,
       }
@@ -305,9 +298,6 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
     }
   }
 
-  const scheduleEntries = parseSchedule(form.retry_schedule)
-  const max = parseInt(form.max_retry_attempts, 10) || 0
-  const scheduleShortage = max - 1 - scheduleEntries.length
   // Saving a new policy can replace the account's seeded default (ADR-123);
   // say so before the operator saves, not only on the seed's card.
   const defaultNote = mode === 'create' ? newPolicyDefaultNote(policies, form.enabled) : null
@@ -331,27 +321,16 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
           {defaultNote && (
             <p className="text-xs text-muted-foreground" role="status">{defaultNote}</p>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Max retry attempts</Label>
-              <Input type="number" min={1} max={15} value={form.max_retry_attempts}
-                onChange={e => setForm(f => ({ ...f, max_retry_attempts: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label>Grace (days)</Label>
-              <Input type="number" min={1} max={30} value={form.grace_period_days}
-                onChange={e => setForm(f => ({ ...f, grace_period_days: e.target.value }))} />
-            </div>
-          </div>
           <div className="space-y-2">
-            <Label>Retry schedule</Label>
-            <Input value={form.retry_schedule} placeholder="72h, 120h, 168h"
-              onChange={e => setForm(f => ({ ...f, retry_schedule: e.target.value }))} />
-            <p className="text-xs text-muted-foreground">
-              Comma-separated Go durations (h / m / s). Need {Math.max(0, max - 1)} entries for {max} retries.
-              {scheduleShortage > 0 && (
-                <span className="text-destructive"> Missing {scheduleShortage} entries.</span>
-              )}
+            <Label htmlFor="retry-days">Days before each retry</Label>
+            <Input id="retry-days" value={form.retry_days} placeholder="3, 4, 7" inputMode="numeric"
+              aria-invalid={!!schedule.error} aria-describedby="retry-days-help"
+              onChange={e => setForm(f => ({ ...f, retry_days: e.target.value }))} />
+            <p id="retry-days-help" className="text-xs text-muted-foreground">
+              Separate with commas. The first wait counts from the failed payment, each next one from the retry before it.{' '}
+              {schedule.error
+                ? <span className="text-destructive">{schedule.error}</span>
+                : <span className="text-foreground">{retryPlanText(schedule.days)} after the failed payment.</span>}
             </p>
           </div>
           <fieldset className="space-y-3 rounded-md border p-3">
@@ -388,7 +367,7 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
           </fieldset>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || !!schedule.error}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
           </DialogFooter>

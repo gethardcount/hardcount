@@ -12,8 +12,8 @@ import type { RecipeDunningPolicyFinalSubscriptionAction } from './recipeDunning
 
 export interface RecipeDunningPolicy {
   name: string;
-  max_retries: number;
-  intervals_hours: number[];
+  /** The policy's schedule, as `retry_days` on a dunning policy. */
+  retry_days: number[];
   /** What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription. */
   final_subscription_action: RecipeDunningPolicyFinalSubscriptionAction;
   /**
