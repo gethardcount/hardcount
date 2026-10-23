@@ -94,6 +94,58 @@ func TestE2E_WrittenOffBase_UpgradeIsRefusedAsUnpaid(t *testing.T) {
 	})
 }
 
+// TestE2E_WrittenOffBase_NothingDue_UpgradeGoesAhead: plan A 3000c plus
+// add-on C 1000c, with 3500c of credit, so the first invoice applies 3500c and
+// leaves 500c due. Removing the add-on on Apr 16 credits 500c of unused time,
+// which takes what is due to 0. An unpaid invoice is then paid (nothing is
+// due) and an upgrade to plan B on Apr 17 goes ahead, charging 1400c for the
+// rest of April. A written-off invoice stays written off with nothing due
+// (only a recorded payment settles one, ADR-113), and the upgrade over it must
+// go ahead the same way: nothing is owed on it. It used to be refused with
+// "unpaid (0.00 USD outstanding)".
+//
+// Mutation seam: in handleItemProration, block on a base with nothing due
+// again (drop the amount-due term) → the written-off arm is red.
+func TestE2E_WrittenOffBase_NothingDue_UpgradeGoesAhead(t *testing.T) {
+	skipShort(t)
+	upgradeAt := reliefCancelAt.Add(24 * time.Hour) // Apr 17: 14 of 30 days left
+	for _, tc := range []struct {
+		name       string
+		writeOff   bool
+		wantStatus string
+	}{
+		{"unpaid base: paid once nothing is due", false, string(domain.InvoicePaid)},
+		{"written-off base: stays written off with nothing due", true, string(domain.InvoiceUncollectible)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLagRigGranted(t, "in_advance", true, 3500)
+			invID := r.firstInvoiceID()
+			if _, due, _ := r.invoiceMoney(invID, lagP0.Add(time.Hour)); due != 500 {
+				t.Fatalf("fixture: first invoice has %dc due, want 500c (4000c less 3500c of credit)", due)
+			}
+			if tc.writeOff {
+				r.writeOff(invID, lagP0.Add(time.Hour))
+			}
+			r.removeAddOn(reliefCancelAt)
+			if status, due, _ := r.invoiceMoney(invID, reliefCancelAt.Add(time.Hour)); status != tc.wantStatus || due != 0 {
+				t.Fatalf("after the removal: invoice %s with %dc due, want %s with 0c due", status, due, tc.wantStatus)
+			}
+			if bal := r.creditBalance(); bal != 0 {
+				t.Errorf("credit balance = %dc, want 0c: the 500c note only cleared what was due", bal)
+			}
+
+			code, raw := r.do(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, upgradeAt,
+				map[string]any{"new_plan_id": r.planB, "immediate": true})
+			if code != http.StatusOK {
+				t.Fatalf("upgrade over a base with nothing due: %d %s, want 200", code, raw)
+			}
+			if pro := r.prorationInvoice(); pro.subtotal != 1400 {
+				t.Errorf("proration invoice subtotal = %dc, want 1400c ((6000c - 3000c) x 14/30)", pro.subtotal)
+			}
+		})
+	}
+}
+
 // TestE2E_WrittenOffBase_CancelThenLatePayment: an immediate cancel on Apr 16
 // leaves 15 of April's 30 days unused, 1500c of the 3000c base. Whichever way
 // the invoice stood, the customer ends up paying 1500c for the half they used:

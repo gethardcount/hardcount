@@ -344,6 +344,49 @@ func TestParked_WrittenOff_StripeShowsNothing_LeavesThePark(t *testing.T) {
 	}
 }
 
+// 5b. A parked invoice written off, and Stripe then refuses the check for
+// good (not connected, key rejected, customer missing). The invoice keeps its
+// hold and stays parked, its check stamped, as an open park does: the hold is
+// the only thing that brings the sweep back to it. Once Stripe answers again
+// and shows nothing 24 hours after the attempt, the park ends. Before
+// 2026-10-23 the sweep cleared the hold on the written-off invoice and left it
+// parked, and nothing ever looked at it again, so a relief credit note held on
+// it waited for good (ADR-050 amendment 2026-10-23).
+//
+// Mutation seam: in staleHoldReadFailed, keep the hold only on a finalized
+// invoice again (drop the Parked() term) → red at the first check.
+func TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers(t *testing.T) {
+	r := newSHRig(t, "Parked Written Off Refused")
+	inv := r.seed("INV-PK-WO-REFUSED")
+	parked := r.park(inv, autoCharge, park500)
+	if _, err := r.invSvc.MarkUncollectible(r.ctx, r.tenantID, inv.ID); err != nil {
+		t.Fatalf("write-off on a parked invoice: %v, want allowed", err)
+	}
+	r.fake.mu.Lock()
+	r.fake.notConfigured = true
+	r.fake.mu.Unlock()
+	r.ageHold(inv.ID, pastParkedWait)
+	_ = r.run()
+	if got := r.get(inv.ID); got.Status != domain.InvoiceUncollectible {
+		t.Fatalf("after a check Stripe refused: %s, want still written off", got.Status)
+	}
+	r.assertStillParked(parked, "a check Stripe refused on a written-off park")
+
+	r.fake.mu.Lock()
+	r.fake.notConfigured = false
+	r.fake.mu.Unlock()
+	r.ageHold(inv.ID, pastParkedWait)
+	r.runClean()
+	got := r.get(inv.ID)
+	if got.Status != domain.InvoiceUncollectible || got.PaymentStatus != domain.PaymentPending || got.ChargeAttemptSeq != parked.ChargeAttemptSeq+1 || r.hold(inv.ID) != nil {
+		t.Fatalf("after Stripe answers: %s/%s seq %d hold %v, want uncollectible/pending seq %d and no hold (the park ended)",
+			got.Status, got.PaymentStatus, got.ChargeAttemptSeq, r.hold(inv.ID), parked.ChargeAttemptSeq+1)
+	}
+	if n := r.fake.countPIs(); n != 0 {
+		t.Errorf("PaymentIntents at Stripe = %d, want 0: nothing charges a written-off invoice", n)
+	}
+}
+
 // 6. Collisions on real Postgres.
 func TestParked_Collisions(t *testing.T) {
 	// Stripe's recovery creates the payment, and its webhook settles the

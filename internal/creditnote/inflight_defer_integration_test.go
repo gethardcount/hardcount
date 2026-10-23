@@ -106,9 +106,12 @@ func TestListPendingClawbackDrafts_DefersInFlightSource(t *testing.T) {
 // later paid the written-off invoice paid for the unused time too.
 //
 // The wait ends when the park is answered: the stale-hold sweep asks Stripe
-// about the lost charge (ADR-127) and, when Stripe has nothing, writes the
-// payment status back to pending or failed. The draft is then eligible, and
-// Issue applies it to the written-off invoice.
+// about the lost charge (ADR-127) and, when Stripe has nothing 24 hours after
+// the attempt, ends the park with UnparkAfterNoPayment (the payment status goes
+// back to pending or failed). The draft is then eligible, and Issue applies it
+// to the written-off invoice. The sweep keeps a written-off park's hold even
+// when Stripe refuses the check for good, so this exit stays reachable
+// (TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers).
 //
 // Mutation seams: put 'uncollectible' back in the scan's status term (step 2
 // lists the draft), or hold an uncollectible source in issueHeld (step 4 voids
@@ -188,17 +191,24 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues(t *test
 	}
 	mustCount(0, "a parked written-off source must defer like a parked open one")
 
-	// 3. The stale-hold sweep finds no charge at Stripe and writes the
-	//    payment status back (ADR-127). The draft is now eligible.
+	// 3. The stale-hold sweep finds no charge at Stripe 24 hours after the
+	//    attempt and ends the park (ADR-127): UnparkAfterNoPayment, the
+	//    sweep's own write, which needs the park's charge hold. The draft is
+	//    now eligible.
+	hold := time.Now().Add(-25 * time.Hour).UTC().Truncate(time.Microsecond)
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET payment_status = 'failed' WHERE id = $1`, inv.ID); err != nil {
-		t.Fatalf("answer the park: %v", err)
+	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET auto_charge_claimed_until = $2 WHERE id = $1`, inv.ID, hold); err != nil {
+		t.Fatalf("give the park its charge hold: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
+	}
+	mustCount(0, "a written-off park with its hold still waits")
+	if status, unparked, err := invStore.UnparkAfterNoPayment(ctx, tenantID, inv.ID, hold, inv.ChargeAttemptSeq); err != nil || !unparked || status != domain.PaymentPending {
+		t.Fatalf("end the park: status %q unparked %v err %v, want pending, ended", status, unparked, err)
 	}
 	mustCount(1, "an answered park must release the draft")
 
