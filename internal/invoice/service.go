@@ -1993,15 +1993,12 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Void and credit note still reverse — see reverseInvoiceTax. That
 	// asymmetry is the decision: they change what was supplied; this does not.
 
-	// Stop the invoice being payable on a Checkout page the customer still has
-	// open: the flip above closed Velox's claims in its transaction, and this
-	// expires the sessions at Stripe, the same call and handling a void uses
-	// (AfterVoid). Best-effort and post-commit, on a context that outlives the
-	// caller's, as there. A session whose expiry fails ends at its ExpiresAt
-	// (at most an hour); a payment through it settles the invoice once.
-	if s.collectionStopper != nil {
-		s.collectionStopper.ExpireCheckoutSessions(context.WithoutCancel(ctx), tenantID, updated)
-	}
+	// The write-off has committed, so every leg below runs to the end even if
+	// the caller's context ends now (an API timeout, a client disconnect, a
+	// dunning tick stopping), as in AfterVoid. The audit row and the event go
+	// first: they are local writes, and the Stripe expiry after them can take
+	// as long as Stripe does.
+	ctx = context.WithoutCancel(ctx)
 
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", updated.ID, updated.InvoiceNumber, map[string]any{
@@ -2019,6 +2016,16 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 			"amount_due_cents": updated.AmountDueCents,
 			"currency":         updated.Currency,
 		})
+	}
+
+	// Stop the invoice being payable on a Checkout page the customer still has
+	// open: the flip above closed Velox's claims in its transaction, and this
+	// expires the sessions at Stripe, the same call and handling a void uses
+	// (AfterVoid). Best-effort: a session whose expiry fails ends at its
+	// ExpiresAt (at most an hour after it opened); a payment through it
+	// settles the invoice once.
+	if s.collectionStopper != nil {
+		s.collectionStopper.ExpireCheckoutSessions(ctx, tenantID, updated)
 	}
 	return updated, nil
 }

@@ -82,6 +82,24 @@ func TestE2E_WrittenOffBase_UpgradeIsRefusedAsUnpaid(t *testing.T) {
 		})
 	}
 
+	// The way round the refusal for a plan change (the runbook's): schedule
+	// it for the period's end. Nothing is charged for the rest of April, so
+	// nothing is refused.
+	t.Run("written-off base: a plan change at the period's end goes ahead", func(t *testing.T) {
+		r := newLagRig(t, "in_advance", false)
+		r.writeOff(r.firstInvoiceID(), lagP0.Add(time.Hour))
+		r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, reliefCancelAt,
+			map[string]any{"new_plan_id": r.planB, "immediate": false}, http.StatusOK)
+		if s := r.sub(); len(s.Items) != 1 || s.Items[0].PlanID != r.planA || s.Items[0].PendingPlanID != r.planB {
+			t.Errorf("items after the scheduled change = %+v, want plan A now with plan B pending", s.Items)
+		}
+		for _, i := range r.invoices() {
+			if i.reason == string(domain.BillingReasonSubscriptionUpdate) {
+				t.Errorf("a scheduled change wrote proration invoice %s (%dc)", i.id, i.subtotal)
+			}
+		}
+	})
+
 	t.Run("paid base: the upgrade charges the rest of April", func(t *testing.T) {
 		r := newLagRig(t, "in_advance", false)
 		r.must(http.MethodPost, "/v1/invoices/"+r.firstInvoiceID()+"/record-payment", lagP0.Add(time.Hour), map[string]any{"note": "fixture"}, http.StatusOK)
@@ -261,4 +279,70 @@ func TestE2E_WrittenOffBase_RemovedItemLowersWhatIsDue(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestE2E_WrittenOffBase_CreditsApplied_CancelThenVoid: plan A 3000c plus
+// add-on C 1000c, first invoice 4000c, paid down by customer credit. A cancel
+// on Apr 16 leaves 2000c of the period unused. The relief note clears what is
+// due and hands back the credits it displaces; a later void hands back the
+// credits still applied, once.
+//   - 3000c of credit, 1000c due: the 2000c note clears the 1000c and returns
+//     1000c of credit. The unpaid control is then paid (nothing due); the
+//     written-off one stays written off with nothing due. Same money: 0c due,
+//     1000c balance.
+//   - 3500c of credit, 500c due, written off: the note returns 1500c; a void
+//     then returns the 2000c still applied, so the balance is the 3500c
+//     granted, not 5000c.
+//
+// Mutation seams: hold a draft on a written-off invoice at issue (the note
+// never applies: 1000c or 500c stays due, balance 0); hand back every applied
+// credit on the void, ignoring what the note returned (balance 5000c).
+func TestE2E_WrittenOffBase_CreditsApplied_CancelThenVoid(t *testing.T) {
+	skipShort(t)
+	for _, tc := range []struct {
+		name       string
+		writeOff   bool
+		wantStatus string
+	}{
+		{"unpaid base: paid once nothing is due", false, string(domain.InvoicePaid)},
+		{"written-off base: the same money, still written off", true, string(domain.InvoiceUncollectible)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newLagRigGranted(t, "in_advance", true, 3000)
+			invID := r.firstInvoiceID()
+			if tc.writeOff {
+				r.writeOff(invID, lagP0.Add(time.Hour))
+			}
+			r.cancelNow(reliefCancelAt)
+			if n, sum := r.creditNotesOn(invID), r.creditNoteTotalOn(invID); n != 1 || sum != 2000 {
+				t.Errorf("%d notes summing to %dc, want one 2000c relief note (15 of 30 days of 4000c)", n, sum)
+			}
+			if status, due, _ := r.invoiceMoney(invID, reliefCancelAt.Add(time.Hour)); status != tc.wantStatus || due != 0 {
+				t.Errorf("after the cancel: invoice %s with %dc due, want %s with 0c due", status, due, tc.wantStatus)
+			}
+			if bal := r.creditBalance(); bal != 1000 {
+				t.Errorf("credit balance = %dc, want 1000c: the 2000c note cleared 1000c due and displaced 1000c of credit", bal)
+			}
+		})
+	}
+
+	t.Run("written-off base, then void: credits come back once", func(t *testing.T) {
+		r := newLagRigGranted(t, "in_advance", true, 3500)
+		invID := r.firstInvoiceID()
+		r.writeOff(invID, lagP0.Add(time.Hour))
+		r.cancelNow(reliefCancelAt)
+		if status, due, _ := r.invoiceMoney(invID, reliefCancelAt.Add(time.Hour)); status != string(domain.InvoiceUncollectible) || due != 0 {
+			t.Fatalf("after the cancel: invoice %s with %dc due, want uncollectible with 0c due", status, due)
+		}
+		if bal := r.creditBalance(); bal != 1500 {
+			t.Fatalf("credit balance after the cancel = %dc, want 1500c (the 2000c note cleared 500c due)", bal)
+		}
+		r.must(http.MethodPost, "/v1/invoices/"+invID+"/void", reliefCancelAt.Add(2*time.Hour), nil, http.StatusOK)
+		if status, _, _ := r.invoiceMoney(invID, reliefCancelAt.Add(3*time.Hour)); status != string(domain.InvoiceVoided) {
+			t.Fatalf("invoice %s after the void, want voided", status)
+		}
+		if bal := r.creditBalance(); bal != 3500 {
+			t.Errorf("credit balance after the void = %dc, want 3500c: every credit granted, back once", bal)
+		}
+	})
 }

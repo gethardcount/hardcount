@@ -239,7 +239,9 @@ or not.
   one as it credits an unpaid one. It writes an adjustment credit note that
   lowers what the invoice asks for, capped at amount due plus credits
   applied. A cancel or a change of billing interval on the period's first
-  day voids the invoice instead, when it bills nothing else. A customer who pays the written-off
+  day voids the invoice instead, under the same conditions as an unpaid
+  one (`reliefTx`): nothing paid on it, no charge on it in flight (a park
+  included) and nothing billed on it but the period's base. A customer who pays the written-off
   invoice later pays only for the time used, the same money as paying the
   unpaid invoice after the same change. Before, the lookup skipped it and no
   relief was written, so a later payment paid for the unused time too.
@@ -247,6 +249,18 @@ or not.
 The unpaid path is the right one, not the paid one: nothing was received,
 so a balance credit would be a refundable credit for money never paid (the
 rule above).
+
+Known limit (review round 2). ADR-113's way to collect a written-off debt
+is a fresh recovery invoice, and nothing links that invoice to the
+written-off one. After the customer pays it, the written-off invoice still
+has its amount due: an increase over it is refused, and a cancel or
+downgrade lowers what it asks for instead of crediting the customer. A
+payment recorded on the written-off invoice itself ends in the same money
+as paying the unpaid one; one collected on a recovery invoice does not. The
+runbook (`manual-interventions.md`) gives the ways round: a plan change
+scheduled for the period's end, and a manual credit grant for the unused
+time. Not decided here: whether a recovery invoice should name the
+invoice it recovers, or a written-off base should stop blocking increases.
 
 What it took beyond the two lookups (one predicate, `baseFundsPeriod`,
 `status <> 'voided'`):

@@ -9798,7 +9798,9 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  * later invoice bills them again unless the invoice is then voided.
  * `POST /v1/invoices/{id}/void` says when a void gives them back.
  *
- * Closes any Stripe Checkout page still open for the invoice.
+ * Asks Stripe to expire any Checkout session still open for the
+ * invoice. If Stripe refuses or cannot be reached, the session stays
+ * payable until it expires, at most an hour after it opened.
  *
  * If the invoice billed its subscription's current period in advance,
  * it still counts as unpaid for that subscription. While it has an
@@ -9808,7 +9810,8 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  * still being confirmed with Stripe. A cancel, downgrade, removed item
  * or plan swap lowers what it asks for by the unused time; a cancel or
  * a change of billing interval on the period's first day voids it
- * instead, when it bills nothing else. A written-off invoice from an earlier period, or one not
+ * instead, if nothing is paid on it, no charge on it is being
+ * confirmed with Stripe and it bills nothing else. A written-off invoice from an earlier period, or one not
  * tied to a subscription's period, does not affect subscription
  * changes.
  * @summary Write off an invoice as uncollectible

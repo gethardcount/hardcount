@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/credit"
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -230,6 +231,99 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues(t *test
 		t.Errorf("invoice %s with %dc due, want uncollectible with 6000c due", after.Status, after.AmountDueCents)
 	}
 	mustCount(0, "an issued draft leaves the scan")
+}
+
+// The other answer to a written-off park: the card charge did succeed. The
+// card settlement records it (uncollectible -> paid, ADR-113: money that
+// already moved is recorded), the held relief draft is released, and Issue
+// takes the paid branch: the unused time goes to the customer's balance, the
+// same money as a cancel on an invoice paid before the write-off (ADR-050).
+// The draft must not have lowered the amount due first: that would have
+// asked the customer for 6000c while the card took 10000c.
+//
+// Mutation seam: release an uncollectible source in the held-draft scan again
+// (step 1 lists the draft while the charge is unknown).
+func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsTheBalance(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "CN Parked Card Succeeded")
+
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
+		ExternalID: "cus_parked_paid", DisplayName: "Parked Paid",
+	})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	invStore := invoice.NewPostgresStore(db)
+	now := time.Now().UTC()
+	inv, err := invStore.Create(ctx, tenantID, domain.Invoice{
+		CustomerID: cust.ID, InvoiceNumber: "INV-PARKED-PAID-1",
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentUnknown,
+		Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10000, AmountDueCents: 10000,
+		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
+	})
+	if err != nil {
+		t.Fatalf("create parked invoice: %v", err)
+	}
+	if _, err := invStore.UpdateStatus(ctx, tenantID, inv.ID, domain.InvoiceUncollectible); err != nil {
+		t.Fatalf("write off parked invoice: %v", err)
+	}
+	cnStore := creditnote.NewPostgresStore(db)
+	draft, err := cnStore.Create(ctx, tenantID, domain.CreditNote{
+		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-PARKED-PAID-1",
+		Status: domain.CreditNoteDraft, Reason: "subscription_cancellation",
+		SubtotalCents: 4000, TotalCents: 4000, Currency: "USD",
+		RefundStatus: domain.RefundNone, IssuePending: true,
+	})
+	if err != nil {
+		t.Fatalf("create clawback draft: %v", err)
+	}
+	pending := func() int {
+		t.Helper()
+		drafts, err := cnStore.ListPendingClawbackDrafts(ctx, 100, false)
+		if err != nil {
+			t.Fatalf("list pending clawback drafts: %v", err)
+		}
+		return len(drafts)
+	}
+
+	// 1. Written off and parked: the draft waits for the charge's answer.
+	if n := pending(); n != 0 {
+		t.Fatalf("%d pending drafts while the charge is unknown, want 0", n)
+	}
+
+	// 2. Stripe answers: the charge succeeded. The card settlement's write.
+	paid, transitioned, err := invStore.MarkPaidCardSettlementTransition(ctx, tenantID, inv.ID, "pi_found", time.Now().UTC(), nil)
+	if err != nil || !transitioned {
+		t.Fatalf("card settle: transitioned %v, err %v", transitioned, err)
+	}
+	if paid.Status != domain.InvoicePaid || paid.AmountPaidCents != 10000 {
+		t.Fatalf("after the card settle: invoice %s, %dc paid; want paid, 10000c", paid.Status, paid.AmountPaidCents)
+	}
+	if n := pending(); n != 1 {
+		t.Fatalf("%d pending drafts after the charge settled, want 1", n)
+	}
+
+	// 3. Issue takes the paid branch: 4000c to the balance.
+	credits := credit.NewService(credit.NewPostgresStore(db))
+	svc := creditnote.NewService(cnStore, invStore, nil, ledgerGranter{credits})
+	got, err := svc.Issue(ctx, tenantID, draft.ID)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if got.Status != domain.CreditNoteIssued || got.CreditAmountCents != 4000 {
+		t.Fatalf("note %s crediting %dc, want issued crediting 4000c to the balance", got.Status, got.CreditAmountCents)
+	}
+	bal, err := credits.GetBalance(ctx, tenantID, cust.ID)
+	if err != nil {
+		t.Fatalf("balance: %v", err)
+	}
+	if bal.BalanceCents != 4000 {
+		t.Errorf("customer balance = %dc, want 4000c: paid 10000c, 4000c of it unused", bal.BalanceCents)
+	}
+	if after, err := invStore.Get(ctx, tenantID, inv.ID); err != nil || after.Status != domain.InvoicePaid || after.AmountPaidCents != 10000 {
+		t.Errorf("invoice after the note = %+v (err %v), want paid with 10000c paid", after.Status, err)
+	}
 }
 
 // backdateCreditNote pushes a credit note's updated_at 10 days into the past to

@@ -57,11 +57,24 @@ amount due. A written-off invoice counts as unpaid. Do one of:
 
 - record the payment, if the customer paid outside Stripe (above);
 - void the invoice, if it should not be owed. A void hands back the credits
-  applied to it and reverses its tax.
+  applied to it and reverses its tax;
+- for a plan change, schedule it for the end of the period
+  (`immediate: false`). Nothing is charged for the rest of this one.
 
-Then make the change again. A cancel, downgrade or removed item is never
-refused for this: it lowers what that invoice asks for by the unused time
-(a cancel on the period's first day voids it).
+After a payment or a void, make the change again. A cancel, downgrade or
+removed item is never refused for this: it lowers what that invoice asks
+for by the unused time. A cancel on the period's first day voids the invoice instead, if nothing
+is paid on it, no charge on it is being confirmed with Stripe and it bills
+nothing else.
+
+If the customer paid a new invoice you made to recover a written-off one,
+Velox does not link the two. The written-off invoice keeps its amount due,
+so the change is still refused, and a later cancel or downgrade lowers what
+it asks for instead of crediting the customer. Do not record a payment on
+it: the money would be counted twice. Schedule a plan change for the
+period's end. For a cancel or downgrade, grant the customer the unused time
+as credit (`POST /v1/credits/grant`). An added item or seat increase has no
+way round yet.
 
 ## A customer has no usable payment method on file
 
