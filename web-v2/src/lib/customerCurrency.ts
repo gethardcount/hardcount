@@ -12,9 +12,9 @@
 // invoice in (engine.invoiceCurrency, ADR-100), so the page shows the
 // currency the next invoice will use:
 //  1. the billing profile's currency;
-//  2. the plan of the customer's live subscription (the one whose period
-//     started last, the same "primary" pick GET /v1/customers/{id}/usage
-//     makes). A plan has exactly one currency;
+//  2. the plan of the customer's draft, trialing or active subscription (the
+//     one whose period started last, the same "primary" pick
+//     GET /v1/customers/{id}/usage makes). A plan has exactly one currency;
 //  3. the newest invoice's currency;
 //  4. the workspace default.
 //
@@ -28,8 +28,10 @@ export interface CustomerCurrency {
   source: CustomerCurrencySource
 }
 
-// A subscription still bills (and so still sets the currency) in these states.
-const LIVE_STATUSES = new Set(['active', 'trialing'])
+// A subscription in these states fixes the customer's currency. They are the
+// states POST /v1/invoices pins a manual invoice to (ADR-100): a draft counts,
+// because it will bill in its plan's currency once it starts.
+const LIVE_STATUSES = new Set(['draft', 'trialing', 'active'])
 
 export interface CurrencySubscription {
   status: string

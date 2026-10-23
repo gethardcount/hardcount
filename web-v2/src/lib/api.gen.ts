@@ -1383,9 +1383,9 @@ export interface paths {
          *     Errors (422, `param` names the field): `customer_id`, `currency` or
          *     `description` missing; `currency` not supported (an unknown code or
          *     a zero-decimal currency such as JPY); `amount_cents` is zero, above
-         *     100000000 ($1,000,000), or a removal larger than the credit in that
-         *     currency that can be drawn (expired grants not yet written off do
-         *     not count).
+         *     100000000 (1,000,000.00 in that currency), or a removal larger than
+         *     the credit in that currency that can be drawn (expired grants not
+         *     yet written off do not count).
          */
         post: operations["adjustCredits"];
         delete?: never;
