@@ -107,8 +107,10 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 	if err := validateDimensions(in.Dimensions); err != nil {
 		return domain.HeldUsageEvent{}, err
 	}
-	if in.Quantity.Abs().Cmp(maxQuantityMagnitude) >= 0 {
-		return domain.HeldUsageEvent{}, errs.Invalid("quantity", "magnitude too large — must be less than 10^26")
+	// The same limits as an event, so a held row can always be released.
+	quantity, err := checkQuantity(in.Quantity)
+	if err != nil {
+		return domain.HeldUsageEvent{}, err
 	}
 	// No customer exists, so there is no test clock to read: wall-clock is
 	// the only "now" there is.
@@ -128,7 +130,7 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 		Source:             source,
 		ExternalCustomerID: in.ExternalCustomerID,
 		EventName:          in.EventName,
-		Quantity:           in.Quantity,
+		Quantity:           quantity,
 		Dimensions:         in.Dimensions,
 		IdempotencyKey:     in.IdempotencyKey,
 		EventAt:            at,

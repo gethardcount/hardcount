@@ -509,13 +509,13 @@ func containsJSONField(raw, field string) bool {
 	return false
 }
 
-// TestViewInvoice_FractionalQuantity_CarriesQuantityDecimal locks the
-// qty × unit = amount coherence fix for the hosted page: a fractional-usage
-// line (1.5 GPU-hours at $6.67/hr = $10.00) must surface quantity_decimal in
-// the JSON so the SPA renders "1.5", not the truncated integer 1 against the
-// full $10.00 amount. The invoice PDF already handles this via its
-// QuantityDecimal-aware formatter; the hosted payload dropped the field.
-func TestViewInvoice_FractionalQuantity_CarriesQuantityDecimal(t *testing.T) {
+// TestViewInvoice_LineHasOneQuantityAndOneUnitPrice locks the hosted line
+// shape (B5): `quantity` is the exact decimal string (1.5 GPU-hours, not the
+// truncated 1 against the full $10.00), `unit_amount_decimal` is the unit
+// price, and the int/decimal duplicates `quantity_decimal` and
+// `unit_amount_cents` are gone. A whole-quantity line with no stored decimal
+// sends its integer as the string.
+func TestViewInvoice_LineHasOneQuantityAndOneUnitPrice(t *testing.T) {
 	fi := newFakeInvoices()
 	fc := newFakeCustomers()
 	fs := newFakeSettings()
@@ -529,39 +529,46 @@ func TestViewInvoice_FractionalQuantity_CarriesQuantityDecimal(t *testing.T) {
 		QuantityDecimal: decimal.RequireFromString("1.5"),
 		UnitAmountCents: 667, AmountCents: 1000, TotalAmountCents: 1000,
 		Currency: "USD",
+	}, {
+		ID:              "li_seats",
+		InvoiceID:       inv.ID,
+		TenantID:        "t_1",
+		Description:     "Seats",
+		Quantity:        1500,
+		UnitAmountCents: 2, AmountCents: 3000, TotalAmountCents: 3000,
+		Currency: "USD",
 	}}
 
 	h := newTestHandler(fi, fc, fs, &fakeCheckout{})
 	r := mountRouter(h)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/vlx_pinv_frac", nil)
-	r.ServeHTTP(w, req)
-
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/vlx_pinv_frac", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200, body=%s", w.Code, w.Body.String())
 	}
-	var resp hostedInvoicePayload
+	var resp struct {
+		LineItems []map[string]any `json:"line_items"`
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if len(resp.LineItems) != 1 {
-		t.Fatalf("line_items = %d, want 1", len(resp.LineItems))
+	if len(resp.LineItems) != 2 {
+		t.Fatalf("line_items = %d, want 2", len(resp.LineItems))
 	}
-	if resp.LineItems[0].QuantityDecimal != "1.5" {
-		t.Errorf("quantity_decimal = %q, want \"1.5\" (SPA must render the exact fractional qty)", resp.LineItems[0].QuantityDecimal)
-	}
-	// Whole-quantity lines keep the field empty (omitempty) — the SPA falls
-	// back to the integer quantity.
-	fi.lineItems[inv.ID][0].QuantityDecimal = decimal.Decimal{}
-	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, httptest.NewRequest(http.MethodGet, "/vlx_pinv_frac", nil))
-	var resp2 hostedInvoicePayload
-	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
-		t.Fatalf("decode body 2: %v", err)
-	}
-	if resp2.LineItems[0].QuantityDecimal != "" {
-		t.Errorf("whole-qty line quantity_decimal = %q, want empty", resp2.LineItems[0].QuantityDecimal)
+	for i, want := range []struct{ qty, unit string }{{"1.5", "666.666666666667"}, {"1500", "2"}} {
+		li := resp.LineItems[i]
+		if li["quantity"] != want.qty {
+			t.Errorf("line %d quantity = %#v, want the string %q", i, li["quantity"], want.qty)
+		}
+		if li["unit_amount_decimal"] != want.unit {
+			t.Errorf("line %d unit_amount_decimal = %#v, want %q", i, li["unit_amount_decimal"], want.unit)
+		}
+		for _, gone := range []string{"quantity_decimal", "unit_amount_cents"} {
+			if _, ok := li[gone]; ok {
+				t.Errorf("line %d still sends %s: %v", i, gone, li)
+			}
+		}
 	}
 }
 

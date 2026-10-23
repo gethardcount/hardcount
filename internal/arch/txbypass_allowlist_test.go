@@ -64,7 +64,6 @@ var txBypassUsers = map[string]string{
 	"internal/invoice/postgres.go PostgresStore.listInflightPayments":                        "background",
 	"internal/payment/checkout_sessions_store.go CheckoutSessionStore.ListHostedToReconcile": "background",
 	"internal/payment/token.go TokenService.Cleanup":                                         "background",
-	"internal/subscription/backfill_intervals.go PostgresStore.intervalBackfillPartitions":   "background",
 	"internal/subscription/postgres.go PostgresStore.GetDueBilling":                          "background",
 	"internal/subscription/postgres.go PostgresStore.ListExpiredPauseCollections":            "background",
 	"internal/subscription/postgres.go PostgresStore.ListExpiredTrials":                      "background",

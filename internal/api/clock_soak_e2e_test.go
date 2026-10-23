@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -308,11 +309,11 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 		if lt, _ := li["line_type"].(string); lt != "base_fee" {
 			t.Errorf("step %d: line_type = %q, want base_fee", step, lt)
 		}
-		if got := num(li, "quantity"); got != 1 {
-			t.Errorf("step %d: line quantity = %d, want 1", step, got)
+		if got := li["quantity"]; got != "1" {
+			t.Errorf("step %d: line quantity = %v, want \"1\"", step, got)
 		}
-		if got := num(li, "unit_amount_cents"); got != wantBaseCents {
-			t.Errorf("step %d: line unit_amount_cents = %d, want %d", step, got, wantBaseCents)
+		if got, want := li["unit_amount_decimal"], strconv.FormatInt(wantBaseCents, 10); got != want {
+			t.Errorf("step %d: line unit_amount_decimal = %v, want %q", step, got, want)
 		}
 		if got := num(li, "amount_cents"); got != wantBaseCents {
 			t.Errorf("step %d: line amount_cents = %d, want %d", step, got, wantBaseCents)

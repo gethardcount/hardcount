@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -104,8 +103,7 @@ func ivActiveSub(t *testing.T, store *PostgresStore, ctx context.Context, tenant
 	t.Helper()
 	// Pin the create to the period start so the items' created_at (and the
 	// trigger's 'add' fact rows) land at ivPS, matching the fixture period
-	// — a wall-clock create would strand the 'add' months after ivPE and
-	// make the backfill replay assertions meaningless.
+	// — a wall-clock create would strand the 'add' months after ivPE.
 	sub, err := store.Create(clock.WithEffectiveNow(ctx, ivPS), tenantID, domain.Subscription{
 		Code: code, DisplayName: code, CustomerID: custID,
 		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
@@ -481,179 +479,6 @@ func TestIntervals_UndeleteRefusedLoudly(t *testing.T) {
 	}
 }
 
-func TestIntervals_BackfillReconstructsHistory(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "IV Backfill")
-	cust := ivCustomer(t, db, ctx, tenantID, "cus_iv_bf")
-	planA := ivPlan(t, db, ctx, tenantID, "iv-bf-a", 1000)
-	planB := ivPlan(t, db, ctx, tenantID, "iv-bf-b", 2000)
-	store := NewPostgresStore(db)
-
-	// Build real history through the live writers (add → qty → plan →
-	// remove on a second item), then erase the dual-written intervals to
-	// simulate a pre-ADR-101 database.
-	sub := ivActiveSub(t, store, ctx, tenantID, cust, "sub-iv-bf", []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}})
-	itemID := sub.Items[0].ID
-	t1 := ivPS.Add(5 * 24 * time.Hour)
-	t2 := ivPS.Add(10 * 24 * time.Hour)
-	if _, err := store.UpdateItemQuantity(clock.WithEffectiveNow(ctx, t1), tenantID, itemID, 4); err != nil {
-		t.Fatalf("qty: %v", err)
-	}
-	if _, err := store.ApplyItemPlanImmediately(ctx, tenantID, itemID, planB.ID, t2); err != nil {
-		t.Fatalf("plan: %v", err)
-	}
-
-	wipe := func() {
-		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		defer postgres.Rollback(tx)
-		if _, err := tx.ExecContext(ctx, `DELETE FROM billing_intervals WHERE subscription_id = $1`, sub.ID); err != nil {
-			t.Fatalf("wipe intervals: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
-	}
-	wipe()
-
-	n, err := store.BackfillBillingIntervals(ctx)
-	if err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-	if n != 3 {
-		t.Fatalf("backfill must insert 3 segments, got %d", n)
-	}
-	ivs := readItemIntervals(t, db, ctx, tenantID, itemID)
-	if len(ivs) != 3 {
-		t.Fatalf("backfill must yield 3 segments: %+v", ivs)
-	}
-	if ivs[0].planID != planA.ID || ivs[0].quantity != 1 || !ivs[0].startsAt.Equal(ivPS) || !ivEndEq(ivs[0].endsAt, t1) {
-		t.Fatalf("backfill seg 0 mismatch: %+v", ivs[0])
-	}
-	if ivs[1].planID != planA.ID || ivs[1].quantity != 4 || !ivs[1].startsAt.Equal(t1) || !ivEndEq(ivs[1].endsAt, t2) {
-		t.Fatalf("backfill seg 1 mismatch: %+v", ivs[1])
-	}
-	if ivs[2].planID != planB.ID || ivs[2].quantity != 4 || !ivs[2].startsAt.Equal(t2) || ivs[2].endsAt != nil {
-		t.Fatalf("backfill seg 2 mismatch: %+v", ivs[2])
-	}
-	for _, iv := range ivs {
-		if iv.source != "backfill" {
-			t.Errorf("backfilled row must be source=backfill: %+v", iv)
-		}
-	}
-	// Note ivs[0] starts at ivPS: the item's 'add' fact row is stamped at
-	// the sub-creation instant, which the walk emits verbatim — here the
-	// fixture creates at ivPS exactly, so no clamp is needed.
-
-	// Idempotent: second run inserts nothing.
-	if n2, err := store.BackfillBillingIntervals(ctx); err != nil || n2 != 0 {
-		t.Fatalf("second backfill must be a no-op, got n=%d err=%v", n2, err)
-	}
-}
-
-func TestIntervals_BackfillLogGaps(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "IV BF Gaps")
-	cust := ivCustomer(t, db, ctx, tenantID, "cus_iv_bfg")
-	planA := ivPlan(t, db, ctx, tenantID, "iv-bfg-a", 1000)
-	planB := ivPlan(t, db, ctx, tenantID, "iv-bfg-b", 2000)
-	store := NewPostgresStore(db)
-
-	sub := ivActiveSub(t, store, ctx, tenantID, cust, "sub-iv-bfg", []domain.SubscriptionItem{
-		{PlanID: planA.ID, Quantity: 2}, {PlanID: planB.ID, Quantity: 1},
-	})
-	preItem := sub.Items[0].ID  // will become the pre-0029 shape (no 'add' row)
-	goneItem := sub.Items[1].ID // will become the 0102→0129 shape (removed, no 'remove' row)
-
-	t1 := ivPS.Add(8 * 24 * time.Hour)
-	if _, err := store.UpdateItemQuantity(clock.WithEffectiveNow(ctx, t1), tenantID, preItem, 5); err != nil {
-		t.Fatalf("qty: %v", err)
-	}
-	tDel := ivPS.Add(12 * 24 * time.Hour)
-	if err := store.RemoveItem(clock.WithEffectiveNow(ctx, tDel), tenantID, goneItem); err != nil {
-		t.Fatalf("remove: %v", err)
-	}
-
-	// Simulate the historical gaps: drop the 'add' row for preItem and the
-	// 'remove' row for goneItem, and erase the dual-written intervals.
-	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	for q, args := range map[string][]any{
-		`DELETE FROM subscription_item_changes WHERE subscription_item_id = $1 AND change_type = 'add'`:    {preItem},
-		`DELETE FROM subscription_item_changes WHERE subscription_item_id = $1 AND change_type = 'remove'`: {goneItem},
-		`DELETE FROM billing_intervals WHERE subscription_id = $1`:                                         {sub.ID},
-	} {
-		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
-			t.Fatalf("fixture %s: %v", q, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	if _, err := store.BackfillBillingIntervals(ctx); err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-
-	// preItem: synthetic open at created_at with the qty row's from-state.
-	pre := readItemIntervals(t, db, ctx, tenantID, preItem)
-	if len(pre) != 2 {
-		t.Fatalf("pre-0029 reconstruction must yield 2 segments: %+v", pre)
-	}
-	if pre[0].planID != planA.ID || pre[0].quantity != 2 || !pre[0].startsAt.Equal(ivPS) || !ivEndEq(pre[0].endsAt, t1) {
-		t.Fatalf("pre-0029 seg 0 mismatch: %+v", pre[0])
-	}
-	if pre[1].quantity != 5 || pre[1].endsAt != nil {
-		t.Fatalf("pre-0029 seg 1 mismatch: %+v", pre[1])
-	}
-	// goneItem: sealed at deleted_at despite the missing 'remove' row.
-	gone := readItemIntervals(t, db, ctx, tenantID, goneItem)
-	if len(gone) != 1 || !ivEndEq(gone[0].endsAt, tDel) {
-		t.Fatalf("remove-gap reconstruction mismatch: %+v", gone)
-	}
-}
-
-func TestIntervals_BackfillCanceledSubSeals(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "IV BF Cancel")
-	cust := ivCustomer(t, db, ctx, tenantID, "cus_iv_bfc")
-	planA := ivPlan(t, db, ctx, tenantID, "iv-bfc-a", 1000)
-	store := NewPostgresStore(db)
-
-	sub := ivActiveSub(t, store, ctx, tenantID, cust, "sub-iv-bfc", []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}})
-	at := ivPS.Add(20 * 24 * time.Hour)
-	if _, err := store.CancelAtomic(clock.WithEffectiveNow(ctx, at), tenantID, sub.ID); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(ctx, `DELETE FROM billing_intervals WHERE subscription_id = $1`, sub.ID); err != nil {
-		t.Fatalf("wipe: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	if _, err := store.BackfillBillingIntervals(ctx); err != nil {
-		t.Fatalf("backfill: %v", err)
-	}
-	ivs := readItemIntervals(t, db, ctx, tenantID, sub.Items[0].ID)
-	if len(ivs) != 1 || !ivEndEq(ivs[0].endsAt, at) {
-		t.Fatalf("canceled-sub backfill must seal at canceled_at %s: %+v", at, ivs)
-	}
-}
-
 func TestIntervals_HardDeleteRefusedLoudly(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -694,68 +519,5 @@ func TestIntervals_HardDeleteRefusedLoudly(t *testing.T) {
 	}
 	if err := tx2.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
-	}
-}
-
-// TestIntervals_BackfillTwoReplicasConverge is sweep-2026-08-30 S6: two
-// replicas boot together and both run BackfillBillingIntervals on the same
-// partition. Both must return nil — the second committer's EXCLUDE violation
-// means "a sibling reconstructed this first", not a boot failure — and the
-// table must hold exactly the one reconstruction. The barrier hook makes the
-// race deterministic: both goroutines read "no rows" before either inserts.
-// Mutation check: drop the IsExclusionViolation branch in
-// BackfillBillingIntervals → one goroutine errors → this fails.
-func TestIntervals_BackfillTwoReplicasConverge(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "IV Backfill Race")
-	cust := ivCustomer(t, db, ctx, tenantID, "cus_iv_race")
-	planA := ivPlan(t, db, ctx, tenantID, "iv-race-a", 1000)
-	store := NewPostgresStore(db)
-	sub := ivActiveSub(t, store, ctx, tenantID, cust, "sub-iv-race", []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}})
-	itemID := sub.Items[0].ID
-
-	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM billing_intervals WHERE subscription_id = $1`, sub.ID); err != nil {
-		t.Fatalf("wipe intervals: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Barrier: both "replicas" must have read the partition before either
-	// inserts. Each calls the hook once per partition (one partition here).
-	var arrive sync.WaitGroup
-	arrive.Add(2)
-	backfillBeforeInsert = func() { arrive.Done(); arrive.Wait() }
-	t.Cleanup(func() { backfillBeforeInsert = nil })
-
-	type result struct {
-		n   int
-		err error
-	}
-	results := make(chan result, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			n, err := store.BackfillBillingIntervals(ctx)
-			results <- result{n, err}
-		}()
-	}
-	var total int
-	for i := 0; i < 2; i++ {
-		r := <-results
-		if r.err != nil {
-			t.Fatalf("a booting replica failed its backfill because a sibling won the race: %v", r.err)
-		}
-		total += r.n
-	}
-	if total != 1 {
-		t.Fatalf("exactly one replica must reconstruct the segment; inserted=%d", total)
-	}
-	if ivs := readItemIntervals(t, db, ctx, tenantID, itemID); len(ivs) != 1 {
-		t.Fatalf("table must hold one reconstructed segment, got %+v", ivs)
 	}
 }

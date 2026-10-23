@@ -824,16 +824,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentReadiness := &paymentReadinessAdapter{customers: customerStore, pms: paymentMethodsSvc}
 	engine := billing.NewEngine(subStore, usageStore, pricingSvc,
 		&invoiceWriterAdapter{PostgresStore: invoiceStore}, creditSvc, settingsStore, paymentReadiness, stripeAdapter, clk, customerStore)
-	// ADR-101 Phase 4 (2026-07-28): billing_intervals is the ONLY
-	// segment source — the legacy fact-log interpretation, the shadow
-	// comparator, and the VELOX_BILLING_INTERVALS_READER kill switches
-	// are gone (clean soak: 140/140 cutover sweep, two-mode corpus CI on
-	// every PR since, zero unexplained divergences). A stale env value
-	// can no longer change behavior; say so loudly instead of silently
-	// ignoring an operator's kill-switch intent.
-	if v := strings.TrimSpace(os.Getenv("VELOX_BILLING_INTERVALS_READER")); v != "" && v != "on" {
-		slog.Warn("VELOX_BILLING_INTERVALS_READER is set but the flag was removed at ADR-101 Phase 4 — billing_intervals always bill; the legacy reader no longer exists", "value", v)
-	}
+	// ADR-101: billing_intervals is the only segment source.
 	engine.SetIntervalReader(subStore)
 	engine.SetInvoiceGrace(o.invoiceGrace)
 	engine.SetTestClockReader(testClockStore)
@@ -1690,10 +1681,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// After auth so tenant ID is available for the bucket key. Ingest
 		// paths ride their own (much larger) bucket — see ingestLimiter.
 		r.Use(mw.SplitRateLimit(isIngestPath, ingestLimiter, rateLimiter))
-		// Ingest routes (isIngestPath): a 5xx releases the Idempotency-Key
-		// instead of pinning it — ingest is a single-tx writer with DB-level
-		// per-event dedup, so the documented contract is "non-2xx means not
-		// recorded — retry with the SAME key" (HA register work item 11).
+		// Ingest routes (isIngestPath) ignore the Idempotency-Key header:
+		// each event's own idempotency_key is the one dedup rule there.
 		r.Use(mw.Idempotency(db, isIngestPath))
 		// No audit middleware here. Audit rows are EMITTED by the code that
 		// owns the mutation, inside its transaction (audit.Logger.LogInTx), and
@@ -2044,10 +2033,12 @@ func loggablePath(r *http.Request) string {
 	return path
 }
 
-// isIngestPath scopes the dedicated ingest rate-limit bucket: the
-// usage-events subtree (single, batch, backfill — reads ride along
-// harmlessly) and the LiteLLM adapter, which POSTs one callback per LLM
-// call and must never be squeezed through the operator-CRUD bucket.
+// isIngestPath names the usage routes: the usage-events subtree (single,
+// batch, backfill, held release and discard; reads ride along harmlessly)
+// and the LiteLLM adapter. They ride the dedicated ingest rate-limit bucket
+// (one callback per LLM call must never be squeezed through the
+// operator-CRUD bucket), and they ignore the Idempotency-Key header: each
+// event's idempotency_key, or the held row moving once, is their dedup.
 func isIngestPath(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/v1/usage-events") ||
 		strings.HasPrefix(r.URL.Path, "/v1/integrations/litellm")

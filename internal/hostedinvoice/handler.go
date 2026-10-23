@@ -211,18 +211,14 @@ type viewInvoice struct {
 
 type viewLineItem struct {
 	Description string `json:"description"`
-	Quantity    int64  `json:"quantity"`
-	// QuantityDecimal is the exact (possibly fractional) usage quantity as a
-	// decimal string; empty for whole-quantity lines. Without it the page
-	// showed the truncated integer against the full amount (1.5 GPU-hours →
-	// "Qty 1 × $6.67 = $10.00"), the qty × unit ≠ amount incoherence the
-	// invoice PDF already avoids via its QuantityDecimal-aware formatter.
-	QuantityDecimal string `json:"quantity_decimal,omitempty"`
-	UnitAmountCents int64  `json:"unit_amount_cents"`
+	// Quantity is the line's exact quantity as a decimal string
+	// (InvoiceLineItem.ExactQuantity): 1.5 GPU-hours is "1.5", never the
+	// truncated 1 against the full amount.
+	Quantity string `json:"quantity"`
 	// UnitAmountDecimal is the full-precision per-unit price (decimal cents),
-	// so the public page renders sub-cent rates (e.g. $0.003) instead of the
-	// whole-cent UnitAmountCents collapsing them to "$0.00" (ADR-054).
-	UnitAmountDecimal string `json:"unit_amount_decimal,omitempty"`
+	// so the public page renders sub-cent rates (e.g. $0.003) instead of a
+	// whole-cent price collapsing them to "$0.00" (ADR-054).
+	UnitAmountDecimal string `json:"unit_amount_decimal"`
 	// MeterUnit lets the public page render token rates per-1M
 	// ("$3.00 / 1M tokens"), matching the operator dashboard and the PDF.
 	MeterUnit        string `json:"meter_unit,omitempty"`
@@ -566,21 +562,16 @@ func toViewInvoice(inv domain.Invoice) viewInvoice {
 func toViewLineItems(items []domain.InvoiceLineItem) []viewLineItem {
 	out := make([]viewLineItem, 0, len(items))
 	for _, it := range items {
-		v := viewLineItem{
+		out = append(out, viewLineItem{
 			Description:       it.Description,
-			Quantity:          it.Quantity,
-			UnitAmountCents:   it.UnitAmountCents,
+			Quantity:          it.ExactQuantity().String(),
 			UnitAmountDecimal: it.DisplayUnitAmountDecimal().String(),
 			MeterUnit:         it.MeterUnit,
 			AmountCents:       it.AmountCents,
 			TaxAmountCents:    it.TaxAmountCents,
 			TotalAmountCents:  it.TotalAmountCents,
 			Currency:          it.Currency,
-		}
-		if !it.QuantityDecimal.IsZero() {
-			v.QuantityDecimal = it.QuantityDecimal.String()
-		}
-		out = append(out, v)
+		})
 	}
 	return out
 }

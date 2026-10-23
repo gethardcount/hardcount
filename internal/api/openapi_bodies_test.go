@@ -47,6 +47,10 @@ type requestBody struct {
 // ignores the field.
 const serverSet = "Read-only. The handler decodes the type it returns, so a body read back from GET is accepted; the server sets or ignores this field."
 
+// propertiesRefused is why a usage event decodes `properties`: it was the old
+// name of `dimensions`, and an event that still sends it is refused with 422.
+const propertiesRefused = "Not a field: the old name of dimensions. The handler decodes it only to refuse the event with 422."
+
 // readOnly maps each name to serverSet.
 func readOnly(names ...string) map[string]string {
 	out := make(map[string]string, len(names))
@@ -85,9 +89,9 @@ var requestBodies = map[string]requestBody{
 	"PUT /v1/subscriptions/{id}/billing-thresholds":                     {body: subscription.BillingThresholdsInput{}},
 	"POST /v1/subscriptions/{id}/items":                                 {body: subscription.AddItemInput{}},
 	"PATCH /v1/subscriptions/{id}/items/{itemID}":                       {body: subscription.UpdateItemInput{}},
-	"POST /v1/usage-events":                                             {body: usage.APIEvent{}},
-	"POST /v1/usage-events/batch":                                       {body: []usage.APIEvent{}},
-	"POST /v1/usage-events/backfill":                                    {body: usage.APIEvent{}},
+	"POST /v1/usage-events":                                             {body: usage.APIEvent{}, undocumented: map[string]string{"properties": propertiesRefused}},
+	"POST /v1/usage-events/batch":                                       {body: []usage.APIEvent{}, undocumented: map[string]string{"[].properties": propertiesRefused}},
+	"POST /v1/usage-events/backfill":                                    {body: usage.APIEvent{}, undocumented: map[string]string{"properties": propertiesRefused}},
 	"POST /v1/usage-events/held/release":                                {body: usage.ReleaseHeldRequest{}},
 	"POST /v1/usage-events/held/discard":                                {body: usage.DiscardHeldRequest{}},
 	"PUT /v1/provider-costs":                                            {body: domain.ProviderCostRate{}, undocumented: readOnly("id", "tenant_id", "created_at", "updated_at")},

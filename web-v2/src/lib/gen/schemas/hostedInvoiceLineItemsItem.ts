@@ -10,12 +10,10 @@
 
 export type HostedInvoiceLineItemsItem = {
   description: string;
-  quantity: number;
-  /** The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities. */
-  quantity_decimal?: string;
-  unit_amount_cents: number;
+  /** The exact quantity as a decimal string, for example `3` or `1.5`. */
+  quantity: string;
   /** The unit price in cents at full precision, for example `0.3` for $0.003. */
-  unit_amount_decimal?: string;
+  unit_amount_decimal: string;
   meter_unit?: string;
   amount_cents: number;
   tax_amount_cents?: number;

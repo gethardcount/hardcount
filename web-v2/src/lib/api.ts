@@ -971,15 +971,16 @@ export interface LineItem {
   id: string
   line_type: string
   description: string
-  quantity: number
-  unit_amount_cents: number
+  // The exact quantity as a decimal string ("3", "1.5"). Render with
+  // formatLineQuantity.
+  quantity: string
   // Full-precision per-unit price in decimal cents (e.g. "0.3" = $0.003).
   // Server-side display value (ADR-054): the stamped NOMINAL configured rate
   // on flat usage lines, falling back to amount_cents ÷ quantity only when no
   // nominal rate is stamped — so on flat lines it deliberately may differ from
   // amount ÷ quantity. Render with formatRate so sub-cent rates don't collapse
-  // to "$0.00" like unit_amount_cents would.
-  unit_amount_decimal?: string
+  // to "$0.00".
+  unit_amount_decimal: string
   // Meter the usage line was rated from. Stamped by the billing engine on
   // usage lines only; absent on base-fee, add-on, discount and tax lines.
   // Carries the drill-down from a disputed line back to the events behind it.
@@ -1910,6 +1911,13 @@ export function formatTaxRate(rate: number): string {
 // whole cents (formatCents).
 export function formatRate(cents: string | number, currency: string): string {
   return rateWithSymbol(cents, getCurrencySymbol(currency))
+}
+
+// formatLineQuantity renders an invoice line's quantity, which the API sends
+// as an exact decimal string ("3", "1.5"). The dashboard and the hosted page
+// both use it, so a line reads the same on each.
+export function formatLineQuantity(quantity: string): string {
+  return Number(quantity).toLocaleString(undefined, { maximumFractionDigits: 12 })
 }
 
 // formatRateBare is a rate with no currency symbol, for a figure whose

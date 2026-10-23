@@ -2,9 +2,8 @@ package usage
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
-
-	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
@@ -31,7 +30,7 @@ func evt(extCust, eventName string) APIEvent {
 	return APIEvent{
 		ExternalCustomerID: extCust,
 		EventName:          eventName,
-		Quantity:           decimal.NewFromInt(1),
+		Quantity:           json.RawMessage("1"),
 		IdempotencyKey:     "evt_" + extCust + "_" + eventName,
 	}
 }

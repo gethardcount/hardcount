@@ -275,25 +275,6 @@ var lockOrderWriters = []lockOrderWriter{
 			return err
 		}
 	}},
-	{"billing-interval backfill", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
-		// A subscription that moved from hi to lo, with its intervals erased
-		// as on a database from before billing_intervals: the backfill
-		// writes the hi segment, then the lo one.
-		sub := r.sub(t, "backfill", domain.SubscriptionActive, hi)
-		if _, err := r.store.ApplyItemPlanImmediately(r.ctx, r.tenantID, sub.Items[0].ID, lo.ID, lockOrderPS.Add(5*24*time.Hour)); err != nil {
-			t.Fatalf("swap: %v", err)
-		}
-		if _, err := r.admin.ExecContext(r.ctx, `DELETE FROM billing_intervals WHERE subscription_id = $1`, sub.ID); err != nil {
-			t.Fatalf("erase intervals: %v", err)
-		}
-		return func(ctx context.Context) error {
-			n, err := r.store.BackfillBillingIntervals(ctx)
-			if err == nil && n != 2 {
-				t.Errorf("the backfill must write 2 segments, wrote %d", n)
-			}
-			return err
-		}
-	}},
 }
 
 // twoMeterWriters reference two plans in a fixture the API accepts: their

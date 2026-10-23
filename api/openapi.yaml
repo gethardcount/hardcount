@@ -97,7 +97,8 @@ components:
         the same value on every retry. For 24 hours, a repeat with the same
         key, method, path and body gets the first response again, with an
         `Idempotent-Replayed: true` header, instead of running again. The
-        error cases are in docs/api-surface.md.
+        error cases are in docs/api-surface.md. The usage routes do not take
+        it: each usage event carries its own `idempotency_key`.
       schema:
         type: string
 
@@ -1245,7 +1246,7 @@ components:
         - line_type
         - description
         - quantity
-        - unit_amount_cents
+        - unit_amount_decimal
         - amount_cents
         - tax_rate
         - tax_amount_cents
@@ -1274,27 +1275,17 @@ components:
         description:
           type: string
         quantity:
-          type: integer
-          format: int64
-        quantity_decimal:
           type: string
           description: >
-            Exact (possibly fractional) usage quantity as a decimal string
-            (e.g. "1.5"). The integer `quantity` is this truncated, kept for
-            back-compat (Stripe quantity_decimal parity). "0" means none — use
-            `quantity`. Line amounts stay whole cents.
-        unit_amount_cents:
-          type: integer
-          format: int64
+            The line's exact quantity as a decimal string, for example "3"
+            or "1.5". Line amounts stay whole cents.
         unit_amount_decimal:
           type: string
           description: >
-            Full-precision per-unit price in DECIMAL CENTS (e.g. "0.3" = $0.003
-            per unit), the Stripe unit_amount_decimal model. Derived on read as
-            amount_cents ÷ quantity, so it reconciles with the rounded line
-            amount and, unlike the whole-cent `unit_amount_cents`, never
-            collapses a sub-cent rate to 0. Render with the decimal-aware rate
-            formatter; line amounts/totals stay whole cents.
+            The unit price in cents at full precision, for example "0.3"
+            for $0.003. On a usage line priced at one flat rate it is that
+            rate; on any other line it is amount_cents ÷ quantity. Line
+            amounts and totals stay whole cents.
         amount_cents:
           type: integer
           format: int64
@@ -4700,19 +4691,13 @@ components:
           type: array
           items:
             type: object
-            required: [description, quantity, unit_amount_cents, amount_cents, total_amount_cents, currency]
+            required: [description, quantity, unit_amount_decimal, amount_cents, total_amount_cents, currency]
             properties:
               description:
                 type: string
               quantity:
-                type: integer
-                format: int64
-              quantity_decimal:
                 type: string
-                description: The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities.
-              unit_amount_cents:
-                type: integer
-                format: int64
+                description: The exact quantity as a decimal string, for example `3` or `1.5`.
               unit_amount_decimal:
                 type: string
                 description: The unit price in cents at full precision, for example `0.3` for $0.003.
@@ -9042,8 +9027,6 @@ paths:
     post:
       tags: [Usage]
       summary: Ingest usage event
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -9062,15 +9045,17 @@ paths:
                   oneOf:
                     - type: number
                     - type: string
-                  description: Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
+                  description: |
+                    A JSON number (`5`) or a string holding one (`"5.5"`,
+                    for exact decimals). At most 12 decimal places; trailing
+                    zeros do not count. Its size must be under 10^26. A
+                    negative value is a correction. A missing quantity, or
+                    any other value, is refused with 422 and `param:
+                    quantity`.
                 dimensions:
                   type: object
                   additionalProperties: true
                   description: Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}).
-                properties:
-                  type: object
-                  additionalProperties: true
-                  description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                 idempotency_key:
                   type: string
                   maxLength: 255
@@ -9084,9 +9069,8 @@ paths:
                     event, such as a batch index or a timestamp that can
                     repeat, or that usage is lost. Empty or whitespace-only
                     keys are refused with 422, and so are keys longer than
-                    255 characters. The `Idempotency-Key` header does not
-                    count as this key: it caches one HTTP response for 24
-                    hours.
+                    255 characters. This is the only dedup key: the usage
+                    routes ignore the `Idempotency-Key` header.
                 timestamp:
                   type: string
                   format: date-time
@@ -9113,8 +9097,11 @@ paths:
           description: |
             Validation failed and nothing was stored. `param` names the
             field: `idempotency_key` when it is missing, blank or longer
-            than 255 characters, `external_customer_id` or `event_name` for
-            an unknown customer or meter, `timestamp` for a malformed one.
+            than 255 characters, `quantity` when it is missing or not as
+            described above, `external_customer_id` or `event_name` for an
+            unknown customer or meter, `timestamp` for a malformed one, and
+            `properties` when it has a key (it was renamed `dimensions`;
+            `null` or `{}` is ignored).
         "503":
           description: |
             `ingest_unavailable`: a customer or meter lookup, or the read of
@@ -9214,8 +9201,6 @@ paths:
         you never sent before means some keys were already used, by an
         earlier event or by another event in the batch. Those events
         were not stored.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -9236,14 +9221,15 @@ paths:
                     oneOf:
                       - type: number
                       - type: string
-                    description: Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values.
+                    description: |
+                      A JSON number (`5`) or a string holding one (`"5.5"`,
+                      for exact decimals). At most 12 decimal places;
+                      trailing zeros do not count. Its size must be under
+                      10^26. A negative value is a correction. A missing
+                      quantity, or any other value, fails validation.
                   dimensions:
                     type: object
                     additionalProperties: true
-                  properties:
-                    type: object
-                    additionalProperties: true
-                    description: Older name for `dimensions`. When both are sent, `dimensions` wins.
                   idempotency_key:
                     type: string
                     maxLength: 255
@@ -9257,9 +9243,8 @@ paths:
                       event, such as a batch index or a timestamp that can
                       repeat, or that usage is lost. Empty or whitespace-only
                       keys are refused with 422, and so are keys longer than
-                      255 characters. The `Idempotency-Key` header does not
-                      count as this key: it caches one HTTP response for 24
-                      hours.
+                      255 characters. This is the only dedup key: the usage
+                      routes ignore the `Idempotency-Key` header.
                   timestamp:
                     type: string
                     format: date-time
@@ -9324,15 +9309,13 @@ paths:
         `Idempotent-Replayed: true` header, and writes nothing.
         Requires usage write permission.
       operationId: backfillUsageEvent
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [external_customer_id, event_name, timestamp, idempotency_key]
+              required: [external_customer_id, event_name, quantity, timestamp, idempotency_key]
               properties:
                 external_customer_id:
                   type: string
@@ -9344,16 +9327,18 @@ paths:
                   oneOf:
                     - type: number
                     - type: string
-                  description: Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections.
+                  description: |
+                    A JSON number (`5`) or a string holding one (`"5.5"`,
+                    for exact decimals). At most 12 decimal places; trailing
+                    zeros do not count. Its size must be under 10^26. A
+                    negative value is a correction. A missing quantity, or
+                    any other value, is refused with 422 and `param:
+                    quantity`.
                 dimensions:
                   type: object
                   additionalProperties: true
                   maxProperties: 16
                   description: Scalar dimension values used to pick the pricing rule.
-                properties:
-                  type: object
-                  additionalProperties: true
-                  description: Older name for `dimensions`. Used only when `dimensions` is absent.
                 idempotency_key:
                   type: string
                   maxLength: 255
@@ -9367,9 +9352,8 @@ paths:
                     event, such as a batch index or a timestamp that can
                     repeat, or that usage is lost. Empty or whitespace-only
                     keys are refused with 422, and so are keys longer than
-                    255 characters. The `Idempotency-Key` header does not
-                    count as this key: it caches one HTTP response for 24
-                    hours.
+                    255 characters. This is the only dedup key: the usage
+                    routes ignore the `Idempotency-Key` header.
                 timestamp:
                   type: string
                   format: date-time
@@ -9408,7 +9392,9 @@ paths:
             `idempotency_key`); missing `external_customer_id`, `event_name`
             or `timestamp`; unknown customer or meter; a future or badly
             formatted `timestamp`; more than 16 dimensions or a non-scalar
-            dimension value; a quantity of 10^26 or more.
+            dimension value; a missing or malformed `quantity`, one with
+            more than 12 decimal places, or one of 10^26 or more; a
+            `properties` field with a key (it was renamed `dimensions`).
           content:
             application/json:
               schema:
@@ -9475,8 +9461,6 @@ paths:
         has not been built yet; Velox does not move it onto a later
         invoice. Writes an audit log entry. Requires usage write permission.
       operationId: releaseHeldUsage
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -9518,8 +9502,6 @@ paths:
         stored as a record. Writes an audit log entry. Requires usage write
         permission.
       operationId: discardHeldUsage
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -13160,8 +13142,6 @@ paths:
         If the usage store cannot be reached, the whole request fails with
         503 so LiteLLM retries it. Requires usage write permission.
       operationId: ingestLitellmSpend
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:

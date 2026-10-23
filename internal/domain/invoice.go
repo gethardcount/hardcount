@@ -530,20 +530,23 @@ type InvoiceLineItem struct {
 	// lines and on lines written before migration 0173's backfill ran.
 	MeterUnit   string `json:"meter_unit,omitempty"`
 	Description string `json:"description"`
-	Quantity    int64  `json:"quantity"`
-	// QuantityDecimal is the exact (possibly fractional) usage quantity. The
-	// integer Quantity above is it truncated, kept for back-compat (Stripe
-	// `quantity_decimal` / Chargebee `quantity_in_decimal` parity). Zero means
-	// "no decimal quantity — use Quantity" (base-fee/proration/manual lines).
-	// The line amount stays whole cents (AmountCents); this only restores the
-	// quantity × unit = amount reconciliation for fractional usage.
-	QuantityDecimal decimal.Decimal `json:"quantity_decimal"`
-	UnitAmountCents int64           `json:"unit_amount_cents"`
-	AmountCents     int64           `json:"amount_cents"`
-	TaxRate         float64         `json:"tax_rate"` // Percent rate (4-decimal precision). ADR-042/043.
-	TaxAmountCents  int64           `json:"tax_amount_cents"`
-	TaxJurisdiction string          `json:"tax_jurisdiction,omitempty"`
-	TaxCode         string          `json:"tax_code,omitempty"`
+	// Quantity and QuantityDecimal are the two stored quantity columns. The
+	// integer is the decimal truncated; QuantityDecimal is the exact
+	// (possibly fractional) usage quantity, zero on lines that store none
+	// (base-fee/proration/manual lines), which then use Quantity. Neither is
+	// on the wire: MarshalJSON sends the one exact value, ExactQuantity, as
+	// `quantity` (B5).
+	Quantity        int64           `json:"-"`
+	QuantityDecimal decimal.Decimal `json:"-"`
+	// UnitAmountCents is the stored whole-cent unit price. It is not on the
+	// wire: a sub-cent rate collapses to 0 in it, so the line sends
+	// DisplayUnitAmountDecimal as `unit_amount_decimal` instead (B5).
+	UnitAmountCents int64   `json:"-"`
+	AmountCents     int64   `json:"amount_cents"`
+	TaxRate         float64 `json:"tax_rate"` // Percent rate (4-decimal precision). ADR-042/043.
+	TaxAmountCents  int64   `json:"tax_amount_cents"`
+	TaxJurisdiction string  `json:"tax_jurisdiction,omitempty"`
+	TaxCode         string  `json:"tax_code,omitempty"`
 	// TaxabilityReason carries the Stripe-canonical structured reason
 	// (e.g. "standard_rated", "reverse_charge", "not_collecting",
 	// "customer_exempt", "product_exempt", "zero_rated"), or Velox's own
@@ -616,11 +619,17 @@ const TaxReasonPrepaidCreditPurchase = "prepaid_credit_purchase"
 // Precision is capped at 12 decimal places (Stripe unit_amount_decimal
 // parity). Returns 0 when the quantity is 0 (no meaningful per-unit price).
 func (li InvoiceLineItem) EffectiveUnitAmountDecimal() decimal.Decimal {
-	qty := li.QuantityDecimal
-	if qty.IsZero() {
-		qty = decimal.NewFromInt(li.Quantity)
+	return EffectiveUnitAmountDecimalFor(li.AmountCents, li.ExactQuantity())
+}
+
+// ExactQuantity is the line's quantity: the stored decimal when the line has
+// one, else the stored integer. It is the line's `quantity` on the wire, and
+// the value the dashboard, the hosted page and the PDF show.
+func (li InvoiceLineItem) ExactQuantity() decimal.Decimal {
+	if !li.QuantityDecimal.IsZero() {
+		return li.QuantityDecimal
 	}
-	return EffectiveUnitAmountDecimalFor(li.AmountCents, qty)
+	return decimal.NewFromInt(li.Quantity)
 }
 
 // EffectiveUnitAmountDecimalFor is the per-unit price in DECIMAL CENTS derived
@@ -666,18 +675,19 @@ func (li InvoiceLineItem) DisplayUnitAmountDecimal() decimal.Decimal {
 	return li.EffectiveUnitAmountDecimal()
 }
 
-// MarshalJSON augments the wire form with unit_amount_decimal — the
-// full-precision per-unit price (decimal cents) from DisplayUnitAmountDecimal
-// (the nominal configured rate on flat usage lines, else the effective
-// amount÷quantity rate) — so dashboards and API clients render sub-cent rates
-// cleanly without the whole-cent unit_amount_cents collapsing them to "$0.00"
-// (ADR-054). Computed on the fly.
+// MarshalJSON gives the line one quantity and one unit price on the wire
+// (B5): `quantity` is ExactQuantity as a decimal string, and
+// `unit_amount_decimal` is the full-precision per-unit price in decimal cents
+// from DisplayUnitAmountDecimal (the nominal configured rate on flat usage
+// lines, else the effective amount÷quantity rate), so a sub-cent rate never
+// collapses to "$0.00" (ADR-054). Both are computed on the fly.
 func (li InvoiceLineItem) MarshalJSON() ([]byte, error) {
 	type alias InvoiceLineItem
 	return json.Marshal(struct {
 		alias
+		Quantity          string `json:"quantity"`
 		UnitAmountDecimal string `json:"unit_amount_decimal"`
-	}{alias(li), li.DisplayUnitAmountDecimal().String()})
+	}{alias(li), li.ExactQuantity().String(), li.DisplayUnitAmountDecimal().String()})
 }
 
 // InvoiceKeyset is a position in a queue read oldest-first by (created_at, id).

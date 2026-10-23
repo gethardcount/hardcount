@@ -25,7 +25,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/migrate"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/platform/telemetry"
-	"github.com/sagarsuperuser/velox/internal/subscription"
 	"github.com/sagarsuperuser/velox/internal/testclock"
 	"github.com/sagarsuperuser/velox/internal/version"
 	"github.com/sagarsuperuser/velox/internal/webhook"
@@ -62,8 +61,6 @@ func main() {
 			runMigrateStatus()
 		case "rollback":
 			runMigrateRollback()
-		case "force":
-			runMigrateForce()
 		case "":
 			runMigrate()
 		default:
@@ -170,17 +167,6 @@ func serve() {
 		}
 		return out, nil
 	})
-
-	// ADR-101 Phase 1: reconstruct billing_intervals for items that predate
-	// the dual-write (idempotent — items with rows are skipped, so this is
-	// a no-op on every boot after the first). Runs BEFORE serving so no
-	// item mutation can race the reconstruction of its own history.
-	if n, err := subscription.NewPostgresStore(db).BackfillBillingIntervals(context.Background()); err != nil {
-		slog.Error("billing-intervals backfill failed", "error", err)
-		os.Exit(1)
-	} else if n > 0 {
-		slog.Info("billing-intervals backfill complete", "intervals", n)
-	}
 
 	// Redis: production refuses to boot without a reachable one (the
 	// general and hosted-invoice rate limiters fail CLOSED without Redis,
@@ -451,17 +437,6 @@ func runMigrateStatus() {
 		os.Exit(1)
 	}
 	fmt.Print(migrate.FormatPlan(p, version.Version))
-}
-
-// migrateForceRemoved is what `velox migrate force` prints since v0.9.0.
-// The stub stays for one release, so a script or habit that still runs it
-// gets a pointer instead of "unknown subcommand".
-const migrateForceRemoved = `velox migrate force was removed in v0.9.0: goose leaves no half-applied state, so there is nothing to force.
-After a failed upgrade, fix the cause and run "velox migrate" again. Steps: ` + migrate.RunbookPath
-
-func runMigrateForce() {
-	fmt.Fprintln(os.Stderr, migrateForceRemoved)
-	os.Exit(2)
 }
 
 // rollbackRefused is what `velox migrate rollback` prints outside local.

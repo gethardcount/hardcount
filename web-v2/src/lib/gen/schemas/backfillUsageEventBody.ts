@@ -8,19 +8,23 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { BackfillUsageEventBodyDimensions } from './backfillUsageEventBodyDimensions';
-import type { BackfillUsageEventBodyProperties } from './backfillUsageEventBodyProperties';
 
 export type BackfillUsageEventBody = {
   /** The customer's external_id (your identifier), not the internal vlx_cus_ id. */
   external_customer_id: string;
   /** The meter's `event_name` (e.g. "tokens"). */
   event_name: string;
-  /** Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections. */
-  quantity?: number | string;
+  /**
+     * A JSON number (`5`) or a string holding one (`"5.5"`,
+     * for exact decimals). At most 12 decimal places; trailing
+     * zeros do not count. Its size must be under 10^26. A
+     * negative value is a correction. A missing quantity, or
+     * any other value, is refused with 422 and `param:
+     * quantity`.
+     */
+  quantity: number | string;
   /** Scalar dimension values used to pick the pricing rule. */
   dimensions?: BackfillUsageEventBodyDimensions;
-  /** Older name for `dimensions`. Used only when `dimensions` is absent. */
-  properties?: BackfillUsageEventBodyProperties;
   /**
      * Your unique ID for this event. Pick it once, before the
      * first send, and send the same key on every retry of the
@@ -31,9 +35,8 @@ export type BackfillUsageEventBody = {
      * event, such as a batch index or a timestamp that can
      * repeat, or that usage is lost. Empty or whitespace-only
      * keys are refused with 422, and so are keys longer than
-     * 255 characters. The `Idempotency-Key` header does not
-     * count as this key: it caches one HTTP response for 24
-     * hours.
+     * 255 characters. This is the only dedup key: the usage
+     * routes ignore the `Idempotency-Key` header.
      * @maxLength 255
      */
   idempotency_key: string;

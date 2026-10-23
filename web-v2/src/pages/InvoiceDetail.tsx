@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
 import { invoiceLineRate } from '@/lib/priceDisplay'
-import { api, downloadPDF, formatCents, formatRate, formatDateTime, formatTaxRate, getCurrencySymbol, dunningFinalStepNext, type DunningRun, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
+import { api, downloadPDF, formatCents, formatRate, formatLineQuantity, formatDateTime, formatTaxRate, getCurrencySymbol, dunningFinalStepNext, type DunningRun, type Invoice as ApiInvoice, type CreditNote } from '@/lib/api'
 import { formatCivilPeriod, formatInvoiceDate, formatYMDInTZ, usageFilterEndYMD } from '@/lib/dates'
 import { canIssueCreditNote } from '@/lib/creditNoteCeilings'
 import { IssueCreditDialog } from '@/components/IssueCreditDialog'
@@ -1229,11 +1229,9 @@ export default function InvoiceDetailPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right font-mono tabular-nums text-sm">
-                        {item.quantity_decimal && Number(item.quantity_decimal) !== 0
-                          ? Number(item.quantity_decimal).toLocaleString(undefined, { maximumFractionDigits: 12 })
-                          : item.quantity.toLocaleString()}
+                        {formatLineQuantity(item.quantity)}
                       </TableCell>
-                      <TableCell className="text-right font-mono tabular-nums text-sm">{invoiceLineRate(item, invoice.currency, formatRate(item.unit_amount_decimal ?? item.unit_amount_cents, invoice.currency))}</TableCell>
+                      <TableCell className="text-right font-mono tabular-nums text-sm">{invoiceLineRate(item, invoice.currency, formatRate(item.unit_amount_decimal, invoice.currency))}</TableCell>
                       <TableCell className="text-right font-mono tabular-nums text-sm font-medium">{formatCents(item.amount_cents, invoice.currency)}</TableCell>
                     </TableRow>
                   )

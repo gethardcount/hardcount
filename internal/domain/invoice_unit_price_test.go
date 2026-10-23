@@ -152,8 +152,8 @@ func TestInvoiceLineItem_MarshalJSON_PrefersNominal(t *testing.T) {
 	}
 }
 
-// The wire form must carry unit_amount_decimal (full precision) AND retain the
-// legacy whole-cent unit_amount_cents.
+// The wire form carries unit_amount_decimal (full precision), and not the
+// whole-cent unit_amount_cents that collapsed the rate to 0 (B5).
 func TestInvoiceLineItem_MarshalJSON_CarriesUnitAmountDecimal(t *testing.T) {
 	li := InvoiceLineItem{
 		AmountCents:     300,
@@ -169,7 +169,7 @@ func TestInvoiceLineItem_MarshalJSON_CarriesUnitAmountDecimal(t *testing.T) {
 	if !strings.Contains(s, `"unit_amount_decimal":"0.3"`) {
 		t.Fatalf("expected unit_amount_decimal 0.3 in JSON, got: %s", s)
 	}
-	if !strings.Contains(s, `"unit_amount_cents":0`) {
-		t.Fatalf("expected unit_amount_cents:0 retained, got: %s", s)
+	if strings.Contains(s, `"unit_amount_cents"`) {
+		t.Fatalf("unit_amount_cents must be off the wire, got: %s", s)
 	}
 }
