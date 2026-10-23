@@ -43,6 +43,7 @@ func (h *Handler) Routes() chi.Router {
 // or the other mode.
 type GrantRequest struct {
 	CustomerID  string           `json:"customer_id"`
+	Currency    string           `json:"currency"`
 	AmountCents int64            `json:"amount_cents"`
 	Description string           `json:"description"`
 	ExpiresAt   *time.Time       `json:"expires_at,omitempty"`
@@ -59,6 +60,7 @@ func (h *Handler) grant(w http.ResponseWriter, r *http.Request) {
 
 	entry, err := h.svc.Grant(r.Context(), tenantID, GrantInput{
 		CustomerID:  req.CustomerID,
+		Currency:    req.Currency,
 		AmountCents: req.AmountCents,
 		Description: req.Description,
 		ExpiresAt:   req.ExpiresAt,
@@ -113,7 +115,7 @@ func (h *Handler) getBalance(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "customer_id")
 
-	bal, err := h.svc.GetBalance(r.Context(), tenantID, customerID)
+	balances, err := h.svc.GetBalance(r.Context(), tenantID, customerID)
 	if errors.Is(err, errs.ErrNotFound) {
 		respond.NotFound(w, r, "customer")
 		return
@@ -123,8 +125,12 @@ func (h *Handler) getBalance(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "get credit balance", "error", err)
 		return
 	}
+	if balances == nil {
+		balances = []domain.CreditBalance{}
+	}
 
-	respond.JSON(w, r, http.StatusOK, bal)
+	// One balance per currency the customer holds credit in (ADR-129).
+	respond.JSON(w, r, http.StatusOK, map[string]any{"data": balances})
 }
 
 // getLiveBalance answers "how much credit does this customer have left right

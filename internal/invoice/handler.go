@@ -396,46 +396,18 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Currency resolve for one-off invoices (FLOW I8, fixed 2026-07-26):
-	// explicit input → customer billing-profile currency → tenant default
-	// → the service's USD fallback. Pre-fix an empty currency hardcoded
-	// USD, so a bare API create for a GBP-profile customer silently
-	// minted a USD invoice — the composer masked it by always sending
-	// its picker value (which itself defaults to the profile currency).
-	// Only this endpoint can see an empty currency: every internal
-	// caller (cycle engine, prorations, threshold, BillOnCreate) stamps
-	// the plan currency explicitly.
-	//
-	// A read that ERRORS stops the request: treating it as "no currency set"
-	// minted, during a database blip, a USD invoice for a EUR customer — a
-	// wrong invoice nobody notices, where a failed request is retried. Only a
-	// profile that does not exist (or has no currency) falls through to the
-	// tenant default, which the settings read itself supplies when the tenant
-	// has no settings row.
-	if strings.TrimSpace(input.Currency) == "" && input.CustomerID != "" {
-		if h.customers != nil {
-			bp, err := h.customers.GetBillingProfile(r.Context(), tenantID, input.CustomerID)
-			switch {
-			case err == nil:
-				input.Currency = bp.Currency
-			case errors.Is(err, errs.ErrNotFound):
-				// No billing profile: the currency is not set.
-			default:
-				currencyUnavailable(w, r, tenantID, input.CustomerID, err)
-				return
-			}
-		}
-		if input.Currency == "" && h.settings != nil {
-			ts, err := h.settings.Get(r.Context(), tenantID)
-			if err != nil {
-				currencyUnavailable(w, r, tenantID, input.CustomerID, err)
-				return
-			}
-			input.Currency = ts.DefaultCurrency
-		}
-	}
-
+	// The currency is resolved in Service.Create (ADR-100, ADR-129): an
+	// explicit one must agree with the customer's billing profile and live
+	// subscriptions (409 customer_currency_conflict); an empty one takes the
+	// profile's, then the subscriptions' plan currency, then the workspace
+	// default. A read that errors stops the request: guessing minted, during
+	// a database blip, a USD invoice for a EUR customer — a wrong invoice
+	// nobody notices, where a failed request is retried.
 	inv, err := h.svc.Create(r.Context(), tenantID, input)
+	if errors.Is(err, ErrCurrencyUnavailable) {
+		currencyUnavailable(w, r, tenantID, input.CustomerID, err)
+		return
+	}
 	if err != nil {
 		respond.FromError(w, r, err, "invoice")
 		return

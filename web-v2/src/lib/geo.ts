@@ -160,9 +160,6 @@ export const CURRENCIES: ReadonlyArray<{
   { code: 'PHP', label: 'Philippine Peso', symbol: '\u20B1' },
 ]
 
-export const CURRENCY_BY_CODE: Record<string, typeof CURRENCIES[number]> =
-  Object.fromEntries(CURRENCIES.map(c => [c.code, c]))
-
 // Smart-default tax labels by country. Used to pre-fill tax_name when the
 // operator sets their home country. Purely a UX hint — they can override.
 export const DEFAULT_TAX_NAME_BY_COUNTRY: Record<string, string> = {

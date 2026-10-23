@@ -18,6 +18,8 @@ export interface CreditGrantBlock {
   id: string;
   /** `grant` or `adjustment`. */
   entry_type: string;
+  /** The block's currency, uppercase. */
+  currency: string;
   /** Absent for unclassified credit. */
   grant_kind?: CreditGrantBlockGrantKind;
   description: string;

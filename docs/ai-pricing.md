@@ -364,7 +364,8 @@ one rate.
 
 A prepaid commit is a one-off invoice with a special line. When the invoice
 is finalized (issued), the customer gets the credit, and later invoices
-draw it down. Here the customer pays $9,000 for $10,000 of credit.
+in the same currency draw it down. Here the customer pays $9,000 for
+$10,000 of credit.
 
 1. **Make a one-off invoice with the commit line.** `unit_amount_cents` is
    what the customer pays. `commit_granted_cents` is the credit they get.
@@ -397,10 +398,11 @@ draw it down. Here the customer pays $9,000 for $10,000 of credit.
 
    ```bash
    curl -s "$VELOX/v1/credits/balance/$CUSTOMER_ID" \
-     -H "Authorization: Bearer $VELOX_KEY" | jq -c '{balance_cents, total_granted}'
+     -H "Authorization: Bearer $VELOX_KEY" | jq -c '.data[] | {currency, balance_cents, total_granted}'
    ```
 
-   **You see:** `{"balance_cents":1000000,"total_granted":1000000}`
+   **You see:** `{"currency":"USD","balance_cents":1000000,"total_granted":1000000}`
+   (one line per currency the customer holds credit in).
 
 One invoice can hold at most one commit line. To stop a customer's usage
 when the credit runs out, see [Stop usage when credit runs

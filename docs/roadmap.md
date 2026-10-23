@@ -13,8 +13,9 @@ first. Every shipped change, with its date, is in the
   There is no upgrade from v0.8.x: install fresh.
 - **Done:** a card payment the customer's bank wants them to confirm (3-D
   Secure) is no longer treated as a declined card.
-- **In review:** each prepaid credit carries its own currency and pays only
-  invoices in that currency.
+- **Done:** each prepaid credit carries its own currency and pays only
+  invoices in that currency. Grant and adjust take a `currency`
+  ([ADR-129](adr/129-credit-carries-its-own-currency.md)).
 - **In review:** while live subscriptions use a meter, a pricing edit that
   would change the price of a billing period already open is refused.
 - **Planned:** the commands in the [first-invoice guide](first-invoice.md)

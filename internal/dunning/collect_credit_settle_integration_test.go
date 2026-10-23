@@ -104,6 +104,7 @@ func TestCollect_CreditCoveredInvoice_ResolvesActiveDunningRun(t *testing.T) {
 
 	// Credit arrives that covers the whole invoice.
 	if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 5000, Description: "goodwill", At: time.Now().UTC().Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("grant: %v", err)

@@ -293,3 +293,110 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 		}
 	}
 }
+
+// TestDoctor_CreditCurrencyChecks (ADR-129, T11): the three ledger-currency
+// checks fire on hand-seeded drift and stay silent on the matching clean rows.
+//   - balance_exceeds_block_capacity is per currency: a USD phantom hidden by
+//     EUR headroom is still caught.
+//   - ledger_currency_matches_invoice: a row tied to an invoice (usage,
+//     credit-note grant, reversal by invoice_id; a commit grant by
+//     source_invoice_id) carries that invoice's currency.
+//   - drained_block_currency_matches: every block a drain names has the
+//     draining entry's currency.
+func TestDoctor_CreditCurrencyChecks(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	adminURL := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL"))
+	if adminURL == "" {
+		adminURL = "postgres://velox:velox@localhost:5432/velox_test?sslmode=disable"
+	}
+	admin, err := sql.Open("pgx", adminURL)
+	if err != nil {
+		t.Fatalf("open admin pool: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+
+	tenantID := testutil.CreateTestTenant(t, db, "Doctor Credit Currency")
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("seed begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("seed commit: %v", err)
+		}
+	}
+	for _, c := range []string{"cus_dccy_cap", "cus_dccy_inv", "cus_dccy_drain"} {
+		mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ($1, $2, $1, $1, '')`, c, tenantID)
+	}
+	mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status, currency,
+			subtotal_cents, total_amount_cents, amount_due_cents, billing_period_start, billing_period_end)
+		VALUES ('vlx_inv_dccy', $1, 'cus_dccy_inv', 'DCCY-1', 'finalized', 'pending', 'EUR', 5000, 5000, 5000, now() - interval '30 days', now())`, tenantID)
+	ledger := func(id, cust, typ, currency string, amount, consumed int64, invoiceID, sourceInvoiceID, kind, meta string) {
+		t.Helper()
+		mustExec(`INSERT INTO customer_credit_ledger (id, tenant_id, customer_id, entry_type, currency, amount_cents, consumed_cents,
+				balance_after, description, invoice_id, source_invoice_id, grant_kind, metadata)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 'seed', NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), $11::jsonb)`,
+			id, tenantID, cust, typ, currency, amount, consumed, invoiceID, sourceInvoiceID, kind, meta)
+	}
+	// Capacity: USD sums to 1000 with no open USD block (phantom); EUR has
+	// 2000 open against a 1000 balance. Summed across currencies they hide
+	// each other.
+	ledger("vlx_ccl_dccy_cap_usd", "cus_dccy_cap", "grant", "USD", 1000, 1000, "", "", "", `{}`)
+	ledger("vlx_ccl_dccy_cap_eur", "cus_dccy_cap", "grant", "EUR", 2000, 0, "", "", "", `{}`)
+	ledger("vlx_ccl_dccy_cap_use", "cus_dccy_cap", "usage", "EUR", -1000, 0, "vlx_inv_dccy", "", "", `{}`)
+	// Invoice currency: a USD usage row and a USD commit grant on the EUR
+	// invoice; a EUR usage row is the clean control.
+	ledger("vlx_ccl_dccy_bad_use", "cus_dccy_inv", "usage", "USD", -100, 0, "vlx_inv_dccy", "", "", `{}`)
+	ledger("vlx_ccl_dccy_bad_commit", "cus_dccy_inv", "grant", "USD", 9000, 0, "", "vlx_inv_dccy", "commit", `{}`)
+	ledger("vlx_ccl_dccy_ok_use", "cus_dccy_inv", "usage", "EUR", -100, 0, "vlx_inv_dccy", "", "", `{}`)
+	// Drained blocks: a USD deduction that names a EUR block; a EUR one that
+	// names it is the clean control.
+	ledger("vlx_ccl_dccy_blk", "cus_dccy_drain", "grant", "EUR", 1000, 600, "", "", "", `{}`)
+	ledger("vlx_ccl_dccy_bad_drain", "cus_dccy_drain", "adjustment", "USD", -300, 0, "", "", "",
+		`{"drained_blocks":[{"block_id":"vlx_ccl_dccy_blk","take_cents":300}]}`)
+	ledger("vlx_ccl_dccy_ok_drain", "cus_dccy_drain", "adjustment", "EUR", -300, 0, "", "", "",
+		`{"drained_blocks":[{"block_id":"vlx_ccl_dccy_blk","take_cents":300}]}`)
+
+	res := doctor.Run(ctx, admin, doctor.Checks)
+	for _, e := range res.Errors {
+		t.Errorf("check failed to run: %v", e)
+	}
+	flagged := map[string]map[string]bool{}
+	for _, v := range res.Violations {
+		if flagged[v.Check.Name] == nil {
+			flagged[v.Check.Name] = map[string]bool{}
+		}
+		flagged[v.Check.Name][v.RowID+" "+v.Detail] = true
+	}
+	has := func(check, part string) bool {
+		for k := range flagged[check] {
+			if strings.Contains(k, part) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, c := range []struct {
+		check, part string
+		want        bool
+	}{
+		{"balance_exceeds_block_capacity", "customer_id=cus_dccy_cap currency=USD", true},
+		{"balance_exceeds_block_capacity", "customer_id=cus_dccy_cap currency=EUR", false},
+		{"ledger_currency_matches_invoice", "vlx_ccl_dccy_bad_use", true},
+		{"ledger_currency_matches_invoice", "vlx_ccl_dccy_bad_commit", true},
+		{"ledger_currency_matches_invoice", "vlx_ccl_dccy_ok_use", false},
+		{"drained_block_currency_matches", "vlx_ccl_dccy_bad_drain", true},
+		{"drained_block_currency_matches", "vlx_ccl_dccy_ok_drain", false},
+	} {
+		if got := has(c.check, c.part); got != c.want {
+			t.Errorf("%s flags %q: %v, want %v (flagged: %v)", c.check, c.part, got, c.want, flagged[c.check])
+		}
+	}
+}

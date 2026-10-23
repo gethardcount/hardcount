@@ -41,6 +41,7 @@ func TestApplyToInvoiceAtomic_CapsAtCurrentBalance(t *testing.T) {
 
 	// Grant $100. Grant.consumed_cents=0, grant.remaining=$100.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 10000, Description: "seed",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -51,12 +52,13 @@ func TestApplyToInvoiceAtomic_CapsAtCurrentBalance(t *testing.T) {
 	// protects against — adjustments reduce balance without
 	// attribution to any specific grant.
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: -7000, Description: "clawback",
 	}); err != nil {
 		t.Fatalf("adjust: %v", err)
 	}
 
-	bal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
@@ -95,7 +97,7 @@ func TestApplyToInvoiceAtomic_CapsAtCurrentBalance(t *testing.T) {
 		t.Errorf("applied: got %d, want 3000 (capped at current balance, not $80 invoice or $100 grant remaining)", applied)
 	}
 
-	postBal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	postBal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance after apply: %v", err)
 	}
@@ -160,6 +162,7 @@ func TestApplyToInvoiceAtomic_DriftIsCappedNotNegative(t *testing.T) {
 
 	// Grant $100 — block: amount 10000, consumed 0, remaining 10000.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 10000, Description: "seed",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -178,8 +181,8 @@ func TestApplyToInvoiceAtomic_DriftIsCappedNotNegative(t *testing.T) {
 	}
 	if _, err := tx.Exec(`
 		INSERT INTO customer_credit_ledger
-			(tenant_id, customer_id, entry_type, amount_cents, balance_after, description, created_at)
-		VALUES ($1, $2, 'adjustment', -7000, 3000, 'legacy unattributed clawback', now())
+			(tenant_id, customer_id, entry_type, currency, amount_cents, balance_after, description, created_at)
+		VALUES ($1, $2, 'adjustment', 'USD', -7000, 3000, 'legacy unattributed clawback', now())
 	`, tenantID, cust.ID); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("insert drift entry: %v", err)
@@ -188,7 +191,7 @@ func TestApplyToInvoiceAtomic_DriftIsCappedNotNegative(t *testing.T) {
 		t.Fatalf("commit drift entry: %v", err)
 	}
 
-	bal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
@@ -227,7 +230,7 @@ func TestApplyToInvoiceAtomic_DriftIsCappedNotNegative(t *testing.T) {
 		t.Errorf("applied: got %d, want 3000 (capped at balance, NOT the $100 block remaining)", applied)
 	}
 
-	postBal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	postBal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance after apply: %v", err)
 	}
@@ -269,6 +272,7 @@ func TestAdjustAtomic_ClawbackAttributesToGrants(t *testing.T) {
 
 	// Two grants seeded earliest-first; FIFO drains oldest first.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 5000, Description: "grant A",
 	}); err != nil {
 		t.Fatalf("grant A: %v", err)
@@ -277,6 +281,7 @@ func TestAdjustAtomic_ClawbackAttributesToGrants(t *testing.T) {
 	// has microsecond precision; back-to-back inserts can collide).
 	time.Sleep(2 * time.Millisecond)
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 3000, Description: "grant B",
 	}); err != nil {
 		t.Fatalf("grant B: %v", err)
@@ -284,6 +289,7 @@ func TestAdjustAtomic_ClawbackAttributesToGrants(t *testing.T) {
 
 	// Clawback $60. Should consume grant A fully ($50) + $10 of grant B.
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: -6000, Description: "clawback",
 	}); err != nil {
 		t.Fatalf("clawback: %v", err)
@@ -329,7 +335,7 @@ func TestAdjustAtomic_ClawbackAttributesToGrants(t *testing.T) {
 	}
 
 	// Balance reconciles.
-	bal, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	bal, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance: %v", err)
 	}
@@ -361,6 +367,7 @@ func TestApplyToInvoiceAtomic_DrainsPositiveAdjustments(t *testing.T) {
 
 	// Goodwill credit via positive adjustment — no Grant.
 	if _, err := svc.Adjust(ctx, tenantID, credit.AdjustInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 5000, Description: "goodwill",
 	}); err != nil {
 		t.Fatalf("positive adjust: %v", err)

@@ -189,7 +189,10 @@ type NumberGenerator interface {
 }
 
 type CreditGrantInput struct {
-	CustomerID  string
+	CustomerID string
+	// Currency is the invoice's: the credit is the money the note returns
+	// (ADR-129).
+	Currency    string
 	AmountCents int64
 	Description string
 	InvoiceID   string
@@ -1656,6 +1659,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 		if cn.CreditAmountCents > 0 && s.credits != nil {
 			if err := s.credits.GrantForCreditNoteTx(ctx, tx, tenantID, cn.ID, CreditGrantInput{
 				CustomerID:  cn.CustomerID,
+				Currency:    inv.Currency, // the money refunded is the invoice's (ADR-129)
 				AmountCents: cn.CreditAmountCents,
 				Description: fmt.Sprintf("Credit note %s — %s", cn.CreditNoteNumber, cn.Reason),
 				InvoiceID:   cn.InvoiceID,
@@ -1689,6 +1693,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 		if creditsReturned > 0 {
 			if err := s.credits.GrantForCreditNoteTx(ctx, tx, tenantID, cn.ID, CreditGrantInput{
 				CustomerID:  cn.CustomerID,
+				Currency:    inv.Currency, // the credits came off this invoice, in its currency
 				AmountCents: creditsReturned,
 				Description: fmt.Sprintf("Credit note %s — credits returned from invoice %s", cn.CreditNoteNumber, inv.InvoiceNumber),
 				InvoiceID:   cn.InvoiceID,

@@ -3,10 +3,11 @@ package billing_test
 import (
 	"context"
 	"database/sql"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
 	"testing"
 	"time"
+
+	"github.com/sagarsuperuser/velox/internal/platform/leader"
+	"github.com/sagarsuperuser/velox/internal/platform/leader/leadertest"
 
 	"github.com/shopspring/decimal"
 
@@ -677,7 +678,7 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 type reliefLedgerGranter struct{ svc *credit.Service }
 
 func (g reliefLedgerGranter) in(i creditnote.CreditGrantInput) credit.GrantInput {
-	return credit.GrantInput{CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
+	return credit.GrantInput{Currency: i.Currency, CustomerID: i.CustomerID, AmountCents: i.AmountCents, Description: i.Description, InvoiceID: i.InvoiceID}
 }
 func (g reliefLedgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, cnID string, i creditnote.CreditGrantInput) error {
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
@@ -826,7 +827,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 	// credits stayed spent on time they never used.
 	t.Run("credits applied before the cancel: the unused share of them comes back", func(t *testing.T) {
 		sub, invID := freshUnpaidSub("cus_credits_first")
-		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{CustomerID: sub.CustomerID, AmountCents: 3000, Description: "goodwill"}); err != nil {
+		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{Currency: "USD", CustomerID: sub.CustomerID, AmountCents: 3000, Description: "goodwill"}); err != nil {
 			t.Fatalf("grant: %v", err)
 		}
 		if applied, err := creditSvc.ApplyToInvoice(ctx, tenantID, sub.CustomerID, invID, 4900); err != nil || applied != 3000 {
@@ -852,7 +853,7 @@ func TestBillOnCancel_UnpaidPrebillRelief_E2E(t *testing.T) {
 		if got.AmountDueCents != 0 || got.CreditsAppliedCents != 2450 {
 			t.Errorf("invoice due %d / credits applied %d, want 0 / 2450", got.AmountDueCents, got.CreditsAppliedCents)
 		}
-		bal, err := creditSvc.GetBalance(ctx, tenantID, sub.CustomerID)
+		bal, err := testutil.BalanceUSD(creditSvc.GetBalance(ctx, tenantID, sub.CustomerID))
 		if err != nil {
 			t.Fatalf("balance: %v", err)
 		}

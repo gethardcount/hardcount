@@ -47,6 +47,7 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 	// Grant $100, then apply $40 to an invoice — leaves $60 balance and a
 	// usage entry of -$40 linked to the invoice.
 	if _, err := svc.Grant(ctx, tenantID, credit.GrantInput{
+		Currency:   "USD",
 		CustomerID: cust.ID, AmountCents: 10000, Description: "seed",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
@@ -80,7 +81,7 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 		t.Fatalf("applied: got %d, want 4000", applied)
 	}
 
-	balAfterApply, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	balAfterApply, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance after apply: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 		t.Errorf("first reversal: got %d, want 4000", reversed)
 	}
 
-	balAfterFirst, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	balAfterFirst, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance after first reversal: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestReverseForInvoiceTx_SecondReversalRefused(t *testing.T) {
 		t.Errorf("second reversal: got %d, want 0", reversedAgain)
 	}
 
-	balAfterSecond, err := svc.GetBalance(ctx, tenantID, cust.ID)
+	balAfterSecond, err := testutil.BalanceUSD(svc.GetBalance(ctx, tenantID, cust.ID))
 	if err != nil {
 		t.Fatalf("get balance after second reversal: %v", err)
 	}

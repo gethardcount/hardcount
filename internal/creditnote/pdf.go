@@ -722,7 +722,10 @@ func settlementLines(cn domain.CreditNote, symbol string) []string {
 		}
 	}
 	if cn.CreditAmountCents > 0 {
-		lines = append(lines, fmt.Sprintf("%s added to your account credit balance. Applied automatically to future invoices.", cnFormatCents(cn.CreditAmountCents, symbol)))
+		// The credit is in the invoice's currency and pays only invoices in
+		// it (ADR-129), so the line names the currency.
+		ccy := strings.ToUpper(cn.Currency)
+		lines = append(lines, fmt.Sprintf("%s added to your %s credit balance. Applied automatically to future invoices in %s.", cnFormatCents(cn.CreditAmountCents, symbol), ccy, ccy))
 	}
 	if cn.OutOfBandAmountCents > 0 {
 		lines = append(lines, fmt.Sprintf("%s settled outside this billing system (recorded for your records).", cnFormatCents(cn.OutOfBandAmountCents, symbol)))

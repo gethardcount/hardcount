@@ -51,7 +51,6 @@ import type {
   CreatePriceOverrideBody,
   CreatePublicPaymentUpdateCheckout201,
   CreateTenantBody,
-  CreditBalance,
   CreditGrants,
   CreditLedgerEntry,
   CreditLiveBalance,
@@ -97,6 +96,7 @@ import type {
   GetUsageSummary500,
   GetUsageSummaryParams,
   GetV1AuthInviteToken200,
+  GetV1CreditsBalanceCustomerId200,
   GetV1CreditsGrantsCustomerIdParams,
   GetV1Customers200,
   GetV1CustomersIdMarginParams,
@@ -4023,9 +4023,9 @@ export const getGetV1CreditsGrantsCustomerIdUrl = (customerId: string,
 
 /**
  * The customer's credit blocks with drawdown state — granted /
- * drawn / remaining per grant, expiry, and remaining split by
- * cost-basis class (commit = money-backed, promotional = free,
- * other = legacy/adjustments). include_exhausted=true adds
+ * drawn / remaining per grant, expiry, and remaining per currency
+ * split by cost-basis class (commit = money-backed, promotional =
+ * free, other = legacy/adjustments). include_exhausted=true adds
  * fully-drawn blocks for history. Each grant's `consumed_cents`
  * also counts credit no invoice used: `expired_cents`, the part that
  * expired unused; `retired_cents`, commit credit taken back when the
@@ -4141,14 +4141,17 @@ export const getAdjustCreditsUrl = () => {
 }
 
 /**
- * Writes one `adjustment` entry to the customer's credit ledger. A
- * positive amount adds credit; a negative amount removes it. Audit
- * action is `credit.adjustment` or `credit.deduction`.
+ * Writes one `adjustment` entry to the customer's credit ledger in
+ * `currency`. A positive amount adds credit in that currency; a
+ * negative amount removes credit in that currency only. Audit action
+ * is `credit.adjustment` or `credit.deduction`.
  *
- * Errors (422, `param` names the field): `customer_id` or
- * `description` missing; `amount_cents` is zero, above 100000000
- * ($1,000,000), or a removal larger than the credit that can be
- * drawn (expired grants not yet written off do not count).
+ * Errors (422, `param` names the field): `customer_id`, `currency` or
+ * `description` missing; `currency` not supported (an unknown code or
+ * a zero-decimal currency such as JPY); `amount_cents` is zero, above
+ * 100000000 (1,000,000.00 in that currency), or a removal larger than
+ * the credit in that currency that can be drawn (expired grants not
+ * yet written off do not count).
  * @summary Add or remove credit
  */
 export const adjustCredits = async (adjustCreditsBody: AdjustCreditsBody, options?: RequestInit): Promise<CreditLedgerEntry> => {
@@ -4220,10 +4223,10 @@ export const getListCreditBalancesUrl = () => {
 }
 
 /**
- * One row per customer that has any credit ledger entry, highest
- * balance first. No paging and no `total`. `total_granted` is the
- * sum of every credit added (grants, positive adjustments and
- * reversals).
+ * One row per customer and currency that has any credit ledger
+ * entry, highest balance first. No paging and no `total`.
+ * `total_granted` is the sum of every credit added in that currency
+ * (grants, positive adjustments and reversals).
  * @summary List credit balances for all customers
  */
 export const listCreditBalances = async ( options?: RequestInit): Promise<ListCreditBalances200> => {
@@ -4334,8 +4337,8 @@ export const getListCreditLedgerEntriesUrl = (customerId: string,
 
 /**
  * Ledger entries for one customer. `balance_after` is the running
- * balance in time order over the whole ledger, so it stays right
- * when you filter by `entry_type`.
+ * balance in the entry's currency, in time order over the whole
+ * ledger, so it stays right when you filter by `entry_type`.
  * @summary List a customer's credit ledger
  */
 export const listCreditLedgerEntries = async (customerId: string,
@@ -9099,9 +9102,16 @@ export const getCreateInvoiceUrl = () => {
  * one transaction, or omit them and add lines later with
  * `POST /v1/invoices/{id}/line-items`.
  *
+ * A manual invoice uses the customer's currency. A `currency` that
+ * differs from the customer's billing-profile currency, or from the
+ * plan currency of any of the customer's live (draft, trialing or
+ * active) subscriptions, is refused with 409. A customer with neither
+ * may be invoiced in any supported currency.
+ *
  * Defaults when a field is left out:
- * - `currency`: the customer's billing-profile currency, then the
- *   tenant default, then `USD`.
+ * - `currency`: the customer's billing-profile currency, then the plan
+ *   currency of the customer's live subscriptions, then the tenant
+ *   default.
  * - `net_payment_term_days`: the tenant's net payment terms. A
  *   negative value is stored as 0 (due on receipt).
  * - `billing_period_start` / `billing_period_end`: now.
@@ -12891,6 +12901,10 @@ export const getPostV1CreditsGrantUrl = () => {
 }
 
 /**
+ * Adds a block of credit in `currency`. The credit pays only the
+ * customer's invoices in that currency; it is never converted. A
+ * grant in a currency the customer is not billed in is accepted and
+ * shows as its own balance.
  * @summary Grant credits to customer
  */
 export const postV1CreditsGrant = async (postV1CreditsGrantBody: PostV1CreditsGrantBody, options?: RequestInit): Promise<CreditLedgerEntry> => {
@@ -12962,11 +12976,14 @@ export const getGetV1CreditsBalanceCustomerIdUrl = (customerId: string,) => {
 }
 
 /**
+ * The customer's balances, one per currency the customer's credit
+ * ledger holds, ordered by currency. Empty when the customer has no
+ * ledger entry.
  * @summary Get customer credit balance
  */
-export const getV1CreditsBalanceCustomerId = async (customerId: string, options?: RequestInit): Promise<CreditBalance> => {
+export const getV1CreditsBalanceCustomerId = async (customerId: string, options?: RequestInit): Promise<GetV1CreditsBalanceCustomerId200> => {
 
-  return orvalClient<CreditBalance>(getGetV1CreditsBalanceCustomerIdUrl(customerId),
+  return orvalClient<GetV1CreditsBalanceCustomerId200>(getGetV1CreditsBalanceCustomerIdUrl(customerId),
   {
     ...options,
     method: 'GET'
@@ -13063,8 +13080,9 @@ export const getGetV1CreditsBalanceCustomerIdLiveUrl = (customerId: string,) => 
 }
 
 /**
- * How much credit the customer has left right now: the settled balance
- * less the usage no invoice has billed yet. Use it to decide in your
+ * How much credit the customer has left right now, per currency: the
+ * settled balance less the usage no invoice has billed yet in that
+ * currency. Use it to decide in your
  * own code whether to keep serving a prepaid customer; Velox records
  * usage and never refuses it.
  *

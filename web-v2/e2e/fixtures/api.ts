@@ -27,3 +27,9 @@ export function usd(cents: number): string {
 export function uniq(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 }
+
+// usdBalance is the USD row of GET /v1/credits/balance/{id}, which returns
+// one balance per currency (ADR-129); a customer with no USD credit reads 0.
+export function usdBalance(res: { data: { currency: string; balance_cents: number }[] }): { balance_cents: number } {
+  return res.data.find(b => b.currency === 'USD') ?? { balance_cents: 0 }
+}

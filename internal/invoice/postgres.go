@@ -46,7 +46,8 @@ type OutboxEnqueuer interface {
 // when unset, no event is enqueued.
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 
-// CommitFunder grants a prepaid-commit credit block on the caller's tx —
+// CommitFunder grants a prepaid-commit credit block, in the funding invoice's
+// currency (ADR-129), on the caller's tx —
 // FinalizeWithDates calls it inside the finalize coordinator tx so the status
 // flip and the grant are both-or-neither (ADR-078 D2). Satisfied by
 // *credit.Service; declared consumer-side so the invoice store needs no
@@ -54,7 +55,7 @@ func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 // commit line exists: FinalizeWithDates fails loud on a commit invoice with
 // no funder wired.
 type CommitFunder interface {
-	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
+	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
 }
 
 // SetCommitFunder wires commit-grant funding at finalize (ADR-078).
@@ -863,7 +864,7 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 			expiresAt = &commitExpires.Time
 		}
 		if _, ferr := s.commitFunder.GrantCommitForInvoiceTx(ctx, tx, tenantID,
-			inv.CustomerID, inv.ID, inv.InvoiceNumber, commitCents.Int64, expiresAt); ferr != nil {
+			inv.CustomerID, inv.ID, inv.InvoiceNumber, inv.Currency, commitCents.Int64, expiresAt); ferr != nil {
 			return domain.Invoice{}, fmt.Errorf("fund commit grant at finalize: %w", ferr)
 		}
 	}

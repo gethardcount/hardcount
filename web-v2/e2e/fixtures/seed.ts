@@ -110,7 +110,7 @@ export async function seedWorld() {
     url: 'https://example.com/velox-e2e',
     description: 'E2E endpoint',
   })
-  await api('POST', '/credits/grant', { customer_id: billed.customer.id, amount_cents: 1000, description: 'E2E welcome credit' })
+  await api('POST', '/credits/grant', { customer_id: billed.customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E welcome credit' })
   return {
     customer: billed.customer,
     plan: billed.plan,

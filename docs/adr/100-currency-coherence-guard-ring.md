@@ -1,7 +1,7 @@
 # ADR-100: Currency coherence is enforced at every write — a guard ring, not engine reconciliation
 
 **Date:** 2026-07-26
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md))
 
 ## Summary
 
@@ -42,12 +42,28 @@ An adversarial panel (three lenses: legitimate-flow breakage, completeness, blas
 
 ## Deferred (register entries in velox-ops)
 
-- **Credit-ledger currency column** — the ring narrows but does NOT close cross-currency draining: a canceled USD sub's unpaid invoices + a new EUR sub passes clause (iv) (non-terminal only), and manual invoices aren't customer-currency-pinned. Trigger: first multi-currency tenant need, or the ledger project.
+- ~~**Credit-ledger currency column**~~ — closed 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md): each ledger row stores its currency and credit pays only same-currency invoices, and a manual invoice is held to the customer's currency.
 - **Multi-currency price catalogs** (Stripe `currency_options` parity — Velox is BEHIND here, knowingly). Trigger: first DP selling one product in two currencies.
 - **Zero-decimal currency support** (amount semantics per currency at Stripe boundary + renderers). Trigger: first JPY/KRW-pricing DP.
 - **TOCTOU serialization locks** as above.
 
+## Amendment 2026-10-23: credit carries its own currency (ADR-129)
+
+[ADR-129](129-credit-carries-its-own-currency.md) closes the "Credit-ledger
+currency column" deferral above. Every ledger row stores its currency, and the
+drain pays only invoices in it, so neither a canceled subscription's invoices
+nor a manual invoice can draw credit in another currency. It also closes the
+manual-invoice gap: an explicit currency on `POST /v1/invoices` must agree
+with the billing profile and every live subscription's plan (409
+`customer_currency_conflict`), and an empty one takes the profile's, then the
+plan currency, then the workspace default. G5/G6's "empty→USD default" no
+longer exists. It supersedes the 2026-10-22 amendment below: a balance's
+currency is the stored one, not one derived at read time, and the live balance
+is per currency too.
+
 ## Amendment 2026-10-22: a credit balance reads in the customer's currency
+
+*Superseded 2026-10-23 by the amendment above (ADR-129): the ledger now stores a currency on each row.*
 
 The ledger still has no currency column (see Deferred). Without one, the dashboard printed every credit amount with the workspace symbol: a EUR customer's €20 read "$20.00", and the Credits page added it into one dollar total.
 
