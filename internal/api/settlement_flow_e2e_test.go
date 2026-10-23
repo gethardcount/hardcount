@@ -49,7 +49,7 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 	// With a dunning policy, finalizing an invoice that has no card on file
 	// opens a dunning run. The first policy becomes the default.
 	call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-		"name": "Settlement flow policy", "enabled": true, "max_retry_attempts": 2, "retry_schedule": []string{"72h", "120h"},
+		"name": "Settlement flow policy", "enabled": true, "retry_days": []int{3, 3},
 	}}).want(t, 201, "create dunning policy")
 
 	const customerEmail = "ap@settlement-flow.test"

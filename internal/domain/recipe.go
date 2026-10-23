@@ -117,9 +117,10 @@ type RecipePlan struct {
 }
 
 type RecipeDunningPolicy struct {
-	Name                    string `json:"name"`
-	MaxRetries              int    `json:"max_retries"`
-	IntervalsHours          []int  `json:"intervals_hours"`
+	Name string `json:"name"`
+	// RetryDays is the policy's schedule, as DunningPolicy.RetryDays: the
+	// days to wait before each retry.
+	RetryDays               []int  `json:"retry_days"`
 	FinalSubscriptionAction string `json:"final_subscription_action"`
 	FinalInvoiceAction      string `json:"final_invoice_action"`
 }

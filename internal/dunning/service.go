@@ -357,8 +357,8 @@ func (s *Service) fireEvent(ctx context.Context, tenantID, eventType string, pay
 // race somehow gets past this check, the INSERT in CreateRun fails
 // with a constraint violation.
 //
-// The first retry lands grace_period_days after the moment collection
-// failed, in the invoice's own time domain:
+// The first retry lands the policy's first retry_days entry after the moment
+// collection failed, in the invoice's own time domain:
 //
 //   - A wall-clock invoice: now, the moment the failure is recorded. Not the
 //     invoice's issue date or billing period — an invoice charged (or
@@ -428,11 +428,13 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		return domain.InvoiceDunningRun{}, errs.InvalidState("dunning is disabled (assigned policy or tenant default is not enabled)")
 	}
 
-	// Grace period determines when the first retry happens.
-	// retry_schedule determines the intervals between subsequent retries.
-	firstRetryDelay := time.Duration(policy.GracePeriodDays) * 24 * time.Hour
-	if firstRetryDelay <= 0 {
-		firstRetryDelay = 24 * time.Hour // minimum 1 day before first retry
+	// The first entry of retry_days is the wait before the first retry.
+	firstRetryDelay, ok := policy.WaitBeforeRetry(1)
+	if !ok {
+		// Unreachable while every writer validates and the column's CHECK
+		// holds (at least one entry). Loud: a run with no retry to schedule
+		// would never be due.
+		return domain.InvoiceDunningRun{}, fmt.Errorf("dunning policy %s has no retries", policy.ID)
 	}
 
 	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
@@ -551,8 +553,8 @@ func anchorInstant(now time.Time, scheduled *time.Time, simulated bool) time.Tim
 // the uninterrupted inline path writes — never the lease or frozen_time.
 // Every other entry records when it ran (attemptAt): an action_failed
 // re-attempt (it carries attempt+24h, not the lease) is its own scheduled
-// action, and a run exhausted because an operator lowered
-// max_retry_attempts was never contracted at its last retry (backdating it
+// action, and a run exhausted because an operator shortened
+// retry_days was never contracted at its last retry (backdating it
 // would show the escalation before the edit that caused it).
 // One residue: a re-drive interrupted AFTER its claim re-leases from its own
 // attempt instant, so a second re-drive records that instant instead.
@@ -648,8 +650,8 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// runs, and only the NEXT run picks up the new assignment (Stripe-Lago
 	// shape, ADR-036 research). EDITS to the bound policy do reach
 	// in-flight runs — the row is updated in place and read here every
-	// tick — so lowering max_retry_attempts exhausts a run on its next
-	// tick through the exhaust-on-entry branch below.
+	// tick — so shortening retry_days below the attempts made exhausts a
+	// run on its next tick through the exhaust-on-entry branch below.
 	// Paid-pre-check — the durable backstop for an invoice settled OUT-OF-BAND
 	// (a credit-cover sweep MarkPaids the invoice without resolving its run, or
 	// any settle path the prompt-resolve doesn't instrument). Resolve the run in
@@ -722,10 +724,11 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 
 	// Retries exhausted on entry: an exhaustion that was interrupted after the
 	// final retry (its lease expired), an action_failed re-attempt, or a policy
-	// whose max_retry_attempts was lowered. Claim it before any terminal action
+	// whose retry_days was shortened. Claim it before any terminal action
 	// fires: exactly one processor moves next_action_at from the listed value
 	// to a fresh lease, and only that one exhausts (SB-2). A loser fires nothing.
-	if run.AttemptCount >= policy.MaxRetryAttempts {
+	retries := policy.Retries()
+	if run.AttemptCount >= retries {
 		if run.NextActionAt == nil { // unreachable: both pickers select on next_action_at
 			return fmt.Errorf("exhaust-on-entry: run %s has no next_action_at", run.ID)
 		}
@@ -786,7 +789,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// finishes it. Under test-clock catchup the lease is in simulated time and
 	// an advance can pass it; there the clock's single-flight advance is the
 	// exclusion, and ClaimExhaustion guards any re-entry.
-	if run.AttemptCount >= policy.MaxRetryAttempts {
+	if run.AttemptCount >= retries {
 		l := leaseFrom(now)
 		run.NextActionAt = &l
 	}
@@ -947,32 +950,16 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		return rerr
 	}
 
-	// Schedule next retry.
-	// retry_schedule contains the intervals between retries:
-	//   retry_schedule[0] = gap between retry 1 and retry 2
-	//   retry_schedule[1] = gap between retry 2 and retry 3
-	// Grace period (used in StartDunning) determines when retry 1 happens.
-	//
-	// Save-time validation (Service.UpsertPolicy) guarantees the schedule
-	// has at least (MaxRetryAttempts - 1) entries AND that every entry
-	// parses as a positive Go duration (an unparseable entry here would
-	// error after the attempt persisted but before the reschedule landed,
-	// wedging the run — the FLOW TC5 "3d" livelock). The pre-ADR-036
-	// "reuse last interval when idx out of bounds" runtime fallback was
-	// removed — that was a silent fallback (feedback_no_silent_fallbacks);
-	// out-of-bounds here now indicates a schema invariant violation, so
-	// fail loudly rather than substitute a default.
-	if run.AttemptCount < policy.MaxRetryAttempts {
-		idx := run.AttemptCount - 1 // 1-based; schedule[0] = after retry 1
-		if idx < 0 || idx >= len(policy.RetrySchedule) {
-			return fmt.Errorf("retry_schedule index %d out of bounds for policy %s (schedule has %d entries, max_retry_attempts %d) — save-time validation must enforce schedule length",
-				idx, policy.ID, len(policy.RetrySchedule), policy.MaxRetryAttempts)
+	// Schedule the next retry: retry_days[k] is the wait after retry k
+	// (retry_days[0], the wait after the failed payment, was StartDunning's).
+	// The list's length is the retry count, so a retry still to come always
+	// has its entry; there is no count that can disagree with the list.
+	if run.AttemptCount < retries {
+		wait, ok := policy.WaitBeforeRetry(run.AttemptCount + 1)
+		if !ok { // unreachable: AttemptCount+1 <= retries
+			return fmt.Errorf("dunning policy %s has no retry %d", policy.ID, run.AttemptCount+1)
 		}
-		d, err := time.ParseDuration(policy.RetrySchedule[idx])
-		if err != nil {
-			return fmt.Errorf("parse retry_schedule[%d]=%q for policy %s: %w", idx, policy.RetrySchedule[idx], policy.ID, err)
-		}
-		t := now.Add(d)
+		t := now.Add(wait)
 		run.NextActionAt = &t
 	} else {
 		// Never NULL: NULL removes an active run from both due-run pickers for
@@ -1003,7 +990,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// on every retry that then skips the card: "we'll try again on <date>"
 	// would promise a charge that cannot succeed.
 	var warnTx func(tx *sql.Tx) error
-	if run.AttemptCount < policy.MaxRetryAttempts && s.emailNotifier != nil && s.customerEmail != nil {
+	if run.AttemptCount < retries && s.emailNotifier != nil && s.customerEmail != nil {
 		ask := retryAsk(retryErr)
 		reason := activity.StripWrapper(retryErr.Error())
 		if errors.Is(retryErr, domain.ErrNoPaymentMethodOnRetry) || ask != domain.DeclineAskNone {
@@ -1040,7 +1027,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// into `now` above) so the escalated event row aligns with the
 	// retry that actually triggered the exhaustion, not orchestrator
 	// frozen_time.
-	if run.AttemptCount >= policy.MaxRetryAttempts {
+	if run.AttemptCount >= retries {
 		return s.exhaustRun(ctx, tenantID, run, policy, now, now)
 	}
 
@@ -1816,13 +1803,8 @@ func (s *Service) CountCustomersOnPolicy(ctx context.Context, tenantID, policyID
 }
 
 // UpsertPolicy creates a new policy (when input.ID is empty) or updates
-// an existing one (when input.ID is set). Save-time validation enforces
-// the per-platform invariant that retry_schedule has enough entries to
-// cover the max-attempts count — without this guard a misconfig (max=5
-// with 2-entry schedule) would silently reuse the last interval at
-// runtime, producing back-to-back retries the operator never asked for
-// (a feedback_no_silent_fallbacks violation; the pre-ADR-036 runtime
-// fallback `idx >= len(retryIntervals)` was removed alongside this).
+// an existing one (when input.ID is set), through the save-time validation
+// every writer shares (normalizeAndValidatePolicy).
 func (s *Service) UpsertPolicy(ctx context.Context, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error) {
 	policy, err := normalizeAndValidatePolicy(policy)
 	if err != nil {
@@ -1832,15 +1814,12 @@ func (s *Service) UpsertPolicy(ctx context.Context, tenantID string, policy doma
 }
 
 // UpsertPolicyTx is the tx-aware upsert used by the recipe-instantiate path.
-// It runs the SAME normalize+validate as UpsertPolicy — the recipe schema layer
-// validates only the terminal actions (recipe/parse.go), NOT the schedule-length
-// invariant, so skipping validation here let a mismatched recipe (max_retries
-// exceeding its intervals_hours count) persist and stall that campaign at
-// retry-time in a background tick ("retry_schedule index out of bounds")
-// instead of failing loudly at instantiate-time. One validation chokepoint for
-// every writer; a policy the API path would reject must never enter via a
-// recipe. (The pre-fix comment claiming the recipe layer "already validated"
-// was wrong for this invariant.)
+// It runs the SAME normalize+validate as UpsertPolicy: the recipe schema layer
+// does not check the schedule's bounds (recipe/parse.go), and before #333 this
+// path skipped validation, so a recipe whose retry count outran its waits
+// stalled its campaign at retry time instead of failing at instantiate time.
+// One validation chokepoint for every writer; a policy the API path would
+// reject must never enter via a recipe.
 func (s *Service) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error) {
 	policy, err := normalizeAndValidatePolicy(policy)
 	if err != nil {
@@ -1862,9 +1841,7 @@ func DefaultSeedPolicy() domain.DunningPolicy {
 	return domain.DunningPolicy{
 		Name:                    "Default retries",
 		Enabled:                 true,
-		MaxRetryAttempts:        3,
-		GracePeriodDays:         3,
-		RetrySchedule:           []string{"96h", "168h"},
+		RetryDays:               []int{3, 4, 7},
 		FinalSubscriptionAction: domain.SubActionNone,
 		FinalInvoiceAction:      domain.InvActionNone,
 	}
@@ -1890,17 +1867,8 @@ func (s *Service) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantI
 // policy invariants. The single chokepoint shared by UpsertPolicy and
 // UpsertPolicyTx so no writer can persist a policy another path would reject.
 func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPolicy, error) {
-	if policy.MaxRetryAttempts <= 0 {
-		policy.MaxRetryAttempts = 3
-	}
-	if policy.MaxRetryAttempts > 15 {
-		return domain.DunningPolicy{}, errs.Invalid("max_retry_attempts", "cannot exceed 15")
-	}
-	if policy.GracePeriodDays <= 0 {
-		policy.GracePeriodDays = 3
-	}
-	if policy.GracePeriodDays > 30 {
-		return domain.DunningPolicy{}, errs.Invalid("grace_period_days", "cannot exceed 30")
+	if err := validateRetryDays(policy.RetryDays); err != nil {
+		return domain.DunningPolicy{}, err
 	}
 	// Default = pause (Stripe-aligned pause_collection.behavior=
 	// keep_as_draft). Without it the engine keeps generating finalized
@@ -1927,34 +1895,27 @@ func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPoli
 	if err := domain.MaxLen("name", policy.Name, 255); err != nil {
 		return domain.DunningPolicy{}, err
 	}
-	// retry_schedule length must support max_retry_attempts. Retry 1
-	// uses grace_period_days; retries 2..N use retry_schedule[0..N-2].
-	// So schedule must have at least MaxRetryAttempts - 1 entries.
-	needed := policy.MaxRetryAttempts - 1
-	if needed > 0 && len(policy.RetrySchedule) < needed {
-		return domain.DunningPolicy{}, errs.Invalid("retry_schedule",
-			fmt.Sprintf("max_retry_attempts (%d) requires at least %d retry_schedule entries — got %d",
-				policy.MaxRetryAttempts, needed, len(policy.RetrySchedule)))
-	}
-	// Every entry must parse as a positive Go duration NOW: the retry path
-	// calls time.ParseDuration at fire time, and an unparseable entry there
-	// errors AFTER the attempt is persisted but BEFORE the reschedule lands
-	// — wedging the run in a re-attempt livelock at that retry forever
-	// (found live in FLOW TC5 with "3d": Go durations have no day unit).
-	// Rejecting here keeps the retry path's "save-time validation
-	// guarantees the schedule" contract actually true.
-	for i, entry := range policy.RetrySchedule {
-		d, err := time.ParseDuration(entry)
-		if err != nil {
-			return domain.DunningPolicy{}, errs.Invalid("retry_schedule",
-				fmt.Sprintf("entry %d (%q) is not a valid Go duration — use h/m/s units, e.g. \"72h\" for 3 days", i, entry))
-		}
-		if d <= 0 {
-			return domain.DunningPolicy{}, errs.Invalid("retry_schedule",
-				fmt.Sprintf("entry %d (%q) must be a positive duration", i, entry))
-		}
-	}
 	return policy, nil
+}
+
+// validateRetryDays checks the schedule: 1 to MaxDunningRetries waits, each a
+// whole number of days from 1 to MaxDunningRetryWait. There is no default:
+// a policy without a schedule is refused rather than given one the caller
+// did not choose. Whole days are the unit, so a wait of part of a day
+// cannot be written (the JSON decode refuses 1.5 or "36h" before this).
+func validateRetryDays(days []int) error {
+	if len(days) == 0 {
+		return errs.Invalid("retry_days", "retry_days is required: the days to wait before each retry, for example [3, 4, 7]")
+	}
+	if len(days) > domain.MaxDunningRetries {
+		return errs.Invalid("retry_days", fmt.Sprintf("at most %d retries; got %d", domain.MaxDunningRetries, len(days)))
+	}
+	for i, d := range days {
+		if d < 1 || d > domain.MaxDunningRetryWait {
+			return errs.Invalid("retry_days", fmt.Sprintf("entry %d is %d; each wait is a whole number of days from 1 to %d", i, d, domain.MaxDunningRetryWait))
+		}
+	}
+	return nil
 }
 
 // ListRuns returns dunning runs matching the filter.
@@ -1997,7 +1958,7 @@ func (s *Service) buildDunningWarningTx(ctx context.Context, tenantID string, ru
 		nextRetry = run.NextActionAt.In(domain.LoadLocationOrUTC(billTZ)).Format("January 2, 2006")
 	}
 	return func(tx *sql.Tx) error {
-		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.MaxRetryAttempts, nextRetry, retryErrMsg, publicToken, ask)
+		return s.emailNotifier.SendDunningWarningTx(ctx, tx, tenantID, email, cc, name, invoiceNumber, run.AttemptCount, policy.Retries(), nextRetry, retryErrMsg, publicToken, ask)
 	}
 }
 

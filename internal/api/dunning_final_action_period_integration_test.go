@@ -81,8 +81,8 @@ func TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod(t *testing.T) 
 			}
 
 			policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-				Name: "one retry", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 1,
-				FinalSubscriptionAction: tc.action, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+				Name: "one retry", Enabled: true, RetryDays: []int{3},
+				FinalSubscriptionAction: tc.action, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 			})
 			if err != nil {
 				t.Fatalf("upsert policy: %v", err)

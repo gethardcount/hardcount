@@ -44,43 +44,44 @@ type scheduleCase struct {
 // retry (never used), the longest allowed, and uneven waits. The goldens
 // were recorded on main before the schedule became one list (#B8), with
 // the policy written as grace_period_days + retry_schedule +
-// max_retry_attempts.
+// max_retry_attempts (commit 29bbec74). Each policy is now that same
+// schedule as retry_days, converted as migration 00206 converts a stored
+// policy: the first wait, then the waits the retries use, in days.
 func scheduleCases() []scheduleCase {
 	return []scheduleCase{
 		{
 			name: "seeded default",
-			policy: domain.DunningPolicy{GracePeriodDays: 3, RetrySchedule: []string{"96h", "168h"}, MaxRetryAttempts: 3,
+			policy: domain.DunningPolicy{RetryDays: []int{3, 4, 7},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone},
 			wantDays: []int{3, 7, 14}, wantOutcome: "",
 		},
 		{
 			name: "recipe policy",
-			policy: domain.DunningPolicy{GracePeriodDays: 3, RetrySchedule: []string{"24h", "72h", "168h", "336h"}, MaxRetryAttempts: 4,
+			policy: domain.DunningPolicy{RetryDays: []int{3, 1, 3, 7},
 				FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionMarkUncollectible},
 			wantDays: []int{3, 4, 7, 14}, wantOutcome: "subscription_paused+invoice_marked_uncollectible",
 		},
 		{
 			name: "one retry",
-			policy: domain.DunningPolicy{GracePeriodDays: 1, MaxRetryAttempts: 1,
+			policy: domain.DunningPolicy{RetryDays: []int{1},
 				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionNone},
 			wantDays: []int{1}, wantOutcome: "subscription_canceled",
 		},
 		{
 			name: "entries past the last retry",
-			policy: domain.DunningPolicy{GracePeriodDays: 2, RetrySchedule: []string{"48h", "72h", "96h"}, MaxRetryAttempts: 2,
+			policy: domain.DunningPolicy{RetryDays: []int{2, 2},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible},
 			wantDays: []int{2, 4}, wantOutcome: "invoice_marked_uncollectible",
 		},
 		{
 			name: "fifteen retries",
-			policy: domain.DunningPolicy{GracePeriodDays: 30, MaxRetryAttempts: 15, RetrySchedule: []string{
-				"24h", "24h", "24h", "24h", "24h", "24h", "24h", "24h", "24h", "24h", "24h", "24h", "24h", "24h"},
+			policy: domain.DunningPolicy{RetryDays: []int{30, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone},
 			wantDays: []int{30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44}, wantOutcome: "",
 		},
 		{
 			name: "uneven waits",
-			policy: domain.DunningPolicy{GracePeriodDays: 5, RetrySchedule: []string{"120h", "24h", "240h"}, MaxRetryAttempts: 4,
+			policy: domain.DunningPolicy{RetryDays: []int{5, 5, 1, 10},
 				FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionNone},
 			wantDays: []int{5, 10, 11, 21}, wantOutcome: "subscription_paused",
 		},

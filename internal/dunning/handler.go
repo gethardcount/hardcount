@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -175,28 +176,54 @@ func (h *Handler) getPolicy(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, policy)
 }
 
-// decodePolicyBody decodes a policy payload and REFUSES the pre-ADR-112
-// `final_action` key by name.
+// decodePolicyBody decodes a policy payload and REFUSES the replaced keys by
+// name: the pre-ADR-112 `final_action`, and the three schedule fields that
+// retry_days replaced (2026-10-23).
 //
 // encoding/json drops unknown fields silently, so a caller still sending
 // `final_action: "cancel_subscription"` would have stored a policy that
-// pauses and never writes off — a terminal action they did not choose,
-// applied to real money, with a 200 on the way out. DisallowUnknownFields
-// would be the blunt version and would also reject harmless extra keys.
+// pauses and never writes off, and one still sending `retry_schedule:
+// ["1h"]` would get retries days apart — a schedule or terminal action they
+// did not choose, applied to real money, with a 200 on the way out.
+// DisallowUnknownFields would be the blunt version and would also reject
+// harmless extra keys.
 func decodePolicyBody(r *http.Request) (domain.DunningPolicy, error) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return domain.DunningPolicy{}, errors.New("invalid JSON body")
 	}
 	var legacy struct {
-		FinalAction *string `json:"final_action"`
+		FinalAction      *string          `json:"final_action"`
+		RetrySchedule    *json.RawMessage `json:"retry_schedule"`
+		MaxRetryAttempts *json.RawMessage `json:"max_retry_attempts"`
+		GracePeriodDays  *json.RawMessage `json:"grace_period_days"`
 	}
-	if err := json.Unmarshal(body, &legacy); err == nil && legacy.FinalAction != nil {
-		return domain.DunningPolicy{}, errs.Invalid("final_action",
-			"final_action is no longer accepted — it decided two separate things. Send final_subscription_action (none|pause|cancel) and final_invoice_action (none|mark_uncollectible) instead")
+	if err := json.Unmarshal(body, &legacy); err == nil {
+		if legacy.FinalAction != nil {
+			return domain.DunningPolicy{}, errs.Invalid("final_action",
+				"final_action is no longer accepted — it decided two separate things. Send final_subscription_action (none|pause|cancel) and final_invoice_action (none|mark_uncollectible) instead")
+		}
+		for _, old := range []struct {
+			field string
+			sent  bool
+		}{
+			{"grace_period_days", legacy.GracePeriodDays != nil},
+			{"retry_schedule", legacy.RetrySchedule != nil},
+			{"max_retry_attempts", legacy.MaxRetryAttempts != nil},
+		} {
+			if field := old.field; old.sent {
+				return domain.DunningPolicy{}, errs.Invalid(field,
+					field+" is no longer accepted. Send retry_days instead: the whole days to wait before each retry, the first counted from the failed payment, for example [3, 4, 7] for retries on day 3, 7 and 14")
+			}
+		}
 	}
 	var policy domain.DunningPolicy
 	if err := json.Unmarshal(body, &policy); err != nil {
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) && strings.HasPrefix(typeErr.Field, "retry_days") {
+			return domain.DunningPolicy{}, errs.Invalid("retry_days",
+				"retry_days is a list of whole days, for example [3, 4, 7]")
+		}
 		return domain.DunningPolicy{}, errors.New("invalid JSON body")
 	}
 	return policy, nil

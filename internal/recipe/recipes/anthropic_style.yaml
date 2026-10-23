@@ -1,5 +1,5 @@
 key: anthropic_style
-version: 6.0.0
+version: 7.0.0
 name: Anthropic (Claude) token pricing
 summary: |
   Ready-made pricing for reselling Claude (Anthropic) API access. Bills each
@@ -1393,8 +1393,9 @@ plans:
 dunning:
   policy:
     name: AI default retry
-    max_retries: 4
-    intervals_hours: [24, 72, 168, 336]
+    # Retries on day 3, 4, 7 and 14 after the failed payment: the first
+    # waits 3 days, each next one 1, 3 and 7 days after the one before.
+    retry_days: [3, 1, 3, 7]
     final_subscription_action: pause
     final_invoice_action: none
 

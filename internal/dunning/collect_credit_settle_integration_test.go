@@ -65,8 +65,8 @@ func TestCollect_CreditCoveredInvoice_ResolvesActiveDunningRun(t *testing.T) {
 	dunStore := dunning.NewPostgresStore(db)
 	dunSvc := dunning.NewService(dunStore, nil, clock.Real())
 	policy, err := dunSvc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

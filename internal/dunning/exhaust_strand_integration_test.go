@@ -28,8 +28,8 @@ func exhaustedRunPG(t *testing.T, name string) (context.Context, *dunning.Postgr
 	}
 	store := dunning.NewPostgresStore(db)
 	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

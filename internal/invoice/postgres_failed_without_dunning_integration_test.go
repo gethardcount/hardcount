@@ -105,8 +105,8 @@ func TestListFailedWithoutDunningRun_CandidateSet(t *testing.T) {
 	// a NON-active state, so the state-agnostic NOT EXISTS still excludes it.
 	dstore := dunning.NewPostgresStore(db)
 	pol, err := dstore.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "backfill-pol", Enabled: true, RetrySchedule: []string{"72h", "120h"},
-		MaxRetryAttempts: 3, FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 1,
+		Name: "backfill-pol", Enabled: true, RetryDays: []int{1, 3, 5},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	})
 	if err != nil {
 		t.Fatalf("create dunning policy: %v", err)

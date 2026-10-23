@@ -183,8 +183,8 @@ func newExhaustFixture(t *testing.T, db *postgres.DB, name string, acts finalAct
 	}
 	svc := dunning.NewService(st, retrier, clk)
 	policy, err := svc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "two retries", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 2,
-		FinalSubscriptionAction: acts.sub, FinalInvoiceAction: acts.inv, GracePeriodDays: 3,
+		Name: "two retries", Enabled: true, RetryDays: []int{3, 3},
+		FinalSubscriptionAction: acts.sub, FinalInvoiceAction: acts.inv,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)

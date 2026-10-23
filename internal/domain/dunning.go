@@ -241,16 +241,38 @@ type DunningPolicy struct {
 	// Seeded is true for the policy the account was created with, until
 	// the operator edits it or makes it the default. While it is true, the
 	// next policy created takes over the default slot (ADR-123).
-	Seeded           bool     `json:"seeded"`
-	RetrySchedule    []string `json:"retry_schedule"`
-	MaxRetryAttempts int      `json:"max_retry_attempts"`
+	Seeded bool `json:"seeded"`
+	// RetryDays is the whole schedule: the days to wait before each retry.
+	// The first wait counts from the failed payment, each later one from
+	// the retry before it, so [3, 4, 7] retries on day 3, 7 and 14. The
+	// number of retries is its length. A day is 24 hours.
+	RetryDays []int `json:"retry_days"`
 	// The two terminal decisions (ADR-112). Both are always present; the
 	// (none, none) pair is the old `manual_review`.
 	FinalSubscriptionAction DunningSubscriptionAction `json:"final_subscription_action"`
 	FinalInvoiceAction      DunningInvoiceAction      `json:"final_invoice_action"`
-	GracePeriodDays         int                       `json:"grace_period_days"`
 	CreatedAt               time.Time                 `json:"created_at"`
 	UpdatedAt               time.Time                 `json:"updated_at"`
+}
+
+// Limits on DunningPolicy.RetryDays, checked on every write and by the
+// column's CHECK.
+const (
+	MaxDunningRetries   = 15
+	MaxDunningRetryWait = 30 // days
+)
+
+// Retries is how many retries the policy makes.
+func (p DunningPolicy) Retries() int { return len(p.RetryDays) }
+
+// WaitBeforeRetry is how long retry n (1-based) waits: after the failed
+// payment for retry 1, after retry n-1 for the others. ok is false when the
+// policy has no retry n.
+func (p DunningPolicy) WaitBeforeRetry(n int) (wait time.Duration, ok bool) {
+	if n < 1 || n > len(p.RetryDays) {
+		return 0, false
+	}
+	return time.Duration(p.RetryDays[n-1]) * 24 * time.Hour, true
 }
 
 type InvoiceDunningRun struct {
@@ -292,10 +314,11 @@ type InvoiceDunningRun struct {
 	// client-side subscription-map heuristic lost the badge on
 	// one-off-invoice runs and past page 1).
 	TestClockID string `json:"test_clock_id,omitempty"`
-	// MaxRetryAttempts is the bound policy's max_retry_attempts, read with
-	// the run on the list reads (ListRuns, ListRunsByInvoices); 0 where it
-	// was not read. The policy row is read every tick, so this is the limit
-	// the run's next tick applies.
+	// MaxRetryAttempts is how many retries the bound policy makes (the
+	// length of its retry_days), read with the run on the list reads
+	// (ListRuns, ListRunsByInvoices); 0 where it was not read. The policy
+	// row is read every tick, so this is the limit the run's next tick
+	// applies.
 	MaxRetryAttempts int `json:"max_retry_attempts,omitempty"`
 }
 
@@ -303,15 +326,15 @@ type InvoiceDunningRun struct {
 // is active, not paused, and has attempts left under its policy. A run with
 // every attempt used only runs its final action next, whether that action
 // waits for the invoice grace, is re-attempted after it failed, or the
-// policy's limit was lowered after the run started. A run read without its
+// policy's schedule was shortened after the run started. A run read without its
 // policy (MaxRetryAttempts 0) reports false: no retry is promised.
 func (r InvoiceDunningRun) RetryScheduled() bool {
 	return r.State == DunningActive && !r.Paused && r.AttemptCount < r.MaxRetryAttempts
 }
 
 // CustomerDunningOverride was removed in ADR-036. The partial-field
-// override (override max + grace + terminal action but inherit
-// retry_schedule) had no industry precedent (Stripe / Lago / Orb /
+// override (override the retry count, the first wait and the terminal
+// action but inherit the rest of the schedule) had no industry precedent (Stripe / Lago / Orb /
 // Recurly all use named templates with full assignment, verified
 // 2026-05-16). Per-customer differentiation now flows through
 // `customers.dunning_policy_id` referencing a DunningPolicy row.

@@ -3,6 +3,7 @@ package dunning_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,8 +65,7 @@ func defaultOf(t *testing.T, svc *dunning.Service, tenantID string, livemode boo
 
 func operatorPolicy(name string) domain.DunningPolicy {
 	return domain.DunningPolicy{
-		Name: name, Enabled: true, MaxRetryAttempts: 2, GracePeriodDays: 1,
-		RetrySchedule:           []string{"24h"},
+		Name: name, Enabled: true, RetryDays: []int{1, 1},
 		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: domain.InvActionNone,
 	}
 }
@@ -92,11 +92,8 @@ func TestSeedDefaultPolicies_OnePerMode(t *testing.T) {
 		if !p.IsDefault || !p.Seeded || !p.Enabled {
 			t.Errorf("%s: is_default=%v seeded=%v enabled=%v, want all true", p.ID, p.IsDefault, p.Seeded, p.Enabled)
 		}
-		if p.Name != "Default retries" || p.MaxRetryAttempts != 3 || p.GracePeriodDays != 3 {
-			t.Errorf("%s: name=%q max=%d grace=%d", p.ID, p.Name, p.MaxRetryAttempts, p.GracePeriodDays)
-		}
-		if len(p.RetrySchedule) != 2 || p.RetrySchedule[0] != "96h" || p.RetrySchedule[1] != "168h" {
-			t.Errorf("%s: retry_schedule=%v, want [96h 168h]", p.ID, p.RetrySchedule)
+		if p.Name != "Default retries" || fmt.Sprint(p.RetryDays) != "[3 4 7]" {
+			t.Errorf("%s: name=%q retry_days=%v, want Default retries [3 4 7]", p.ID, p.Name, p.RetryDays)
 		}
 		if p.FinalSubscriptionAction != domain.SubActionNone || p.FinalInvoiceAction != domain.InvActionNone {
 			t.Errorf("%s: final actions %q/%q, want none/none — the seed must not pause, cancel or write off on the account's behalf",
@@ -273,7 +270,7 @@ func TestSeedDefaultPolicies_CreateRacesSeedEdit(t *testing.T) {
 		tenantID := testutil.CreateTestTenant(t, db, "Seed Race")
 		seedAccount(t, db, svc, tenantID)
 		seed := onlySeed(t, svc, tenantID, false)
-		seed.GracePeriodDays = 5
+		seed.RetryDays = []int{5, 4, 7}
 
 		var wg sync.WaitGroup
 		var editErr, createErr error
@@ -367,7 +364,7 @@ func TestCreatePolicyRoute_DefaultTakeover(t *testing.T) {
 	}
 
 	// No "enabled" key: Go's zero value makes this a disabled policy.
-	draft := post(`{"name":"Enterprise","max_retry_attempts":2,"grace_period_days":1,"retry_schedule":["24h"],"final_subscription_action":"pause","final_invoice_action":"none"}`)
+	draft := post(`{"name":"Enterprise","retry_days":[1,1],"final_subscription_action":"pause","final_invoice_action":"none"}`)
 	if draft.Enabled || draft.IsDefault {
 		t.Fatalf("draft enabled=%v is_default=%v, want a disabled non-default policy", draft.Enabled, draft.IsDefault)
 	}
@@ -378,7 +375,7 @@ func TestCreatePolicyRoute_DefaultTakeover(t *testing.T) {
 		t.Errorf("audit metadata for a non-default create = %v, want none", md)
 	}
 
-	active := post(`{"name":"Active","enabled":true,"max_retry_attempts":2,"grace_period_days":1,"retry_schedule":["24h"],"final_subscription_action":"pause","final_invoice_action":"none"}`)
+	active := post(`{"name":"Active","enabled":true,"retry_days":[1,1],"final_subscription_action":"pause","final_invoice_action":"none"}`)
 	if !active.IsDefault {
 		t.Fatal("the first enabled create must take the default from the seed")
 	}

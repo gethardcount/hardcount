@@ -86,8 +86,8 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		dsvc := dunning.NewService(dstore, nil, clock.Real())
 		dsvc.SetEventDispatcher(events)
 		policy, err := dsvc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-			Name: "resolve-void-" + tag, Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-			FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+			Name: "resolve-void-" + tag, Enabled: true, RetryDays: []int{3, 3, 3},
+			FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 		})
 		if err != nil {
 			t.Fatalf("upsert policy: %v", err)

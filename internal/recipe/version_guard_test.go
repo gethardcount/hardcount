@@ -26,10 +26,13 @@ import (
 // anthropic_style 6.0.0 on 2026-10-22: the new lineup's prices, Haiku 5.5's
 // two prompt tiers (rules on context_tier), and Sonnet 5 at $2 / $10. A
 // MAJOR bump because an install of 5.0.0 does not get these on re-apply.
+// MAJOR bumps on 2026-10-23 (all three): the dunning block's max_retries
+// and intervals_hours became one list, retry_days, and parseRecipe refuses
+// the old keys. The policy a recipe makes retries on the same days.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@6.0.0": "ccb1e014a9d574b159ddbd52863fba54b63448f007a7df5d1707ca10b705a984",
-	"openai_style@5.0.0":    "9e340351b37677c8e79215e9bd8fcd90d198756ecdf4b5a34bd5a706af28af58",
-	"replicate_style@3.0.0": "8abd33097c29909d3bc53c51b0aacab9b9f8c27b984c94724030247b05b8796a",
+	"anthropic_style@7.0.0": "963c9902575fd0e96234fa8151be484e45f8fd1319189ce50a8e558254364587",
+	"openai_style@6.0.0":    "64400f5921f238588cc86542e6b4594539ef1f5408b1cde5ba7ad2def59f8f0e",
+	"replicate_style@4.0.0": "a41d70bcf9c3d5e90fc9d88f4225de47e7e3b79a3bb21dbb29e717e8dc37bc9f",
 }
 
 // TestRecipeCatalog_VersionMovesWithContent asserts every embedded recipe's

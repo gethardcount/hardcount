@@ -69,8 +69,8 @@ func TestListDueRuns_ChargeHoldIsSkipped(t *testing.T) {
 	}
 	dstore := dunning.NewPostgresStore(db)
 	policy, err := dstore.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
@@ -166,8 +166,8 @@ func TestListDueRunsForClock_ChargeHoldIsSkipped(t *testing.T) {
 		VALUES ($1, $2, 'hold', $3, 'ready', false)`, clockID, tenantID, frozen)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, test_clock_id, created_at, updated_at)
 		VALUES ('cus_hold_clk', $1, 'hold_clk', 'Hold', '', $2, $3, $3)`, tenantID, clockID, frozen)
-	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_schedule, max_retry_attempts, final_subscription_action, final_invoice_action, grace_period_days, livemode)
-		VALUES ('dpol_hold', $1, 'P', true, true, '["72h"]', 3, 'pause', 'none', 3, false)`, tenantID)
+	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
+		VALUES ('dpol_hold', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
 	seedInvRun := func(invID, runID, invStatus string, hold bool) {
 		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number,
 			status, payment_status, is_simulated, currency,

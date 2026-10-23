@@ -198,8 +198,8 @@ func TestCollector_StartsNoPaymentDunning_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
 	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
@@ -235,8 +235,8 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
 	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
@@ -288,8 +288,8 @@ func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) 
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
 	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
@@ -347,8 +347,8 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
 	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "120h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 5},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
@@ -395,8 +395,8 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
 	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
@@ -456,8 +456,8 @@ func TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore(t 
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
 	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetrySchedule: []string{"72h", "72h"}, MaxRetryAttempts: 3,
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone, GracePeriodDays: 3,
+		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
