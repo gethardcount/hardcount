@@ -2235,8 +2235,24 @@ export interface paths {
                          * @enum {string}
                          */
                         billing_time?: "calendar" | "anniversary";
+                        /**
+                         * @description Days of free trial. With a trial the subscription is
+                         *     `trialing` from now and its first paid period starts on
+                         *     the day the trial ends.
+                         */
                         trial_days?: number;
-                        start_now?: boolean;
+                        /**
+                         * @description Leave it out and the subscription starts now. Without
+                         *     `trial_days` it is `active`, its first period starts
+                         *     today in the account's billing time zone, and a plan
+                         *     billed in advance is invoiced now. With `trial_days` it
+                         *     is `trialing` from now. Send `draft` to create it
+                         *     without starting it: it bills nothing until you activate
+                         *     it with `POST /v1/subscriptions/{id}/activate`. A draft
+                         *     cannot have `trial_days`.
+                         * @enum {string}
+                         */
+                        status?: "draft";
                     };
                 };
             };
@@ -2252,7 +2268,11 @@ export interface paths {
                 };
                 /**
                  * @description A field failed validation (`param` names it), for example
-                 *     `trial_days` outside 0 to 730, or the body has an unknown field (`param` names it; the body must use only the fields listed here).
+                 *     `trial_days` outside 0 to 730, `status` other than `draft`, or
+                 *     `trial_days` with `status: draft`. Or the body has an unknown
+                 *     field (`param` names it; the body must use only the fields
+                 *     listed here). `start_now` is such a field since 2026-10-23: a
+                 *     subscription starts now unless `status` is `draft`.
                  */
                 422: {
                     headers: {

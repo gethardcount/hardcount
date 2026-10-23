@@ -96,7 +96,7 @@ func TestE2E_ItemChange_ReachesItsPlanBeforeTheNumberRow(t *testing.T) {
 			// subscription keeps at least one item), its first invoice paid so
 			// a decrease or a removal is credited.
 			sub := r.must(http.MethodPost, "/v1/subscriptions", lagP0, map[string]any{
-				"code": "lockord-sub", "display_name": "Lock order", "customer_id": r.custID, "start_now": true,
+				"code": "lockord-sub", "display_name": "Lock order", "customer_id": r.custID,
 				"items": []map[string]any{{"plan_id": lo, "quantity": c.quantity}, {"plan_id": r.planC, "quantity": 1}},
 			}, http.StatusCreated)
 			r.subID = sub["id"].(string)

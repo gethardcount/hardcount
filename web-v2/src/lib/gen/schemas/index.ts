@@ -344,6 +344,7 @@ export * from './postV1RatingRulesBodyMode';
 export * from './postV1SubscriptionsBody';
 export * from './postV1SubscriptionsBodyBillingTime';
 export * from './postV1SubscriptionsBodyItemsItem';
+export * from './postV1SubscriptionsBodyStatus';
 export * from './postV1SubscriptionsIdRetryBilling200';
 export * from './postV1TestClocksBody';
 export * from './postV1TestClocksIdAdvanceBody';

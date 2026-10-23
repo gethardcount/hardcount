@@ -9,6 +9,7 @@
  */
 import type { PostV1SubscriptionsBodyBillingTime } from './postV1SubscriptionsBodyBillingTime';
 import type { PostV1SubscriptionsBodyItemsItem } from './postV1SubscriptionsBodyItemsItem';
+import type { PostV1SubscriptionsBodyStatus } from './postV1SubscriptionsBodyStatus';
 
 export type PostV1SubscriptionsBody = {
   code: string;
@@ -18,9 +19,22 @@ export type PostV1SubscriptionsBody = {
   items: PostV1SubscriptionsBodyItemsItem[];
   billing_time?: PostV1SubscriptionsBodyBillingTime;
   /**
+     * Days of free trial. With a trial the subscription is
+     * `trialing` from now and its first paid period starts on
+     * the day the trial ends.
      * @minimum 0
      * @maximum 730
      */
   trial_days?: number;
-  start_now?: boolean;
+  /**
+     * Leave it out and the subscription starts now. Without
+     * `trial_days` it is `active`, its first period starts
+     * today in the account's billing time zone, and a plan
+     * billed in advance is invoiced now. With `trial_days` it
+     * is `trialing` from now. Send `draft` to create it
+     * without starting it: it bills nothing until you activate
+     * it with `POST /v1/subscriptions/{id}/activate`. A draft
+     * cannot have `trial_days`.
+     */
+  status?: PostV1SubscriptionsBodyStatus;
 };

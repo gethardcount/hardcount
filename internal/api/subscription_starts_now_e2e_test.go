@@ -27,9 +27,10 @@ import (
 // so a forgotten flag silently billed nothing.
 //
 // The golden files under testdata/starts_now were written on 210646e8 (before
-// this change) by a create that sent "start_now": true, through the same rig
-// and the same normalization. A create with no flag must now produce those
-// bytes exactly: the same subscription and the same day-1 in_advance invoice.
+// this change) by a create that sent "start_now": true through the same rig
+// and the same normalization (TestCreateSubscription_StartNowTrueMatchesGolden,
+// removed with start_now). A create with no flag must now produce those bytes
+// exactly: the same subscription and the same day-1 in_advance invoice.
 //
 // The rig is the close-lag rig: the real server over HTTP, every collaborator
 // wired as in production, each request served at a chosen instant. Plans are

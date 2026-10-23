@@ -213,7 +213,7 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 	}
 	sub.Items = inserted
 
-	// ADR-101: a StartNow create IS the items' billable open — one interval
+	// ADR-101: a start-now create IS the items' billable open — one interval
 	// per item at the (already day-snapped) period start, same tx. Draft and
 	// trialing creates open nothing; their activation writer owns it.
 	if sub.Status == domain.SubscriptionActive {

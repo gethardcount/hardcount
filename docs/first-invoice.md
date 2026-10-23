@@ -97,14 +97,16 @@ variable into the JSON for you.
    **You see:** the customer ID, such as `vlx_cus_…`. ACME Corp is now on
    the **Customers** page.
 
-4. **Put the customer on the plan.** This makes a subscription. Its first
-   month starts at the clock's current time.
+4. **Put the customer on the plan.** This makes a subscription. It starts
+   when you create it: its first month starts at the clock's current time.
+   (To set one up that bills nothing yet, send `"status": "draft"` and
+   activate it later.)
 
    ```bash
    jq -n --arg ref "$CUSTOMER_REF" --arg cus "$CUSTOMER_ID" --arg plan "$PLAN_ID" \
        '{code: ($ref + "-ai-api"), display_name: "ACME Corp AI API",
          customer_id: $cus, items: [{plan_id: $plan, quantity: 1}],
-         billing_time: "anniversary", start_now: true}' \
+         billing_time: "anniversary"}' \
      | curl -s -X POST "$VELOX/v1/subscriptions" \
        -H "Authorization: Bearer $VELOX_KEY" \
        -H "Content-Type: application/json" \

@@ -207,7 +207,7 @@ test('a subscription created as a draft bills nothing until it is activated', as
 
   await page.goto(`/subscriptions/${subs.data[0].id}`)
   await page.getByRole('button', { name: 'Activate' }).click()
-  await expect(page.getByText('Subscription activated')).toBeVisible()
+  await expect(page.getByRole('region', { name: /^Notifications/ }).getByText('Subscription activated', { exact: true })).toBeVisible()
   const after = await api<Subscription>('GET', `/subscriptions/${subs.data[0].id}`)
   expect(after.status).toBe('active')
   expect(await invoicesFor(customer.id)).toHaveLength(1)
@@ -306,7 +306,6 @@ test('Home counts trialing subscriptions and compares failed payments with the p
     customer_id: customer.id,
     items: [{ plan_id: plan.id, quantity: 1 }],
     trial_days: 14,
-    start_now: true,
   })
   expect(sub.status).toBe('trialing')
 
@@ -393,7 +392,6 @@ test('the next-invoice preview prorates a mid-month calendar start', async ({ pa
     customer_id: customer.id,
     items: [{ plan_id: plan.id, quantity: 1 }],
     billing_time: 'calendar',
-    start_now: true,
   })
   const preview = await api<{ lines: { description: string; amount_cents: number }[] }>('POST', '/invoices/create_preview', { customer_id: customer.id, subscription_id: sub.id })
   expect(preview.lines).toHaveLength(1)

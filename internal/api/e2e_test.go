@@ -131,7 +131,6 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 			"items": []map[string]any{
 				{"plan_id": planID, "quantity": 1},
 			},
-			"start_now": true,
 		})
 		assertStatus(t, resp, 201)
 		body := readJSON(t, resp)

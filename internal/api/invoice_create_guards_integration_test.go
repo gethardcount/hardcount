@@ -95,7 +95,7 @@ func TestInvoiceCreate_RefusesAnotherCustomersSubscription(t *testing.T) {
 	}).want(t, 201, "create plan").body, "id")
 	subA := flowStr(e.call(t, "POST", "/v1/subscriptions", map[string]any{
 		"code": "guards-sub-a", "display_name": "Guards A", "customer_id": custA,
-		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary", "start_now": true,
+		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary",
 	}).want(t, 201, "create subscription on A").body, "id")
 	addOn := []map[string]any{{"description": "Add-on", "line_type": "add_on", "quantity": 1, "unit_amount_cents": 4900}}
 

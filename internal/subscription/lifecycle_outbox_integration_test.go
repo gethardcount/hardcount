@@ -87,7 +87,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 			Status: status, BillingTime: domain.BillingTimeAnniversary,
 			Items: []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
 		}
-		// Real creates stamp the billing period for both shapes: StartNow
+		// Real creates stamp the billing period for both shapes: start-now
 		// actives carry the current period, trialing subs carry the
 		// post-trial one (firstPeriodAfterTrial) — and the ADR-101
 		// activation writers require it.
