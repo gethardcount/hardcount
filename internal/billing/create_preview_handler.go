@@ -18,7 +18,7 @@ import (
 
 // CreatePreviewHandler exposes POST /v1/invoices/create_preview. Kept
 // distinct from the existing billing.Handler (which owns the engine
-// trigger and the in-app debug preview) because this surface composes
+// trigger) because this surface composes
 // across customer / subscription / pricing — the dependency set is
 // materially different and the route lives under /invoices/* rather than
 // /billing/*.
@@ -82,7 +82,7 @@ func (h *CreatePreviewHandler) create(w http.ResponseWriter, r *http.Request) {
 	// already skips it. MarkSkip is kept as the LOCAL declaration the registry
 	// note cites — the two agree, and if the exemption is ever lifted this call is
 	// what keeps the route from reporting as an uncovered mutation.) Fired automatically by the dashboard's
-	// upcoming-invoice card on every customer page-open.
+	// upcoming-invoice cards on every customer and subscription page-open.
 	audit.MarkSkip(r.Context())
 
 	tenantID := auth.TenantID(r.Context())

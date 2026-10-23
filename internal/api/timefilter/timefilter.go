@@ -72,7 +72,8 @@ func ParseRange(r *http.Request, fromParam, toParam string) (from, to time.Time,
 	// quantized to advance targets and cycle boundaries (found on the FLOW
 	// P2 walk: the flow's own single-instant example 422'd against the
 	// stricter check). The exclusive consumers apply their own check:
-	// customer usage rejects from==to; the usage summary returns nothing.
+	// customer usage rejects from==to; the usage event list and aggregate
+	// return nothing.
 	if !from.IsZero() && !to.IsZero() && to.Before(from) {
 		return time.Time{}, time.Time{}, errs.Invalid(toParam, "must not be before `"+fromParam+"`")
 	}

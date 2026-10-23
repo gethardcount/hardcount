@@ -359,10 +359,12 @@ func (s *PostgresStore) SetStripeCustomerIDAudited(ctx context.Context, tenantID
 	// customer Velox does not have.
 	//
 	// The two callers want opposite handling and BOTH are correct, so the
-	// store reports the fact and lets them decide: the operator checkout route
-	// turns it into a 404, while the checkout.session.completed webhook
-	// tolerates it (acking the event rather than looping Stripe's retries
-	// forever against a customer that no longer exists).
+	// store reports the fact and lets them decide: EnsureStripeCustomer
+	// (paymentmethods, the lazy create behind the operator's setup session)
+	// re-reads the customer and returns an error, so no session is made,
+	// while the checkout.session.completed webhook tolerates it (acking the
+	// event rather than looping Stripe's retries forever against a customer
+	// that no longer exists).
 	n, err := res.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("set stripe_customer_id: rows affected: %w", err)
