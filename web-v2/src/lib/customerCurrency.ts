@@ -88,3 +88,14 @@ export function settledCustomerCurrency(
   if (queries.some(q => q.isLoading || q.isError)) return undefined
   return resolveCustomerCurrency(input())
 }
+
+// invoiceCurrencyPin is why a manual invoice can only be in the customer's
+// currency, or null when it can be in any. POST /v1/invoices refuses another
+// currency (409 customer_currency_conflict) when the billing profile sets it
+// or a live subscription's plan does; the newest invoice and the workspace
+// default only suggest one. The New invoice dialog fixes the picker and
+// shows this line.
+export function invoiceCurrencyPin(c: CustomerCurrency): string | null {
+  void c
+  return null
+}

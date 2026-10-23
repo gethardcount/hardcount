@@ -228,6 +228,18 @@ func TestSettlementLines(t *testing.T) {
 	}
 }
 
+// A credit note to the balance credits the invoice's currency, and that
+// credit pays only invoices in it (ADR-129). The line says so: "applied to
+// future invoices" was false for a customer who has moved to another currency.
+func TestSettlementLines_CreditNamesItsCurrency(t *testing.T) {
+	t.Parallel()
+	got := settlementLines(domain.CreditNote{CreditAmountCents: 1000, Currency: "EUR"}, "€")
+	want := "€10.00 added to your EUR credit balance. Applied automatically to future invoices in EUR."
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("lines = %q, want [%q]", got, want)
+	}
+}
+
 func containsFold(haystack, needle string) bool {
 	if len(needle) == 0 {
 		return true

@@ -56,7 +56,7 @@ import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { COMPANY_EMAIL_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
+import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
 
 const settingsSchema = z.object({
   company_name: z.string().max(255, 'Must be at most 255 characters'),
@@ -673,7 +673,7 @@ export default function SettingsPage() {
                     </div>
                     {formErrors.credit_balance_low_threshold
                       ? <p className="text-xs text-destructive mt-1">{formErrors.credit_balance_low_threshold.message}</p>
-                      : <p className="text-xs text-muted-foreground mt-1.5">Velox tells your app (by webhook) when a customer's credit balance drops below this amount. Leave blank to turn off. A balance that runs out always sends its own message.</p>}
+                      : <p className="text-xs text-muted-foreground mt-1.5">{CREDIT_LOW_THRESHOLD_HINT}</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-invoice-footer">Invoice footer</Label>

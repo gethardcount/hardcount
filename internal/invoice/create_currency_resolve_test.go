@@ -112,7 +112,10 @@ func TestCreate_CurrencyIsTheCustomers(t *testing.T) {
 
 // A currency read that ERRORS refuses the create and writes nothing: a
 // database blip used to fall through to the tenant default or USD, minting a
-// wrong-currency invoice. The facts read answers 503 (retry).
+// wrong-currency invoice. With no currency in the request, both reads it may
+// need (the customer's facts, the workspace default in tenant settings)
+// answer the documented 503 currency_unavailable (retry). Review round 1: the
+// settings read answered 500 after it moved into Service.Create.
 func TestCreate_CurrencyReadErrorRefuses(t *testing.T) {
 	blip := errors.New("connection reset")
 	for name, c := range map[string]struct {
@@ -121,13 +124,13 @@ func TestCreate_CurrencyReadErrorRefuses(t *testing.T) {
 		status   int
 	}{
 		"currency facts read fails":  {currencyFactsFake{err: blip}, currencySettingsFake{s: domain.TenantSettings{DefaultCurrency: "USD"}}, http.StatusServiceUnavailable},
-		"tenant settings read fails": {currencyFactsFake{}, currencySettingsFake{err: blip}, http.StatusInternalServerError},
+		"tenant settings read fails": {currencyFactsFake{}, currencySettingsFake{err: blip}, http.StatusServiceUnavailable},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newMemStore()
 			rr := postCreate(t, currencyHandler(store, c.facts, c.settings), `{"customer_id":"cus_1"}`)
-			if rr.Code != c.status {
-				t.Fatalf("status = %d (%s), want %d", rr.Code, rr.Body.String(), c.status)
+			if rr.Code != c.status || !strings.Contains(rr.Body.String(), `"currency_unavailable"`) {
+				t.Fatalf("status = %d (%s), want %d currency_unavailable", rr.Code, rr.Body.String(), c.status)
 			}
 			if n := len(store.invoices); n != 0 {
 				t.Errorf("%d invoice(s) created; a failed currency read must create none", n)

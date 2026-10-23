@@ -590,3 +590,46 @@ func TestCurrency_EveryWriterRequiresOne(t *testing.T) {
 		t.Error("a currency mismatch must not read as an already-exists replay")
 	}
 }
+
+// The ledger read (GET /v1/credits/ledger/{id}) computes each row's
+// balance_after as the running balance in that row's own currency, in time
+// order. Mixed ledger USD 5000, EUR 1000, USD 200: the EUR row reads 1000 and
+// the second USD row 5200, not 6000 and 6200. The stored balance_after column
+// is overwritten with -1 first, so only the read's own window can pass.
+//
+// Mutation-verify (review round 1): drop `currency` from the window's
+// PARTITION BY in ListEntries → the EUR row reads 6000, red.
+func TestListEntries_BalanceAfterIsPerCurrency(t *testing.T) {
+	r := newCcyRig(t, "Ledger Read Currency", false)
+	cust := r.customer("cus_ledger_ccy")
+	usd1 := r.block(cust, "USD", 5000)
+	eur := r.block(cust, "EUR", 1000)
+	usd2 := r.block(cust, "USD", 200)
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range []string{usd1.ID, eur.ID, usd2.ID} {
+		r.exec(`UPDATE customer_credit_ledger SET created_at = $1, balance_after = -1 WHERE id = $2`,
+			base.Add(time.Duration(i)*time.Minute), id)
+	}
+
+	entries, err := r.store.ListEntries(r.ctx, credit.ListFilter{TenantID: r.tenantID, CustomerID: cust, Limit: 100})
+	if err != nil {
+		t.Fatalf("list entries: %v", err)
+	}
+	got := map[string]domain.CreditLedgerEntry{}
+	for _, e := range entries {
+		got[e.ID] = e
+	}
+	for _, w := range []struct {
+		id, currency string
+		balance      int64
+	}{{usd1.ID, "USD", 5000}, {eur.ID, "EUR", 1000}, {usd2.ID, "USD", 5200}} {
+		e, ok := got[w.id]
+		if !ok {
+			t.Errorf("entry %s missing from the read", w.id)
+			continue
+		}
+		if e.Currency != w.currency || e.BalanceAfter != w.balance {
+			t.Errorf("entry %s: %s balance_after %d, want %s %d", w.id, e.Currency, e.BalanceAfter, w.currency, w.balance)
+		}
+	}
+}

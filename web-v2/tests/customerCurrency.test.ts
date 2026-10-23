@@ -5,7 +5,7 @@
 // card fell back to the workspace default (USD) instead of the plan.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { resolveCustomerCurrency, settledCustomerCurrency } from '../src/lib/customerCurrency.ts'
+import { invoiceCurrencyPin, resolveCustomerCurrency, settledCustomerCurrency } from '../src/lib/customerCurrency.ts'
 
 const plans = [
   { id: 'pln_eur', currency: 'EUR' },
@@ -107,4 +107,16 @@ test('no currency while any read is loading or has failed', () => {
   assert.equal(settledCustomerCurrency([ok, { isLoading: true, isError: false }], input), undefined)
   assert.equal(settledCustomerCurrency([ok, { isLoading: false, isError: true }], input), undefined)
   assert.deepEqual(settledCustomerCurrency([ok, ok], input), { currency: 'USD', source: 'workspace' })
+})
+
+// Review round 1 (#1361): the New invoice picker offered every currency for a
+// customer whose currency is fixed, and the server refused the other ones
+// only after submit (409 customer_currency_conflict).
+test('a manual invoice is fixed to the profile or live plan currency, not to an invoice or the default', () => {
+  assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'billing_profile' }),
+    'This customer is billed in EUR (billing profile), so the invoice is too.')
+  assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'subscription' }),
+    'This customer is billed in EUR (subscription plan), so the invoice is too.')
+  assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'invoice' }), null)
+  assert.equal(invoiceCurrencyPin({ currency: 'USD', source: 'workspace' }), null)
 })
