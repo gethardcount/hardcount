@@ -66,13 +66,11 @@
           "id": "<id 10>",
           "invoice_id": "<id 8>",
           "line_type": "base_fee",
-          "quantity": 1,
-          "quantity_decimal": "0",
+          "quantity": "1",
           "tax_amount_cents": 0,
           "tax_rate": 0,
           "tenant_id": "<id 5>",
           "total_amount_cents": 3000,
-          "unit_amount_cents": 3000,
           "unit_amount_decimal": "3000"
         },
         {
@@ -85,13 +83,11 @@
           "id": "<id 11>",
           "invoice_id": "<id 8>",
           "line_type": "base_fee",
-          "quantity": 2,
-          "quantity_decimal": "0",
+          "quantity": "2",
           "tax_amount_cents": 0,
           "tax_rate": 0,
           "tenant_id": "<id 5>",
           "total_amount_cents": 2000,
-          "unit_amount_cents": 1000,
           "unit_amount_decimal": "1000"
         }
       ]

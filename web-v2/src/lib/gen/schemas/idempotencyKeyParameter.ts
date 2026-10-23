@@ -13,6 +13,7 @@
  * the same value on every retry. For 24 hours, a repeat with the same
  * key, method, path and body gets the first response again, with an
  * `Idempotent-Replayed: true` header, instead of running again. The
- * error cases are in docs/api-surface.md.
+ * error cases are in docs/api-surface.md. The usage routes do not take
+ * it: each usage event carries its own `idempotency_key`.
  */
 export type IdempotencyKeyParameter = string;

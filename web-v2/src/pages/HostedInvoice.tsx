@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { formatCents, formatRate, formatDate, formatTaxRate } from '@/lib/api'
+import { formatCents, formatRate, formatLineQuantity, formatDate, formatTaxRate } from '@/lib/api'
 import { invoiceLineRate } from '@/lib/priceDisplay'
 import { invoiceAmountLine, invoiceDueCents, invoiceHeadline, invoicePaymentInFlight, invoicePaymentSucceeded } from '@/lib/invoiceTerminal'
 import { hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '@/lib/hostedInvoice'
@@ -54,14 +54,11 @@ interface HostedInvoicePayload {
   }
   line_items: {
     description: string
-    quantity: number
-    // Exact fractional usage quantity (decimal string); when present it is
-    // the display quantity — the integer `quantity` is its truncation.
-    quantity_decimal?: string
-    unit_amount_cents: number
+    // The exact quantity as a decimal string ("3", "1.5").
+    quantity: string
     // Full-precision per-unit price in decimal cents (e.g. "0.3" = $0.003);
     // render with formatRate so sub-cent rates don't collapse to "$0.00".
-    unit_amount_decimal?: string
+    unit_amount_decimal: string
     meter_unit?: string
     amount_cents: number
     tax_amount_cents?: number
@@ -522,12 +519,10 @@ export default function HostedInvoicePage() {
                       <tr key={i} className="border-t">
                         <td className="px-4 py-3 text-foreground">{li.description}</td>
                         <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
-                          {li.quantity_decimal && Number(li.quantity_decimal) !== 0
-                            ? Number(li.quantity_decimal).toLocaleString(undefined, { maximumFractionDigits: 12 })
-                            : li.quantity}
+                          {formatLineQuantity(li.quantity)}
                         </td>
                         <td className="px-4 py-3 text-right text-muted-foreground tabular-nums hidden sm:table-cell">
-                          {invoiceLineRate(li, li.currency, formatRate(li.unit_amount_decimal ?? li.unit_amount_cents, li.currency))}
+                          {invoiceLineRate(li, li.currency, formatRate(li.unit_amount_decimal, li.currency))}
                         </td>
                         <td className="px-4 py-3 text-right text-foreground tabular-nums">
                           {formatCents(li.amount_cents, li.currency)}

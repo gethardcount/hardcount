@@ -314,13 +314,13 @@ func TestIdempotency_IngestRoutesIgnoreTheHeader(t *testing.T) {
 		t.Fatalf("handler ran %d times, want 3", got)
 	}
 	ctx := context.Background()
-	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
 	var stored int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM idempotency_keys`).Scan(&stored); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM idempotency_keys WHERE tenant_id = $1`, tenantID).Scan(&stored); err != nil {
 		t.Fatalf("count keys: %v", err)
 	}
 	if stored != 0 {

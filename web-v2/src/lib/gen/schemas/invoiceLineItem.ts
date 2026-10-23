@@ -23,12 +23,10 @@ export interface InvoiceLineItem {
   /** The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill. */
   meter_unit?: string;
   description: string;
-  quantity: number;
-  /** Exact (possibly fractional) usage quantity as a decimal string (e.g. "1.5"). The integer `quantity` is this truncated, kept for back-compat (Stripe quantity_decimal parity). "0" means none — use `quantity`. Line amounts stay whole cents. */
-  quantity_decimal?: string;
-  unit_amount_cents: number;
-  /** Full-precision per-unit price in DECIMAL CENTS (e.g. "0.3" = $0.003 per unit), the Stripe unit_amount_decimal model. Derived on read as amount_cents ÷ quantity, so it reconciles with the rounded line amount and, unlike the whole-cent `unit_amount_cents`, never collapses a sub-cent rate to 0. Render with the decimal-aware rate formatter; line amounts/totals stay whole cents. */
-  unit_amount_decimal?: string;
+  /** The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents. */
+  quantity: string;
+  /** The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced at one flat rate it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents. */
+  unit_amount_decimal: string;
   amount_cents: number;
   /** Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043. */
   tax_rate: number;

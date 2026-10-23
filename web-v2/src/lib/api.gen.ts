@@ -151,7 +151,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -235,7 +236,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -865,7 +867,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -947,7 +950,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1138,7 +1142,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1410,7 +1415,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1507,7 +1513,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1573,7 +1580,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -1894,7 +1902,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2041,7 +2050,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2211,7 +2221,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2312,7 +2323,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2387,7 +2399,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -2908,16 +2921,7 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
+                header?: never;
                 path?: never;
                 cookie?: never;
             };
@@ -2928,14 +2932,17 @@ export interface paths {
                         external_customer_id: string;
                         /** @description The meter key (e.g. "tokens"). */
                         event_name: string;
-                        /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
+                        /**
+                         * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                         *     for exact decimals). At most 12 decimal places; trailing
+                         *     zeros do not count. Its size must be under 10^26. A
+                         *     negative value is a correction. A missing quantity, or
+                         *     any other value, is refused with 422 and `param:
+                         *     quantity`.
+                         */
                         quantity: number | string;
                         /** @description Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}). */
                         dimensions?: {
-                            [key: string]: unknown;
-                        };
-                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
-                        properties?: {
                             [key: string]: unknown;
                         };
                         /**
@@ -2948,9 +2955,8 @@ export interface paths {
                          *     event, such as a batch index or a timestamp that can
                          *     repeat, or that usage is lost. Empty or whitespace-only
                          *     keys are refused with 422, and so are keys longer than
-                         *     255 characters. The `Idempotency-Key` header does not
-                         *     count as this key: it caches one HTTP response for 24
-                         *     hours.
+                         *     255 characters. This is the only dedup key: the usage
+                         *     routes ignore the `Idempotency-Key` header.
                          */
                         idempotency_key: string;
                         /** Format: date-time */
@@ -2988,8 +2994,10 @@ export interface paths {
                 /**
                  * @description Validation failed and nothing was stored. `param` names the
                  *     field: `idempotency_key` when it is missing, blank or longer
-                 *     than 255 characters, `external_customer_id` or `event_name` for
-                 *     an unknown customer or meter, `timestamp` for a malformed one.
+                 *     than 255 characters, `quantity` when it is missing or not as
+                 *     described above, `external_customer_id` or `event_name` for an
+                 *     unknown customer or meter, `timestamp` for a malformed one, and
+                 *     `properties` when it is sent (it was renamed `dimensions`).
                  */
                 422: {
                     headers: {
@@ -3043,16 +3051,7 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: {
-                    /**
-                     * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                     *     the same value on every retry. For 24 hours, a repeat with the same
-                     *     key, method, path and body gets the first response again, with an
-                     *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
-                     */
-                    "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                };
+                header?: never;
                 path?: never;
                 cookie?: never;
             };
@@ -3063,13 +3062,15 @@ export interface paths {
                         external_customer_id: string;
                         /** @description The meter key (e.g. "tokens"). */
                         event_name: string;
-                        /** @description Decimal quantity — accepts a JSON number (5) or string ("5.5") for exact fractional values. */
+                        /**
+                         * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                         *     for exact decimals). At most 12 decimal places;
+                         *     trailing zeros do not count. Its size must be under
+                         *     10^26. A negative value is a correction. A missing
+                         *     quantity, or any other value, fails validation.
+                         */
                         quantity: number | string;
                         dimensions?: {
-                            [key: string]: unknown;
-                        };
-                        /** @description Older name for `dimensions`. When both are sent, `dimensions` wins. */
-                        properties?: {
                             [key: string]: unknown;
                         };
                         /**
@@ -3082,9 +3083,8 @@ export interface paths {
                          *     event, such as a batch index or a timestamp that can
                          *     repeat, or that usage is lost. Empty or whitespace-only
                          *     keys are refused with 422, and so are keys longer than
-                         *     255 characters. The `Idempotency-Key` header does not
-                         *     count as this key: it caches one HTTP response for 24
-                         *     hours.
+                         *     255 characters. This is the only dedup key: the usage
+                         *     routes ignore the `Idempotency-Key` header.
                          */
                         idempotency_key: string;
                         /** Format: date-time */
@@ -3432,7 +3432,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -3591,7 +3592,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -4013,7 +4015,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -4223,7 +4226,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -4294,7 +4298,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5014,7 +5019,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5088,7 +5094,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5290,7 +5297,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5533,7 +5541,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5718,7 +5727,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -5796,7 +5806,8 @@ export interface paths {
                      *     the same value on every retry. For 24 hours, a repeat with the same
                      *     key, method, path and body gets the first response again, with an
                      *     `Idempotent-Replayed: true` header, instead of running again. The
-                     *     error cases are in docs/api-surface.md.
+                     *     error cases are in docs/api-surface.md. The usage routes do not take
+                     *     it: each usage event carries its own `idempotency_key`.
                      */
                     "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
                 };
@@ -7747,14 +7758,10 @@ export interface components {
             /** @description The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill. */
             meter_unit?: string;
             description: string;
-            /** Format: int64 */
-            quantity: number;
-            /** @description Exact (possibly fractional) usage quantity as a decimal string (e.g. "1.5"). The integer `quantity` is this truncated, kept for back-compat (Stripe quantity_decimal parity). "0" means none — use `quantity`. Line amounts stay whole cents. */
-            quantity_decimal?: string;
-            /** Format: int64 */
-            unit_amount_cents: number;
-            /** @description Full-precision per-unit price in DECIMAL CENTS (e.g. "0.3" = $0.003 per unit), the Stripe unit_amount_decimal model. Derived on read as amount_cents ÷ quantity, so it reconciles with the rounded line amount and, unlike the whole-cent `unit_amount_cents`, never collapses a sub-cent rate to 0. Render with the decimal-aware rate formatter; line amounts/totals stay whole cents. */
-            unit_amount_decimal?: string;
+            /** @description The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents. */
+            quantity: string;
+            /** @description The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced at one flat rate it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents. */
+            unit_amount_decimal: string;
             /** Format: int64 */
             amount_cents: number;
             /**
@@ -10011,14 +10018,10 @@ export interface components {
             };
             line_items: {
                 description: string;
-                /** Format: int64 */
-                quantity: number;
-                /** @description The exact quantity when it has a fraction, for example `1.5`. Left out for whole quantities. */
-                quantity_decimal?: string;
-                /** Format: int64 */
-                unit_amount_cents: number;
+                /** @description The exact quantity as a decimal string, for example `3` or `1.5`. */
+                quantity: string;
                 /** @description The unit price in cents at full precision, for example `0.3` for $0.003. */
-                unit_amount_decimal?: string;
+                unit_amount_decimal: string;
                 meter_unit?: string;
                 /** Format: int64 */
                 amount_cents: number;
@@ -10329,7 +10332,8 @@ export interface components {
          *     the same value on every retry. For 24 hours, a repeat with the same
          *     key, method, path and body gets the first response again, with an
          *     `Idempotent-Replayed: true` header, instead of running again. The
-         *     error cases are in docs/api-surface.md.
+         *     error cases are in docs/api-surface.md. The usage routes do not take
+         *     it: each usage event carries its own `idempotency_key`.
          */
         IdempotencyKey: string;
     };
@@ -10437,7 +10441,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10550,7 +10555,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10768,7 +10774,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10892,7 +10899,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -10980,7 +10988,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -11336,7 +11345,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -11566,7 +11576,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -11738,7 +11749,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -11857,7 +11869,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12109,7 +12122,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12277,7 +12291,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12330,7 +12345,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12463,7 +12479,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12593,7 +12610,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12645,7 +12663,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12729,7 +12748,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12850,7 +12870,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -12987,7 +13008,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13165,16 +13187,7 @@ export interface operations {
     backfillUsageEvent: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -13185,14 +13198,17 @@ export interface operations {
                     external_customer_id: string;
                     /** @description The meter key (e.g. "tokens"). */
                     event_name: string;
-                    /** @description Decimal quantity, as a JSON number or a string. Omitted means 0. Negative values are allowed as corrections. */
-                    quantity?: number | string;
+                    /**
+                     * @description A JSON number (`5`) or a string holding one (`"5.5"`,
+                     *     for exact decimals). At most 12 decimal places; trailing
+                     *     zeros do not count. Its size must be under 10^26. A
+                     *     negative value is a correction. A missing quantity, or
+                     *     any other value, is refused with 422 and `param:
+                     *     quantity`.
+                     */
+                    quantity: number | string;
                     /** @description Scalar dimension values used to pick the pricing rule. */
                     dimensions?: {
-                        [key: string]: unknown;
-                    };
-                    /** @description Older name for `dimensions`. Used only when `dimensions` is absent. */
-                    properties?: {
                         [key: string]: unknown;
                     };
                     /**
@@ -13205,9 +13221,8 @@ export interface operations {
                      *     event, such as a batch index or a timestamp that can
                      *     repeat, or that usage is lost. Empty or whitespace-only
                      *     keys are refused with 422, and so are keys longer than
-                     *     255 characters. The `Idempotency-Key` header does not
-                     *     count as this key: it caches one HTTP response for 24
-                     *     hours.
+                     *     255 characters. This is the only dedup key: the usage
+                     *     routes ignore the `Idempotency-Key` header.
                      */
                     idempotency_key: string;
                     /**
@@ -13257,7 +13272,9 @@ export interface operations {
              *     `idempotency_key`); missing `external_customer_id`, `event_name`
              *     or `timestamp`; unknown customer or meter; a future or badly
              *     formatted `timestamp`; more than 16 dimensions or a non-scalar
-             *     dimension value; a quantity of 10^26 or more.
+             *     dimension value; a missing or malformed `quantity`, one with
+             *     more than 12 decimal places, or one of 10^26 or more; a
+             *     `properties` field (it was renamed `dimensions`).
              */
             422: {
                 headers: {
@@ -13311,16 +13328,7 @@ export interface operations {
     releaseHeldUsage: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -13362,16 +13370,7 @@ export interface operations {
     discardHeldUsage: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -13463,7 +13462,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13583,7 +13583,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13649,7 +13650,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13704,7 +13706,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13762,7 +13765,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13815,7 +13819,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13884,7 +13889,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -13933,7 +13939,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14028,7 +14035,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14231,7 +14239,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14280,7 +14289,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14349,7 +14359,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14519,7 +14530,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14761,7 +14773,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -14814,7 +14827,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15283,7 +15297,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15409,7 +15424,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15534,7 +15550,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15587,7 +15604,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15655,7 +15673,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15790,16 +15809,7 @@ export interface operations {
     ingestLitellmSpend: {
         parameters: {
             query?: never;
-            header?: {
-                /**
-                 * @description Makes the call safe to retry. Send a unique value (a UUID works) and
-                 *     the same value on every retry. For 24 hours, a repeat with the same
-                 *     key, method, path and body gets the first response again, with an
-                 *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
-                 */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -15884,7 +15894,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -15989,7 +16000,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16105,7 +16117,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16204,7 +16217,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16275,7 +16289,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16335,7 +16350,8 @@ export interface operations {
                  *     the same value on every retry. For 24 hours, a repeat with the same
                  *     key, method, path and body gets the first response again, with an
                  *     `Idempotent-Replayed: true` header, instead of running again. The
-                 *     error cases are in docs/api-surface.md.
+                 *     error cases are in docs/api-surface.md. The usage routes do not take
+                 *     it: each usage event carries its own `idempotency_key`.
                  */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };

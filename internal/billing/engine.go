@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"os"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2234,11 +2232,6 @@ const maxPeriodsPerSubPerCall = 10000
 // is preserved on error: invoices generated before the error stay
 // committed (each iteration is its own DB tx via billOnePeriod).
 //
-// The pacing env knob (VELOX_TEST_CLOCK_CATCHUP_DELAY_MS) is honoured
-// between iterations so the manual restart-resilience smoke test
-// keeps working — kill -9 mid-loop is still observable from the
-// outside.
-//
 // progress, when non-nil, is kept current as the loop runs: the row of each
 // loop-top read and the invoices generated so far. The caller (attemptSub)
 // then knows which row a failing step planned from, and how much was already
@@ -2367,36 +2360,8 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 			// That's the natural exit, not an error.
 			return count, nil
 		}
-
-		// Optional pacing for the manual kill-mid-flight restart-
-		// resilience smoke test (MANUAL_TEST FLOW TC2). Honours ctx
-		// cancellation so kill -TERM mid-sleep wakes promptly.
-		if delay := catchupDelayFromEnvBilling(); delay > 0 {
-			select {
-			case <-ctx.Done():
-				return count, fmt.Errorf("billing loop ctx done during pacing: %w", ctx.Err())
-			case <-time.After(delay):
-			}
-		}
 	}
 	return count, fmt.Errorf("subscription %s: per-sub safety cap %d hit — billOnePeriod did not converge", sub.ID, maxPeriodsPerSubPerCall)
-}
-
-// catchupDelayFromEnvBilling reads VELOX_TEST_CLOCK_CATCHUP_DELAY_MS
-// for in-loop pacing. Mirrors testclock.catchupDelayFromEnv but
-// duplicated here to avoid a billing→testclock import (would create
-// a cycle). The semantics match — this is the same env, same
-// behaviour, just read at the inner loop instead of the outer one.
-func catchupDelayFromEnvBilling() time.Duration {
-	v := os.Getenv("VELOX_TEST_CLOCK_CATCHUP_DELAY_MS")
-	if v == "" {
-		return 0
-	}
-	ms, err := strconv.Atoi(v)
-	if err != nil || ms <= 0 {
-		return 0
-	}
-	return time.Duration(ms) * time.Millisecond
 }
 
 // usageLineDescription labels a multi-dim usage line by its dimension match

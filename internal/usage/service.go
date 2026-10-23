@@ -201,9 +201,37 @@ const MaxDimensionKeys = 16
 // letting events be parked in a future billing period.
 const usageFutureSkew = 5 * time.Minute
 
-// maxQuantityMagnitude is the exclusive upper bound on |quantity|. The column
-// is NUMERIC(38,12) → 26 integer digits, so values ≥ 10^26 overflow it.
-var maxQuantityMagnitude = decimal.New(1, 26) // 10^26
+// The quantity column is NUMERIC(38,12): 12 decimal places and 26 integer
+// digits. validateQuantity refuses what the column would round or reject.
+const maxQuantityScale = 12
+
+// validateQuantity refuses a quantity the column cannot store exactly. A value
+// with more than 12 decimal places (trailing zeros do not count) was rounded
+// by the column before B5: the event billed a quantity the caller never sent.
+// One too large made Postgres reject the INSERT, a 500.
+//
+// The value is coefficient × 10^exponent. Both limits are decided from the
+// coefficient's digit count and the exponent first, because comparing or
+// rounding a value such as 1e999999999 or 1e-999999999 builds a number with a
+// billion digits.
+func validateQuantity(q decimal.Decimal) error {
+	if q.IsZero() {
+		return nil
+	}
+	digits, exp := int64(q.NumDigits()), int64(q.Exponent())
+	// 10^(digits+exp-1) <= |q| < 10^(digits+exp), so |q| < 10^26 exactly
+	// when digits+exp <= 26.
+	if digits+exp > 26 {
+		return errs.Invalid("quantity", "quantity is too large: it must be under 10^26")
+	}
+	// At most digits-1 trailing zeros can come off, so below this the value
+	// has more than 12 decimal places whatever its digits are. Above it the
+	// rounding below works on at most `digits` more digits.
+	if digits-1+exp < -maxQuantityScale || !q.Equal(q.Round(maxQuantityScale)) {
+		return errs.Invalid("quantity", "quantity has more than 12 decimal places")
+	}
+	return nil
+}
 
 // validateDimensions enforces the v1 dimension contract: at most
 // MaxDimensionKeys keys, scalar values only (string, number, bool, nil).
@@ -333,7 +361,8 @@ func (s *Service) build(ctx context.Context, tenantID string, input IngestInput,
 	if err := validateDimensions(input.Dimensions); err != nil {
 		return domain.UsageEvent{}, false, err
 	}
-	// quantity == 0 (absent or explicit) stays 0 — PRESENCE semantics.
+	// quantity == 0 stays 0 — PRESENCE semantics (the HTTP doors refuse a
+	// missing quantity; parseQuantity).
 	// The old code silently coerced it to 1: an integrator emitting
 	// zero-usage heartbeats ("request happened, zero tokens billed") was
 	// billed one unit per event on sum-aggregated meters — a money bug
@@ -342,13 +371,8 @@ func (s *Service) build(ctx context.Context, tenantID string, input IngestInput,
 	// honestly contribute nothing. (Stripe parity: meter events carry an
 	// explicit value; there is no silent default.) Negative values remain
 	// allowed as usage corrections.
-	// The quantity column is NUMERIC(38,12): at most 26 integer digits. A value
-	// with |q| ≥ 10^26 overflows the column and Postgres rejects the INSERT,
-	// surfacing as an HTTP 500. Reject it here as a clean 422 instead. (Excess
-	// fractional precision beyond 12 places is rounded by the column, not an
-	// error, so only the integer magnitude is gated.)
-	if input.Quantity.Abs().Cmp(maxQuantityMagnitude) >= 0 {
-		return domain.UsageEvent{}, false, errs.Invalid("quantity", "magnitude too large — must be less than 10^26")
+	if err := validateQuantity(input.Quantity); err != nil {
+		return domain.UsageEvent{}, false, err
 	}
 
 	// "Now" is the CUSTOMER's effective now — a test clock's frozen_time

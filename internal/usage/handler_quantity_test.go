@@ -70,6 +70,8 @@ func TestUsageIngest_QuantityRefusedAsTheSpecSays(t *testing.T) {
 		"13 decimals string": `"0.1234567890123"`,
 		"float artifact":     `0.30000000000000004`,
 		"10^26":              `"100000000000000000000000000"`,
+		"huge exponent":      `1e999999999`,
+		"tiny exponent":      `"1e-999999999"`,
 	}
 	for name, raw := range refused {
 		store := newMemStore()

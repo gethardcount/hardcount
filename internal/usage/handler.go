@@ -90,24 +90,51 @@ func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 }
 
 // APIEvent is the public API input — developers send external identifiers.
-// Quantity accepts both number (5) and string ("5.5") forms via shopspring's
-// UnmarshalJSON; the response side serializes as a string for precision.
 //
-// Dimensions: per docs/dev/design/multi-dim-meters.md, AI-native ingest uses
-// `dimensions` as the field name for the JSONB filter that pricing rules
-// dispatch on. Properties is the original name and is kept as an alias
-// for backward compatibility — if both are present, dimensions wins (it
-// is the documented v1 field; properties was an internal name leaked
-// into the wire). The two collapse onto the same usage_events.properties
-// column at the storage layer.
+// Quantity is kept raw so parseQuantity can answer every bad value with a 422
+// naming the field (a decode error would be a 400 for the whole body, and a
+// whole batch). The response side serializes it as a decimal string.
+//
+// Properties is not a field. It was the old name of Dimensions, removed
+// before 0.9.0, and is decoded only so an event that still sends it is
+// refused: stored without its dimensions it would be priced by the wrong
+// rule, silently.
 type APIEvent struct {
 	ExternalCustomerID string           `json:"external_customer_id"`
 	EventName          string           `json:"event_name"`
-	Quantity           decimal.Decimal  `json:"quantity,omitempty"`
-	Properties         map[string]any   `json:"properties,omitempty"`
+	Quantity           json.RawMessage  `json:"quantity,omitempty"`
 	Dimensions         map[string]any   `json:"dimensions,omitempty"`
 	IdempotencyKey     string           `json:"idempotency_key,omitempty"`
 	Timestamp          *json.RawMessage `json:"timestamp,omitempty"`
+	Properties         json.RawMessage  `json:"properties,omitempty"`
+}
+
+// quantityMessage is the 422 text for a quantity that is not a JSON number or
+// a string holding one.
+const quantityMessage = `quantity must be a JSON number (5) or a string holding one ("5.5")`
+
+// parseQuantity reads the event's quantity the way the spec states it: a JSON
+// number, or a string holding one, and present. The scale and size limits
+// are the service's (validateQuantity), so every ingest path shares them.
+func parseQuantity(raw json.RawMessage) (decimal.Decimal, error) {
+	text := strings.TrimSpace(string(raw))
+	if text == "" || text == "null" {
+		return decimal.Decimal{}, errs.Required("quantity")
+	}
+	if text[0] == '"' {
+		var str string
+		if err := json.Unmarshal(raw, &str); err != nil {
+			return decimal.Decimal{}, errs.Invalid("quantity", quantityMessage)
+		}
+		text = str
+	} else if text[0] != '-' && (text[0] < '0' || text[0] > '9') {
+		return decimal.Decimal{}, errs.Invalid("quantity", quantityMessage)
+	}
+	q, err := decimal.NewFromString(text)
+	if err != nil {
+		return decimal.Decimal{}, errs.Invalid("quantity", quantityMessage)
+	}
+	return q, nil
 }
 
 // resolveCache memoizes the customer and meter lookups for the lifetime of
@@ -200,6 +227,14 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 		return IngestInput{}, errs.Invalid("idempotency_key", longKeyMessage)
 	}
 
+	if len(evt.Properties) > 0 {
+		return IngestInput{}, errs.Invalid("properties", "properties was renamed dimensions; send the event's dimensions as dimensions")
+	}
+	quantity, err := parseQuantity(evt.Quantity)
+	if err != nil {
+		return IngestInput{}, err
+	}
+
 	// A miss is cached only on success: caching the "not found" verdict would
 	// turn one bad index in a batch into a repeated failure for every later
 	// event naming the same customer, which is the same answer but a slower
@@ -234,17 +269,11 @@ func (h *Handler) resolve(ctx context.Context, tenantID string, evt APIEvent, ca
 		cache.putMeter(eventName, meterID)
 	}
 
-	// dimensions takes precedence over properties — see APIEvent doc.
-	dims := evt.Dimensions
-	if dims == nil {
-		dims = evt.Properties
-	}
-
 	input := IngestInput{
 		CustomerID:     custID,
 		MeterID:        meterID,
-		Quantity:       evt.Quantity,
-		Dimensions:     dims,
+		Quantity:       quantity,
+		Dimensions:     evt.Dimensions,
 		IdempotencyKey: evt.IdempotencyKey,
 	}
 

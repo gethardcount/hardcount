@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"regexp"
@@ -259,14 +260,18 @@ func isIdempotencyMiddleware(m func(http.Handler) http.Handler) bool {
 // TestOpenAPISpec_IdempotencyKeyHeader ties the spec's Idempotency-Key header
 // to the routes that honour it. mw.Idempotency caches the response of a POST,
 // PUT or PATCH that sends the header, and only routes mounted behind it do
-// that. Every such route must declare the header in api/openapi.yaml, so
-// generated clients can send it, and no other operation may declare it, since
-// the server would ignore it there.
+// that, except the usage routes it is told to ignore (isIngestPath). Every
+// such route must declare the header in api/openapi.yaml, so generated
+// clients can send it, and no other operation may declare it, since the
+// server would ignore it there.
 func TestOpenAPISpec_IdempotencyKeyHeader(t *testing.T) {
 	honours := make(map[string]bool)
 	srv := newTestServer()
 	err := chi.Walk(srv.router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 		if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
+			return nil
+		}
+		if isIngestPath(&http.Request{Method: method, URL: &url.URL{Path: route}}) {
 			return nil
 		}
 		for _, m := range mws {

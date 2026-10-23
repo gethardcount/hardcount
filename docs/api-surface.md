@@ -160,11 +160,15 @@ Because a batch is stored all-or-nothing and each key is stored once,
 resending events with the same keys never counts them twice. See
 *idempotency key* in the [glossary](glossary.md#pricing-and-usage).
 
-**The `Idempotency-Key` header is something else.** It is separate from
-the event key and does not replace it. It saves one HTTP response for 24
-hours, so a retried call gets the same answer. The event key stops an event
-from being counted twice, forever. The usage routes do not save a `5xx`
-under the header's key, so a retry runs again.
+**The usage routes ignore the `Idempotency-Key` header.** The event key is
+their only dedup key. A retried call runs again, and each event already
+stored is answered as a replay (`200`, or counted in `deduplicated`).
+
+**Send `quantity` on every event.** It is a JSON number (`5`) or a string
+holding one (`"5.5"`, for exact decimals), with at most 12 decimal places.
+A negative value is a correction. An event without one, or with any other
+value, is refused with `422` and `param: quantity`. The event's
+`dimensions` pick its price; `properties`, the old name, is refused.
 
 ### Late usage
 
@@ -240,7 +244,7 @@ place of the default code shown below.
 | 404 | `invalid_request_error` | The resource does not exist (`not_found`, or a specific code such as `invoice_not_found`). |
 | 405 | (empty body) | The path exists but does not accept this method. The `Allow` header lists the methods it does accept. |
 | 409 | `invalid_request_error` | The value already exists (`already_exists`), or the resource is in the wrong state for this action (`invalid_state` or a more specific code). |
-| 413 | `invalid_request_error` | The usage batch (`batch_too_large`, only when the request has no `Idempotency-Key`) or the Stripe webhook body (`payload_too_large`) is too large. |
+| 413 | `invalid_request_error` | The usage batch (`batch_too_large`) or the Stripe webhook body (`payload_too_large`) is too large. |
 | 422 | `invalid_request_error` | A field or business rule failed (`validation_error`, or a specific code). |
 | 429 | `rate_limit_error` | Too many requests (`rate_limited`, or `cooldown_active` for a repeated setup-link email). Wait for the number of seconds in `Retry-After`. |
 | 500 | `api_error` | Unexpected server error (`internal_error`). The details are logged on the server, not returned. A few operations return a specific code with instructions instead, for example `proration_failed`. |
@@ -266,8 +270,8 @@ specific status for a body that is too large.
   - `idempotency_error` (422): the key was used before with a different method, path or body. This is checked only after the first request has finished. While the first request is still running, a mismatched request gets `conflict_idempotency`.
   - `conflict_idempotency` (409): another request with this key is still running, or did not finish. Retry later.
   - `conflict_idempotency_unresolved` (409): an earlier request with this key started more than 5 minutes ago and never recorded an outcome. Check whether the resource exists before you retry with a new key.
-  - `bad_request` (400): the body could not be read. This includes any body over 1 MB, so an oversized usage batch sent with an Idempotency-Key gets this 400 instead of the 413 `batch_too_large`.
-- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Velox-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored, and neither is a 5xx on the usage-ingest routes (`/v1/usage-events`, `/v1/integrations/litellm`). In those cases the key is freed, and a retry with the same key runs the request again. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
+  - `bad_request` (400): the body could not be read. This includes any body over 1 MB.
+- **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Velox-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
 - **Plain-text or empty bodies (not JSON)** come from these cases:
   - an unknown path (`404 page not found`);
   - a method the path does not accept (405, empty body);
