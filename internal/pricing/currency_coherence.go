@@ -30,7 +30,7 @@ import (
 // plans with no live subs are excluded so a wrong-currency install can be
 // repaired by archiving the plan and republishing the key. A bound key's
 // currency is its RESOLVED currency — latest active version, mirroring the
-// engine's resolveRatedRule — never the binding row's pinned version. Keys
+// engine's rulePrices.Price — never the binding row's pinned version. Keys
 // whose active versions mix currencies are refused outright: as-of
 // resolution could bill different periods in different currencies.
 

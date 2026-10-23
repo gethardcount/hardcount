@@ -3,7 +3,6 @@ package billing
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -115,14 +114,10 @@ func (w thresholdWatermark) billsMeter(meterID string) bool {
 // A no-op when the ladder is off, the fire billed nothing on this meter, or
 // the meter has no pricing rules; flat versions are skipped (the ladder never
 // continues them, so a shared seed changes nothing).
-func (e *Engine) checkLadderSeeds(ctx context.Context, sub domain.Subscription, meterID string, pricingRules []domain.MeterPricingRule, periodStart time.Time, ladder *usageLadder) error {
+func checkLadderSeeds(ctx context.Context, prices PriceSource, tenantID, customerID, meterID string, meter domain.Meter, pricingRules []domain.MeterPricingRule, pin ratePin, ladder *usageLadder) error {
 	wm := ladder.wm
 	if !ladder.on || len(pricingRules) == 0 || !wm.billsMeter(meterID) {
 		return nil
-	}
-	meter, err := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
-	if err != nil {
-		return fmt.Errorf("get meter %s: %w", meterID, err)
 	}
 	pinned := make([]string, 0, len(pricingRules)+1)
 	if meter.RatingRuleVersionID != "" {
@@ -133,7 +128,7 @@ func (e *Engine) checkLadderSeeds(ctx context.Context, sub domain.Subscription, 
 	}
 	seen := map[string]int{}
 	for _, id := range pinned {
-		rule, err := e.resolveRatedRule(ctx, sub.TenantID, sub.CustomerID, id, periodStart)
+		rule, err := prices.Price(ctx, tenantID, customerID, id, pin)
 		if err != nil {
 			return fmt.Errorf("resolve pricing for meter %s rule %s: %w", meterID, id, err)
 		}

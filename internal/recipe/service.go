@@ -374,7 +374,7 @@ func (s *Service) Instantiate(
 	// Rating rules first — meters and pricing rules reference them by ID. An
 	// existing key is ADOPTED at its current version, NEVER republished: usage
 	// bills the latest active version of a key as-of period start (engine
-	// resolveRatedRule → GetRuleByKeyAsOf), so publishing a new version would
+	// rulePrices.Price → GetRuleByKeyAsOf), so publishing a new version would
 	// reprice every live sub on that key. Adopt-not-republish is the
 	// load-bearing no-reprice invariant (ADR-085/ADR-070) — and adoption is
 	// gated on the money fields matching (ruleConformanceDiff): binding the

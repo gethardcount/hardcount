@@ -2021,7 +2021,7 @@ func TestRunCycle_LineItemDetails(t *testing.T) {
 // list price on a committed, finalized invoice.
 //
 // Mutation-verify: restore the `overrideErr == nil &&` swallow in
-// resolveRatedRule — this test fails (an invoice is generated).
+// rulePrices.Price (rate.go) — this test fails (an invoice is generated).
 func TestRunCycle_OverrideLookupTransientError_Aborts(t *testing.T) {
 	engine, _, _, pricing, invoices := setupEngine()
 	pricing.overrideErr = fmt.Errorf("connection reset by peer")

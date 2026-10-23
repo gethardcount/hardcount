@@ -43,7 +43,7 @@ func (u unpricedUsage) record(ctx context.Context, sub domain.Subscription) {
 	}
 }
 
-// leftOutBucket is one meter's bucket that rateMeterWindow priced at
+// leftOutBucket is one meter's bucket that a preview's rating priced at
 // nothing: unpriced, or with BelowZero set, below zero after corrections
 // (net_negative.go). Mode is the bucket's aggregation mode: the threshold
 // fire needs it to decide whether the bucket is its to report or the period

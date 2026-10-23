@@ -562,7 +562,7 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		// this to one fire per cycle, so counting it cannot loop).
 		//
 		// Classification is per RULE BUCKET (pl.AggregationMode rides from
-		// AggregateByPricingRules through rateMeterWindow), never per meter — one
+		// AggregateByPricingRules through the rater), never per meter — one
 		// meter can carry sum and max rules simultaneously.
 		capRunning += pl.AmountCents
 		if pl.LineType == "usage" && nonAdditiveMode(pl.AggregationMode) {
