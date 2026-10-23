@@ -9,7 +9,9 @@
 -- Each policy is converted exactly: retry_days is grace_period_days, then
 -- the first max_retry_attempts - 1 entries of retry_schedule in days. The
 -- runs retry at the same instants as before. Entries past the last retry
--- were never used and are dropped.
+-- were never used and are dropped. A schedule the caller left out was
+-- stored as JSON null (one retry needed none) and read as an empty list;
+-- it converts as one.
 --
 -- A policy that cannot be converted exactly stops the upgrade before
 -- anything changes, and the error names it and why: a wait used by a retry
@@ -27,6 +29,12 @@
 -- may be subject to it, so the file turns the bypass on for its own
 -- transaction.
 SET LOCAL app.bypass_rls = 'on';
+
+-- The Go writer stored an omitted schedule as json.Marshal(nil), JSON null,
+-- and the Go reader read it back as an empty list. Write it as one, so the
+-- checks and the conversion below read it the same way. If the check
+-- refuses, the transaction rolls this back too.
+UPDATE dunning_policies SET retry_schedule = '[]'::jsonb WHERE jsonb_typeof(retry_schedule) = 'null';
 
 -- The length of a Go duration string (time.ParseDuration's grammar) in
 -- seconds, NULL when it is not one. Temporary: dropped at the end of the Up.
@@ -102,7 +110,7 @@ BEGIN
     SELECT string_agg(format(E'\n  dunning policy %s: %s', id, why), '' ORDER BY id, why) INTO found FROM bad;
     IF found IS NOT NULL THEN
         RAISE EXCEPTION 'migration 00206 writes each dunning schedule as whole days, and these policies cannot be converted exactly:%', found
-            USING HINT = 'Change each policy so every wait it uses is a whole number of days from 1 to 30 (for example retry_schedule "72h", not "36h"), or delete it, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00206-a-dunning-schedule-is-not-whole-days';
+            USING HINT = 'Fix each policy named above so it converts exactly (every wait its retries use a whole number of days from 1 to 30, for example retry_schedule "72h", not "36h"), or delete it, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00206-a-dunning-schedule-is-not-whole-days';
     END IF;
 END
 $$;

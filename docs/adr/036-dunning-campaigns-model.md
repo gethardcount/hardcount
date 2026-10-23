@@ -533,7 +533,9 @@ of the policy's list.
 
 **Stored policies.** Migration 00206 converts each one exactly: the first
 wait, then the waits its retries used, in days. Entries past the last
-retry were never used and are dropped. A policy whose retries used a wait
+retry were never used and are dropped. A schedule left out (one retry
+needed none) was stored as JSON null and read as an empty list, so it
+converts as one. A policy whose retries used a wait
 that is not whole days from 1 to 30 stops the migration, named in the
 error: rounding would retry on a day nobody chose, and under the clean
 break from 0.8.x only local databases can hold one. The API refuses the

@@ -89,7 +89,9 @@ migration 00206_dunning_retry_days.sql failed: ERROR: migration 00206 writes eac
 policy's retries uses, such as `"36h"`, or a wait over 30 days, has no
 exact value in days. The error also lists values Velox's own policy form
 never saved, such as a retry count over 15. Rounding would retry on a day
-nobody chose, so the migration changed nothing.
+nobody chose, so the migration changed nothing. A one-retry policy saved
+without a schedule (stored as `null`) is not an error: it converts to its
+grace period.
 
 **Fix:** choose the days yourself. For each policy the error lists, set
 every wait it names to whole days from 1 to 30, or delete the policy if no
