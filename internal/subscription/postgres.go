@@ -2093,7 +2093,9 @@ func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) erro
 // the swap takes its plans (LockPlansTx) after its period CAS and before its
 // refund drafts. Item add and schedule call it too, though one plan is in
 // order by itself. Quantity change and removal reference only the item's own
-// plan and leave it to their foreign-key checks.
+// plan and leave it to their foreign-key checks. Those run in the item write,
+// before the proration invoice or clawback credit note takes a number, and
+// must stay there (internal/api TestE2E_ItemChange_ReachesItsPlanBeforeTheNumberRow).
 //
 // The order is the database's ORDER BY id, the one D05 uses. A plan RLS hides
 // from the transaction is not locked here; its foreign-key check still
