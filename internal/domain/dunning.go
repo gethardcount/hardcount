@@ -243,8 +243,10 @@ type DunningPolicy struct {
 	// next policy created takes over the default slot (ADR-123).
 	Seeded bool `json:"seeded"`
 	// RetryDays is the whole schedule: the days to wait before each retry.
-	// The first wait counts from the failed payment, each later one from
-	// the retry before it, so [3, 4, 7] retries on day 3, 7 and 14. The
+	// The first wait counts from the failed payment, or, with no card on
+	// file, from the collection that found none (StartDunning's anchor).
+	// Each later one counts from the retry before it, so [3, 4, 7] retries
+	// on day 3, 7 and 14. The
 	// number of retries is its length. A day is 24 hours.
 	RetryDays []int `json:"retry_days"`
 	// The two terminal decisions (ADR-112). Both are always present; the
@@ -266,7 +268,8 @@ const (
 func (p DunningPolicy) Retries() int { return len(p.RetryDays) }
 
 // WaitBeforeRetry is how long retry n (1-based) waits: after the failed
-// payment for retry 1, after retry n-1 for the others. ok is false when the
+// payment (or the collection that found no card) for retry 1, after retry
+// n-1 for the others. ok is false when the
 // policy has no retry n.
 func (p DunningPolicy) WaitBeforeRetry(n int) (wait time.Duration, ok bool) {
 	if n < 1 || n > len(p.RetryDays) {

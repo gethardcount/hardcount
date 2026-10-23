@@ -29,10 +29,11 @@ import (
 // MAJOR bumps on 2026-10-23 (all three): the dunning block's max_retries
 // and intervals_hours became one list, retry_days, and parseRecipe refuses
 // the old keys. The policy a recipe makes retries on the same days.
+// Re-pinned under the same versions, unreleased, when only a comment changed.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@7.0.0": "963c9902575fd0e96234fa8151be484e45f8fd1319189ce50a8e558254364587",
-	"openai_style@6.0.0":    "64400f5921f238588cc86542e6b4594539ef1f5408b1cde5ba7ad2def59f8f0e",
-	"replicate_style@4.0.0": "a41d70bcf9c3d5e90fc9d88f4225de47e7e3b79a3bb21dbb29e717e8dc37bc9f",
+	"anthropic_style@7.0.0": "1f615d44fefe324558c26598c3627f47dcca50a14858591a49fa081ebc943b9d",
+	"openai_style@6.0.0":    "1e4eddc63a70f01126bb8dac32d106245798f8a9120d98b0238187d931938001",
+	"replicate_style@4.0.0": "7506c6ef22d7e92a84b0f8f80f89843fc1103e70936cc3fd1ebc3a9cbfd7a0d9",
 }
 
 // TestRecipeCatalog_VersionMovesWithContent asserts every embedded recipe's

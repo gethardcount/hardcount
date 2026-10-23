@@ -1,7 +1,8 @@
 -- +goose Up
 -- A dunning policy's schedule becomes one list, retry_days: the whole days
--- to wait before each retry, the first counted from the failed payment and
--- each later one from the retry before it. The number of retries is the
+-- to wait before each retry, the first counted from the failed payment (or,
+-- with no card on file, the collection that found none) and each later one
+-- from the retry before it. The number of retries is the
 -- list's length. It replaces three columns that had to agree:
 -- grace_period_days (the wait before retry 1), retry_schedule (Go
 -- durations, the waits before retries 2 to N) and max_retry_attempts (N).
@@ -110,7 +111,7 @@ BEGIN
     SELECT string_agg(format(E'\n  dunning policy %s: %s', id, why), '' ORDER BY id, why) INTO found FROM bad;
     IF found IS NOT NULL THEN
         RAISE EXCEPTION 'migration 00206 writes each dunning schedule as whole days, and these policies cannot be converted exactly:%', found
-            USING HINT = 'Fix each policy named above so it converts exactly (every wait its retries use a whole number of days from 1 to 30, for example retry_schedule "72h", not "36h"), or delete it, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00206-a-dunning-schedule-is-not-whole-days';
+            USING HINT = 'Fix each policy named above so it converts exactly (every wait its retries use a whole number of days from 1 to 30, for example retry_schedule "72h", not "36h"). Change only the value named; do not delete the policy. Then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00206-a-dunning-schedule-is-not-whole-days';
     END IF;
 END
 $$;

@@ -951,7 +951,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	}
 
 	// Schedule the next retry: retry_days[k] is the wait after retry k
-	// (retry_days[0], the wait after the failed payment, was StartDunning's).
+	// (retry_days[0], the wait before retry 1, was StartDunning's).
 	// The list's length is the retry count, so a retry still to come always
 	// has its entry; there is no count that can disagree with the list.
 	if run.AttemptCount < retries {
@@ -1830,7 +1830,7 @@ func (s *Service) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID strin
 
 // DefaultSeedPolicy is the policy every new account starts with, once per
 // mode (ADR-123, #1152). Three retries on day 3, 7 and 14 after the failed
-// payment: Stripe's recommended two-week window, and its limit of three
+// payment (or the collection that found no card): Stripe's recommended two-week window, and its limit of three
 // retries on a custom schedule. When retries run out it changes nothing:
 // the subscription keeps billing and the invoice stays open and due
 // (Stripe's "leave the subscription overdue"). A machine should not pause,

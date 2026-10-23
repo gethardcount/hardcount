@@ -1,12 +1,14 @@
 // A dunning policy's schedule is one list, retry_days: the days to wait
-// before each retry. The first wait counts from the failed payment, each
-// later one from the retry before it. The number of retries is its length.
+// before each retry. The first wait counts from the failed payment, or, with
+// no card on file, from the collection that found none. Each later one
+// counts from the retry before it. The number of retries is its length.
 // The server checks the same bounds (dunning.validateRetryDays).
 
 export const MAX_RETRIES = 15
 export const MAX_RETRY_WAIT_DAYS = 30
 
-// retryDayNumbers: the day of each retry, counted from the failed payment.
+// retryDayNumbers: the day of each retry, counted from the failed payment
+// (or the collection that found no card).
 // [3, 4, 7] → [3, 7, 14].
 export function retryDayNumbers(waits: number[]): number[] {
   let day = 0

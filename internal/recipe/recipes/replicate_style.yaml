@@ -112,8 +112,9 @@ plans:
 dunning:
   policy:
     name: GPU compute retry
-    # Retries on day 3, 4, 7 and 14 after the failed payment: the first
-    # waits 3 days, each next one 1, 3 and 7 days after the one before.
+    # Retries on day 3, 4, 7 and 14 after the failed payment (or the
+    # collection that found no card): the first waits 3 days, each next
+    # one 1, 3 and 7 days after the one before.
     retry_days: [3, 1, 3, 7]
     final_subscription_action: pause
     final_invoice_action: none

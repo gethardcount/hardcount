@@ -213,7 +213,7 @@ func decodePolicyBody(r *http.Request) (domain.DunningPolicy, error) {
 		} {
 			if field := old.field; old.sent {
 				return domain.DunningPolicy{}, errs.Invalid(field,
-					field+" is no longer accepted. Send retry_days instead: the whole days to wait before each retry, the first counted from the failed payment, for example [3, 4, 7] for retries on day 3, 7 and 14")
+					field+" is no longer accepted. Send retry_days instead: the whole days to wait before each retry, the first counted from the failed payment (or the collection that found no card), for example [3, 4, 7] for retries on day 3, 7 and 14")
 			}
 		}
 	}

@@ -327,10 +327,10 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
               aria-invalid={!!schedule.error} aria-describedby="retry-days-help"
               onChange={e => setForm(f => ({ ...f, retry_days: e.target.value }))} />
             <p id="retry-days-help" className="text-xs text-muted-foreground">
-              Separate with commas. The first wait counts from the failed payment, each next one from the retry before it.{' '}
+              Separate with commas. The first wait counts from the failed payment, or from the collection that found no card on file. Each next one counts from the retry before it.{' '}
               {schedule.error
                 ? <span className="text-destructive">{schedule.error}</span>
-                : <span className="text-foreground">{retryPlanText(schedule.days)} after the failed payment.</span>}
+                : <span className="text-foreground">{retryPlanText(schedule.days)} after the failed payment or missing card.</span>}
             </p>
           </div>
           <fieldset className="space-y-3 rounded-md border p-3">

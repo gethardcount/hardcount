@@ -491,8 +491,9 @@ listed the row. Each waits for a reported need.
 
 **Decision.** A policy's schedule is one ordered list, `retry_days`: the
 whole days to wait before each retry. The first wait counts from the failed
-payment, each later one from the retry before it, so `[3, 4, 7]` retries on
-day 3, 7 and 14. The number of retries is the list's length. It replaces
+payment, or, with no card on file (ADR-060), from the collection that found
+none. Each later one counts from the retry before it, so `[3, 4, 7]` retries
+on day 3, 7 and 14. The number of retries is the list's length. It replaces
 three fields that had to agree: `grace_period_days` (the wait before retry
 1), `retry_schedule` (Go durations for retries 2 to N) and
 `max_retry_attempts` (N). The save-time check above existed only because

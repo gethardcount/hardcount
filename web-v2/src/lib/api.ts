@@ -1505,8 +1505,9 @@ export interface DunningPolicy {
   // until it is edited or made the default (ADR-123). While true, the next
   // policy created takes over the default.
   seeded: boolean
-  // Days to wait before each retry: the first after the failed payment,
-  // each later one after the retry before it. Its length is the number of
+  // Days to wait before each retry: the first after the failed payment (or
+  // the collection that found no card), each later one after the retry
+  // before it. Its length is the number of
   // retries (lib/dunningSchedule).
   retry_days: number[]
   // The two terminal decisions (ADR-112): 'none' | 'pause' | 'cancel' and

@@ -4398,7 +4398,8 @@ type DunningPolicyInput struct {
 	Name                    string                                    `json:"name,omitempty"`
 
 	// RetryDays Days to wait before each retry. The first counts from the failed
-	// payment, each later one from the retry before it: `[3, 4, 7]`
+	// payment, or, with no card on file, from the collection that found
+	// none. Each later one counts from the retry before it: `[3, 4, 7]`
 	// retries on day 3, 7 and 14. The number of retries is the length
 	// of the list. A day is 24 hours. `retry_schedule`,
 	// `max_retry_attempts` and `grace_period_days` are refused.

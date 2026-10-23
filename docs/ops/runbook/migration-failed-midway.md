@@ -93,16 +93,23 @@ nobody chose, so the migration changed nothing. A one-retry policy saved
 without a schedule (stored as `null`) is not an error: it converts to its
 grace period.
 
-**Fix:** choose the days yourself. For each policy the error lists, set
-every wait it names to whole days from 1 to 30, or delete the policy if no
-customer needs it. In `psql` as the database owner (`72h` is 3 days):
+**Fix:** choose the days yourself. For each policy the error lists,
+change only the value it names. Do not delete the policy: one that has
+had a dunning run cannot be deleted, and without the account's default
+policy, customers with no policy of their own are not dunned at all.
+
+For a wait, entry 1 of `retry_schedule` is index 0. In `psql` as the
+database owner, this sets entry 1 to `72h` (3 days) and keeps the others:
 
 ```sql
 BEGIN;
 SET LOCAL app.bypass_rls = 'on';
-UPDATE dunning_policies SET retry_schedule = '["72h"]' WHERE id = '<policy id>';
+UPDATE dunning_policies SET retry_schedule = jsonb_set(retry_schedule, '{0}', '"72h"') WHERE id = '<policy id>';
 COMMIT;
 ```
+
+For a count or first wait, set `max_retry_attempts` (1 to 15) or
+`grace_period_days` (1 to 30) the same way.
 
 Then run `velox migrate` again.
 

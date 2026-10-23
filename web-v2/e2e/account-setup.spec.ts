@@ -418,7 +418,7 @@ test.describe('the default dunning policy', () => {
       // One list of waits in days: the first after the failed payment, each
       // next one after the retry before it.
       await field(create, 'Days before each retry').getByRole('textbox').fill('2, 3, 5')
-      await expect(create.getByText('3 retries, on day 2, 5 and 10 after the failed payment.', { exact: true })).toBeVisible()
+      await expect(create.getByText('3 retries, on day 2, 5 and 10 after the failed payment or missing card.', { exact: true })).toBeVisible()
       // The default, pause, keeps new invoices as drafts; runs already open on
       // other unpaid invoices keep retrying, so it must not say charging stops.
       await expect(create.getByText(/^Invoices created while collection is paused stay drafts, so nothing charges them\. Retries already running on other unpaid invoices continue\./)).toBeVisible()
@@ -451,7 +451,7 @@ test.describe('the default dunning policy', () => {
       await expect(edit.getByText('Each wait is a whole number of days from 1 to 30.', { exact: true })).toBeVisible()
       await expect(edit.getByRole('button', { name: 'Save' })).toBeDisabled()
       await days.fill('2, 3, 5, 7')
-      await expect(edit.getByText('4 retries, on day 2, 5, 10 and 17 after the failed payment.', { exact: true })).toBeVisible()
+      await expect(edit.getByText('4 retries, on day 2, 5, 10 and 17 after the failed payment or missing card.', { exact: true })).toBeVisible()
       const saving = apiCall(page, 'PATCH', new RegExp(`/dunning/policies/${created.id}$`))
       await edit.getByRole('button', { name: 'Save' }).click()
       expect((await saving).ok()).toBe(true)
