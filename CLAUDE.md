@@ -19,9 +19,13 @@ Each rule is explained in the section named after it.
   - (b) shared value types, DTOs and validation helpers (chiefly `tax.*`, `subscription.ListFilter`);
   - (c) the `billing` coordinator. The billing engine orchestrates peers through narrow **consumer-defined** interfaces.
 - A new cross-domain import edge fails `internal/arch/boundaries_test.go` until it is justified in the allowlist.
-- PostgreSQL with Row-Level Security for tenant isolation: `db.BeginTx(ctx, postgres.TxTenant, tenantID)`.
+- PostgreSQL with Row-Level Security for tenant isolation on most API requests: `db.BeginTx(ctx, postgres.TxTenant, tenantID)`.
+  - Some work runs under `postgres.TxBypass`, where RLS does not apply, and must filter by tenant itself. Examples: background jobs, sign-in and sessions, public links, incoming webhooks, Stripe credential settings, and team members. The full list is in `docs/architecture.md` (Design rules).
+  - A new `TxBypass` use fails `internal/arch/txbypass_allowlist_test.go` until it is listed.
 - chi/v5 for HTTP routing.
-- API key auth with 3 types: platform, secret, publishable.
+- API key auth with 3 stored key types: platform, secret and publishable (`api_keys_key_type_check`).
+  - Publishable keys carry no permissions today.
+  - Dashboard sessions use a fourth, in-code type, `KeyTypeSession`, with the secret-key permission set (`internal/auth/permission.go`).
 - HMAC-SHA256 webhook signing (both inbound Stripe and outbound).
 
 ## Money-path changes
@@ -94,8 +98,10 @@ Two or more Claude Code sessions may work this repo at the same time. Rules:
 - **Background work:** no Temporal dependency in v1.
   - Background work runs as simple goroutine loops. Each loop is a leader-leased singleton role (`internal/platform/leader`, ADR-114).
   - A [leader lease](docs/glossary.md) is a per-tick lease row on the database clock. Its fence token is re-checked inside every claim statement. The lease is safe behind transaction-mode poolers.
-  - Redis is used for distributed rate limiting only.
-- **Credits:** event-sourced ledger (immutable append-only).
+  - Redis is used for distributed rate limiting only. Production (`APP_ENV=production`) refuses to start without `REDIS_URL`.
+- **Credits:** one ledger of grant, usage, expiry and adjustment entries.
+  - Each entry carries its currency (ADR-129).
+  - It is not strictly append-only: `consumed_cents` and `cn_retired_cents` on grant entries are updated in place (`internal/credit/postgres.go`).
 
 ## Documentation discipline
 Every user-visible ship updates the docs that describe it, in the same PR:
@@ -103,7 +109,7 @@ Every user-visible ship updates the docs that describe it, in the same PR:
 - `CHANGELOG.md` (Keep-a-Changelog) — what shipped, dated.
 - `docs/dev/release-checklist.md` if the change alters what a live Stripe, email or PDF check should see.
 - `docs/adr/` if the change is a decision worth re-litigating later.
-- `docs/roadmap.md` ("Shipped recently", "Next", "Not planned for now") — keep aligned with reality; if a roadmap item is silently descoped, edit the roadmap first, then act.
+- `docs/roadmap.md` ("Now", "Next", "Later", "Not building", "Shipped recently") — keep aligned with reality; if a roadmap item is silently descoped, edit the roadmap first, then act.
 
 How to write them: **[docs/dev/writing-style.md](docs/dev/writing-style.md)** (point first, one idea per sentence, define terms, clarity and truth in separate PRs).
 
