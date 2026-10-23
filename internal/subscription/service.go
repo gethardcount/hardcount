@@ -393,7 +393,7 @@ func firstPeriodAfterTrial(trialEnd time.Time, billingTime domain.SubscriptionBi
 }
 
 // firstPeriodForActivate computes the first billing period when a sub is
-// activated without a trial — either via StartNow on Create, or via the
+// activated without a trial — either by a start-now Create, or by the
 // operator's Activate on a draft sub.
 //
 // Yearly billing: always anniversary semantics — period begins at `at`
@@ -690,8 +690,16 @@ type CreateInput struct {
 	Items       []CreateItemInput              `json:"items"`
 	BillingTime domain.SubscriptionBillingTime `json:"billing_time"`
 	TrialDays   int                            `json:"trial_days,omitempty"`
-	StartNow    bool                           `json:"start_now,omitempty"`
+	// Status is empty (the subscription starts now, or starts its trial now)
+	// or "draft" (it bills nothing until Activate). A start is the default,
+	// as in Stripe and Lago, because a forgotten flag used to make a draft
+	// that silently billed nothing (simplification audit D2, 2026-10-23).
+	Status domain.SubscriptionStatus `json:"status,omitempty"`
 }
+
+// createStatusMessage is the 422 for a create's status other than "draft",
+// including one sent empty or null (the handler refuses those).
+const createStatusMessage = `must be "draft" or left out; a subscription starts now unless it is created as a draft`
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
@@ -743,11 +751,24 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	if billingTime != domain.BillingTimeCalendar && billingTime != domain.BillingTimeAnniversary {
 		return domain.Subscription{}, errs.Invalid("billing_time", "must be calendar or anniversary")
 	}
-	// A negative trial_days used to read as "no trial", so with start_now the
-	// customer was charged on day 1. The upper bound is Stripe's: a trial
-	// "can be at most two years". A longer pause in billing is not a trial.
+	// A negative trial_days used to read as "no trial", so the customer was
+	// charged on day 1. The upper bound is Stripe's: a trial "can be at most
+	// two years". A longer pause in billing is not a trial.
 	if input.TrialDays < 0 || input.TrialDays > maxTrialDays {
 		return domain.Subscription{}, errs.Invalid("trial_days", fmt.Sprintf("must be between 0 and %d", maxTrialDays))
+	}
+	draft := false
+	switch input.Status {
+	case "":
+	case domain.SubscriptionDraft:
+		draft = true
+	default:
+		return domain.Subscription{}, errs.Invalid("status", createStatusMessage)
+	}
+	// A draft does not start, so it has no trial to start; Activate starts
+	// billing at once. Refused, not ignored.
+	if draft && input.TrialDays > 0 {
+		return domain.Subscription{}, errs.Invalid("trial_days", "a draft cannot have a trial; leave out status to start the trial now")
 	}
 
 	// Reject mixed billing intervals across items (Stripe / Lago parity).
@@ -873,14 +894,14 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		periodEnd = &pe
 		nextBilling = &pe
 		billingAnchorDay = anchorDay
-	} else if input.StartNow {
+	} else if !draft {
 		status = domain.SubscriptionActive
 		startedAt = &now
 		// Immediate activation IS an activation — stamp activated_at so
 		// the sub is visible to MRR movement / point-in-time / churn,
 		// which key on activated_at as the MRR-start event. The operator
 		// Activate() and trial-end ActivateAfterTrial() paths already do
-		// this; the StartNow create path used to leave it NULL, so
+		// this; the start-now create path used to leave it NULL, so
 		// every no-trial sub was counted in headline MRR (status='active')
 		// but invisible to New/Net movement — the dashboard never
 		// reconciled. Trialing subs are NOT activated here (their
@@ -984,7 +1005,7 @@ func (s *Service) Activate(ctx context.Context, tenantID, id string) (domain.Sub
 	ctx = s.bindForSub(ctx, tenantID, id)
 	now := s.clock.Now(ctx)
 
-	// First-period math: same helper as Create's StartNow branch — period
+	// First-period math: same helper as Create's start-now branch — period
 	// begins at `now` (day-snapped) and ends at the next calendar boundary
 	// (calendar billing) or `now + 1 month` (anniversary). (The historical
 	// beginningOfMonth backdating bug and its fix are recorded on

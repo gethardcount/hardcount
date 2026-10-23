@@ -82,7 +82,7 @@ all reject this).
 
 **State-machine guarantees:**
 
-- `Service.Create` — trial branch + start_now branch use the helpers.
+- `Service.Create` — the trial branch and the start-now branch use the helpers (since 2026-10-23 a create starts now unless it asks for a draft; `start_now` is gone).
 - `Service.Activate` (draft → active) — uses `firstPeriodForActivate`.
   Pre-fix hardcoded `beginningOfMonth(now)` for `period_start`,
   backdating to first-of-month and ignoring `billing_time`.

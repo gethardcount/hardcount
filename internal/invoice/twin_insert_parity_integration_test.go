@@ -20,7 +20,7 @@ import (
 // persist the SAME field set: the 2026-07-13 manual-test pass found the Tx
 // twin silently dropping billing_timezone (its column list was never updated
 // when the ADR-077 stamp shipped), which broke "an issued invoice keeps its
-// dates" for every coordinator-tx invoice — day-1 start_now, atomic
+// dates" for every coordinator-tx invoice — day-1 start-now create, atomic
 // cancel-final, swaps, proration. Rather than pin one field, this inserts an
 // identical fully-populated invoice through BOTH paths and diffs every column
 // of the two rows (ignoring identity/uniqueness columns), so the NEXT field

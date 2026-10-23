@@ -11,7 +11,7 @@ func seedActiveSub(t *testing.T, svc *Service, fb *fakeBiller) string {
 	t.Helper()
 	created, err := svc.Create(context.Background(), "t1", CreateInput{
 		Code: "sub-cancel-wire", DisplayName: "Wire", CustomerID: "cus_1",
-		Items: []CreateItemInput{{PlanID: "pln_1"}}, StartNow: true,
+		Items: []CreateItemInput{{PlanID: "pln_1"}},
 	})
 	if err != nil {
 		t.Fatalf("seed create: %v", err)

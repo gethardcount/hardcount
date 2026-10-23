@@ -63,7 +63,7 @@ func TestFirstPeriod_TriggerAddRow_BillsFullBase_E2E(t *testing.T) {
 
 	// The ADR-012 first period for a sub created RIGHT NOW (default org
 	// TZ = UTC): day-snapped start, one anniversary month forward —
-	// exactly what firstPeriodForActivate stamps on a StartNow create.
+	// exactly what firstPeriodForActivate stamps on a create that starts now.
 	periodStart := domain.BeginningOfDayIn(time.Now().UTC(), time.UTC)
 	anchorDay := domain.AnchorDayFor(periodStart, domain.BillingTimeAnniversary, domain.BillingMonthly, time.UTC)
 	periodEnd := domain.NextBillingPeriodEnd(periodStart, domain.BillingTimeAnniversary, domain.BillingMonthly, time.UTC, anchorDay)

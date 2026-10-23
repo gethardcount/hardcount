@@ -88,7 +88,7 @@ func (r *datesRig) trialSub(key, clockID string) (string, time.Time) {
 	sub := r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
 		"code": "dates-" + key, "display_name": "Dates " + key, "customer_id": customerID,
 		"items": []map[string]any{{"plan_id": r.planID, "quantity": 1}}, "billing_time": "anniversary",
-		"start_now": true, "trial_days": 14,
+		"trial_days": 14,
 	}}).want(r.t, 201, key+": create subscription").body
 	trialEnd, err := time.Parse(time.RFC3339, flowStr(sub, "trial_end_at"))
 	if err != nil {
@@ -281,7 +281,7 @@ func (r *datesRig) subWithItem(key, clockID, planID string) (string, string) {
 	customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: cust}).want(r.t, 201, key+": create customer").body, "id")
 	sub := r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
 		"code": "dates-" + key, "display_name": "Dates " + key, "customer_id": customerID,
-		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary", "start_now": true,
+		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary",
 	}}).want(r.t, 201, key+": create subscription").body
 	items, _ := sub["items"].([]any)
 	if len(items) != 1 {

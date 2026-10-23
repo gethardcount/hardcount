@@ -99,7 +99,6 @@ function subscribe(customerId: string, planId: string, extra: Record<string, unk
     customer_id: customerId,
     items: [{ plan_id: planId, quantity: 1 }],
     billing_time: 'anniversary',
-    start_now: true,
     ...extra,
   })
 }

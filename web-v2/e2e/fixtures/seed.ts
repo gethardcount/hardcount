@@ -60,7 +60,6 @@ export function createSubscription(customerId: string, planId: string): Promise<
     customer_id: customerId,
     items: [{ plan_id: planId, quantity: 1 }],
     billing_time: 'anniversary',
-    start_now: true,
   })
 }
 
