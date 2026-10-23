@@ -24,6 +24,8 @@ first. Every shipped change, with its date, is in the
   - a new rule that could take usage from a price that bills it now;
   - pointing the default price at another price, or removing it;
   - changing the meter's aggregation.
+
+  Per-plan usage prices (below) replace this check before the release.
 - **Done:** eight API operations that another operation already did are
   removed. The [CHANGELOG](../CHANGELOG.md) names the replacement for each.
 - **Planned:** public names change once, before the release: API key
@@ -36,8 +38,9 @@ first. Every shipped change, with its date, is in the
   meter, so two plans that charge different token rates need two meters.
   In v0.9.0, each plan sets its own price for each meter, and a price edit
   takes effect at each subscriber's next billing period. The pricing API
-  changes. A design goes up for review first, and it sets the details.
-  v0.9.0 is released after this ships.
+  changes. The design is
+  [ADR-130](adr/130-usage-prices-belong-to-the-plan.md). v0.9.0 is
+  released after this ships.
 
 Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
 

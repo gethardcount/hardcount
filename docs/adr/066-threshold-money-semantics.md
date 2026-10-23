@@ -1,7 +1,9 @@
 # ADR-066: Threshold money semantics — prorated reset base, atomic fire→reset, $0 auto-pay, max/last deferral
 
 **Date:** 2026-07-02
-**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11 and 2026-10-23)
+**Status:** Accepted (fixes 4/atomicity/6 shipped in P1b #339; fix 5 + the immediate-cancel watermark shipped in P1c; amended 2026-10-11 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decision 4's rule-bucket granularity, the ladder seed key, the package clamp and the flat threshold window), not built yet
+
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. In decision 4, "granularity is the rule bucket, not the meter" goes, because a meter has one aggregation and `last_ever` is dropped (PR-2). In the 2026-10-11 amendment, the ladder seed keys on the price id instead of the resolved rule version. The ambiguous-config failure goes, because lines carry the price id the seed keys on (PR-4). The non-monotone package clamp goes, because a package always rounds up with no overage (PR-3). The threshold invoice prices each plan window instead of one flat window (PR-4). ADR-130 leaves the prorated reset base, the one-transaction fire, the $0 rule and the write-off amendment as they are. Removing `reset_billing_cycle=true` is a separate change, approved on 2026-10-23.
 
 ## Summary
 

@@ -1,8 +1,10 @@
 # ADR-034: Plan billing-field immutability once a live sub attaches
 
-**Status:** Accepted
+**Status:** Accepted; superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (the `meter_ids` lock goes; the base-fee lock becomes next-period edits), not built yet
 **Date:** 2026-05-15
 **Related**: ADR-031 (per-plan bill_timing), ADR-005 (integer cents for money), industry-reference-first workflow
+
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. The `meter_ids` lock goes, because a plan's meters become the meters it has prices for (PR-4). The `base_amount_cents` lock becomes "applies from each subscriber's next period" (PR-7); if PR-7 is cut, that lock stays. The `base_bill_timing` lock stays, and holds once any subscription has ever used the plan, not only while a live one does (PR-4).
 
 ## Summary
 
