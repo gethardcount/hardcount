@@ -254,7 +254,7 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 		return ReleaseResult{}, errs.Required("customer_id")
 	}
 	// The open periods are read BEFORE the write, as ingest reads them
-	// (open_period.go). The meters' buckets are read in the release's
+	// (open_period.go). The meters' buckets are read on the release's
 	// transaction, after its inserts: see releaseBuckets. A failed read
 	// refuses the release with nothing released.
 	periods, err := s.releasePeriods(ctx, tenantID, in)
@@ -270,7 +270,7 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 		MeterIDs:           in.MeterIDs,
 		NotAfter:           sim.At,
 	}, func(tx *sql.Tx, res ReleaseHeldResult) error {
-		b, err := s.releaseBuckets(ctx, tenantID, in, periods, res)
+		b, err := s.releaseBuckets(ctx, tx, in, periods, res)
 		if err != nil {
 			return err
 		}
@@ -389,14 +389,16 @@ func (s *Service) releasePeriods(ctx context.Context, tenantID string, in Releas
 }
 
 // releaseBuckets reads the buckets of each meter the release wrote a row
-// for. It runs in the release's transaction, after its inserts: each insert
+// for. It reads on the release's transaction, after its inserts: each insert
 // holds the meter row FOR KEY SHARE until commit, so the aggregation read
 // here is the one the events are counted under. An aggregation PATCH that
 // committed before the inserts is seen; one after them waits, then finds
 // the events and is refused (ADR-130 §2). Read before the write, a PATCH
 // committing in between would leave the counts under the old aggregation.
-// With no open period no row needs its meter, and nothing is read.
-func (s *Service) releaseBuckets(ctx context.Context, tenantID string, in ReleaseInput, periods []OpenPeriod, res ReleaseHeldResult) (map[string]MeterBuckets, error) {
+// Read on another connection, the release would hold one connection while
+// it waits for a second. With no open period no row needs its meter, and
+// nothing is read.
+func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInput, periods []OpenPeriod, res ReleaseHeldResult) (map[string]MeterBuckets, error) {
 	buckets := map[string]MeterBuckets{}
 	if len(periods) == 0 {
 		return buckets, nil
@@ -406,7 +408,7 @@ func (s *Service) releaseBuckets(ctx context.Context, tenantID string, in Releas
 		if _, ok := buckets[id]; ok || r.Deduplicated {
 			continue
 		}
-		b, err := s.periods.MeterBuckets(ctx, tenantID, id)
+		b, err := s.periods.MeterBucketsTx(ctx, tx, id)
 		if err != nil {
 			return nil, fmt.Errorf("meter buckets: %w", err)
 		}

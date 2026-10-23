@@ -253,7 +253,7 @@ func (s *PostgresStore) HeldFor(ctx context.Context, tenantID, externalCustomerI
 //     usage_events already bills its call the pre-split way, writes inside
 //     :input (writesBilledInInput).
 //  3. Record the written event id on the held row, run emit (the service
-//     reads the meters' buckets and writes the audit row there), commit. A
+//     reads the meters' buckets and writes the audit row on tx), commit. A
 //     failure anywhere rolls all of it back: the rows stay held.
 func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in ReleaseHeldInput, emit func(tx *sql.Tx, res ReleaseHeldResult) error) (ReleaseHeldResult, error) {
 	keys := make([]string, 0, len(in.MeterIDs))

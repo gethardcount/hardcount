@@ -268,9 +268,14 @@ func (s *PostgresStore) GetMeter(ctx context.Context, tenantID, id string) (doma
 		return domain.Meter{}, err
 	}
 	defer postgres.Rollback(tx)
+	return s.GetMeterTx(ctx, tx, id)
+}
 
+// GetMeterTx reads one meter on the caller's transaction, which carries the
+// tenant. It takes no lock (LockMeterTx locks).
+func (s *PostgresStore) GetMeterTx(ctx context.Context, tx *sql.Tx, id string) (domain.Meter, error) {
 	var m domain.Meter
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, event_name, name, unit, aggregation, COALESCE(rating_rule_version_id,''), created_at, updated_at
 		FROM meters WHERE id = $1
 	`, id).Scan(&m.ID, &m.TenantID, &m.EventName, &m.Name, &m.Unit, &m.Aggregation,

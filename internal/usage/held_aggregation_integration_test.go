@@ -291,6 +291,20 @@ func (r *racingPeriods) MeterBuckets(ctx context.Context, tenantID, meterID stri
 	if err != nil {
 		return usage.MeterBuckets{}, err
 	}
+	return r.race(m), nil
+}
+
+func (r *racingPeriods) MeterBucketsTx(ctx context.Context, tx *sql.Tx, meterID string) (usage.MeterBuckets, error) {
+	m, err := pricing.NewPostgresStore(r.f.db).GetMeterTx(ctx, tx, meterID)
+	if err != nil {
+		return usage.MeterBuckets{}, err
+	}
+	return r.race(m), nil
+}
+
+// race starts the PATCH the first time a meter is read and answers m's
+// buckets.
+func (r *racingPeriods) race(m domain.Meter) usage.MeterBuckets {
 	r.once.Do(func() {
 		go func() {
 			r.patchErr = r.f.patch(r.to)
@@ -301,7 +315,7 @@ func (r *racingPeriods) MeterBuckets(ctx context.Context, tenantID, meterID stri
 		case <-time.After(500 * time.Millisecond):
 		}
 	})
-	return usage.BucketsOf(m), nil
+	return usage.BucketsOf(m)
 }
 
 // A release's counts follow the aggregation its events are counted under,
