@@ -499,9 +499,10 @@ an item added after the fire without its partial base (decision 5's
 
 **Decision.** A threshold counts and bills usage only. The base fee, in
 advance or in arrears, never rides the fire and never counts toward
-`amount_gte`; the period's own invoice bills it, prorated as with no fire:
-the full base at the close, the used days on an immediate cancel, per
-segment after a plan or item change. Lago's progressive billing also
+`amount_gte`; it is billed as with no fire. An in_arrears base: the full
+base at the close, the used days on an immediate cancel, per segment after
+a plan or item change. An in_advance base stays on the invoice that billed
+the period in advance. Lago's progressive billing also
 counts usage-based charges billed in arrears toward its threshold and
 invoices the period's usage (docs.getlago.com, read 2026-10-23). An
 in_advance base was already left out of both. Rejected: prorating the base

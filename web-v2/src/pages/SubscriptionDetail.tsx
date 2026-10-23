@@ -1891,7 +1891,7 @@ function EditBillingThresholdsDialog({ subscription, items, planById, onClose, o
         <DialogHeader>
           <DialogTitle>{existing ? 'Edit spend thresholds' : 'Set spend thresholds'}</DialogTitle>
           <DialogDescription>
-            When this period's usage total, or an item's usage, reaches a level you set, the usage so far is invoiced early at the next hourly billing run. The period keeps running: its own invoice bills the base fee and the rest of the usage at its normal end. Usage is not stopped. Set at least one level.
+            When this period's usage total, or an item's usage, reaches a level you set, the usage so far is invoiced early at the next hourly billing run. The period keeps running. The base fee is billed as it would be with no threshold, and the period's next invoice bills the rest of the usage. Usage is not stopped. Set at least one level.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-5">

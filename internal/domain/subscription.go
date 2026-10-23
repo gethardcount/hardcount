@@ -393,9 +393,9 @@ type SubscriptionItemThreshold struct {
 //
 // Either alone or both. First to fire wins.
 //
-// A fire always keeps the billing period: the threshold invoice bills the
-// period so far, and the period's own invoice bills the rest at its normal
-// end (Stripe's default). Starting a new period at the fire
+// A fire always keeps the billing period (Stripe's default): the threshold
+// invoice bills the period's usage so far, the period's next invoice bills
+// the rest of the usage, and the base fee is billed as with no threshold. Starting a new period at the fire
 // (reset_billing_cycle) was removed on 2026-10-23.
 type BillingThresholds struct {
 	AmountGTE      int64                       `json:"amount_gte,omitempty"`

@@ -280,10 +280,13 @@ them read before any writes:
 ## Amendment 2026-10-23: a threshold fire never moves the period
 
 `reset_billing_cycle` is removed ([ADR-066 amendment](066-threshold-money-semantics.md#amendment-2026-10-23-reset_billing_cycle-is-removed)).
-A subscription's period is now written by three things: the cycle close, an
-immediate cross-interval plan swap and a cancel. A threshold fire still runs
-the CAS, verify-only, as the first statement of its transaction (decision
-3), so it serializes against all three. The tests of the reset arm are
+A threshold fire no longer moves a subscription's period. What still
+changes the period, or the status the CAS proves with it: the cycle close
+(and its trial-active advance), an immediate cross-interval plan swap, a
+cancel, draft activation (`ActivateDraftWithBill`), ending a trial early
+(`endTrialEarlyInTx`) and extending a trial (`ExtendTrial`). A threshold
+fire still runs the CAS, verify-only, as the first statement of its
+transaction (decision 3), so it serializes against each of them. The tests of the reset arm are
 removed: `TestThresholdFire_vs_OperatorClose_CloseFirst_ResetTrue`,
 `TestThresholdFire_vs_Close_FireFirst_ResetTrue` and
 `TestThresholdFire_vs_Close_FireFirst_ResetTrue_CalendarStartOnly` (the

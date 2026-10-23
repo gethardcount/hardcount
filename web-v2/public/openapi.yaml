@@ -2373,9 +2373,9 @@ components:
       required: [item_thresholds]
       description: |
         Limits that make Velox invoice before the period ends. A threshold
-        invoice bills the period's usage so far; the period keeps its dates,
-        and the period's own invoice bills the base fee and the rest of the
-        usage at its normal end.
+        invoice bills the period's usage so far, and no base fee. The period
+        keeps its dates, the base fee is billed as it would be with no
+        threshold, and the period's next invoice bills the rest of the usage.
       properties:
         amount_gte:
           type: integer
@@ -8596,9 +8596,10 @@ paths:
         block usage. Set `amount_gte`, `item_thresholds`, or both. The
         first threshold reached triggers the invoice.
 
-        The threshold invoice bills the period's usage so far. The period
-        keeps its dates: the period's own invoice bills the base fee and the
-        rest of the usage at its normal end.
+        The threshold invoice bills the period's usage so far, and no base
+        fee. The period keeps its dates, the base fee is billed as it would
+        be with no threshold, and the period's next invoice bills the rest
+        of the usage.
         `reset_billing_cycle`, which started a new period at the threshold
         invoice, was removed; a body that sends it is refused with 422.
 

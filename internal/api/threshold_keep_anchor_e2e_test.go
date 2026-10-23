@@ -16,8 +16,9 @@ import (
 )
 
 // A spend threshold always keeps the billing period's anchor: the invoice it
-// fires bills the period so far, and the period's own invoice bills the rest
-// at the period's normal end. The option to start a new period at the fire
+// fires bills the period's usage so far, the period's next invoice bills the
+// rest of the usage, and the base fee is billed as with no threshold. The
+// option to start a new period at the fire
 // (`reset_billing_cycle: true`) is removed (2026-10-23).
 //
 // That option under-billed an in_advance base on an anniversary subscription
@@ -158,20 +159,32 @@ func TestThresholdInArrearsBase_FireThenCloseBillsTheBaseOnClose(t *testing.T) {
 // period open across the upgrade must still bill its base exactly once, by
 // the close or by an immediate cancel. The fixture adds the base line the old
 // code wrote to the threshold invoice.
+//
+// The late-usage runbook's void and write-off guidance covers that base like
+// the usage: written off, it stays billed on the threshold invoice and the
+// close does not bill it again; voided before the close, the close bills it.
 func TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce(t *testing.T) {
 	skipShort(t)
 	for _, tc := range []struct {
 		name  string
-		close func(r *lagRig, fireAt time.Time)
+		close func(r *lagRig, fireAt time.Time, thrID string)
 	}{
-		{"the April close", func(r *lagRig, _ time.Time) { r.run(lagB.Add(2 * time.Hour)) }},
-		{"an immediate cancel", func(r *lagRig, fireAt time.Time) { r.cancelNow(fireAt.Add(5 * 24 * time.Hour)) }},
+		{"the April close", func(r *lagRig, _ time.Time, _ string) { r.run(lagB.Add(2 * time.Hour)) }},
+		{"an immediate cancel", func(r *lagRig, fireAt time.Time, _ string) { r.cancelNow(fireAt.Add(5 * 24 * time.Hour)) }},
+		{"written off, then the April close", func(r *lagRig, fireAt time.Time, thrID string) {
+			r.invoiceAction(thrID, "mark-uncollectible", fireAt.Add(time.Hour))
+			r.run(lagB.Add(2 * time.Hour))
+		}},
+		{"voided, then the April close", func(r *lagRig, fireAt time.Time, thrID string) {
+			r.invoiceAction(thrID, "void", fireAt.Add(time.Hour))
+			r.run(lagB.Add(2 * time.Hour))
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, fireAt, thrID := keepAnchorFired(t)
 			r.exec(`INSERT INTO invoice_line_items (tenant_id, invoice_id, line_type, description, quantity, unit_amount_cents, amount_cents, total_amount_cents, currency)
 				SELECT tenant_id, id, 'base_fee', 'plan_p - base fee (qty 1)', 1, 3000, 3000, 3000, currency FROM invoices WHERE id = $1`, thrID)
-			tc.close(r, fireAt)
+			tc.close(r, fireAt, thrID)
 			invs := r.invoices()
 			var base int64
 			for _, i := range invs {

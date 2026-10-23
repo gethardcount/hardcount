@@ -44,7 +44,8 @@ full access ([Roadmap](roadmap.md#later)).
 | Billing thresholds | Set a spend or usage level, and Velox makes an invoice early once the period's usage reaches it. It bills earlier; it does not stop usage. | [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) |
 
 A threshold fires at most once per period, and the period keeps its dates.
-It counts and bills usage only: the period's own invoice bills the base fee.
+It counts and bills usage only. The base fee is billed as it would be with
+no threshold.
 It is checked on each scheduled billing run: every hour, or every 5 minutes
 with `APP_ENV=local`. `POST /v1/billing/run` does not check it. The
 period's own invoice does not bill again what the threshold invoice billed,

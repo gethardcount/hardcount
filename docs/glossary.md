@@ -111,7 +111,8 @@ Words used in the Velox docs and dashboard. For the big picture, read
   early. It is either a money amount (`amount_gte`) checked against the
   period's usage so far, or a usage count on one item (`usage_gte`).
   Crossing it issues an invoice with `billing_reason` "threshold" for that
-  usage. The period keeps its dates, and its own invoice bills the base fee.
+  usage, and no base fee. The period keeps its dates, and the base fee is
+  billed as it would be with no threshold.
   Usage is never blocked.
   [More](features.md#subscriptions-and-invoices)
 - **invoice states (draft, finalized, paid, void, uncollectible)**: Where
