@@ -61,7 +61,7 @@ Links to other projects are pinned to the commit that was read.
 - Licence: [`LICENSE`](../LICENSE). Services: [`deploy/compose/docker-compose.yml`](../deploy/compose/docker-compose.yml).
 - Pricing by dimension: [AI pricing](ai-pricing.md#how-velox-picks-the-price-for-an-event). Prepaid commits: [ADR-078](adr/078-prepaid-commits-phase-1.md).
 - Webhooks: [`webhooks.md`](webhooks.md). Throughput: [`benchmarks/sustained-throughput.md`](benchmarks/sustained-throughput.md).
-- Invoice preview: [The Velox API](api-surface.md#invoices-and-billing). Card-only checkout: [`internal/payment/checkout.go`](../internal/payment/checkout.go).
+- Invoice preview: [The Velox API](api-surface.md#invoices-and-billing). Card-only checkout: [`internal/paymentmethods/stripe_adapter.go`](../internal/paymentmethods/stripe_adapter.go).
 - Tenant isolation, and what runs outside row-level security: [Architecture](architecture.md#design-rules).
 
 **Lago**
