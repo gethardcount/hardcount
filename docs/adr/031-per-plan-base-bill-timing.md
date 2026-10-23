@@ -23,6 +23,8 @@ This is the gap the bundle closes. Without it, the very first DP demo collapses 
 | Orb | per-price (`fixed_fee_quantity_schedule` + `cadence`) | per-price | yes |
 | Velox today | n/a — single arrears engine | always in_arrears | no — every line is end-of-period |
 
+**Correction (2026-10-23):** Lago's `pay_in_advance` flag is on the plan (for the base fee) and on each charge, not on subscriptions. Checked in lago-api `2e52dfc` (2026-10-22): `app/models/plan.rb:60`, and the `plans` and `charges` tables in `db/structure.sql`.
+
 Stripe / Lago / Orb all converge on the same shape: **recurring is the variable; usage is structurally arrears.** You can't bill in_advance for usage that hasn't happened yet — the quantity is unknown. This isn't a configuration choice, it's a physical constraint.
 
 So bill_timing only meaningfully applies to the **recurring fee**. That's the entire decision surface.

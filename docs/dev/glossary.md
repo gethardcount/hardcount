@@ -13,8 +13,10 @@ them to use Velox.
   [More](../adr/003-postgresql-rls-multi-tenancy.md)
 - **TxTenant and TxBypass**: The two ways to open a database transaction
   with `db.BeginTx`. TxTenant sets the tenant (and test or live mode), so
-  RLS shows only that tenant's rows. TxBypass turns RLS off for work across
-  tenants, such as the billing scheduler.
+  RLS shows only that tenant's rows. TxBypass turns RLS off, so the query
+  must filter by tenant itself. Background jobs, sign-in, public links,
+  incoming webhooks and two signed-in areas use it
+  ([list](../architecture.md#design-rules)).
   [More](../adr/003-postgresql-rls-multi-tenancy.md#decision)
 - **Table and column names behind the words above**:
   - dimensions: the `properties` column of a usage event.

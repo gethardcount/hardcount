@@ -41,6 +41,15 @@ What other billing engines do (read 2026-10-17):
 - **Lago** creates no dunning campaign by itself. Campaigns are created and
   assigned by hand.
 
+**Correction (2026-10-23):** both rows are true but incomplete. Kill Bill's
+code default is `8,8,8`, but the `killbill-server.properties` in its repo
+sets `1,1,1`. Lago's automatic dunning also needs a premium licence and the
+`auto_dunning` flag. Checked in Kill Bill `3548b02`
+(`util/src/main/java/org/killbill/billing/util/config/definition/PaymentConfig.java:31-32`,
+`profiles/killbill/src/main/resources/killbill-server.properties:91`) and
+lago-api `2e52dfc` (`app/models/organization.rb:152`,
+`app/services/dunning_campaigns/bulk_process_service.rb:8`), both 2026-10-22.
+
 Two of three retry without being asked, and none of them takes a
 subscription or write-off action the account did not choose.
 

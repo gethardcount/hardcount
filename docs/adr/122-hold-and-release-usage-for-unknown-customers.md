@@ -60,6 +60,15 @@ None of them silently drops the event while telling the sender it was
 delivered. None moves late usage onto a later invoice; Lago and Kong attribute
 only inside the subscription's own time window.
 
+**Correction (2026-10-23):** two facts are missing above. Flexprice can also
+create the customer, and then a subscription and a wallet, from the usage
+event itself, through a Temporal workflow, if the tenant turns on its
+customer-onboarding setting. And Kill Bill, which is not in the list above,
+does move late usage onto a later invoice (see
+[ADR-120](120-invoice-grace-period-for-late-usage.md)). Checked in Flexprice
+`1c23b81` (2026-10-22): `internal/ee/service/meter_usage_tracking_post_insert.go:200-244`,
+`internal/temporal/models/workflow.go:28-32`.
+
 One fact shapes the value of a release. In Velox a subscription cannot start
 in the past (`subscription.CreateInput` has only `StartNow`), and an invoice
 adds up only the usage inside its own period. So rows that arrived before the

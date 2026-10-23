@@ -174,6 +174,13 @@ $36. Stripe, OpenMeter (#4298 fixed the same bug), Lago and Kill Bill all keep
 one ladder across a mid-period threshold invoice. Cycle resets
 (`reset=true`) still restart tiers, as they restart the cycle.
 
+**Correction (2026-10-23):** drop Kill Bill from that list: its core has no
+threshold billing (no match for "threshold" in the non-test `invoice/` or
+`usage/` code). OpenMeter's open-source collector turns progressive billing
+off, so for OpenMeter this holds only when a mid-period invoice is
+requested. Checked in Kill Bill `3548b02` and OpenMeter `f04b561f`
+(`openmeter/billing/worker/collect/collect.go:89-99`), both 2026-10-22.
+
 **Decision: marginal pricing per additive bucket, seeded from the fire.**
 The closers (cycle close and immediate cancel, multi-dim and single-rule)
 keep one ladder per bucket. The seed is the quantity on the fire's usage

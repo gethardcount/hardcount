@@ -58,9 +58,12 @@ project is ahead, [How Velox compares](comparison.md) says so.
 
 7. **You can't see which customers lose you money.** AI costs move with
    usage, so a customer can cost you more than they pay.
-   **Velox instead:** margin per customer. Velox records what each request
-   cost you, from your provider price table or LiteLLM's reported cost,
-   next to what you billed ([how](ai-pricing.md#see-your-margin)).
+   **Velox instead:** margin per customer. Velox records what each usage
+   event cost you when it arrives, from your provider price table or
+   LiteLLM's reported cost. It sets that against the price of the same
+   usage ([how](ai-pricing.md#see-your-margin)). Other engines report cost
+   too: OpenMeter keeps an LLM price table with cost per feature, and
+   Flexprice's cost sheets report margin (checked 2026-10-23).
 
 8. **Every bill gets questioned, and the answer is the raw events.** One
    engineer who has built usage billing put it this way

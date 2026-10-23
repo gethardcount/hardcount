@@ -85,6 +85,11 @@ References walked: Stripe Smart Retries (8 attempts, ~3 weeks),
 Recurly's tax cron (5min → 30min → 1h → 6h → 24h, max ~10),
 Chargebee (transient-only), Lago (no automatic retry).
 
+**Correction (2026-10-23):** Lago does retry automatically, but only when
+the tax error says "API limit". A clock job retries those failed invoices.
+Checked in lago-api `2e52dfc` (2026-10-22):
+`app/jobs/clock/retry_failed_invoices_job.rb:7-13`.
+
 **Cap.** After the 8th attempt the row is no longer fetched
 (`tax_retry_count < maxAttempts` filter). It stays at its last
 `tax_error_code` so the operator-facing attention surface remains

@@ -55,6 +55,13 @@ What other billing products do (all quoted from their docs):
 | [Chargebee](https://apidocs.chargebee.com/docs/api/usages.md) | the invoice is `pending` until it closes | "If `usage_date` corresponds to a time already invoiced, then it is stored but never invoiced unless the invoice is regenerated." |
 | [Lago](https://knowledge.getlago.com/articles/1455954942-what-happens-to-usage-events-sent-after-the-grace-period-ends) | a [grace period](https://getlago.com/docs/guide/invoicing/invoicing-settings/grace-period.md) in days, invoices stay draft | "Late events are still accepted by the API, but they won't appear on any invoice, past or future." (knowledge-base article, which calls itself not officially supported documentation) |
 
+**Correction (2026-10-23):** Lago's grace period needs a premium licence at
+every level (organization, billing entity and customer). The free edition
+uses 0 days, so it finalizes the invoice when the period closes. Checked in
+lago-api `2e52dfc` (2026-10-22): `app/services/organizations/update_service.rb:59-61`,
+`app/services/customers/update_invoice_issuing_date_settings_service.rb:56-62`,
+`app/models/customer.rb:239-243`.
+
 Kill Bill is the exception: it re-reads the past two periods and bills the
 difference on a later invoice
 ([docs](https://docs.killbill.io/latest/userguide_subscription.html)).

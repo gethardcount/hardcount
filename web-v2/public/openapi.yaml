@@ -33,7 +33,7 @@ tags:
   - name: CreditNotes
     description: Credit notes against issued invoices.
   - name: Credits
-    description: Prepaid customer credit, kept as an append-only ledger.
+    description: Prepaid customer credit, kept as a ledger of grant, usage, expiry and adjustment entries.
   - name: Billing
     description: Billing runs, previews and analytics.
   - name: Dunning

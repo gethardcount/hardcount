@@ -56,6 +56,11 @@ Two structural problems surfaced during the 2026-05 dogfood pass:
    rule-match). Velox's partial-field override is a one-off shape with
    no precedent.
 
+   **Correction (2026-10-23):** Lago's campaigns run automatically only with
+   a premium licence and the `auto_dunning` flag. Checked in lago-api
+   `2e52dfc` (2026-10-22): `app/services/dunning_campaigns/bulk_process_service.rb:8`,
+   `app/models/organization.rb:152`.
+
 Sources:
 - [Stripe — Smart Retries](https://docs.stripe.com/billing/revenue-recovery/smart-retries)
 - [Lago — Automatic dunning](https://doc.getlago.com/guide/dunning/automatic-dunning)
@@ -219,6 +224,8 @@ Sources:
 - [Lago — automatic-termination feature](https://getlago.canny.io/feature-requests/p/trigger-automatic-subscription-termination-based-on-dunning-campaigns)
 - [Orb — advanced dunning](https://docs.withorb.com/invoicing/advanced-dunning) (no state-change actions documented)
 - [Recurly — dunning management](https://docs.recurly.com/recurly-subscriptions/docs/dunning-management)
+
+**Correction (2026-10-23):** Lago's "Cancel subscription ✓ (terminate)" cell is wrong; it should read ✗ (requested, not built). The source above is a feature request. A Lago dunning campaign has thresholds, `bcc_emails`, `days_between_attempts` and `max_attempts`, and no final action. Automatic dunning also needs a premium licence. Checked in lago-api `2e52dfc` (2026-10-22): `app/models/dunning_campaign.rb:59-69`, `app/services/dunning_campaigns/process_attempt_service.rb:17-33`, `app/services/dunning_campaigns/bulk_process_service.rb:8`.
 
 ### Decision
 

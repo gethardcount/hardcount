@@ -11,7 +11,7 @@ Accepted
 
 ## Summary
 
-All tenants share one PostgreSQL database and the same tables, and Row-Level Security (RLS) keeps each tenant's rows apart. Each tenant table has a `tenant_id` column and a `tenant_isolation` policy that shows a row only when it matches the transaction's `app.tenant_id`, or when `app.bypass_rls` is `on`. `postgres.BeginTx` sets these per transaction: `TxTenant` for tenant work, `TxBypass` for cross-tenant background jobs. The app connects as a role that is neither a superuser nor `BYPASSRLS`, and with `APP_ENV` set to anything but `local` Velox refuses to start otherwise ([Postgres requirements](../ops/postgres-requirements.md)). Status: active.
+All tenants share one PostgreSQL database and the same tables, and Row-Level Security (RLS) keeps each tenant's rows apart. Each tenant table has a `tenant_id` column and a `tenant_isolation` policy that shows a row only when it matches the transaction's `app.tenant_id`, or when `app.bypass_rls` is `on`. `postgres.BeginTx` sets these per transaction. `TxTenant` is for most tenant work. `TxBypass` is for work whose query filters by tenant itself: background jobs, sign-in, public links, incoming webhooks, and two signed-in areas, Stripe credential settings and team members ([list](../architecture.md#design-rules), pinned by `internal/arch/txbypass_allowlist_test.go`). The app connects as a role that is neither a superuser nor `BYPASSRLS`, and with `APP_ENV` set to anything but `local` Velox refuses to start otherwise ([Postgres requirements](../ops/postgres-requirements.md)). Status: active.
 
 ## Context
 Velox is multi-tenant: multiple organizations share the same deployment, each seeing only their own data. The three standard approaches are: (1) database-per-tenant, (2) schema-per-tenant, (3) shared tables with row-level isolation.
@@ -29,6 +29,8 @@ CREATE POLICY tenant_isolation ON invoices
 Every transaction sets the tenant context via `set_config('app.tenant_id', $1, true)` in `postgres.BeginTx()`. The `TxTenant` mode sets `app.bypass_rls = off` and configures the tenant ID. A separate `TxBypass` mode (for cross-tenant operations like the billing scheduler) sets `app.bypass_rls = on`.
 
 The application database user has RLS enforced; only the migration user can bypass policies. This means even a SQL injection vulnerability cannot cross tenant boundaries.
+
+**Correction (2026-10-23):** the last sentence is wrong. Every `tenant_isolation` policy shows all rows when `app.bypass_rls` is `on` (`internal/platform/migrate/baseline/00180_baseline.sql`, for example the `api_keys` policy), and the app role can set that setting. So an injected statement could set it and read every tenant's rows. RLS contains application bugs, such as a missing `tenant_id` filter; parameterized queries are the defense against SQL injection ([design review 2026-07-10](../dev/records/design-review-2026-07-10.md), item 4).
 
 ## Consequences
 

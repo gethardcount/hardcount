@@ -51,6 +51,10 @@ account/org (sometimes customer) concept, for display and civil-day boundaries.
   optional **per-customer** override. Changing it re-anchors and specifically
   needs double-bill guards — evidence that a *mutable* billing zone is the hard
   case, which UTC-default + rare-change avoids.
+  **Correction (2026-10-23):** setting any Lago timezone needs a premium
+  licence, so free Lago bills in UTC. Checked in lago-api `2e52dfc`
+  (2026-10-22): `app/services/organizations/update_service.rb:88-93`,
+  `app/services/customers/create_service.rb:160-164`.
 - **Orb** — timezone is an **account/customer** attribute (default UTC),
   immutable after creation. Per-customer, not per-subscription.
 - **Metronome** — no timezone concept surfaced; usage and billing are UTC.

@@ -1,7 +1,8 @@
 # Data leak between tenants suspected
 
-Each tenant (one account's data) shares the database with others. Postgres
-Row-Level Security (RLS) hides every tenant's rows from every other tenant.
+Each tenant (one account's data) shares the database with others. On most
+work, Postgres Row-Level Security (RLS) hides every tenant's rows from every
+other tenant. Some work skips RLS and filters by tenant in its own query.
 Back to the [runbook index](index.md).
 
 **This is a SEV-1.** Follow [Escalation](escalation.md) alongside this page.
@@ -14,15 +15,16 @@ Back to the [runbook index](index.md).
 
 ## Why
 
-Every database transaction for a tenant sets `app.tenant_id`, and RLS
-shows it only that tenant's rows. A leak means one of these failed:
+A transaction opened for one tenant (`postgres.TxTenant`) sets
+`app.tenant_id`, and RLS shows it only that tenant's rows. A leak means one of these failed:
 
 - A table holding tenant data has RLS turned off.
 - A query ran with the wrong `app.tenant_id`.
-- A query ran with `app.bypass_rls` on, which skips RLS. That mode is
-  meant only for work that must look across tenants, such as the billing
-  scheduler or finding which tenant an API key belongs to. The code then
-  has to filter by tenant itself.
+- A query ran with `app.bypass_rls` on (`postgres.TxBypass`), which skips
+  RLS, and its own tenant filter was wrong or missing. Background jobs and
+  sign-in use this mode. So do two areas a signed-in user works in for one
+  tenant: Stripe credential settings and team members and invites. Check
+  every area on the [full list](../../architecture.md#design-rules).
 
 ## Check
 

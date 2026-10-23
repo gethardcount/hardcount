@@ -48,6 +48,14 @@ PaymentIntents can report on one invoice:
 - **Lago: one PaymentIntent per payment record**, the same model as Velox:
   `::Stripe::PaymentIntent.create(payload, { …, idempotency_key: "payment-#{payment.id}" })`
   ([lago-api create_service.rb](https://github.com/getlago/lago-api/blob/main/app/services/payment_providers/stripe/payments/create_service.rb)).
+  **Correction (2026-10-23):** the shape matches, but Lago treats an unclear
+  result as failed and retries under a new key. On a Stripe server error
+  Lago marks the payment failed with no PaymentIntent id. The next attempt
+  creates a new payment record, so its key (`payment-<new id>`) is new, and
+  a double charge is possible. Velox marks such a charge `unknown` and asks
+  Stripe. Checked in lago-api `2e52dfc` (2026-10-22):
+  `app/services/payment_providers/stripe/payments/create_service.rb:37-56,122-131,258-272`,
+  `app/services/invoices/payments/create_service.rb:38-48`.
 - **Kill Bill: per payment transaction.** The Stripe plugin keeps each
   transaction's outcome separately, with the Kill Bill transaction id in the
   PaymentIntent's metadata. Verified in the 2026-10-11 peer check.
