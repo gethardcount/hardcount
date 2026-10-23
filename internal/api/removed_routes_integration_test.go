@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -142,4 +144,86 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestKeptEventDeliveries_AnswersTheCHANGELOGNames pins the two answers of
+// GET /v1/webhook_events/{id}/deliveries that the removed
+// GET /v1/webhook-endpoints/events/{id}/deliveries did not give, which the
+// CHANGELOG's Removed entry names. The removed route listed deliveries for
+// the id as given, with no event lookup:
+//   - an unknown id, or another tenant's, answered 200 with an empty list;
+//     the kept route answers 404;
+//   - a replay's id listed only that replay's deliveries; the kept route
+//     answers for the original event and every replay of it.
+func TestKeptEventDeliveries_AnswersTheCHANGELOGNames(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	defer ts.Close()
+
+	tenantID := testutil.CreateTestTenant(t, db, "Kept Deliveries Co")
+	key := createAPIKeyWithMode(t, db, tenantID, false)
+	otherTenantID := testutil.CreateTestTenant(t, db, "Kept Deliveries Other Co")
+
+	ctx := postgres.WithLivemode(context.Background(), false)
+	store := webhook.NewPostgresStore(db)
+	ep, err := store.CreateEndpoint(ctx, tenantID, domain.WebhookEndpoint{
+		URL: "https://example.test/hook", Events: []string{"*"}, Active: true, Secret: "whsec_test",
+	})
+	if err != nil {
+		t.Fatalf("create endpoint: %v", err)
+	}
+	root, err := store.CreateEvent(ctx, tenantID, domain.WebhookEvent{EventType: "customer.created", Payload: map[string]any{"customer_id": "vlx_cus_1"}})
+	if err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	rootDeliveries, err := store.CreateDeliveriesForEvent(ctx, tenantID, root.ID, []string{ep.ID}, time.Minute)
+	if err != nil {
+		t.Fatalf("create root delivery: %v", err)
+	}
+	clone, err := store.CreateReplayEvent(ctx, tenantID, root.ID)
+	if err != nil {
+		t.Fatalf("create replay: %v", err)
+	}
+	cloneDeliveries, err := store.CreateDeliveriesForEvent(ctx, tenantID, clone.ID, []string{ep.ID}, time.Minute)
+	if err != nil {
+		t.Fatalf("create replay delivery: %v", err)
+	}
+	otherEvent, err := store.CreateEvent(ctx, otherTenantID, domain.WebhookEvent{EventType: "customer.created", Payload: map[string]any{}})
+	if err != nil {
+		t.Fatalf("create other tenant's event: %v", err)
+	}
+
+	get := func(id string) flowResp {
+		t.Helper()
+		return flowDo(t, ts, "GET", "/v1/webhook_events/"+id+"/deliveries", flowReq{bearer: key})
+	}
+
+	for name, id := range map[string]string{
+		"unknown id":             "vlx_whe_doesnotexist",
+		"another tenant's event": otherEvent.ID,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := get(id)
+			if got.status != 404 || got.errCode() != "not_found" {
+				t.Errorf("GET deliveries for %s = %d %s, want 404 not_found", name, got.status, got.raw)
+			}
+		})
+	}
+
+	t.Run("a replay's id answers for the whole chain", func(t *testing.T) {
+		got := get(clone.ID).want(t, 200, "deliveries for a replay's id")
+		if rootID := flowStr(got.body, "root_event_id"); rootID != root.ID {
+			t.Errorf("root_event_id = %q, want the original event %q", rootID, root.ID)
+		}
+		rows, _ := got.body["deliveries"].([]any)
+		var ids []string
+		for _, r := range rows {
+			row, _ := r.(map[string]any)
+			ids = append(ids, flowStr(row, "id"))
+		}
+		want := []string{rootDeliveries[0].ID, cloneDeliveries[0].ID}
+		if !slices.Equal(ids, want) {
+			t.Errorf("delivery ids = %v, want the original's then the replay's %v", ids, want)
+		}
+	})
 }
