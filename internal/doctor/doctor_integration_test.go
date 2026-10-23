@@ -400,3 +400,56 @@ func TestDoctor_CreditCurrencyChecks(t *testing.T) {
 		}
 	}
 }
+
+// TestDoctor_ImportedInvoicesAreNotFlagged: the Stripe importer (removed
+// 2026-04-29) wrote invoices with a stripe_invoice_id and without the
+// components Velox computes, so their totals, due amounts and timestamps
+// do not follow Velox's rules. A database that ran it still holds them, and
+// the invoice checks must not report them.
+func TestDoctor_ImportedInvoicesAreNotFlagged(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	adminURL := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL"))
+	if adminURL == "" {
+		adminURL = "postgres://velox:velox@localhost:5432/velox_test?sslmode=disable"
+	}
+	admin, err := sql.Open("pgx", adminURL)
+	if err != nil {
+		t.Fatalf("open admin pool: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.Close() })
+
+	tenantID := testutil.CreateTestTenant(t, db, "Doctor Imported")
+	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO customers (id, tenant_id, external_id, display_name, email)
+		VALUES ('cus_doc_imp', $1, 'doc_imp', 'Imp', '')`, tenantID); err != nil {
+		t.Fatal(err)
+	}
+	// Total 4000 against a subtotal of 3000, paid with 4000 still due and
+	// no paid_at: each breaks an invoice check on a Velox-native row.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status,
+			currency, subtotal_cents, total_amount_cents, amount_due_cents, amount_paid_cents, credits_applied_cents,
+			billing_period_start, billing_period_end, stripe_invoice_id)
+		VALUES ('vlx_inv_doc_imp', $1, 'cus_doc_imp', 'IMP-1', 'paid', 'succeeded', 'USD', 3000, 4000, 4000, 4000, 0,
+			now() - interval '30 days', now(), 'in_doc_imp')`, tenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	res := doctor.Run(ctx, admin, doctor.Checks)
+	for _, e := range res.Errors {
+		t.Errorf("check failed to run: %v", e)
+	}
+	for _, v := range res.Violations {
+		if strings.Contains(v.RowID+v.Detail, "doc_imp") {
+			t.Errorf("%s flagged an imported invoice: %s (%s)", v.Check.Name, v.RowID, v.Detail)
+		}
+	}
+}
