@@ -20,8 +20,8 @@ import (
 // The rule is one function, classify, shared by ingest and the held-usage
 // release. Ingest reads the open periods BEFORE it writes the event, and
 // that order is what keeps the flag true. Every writer of a period start
-// (the cycle close, BillDueNow, a cross-interval swap, a threshold reset, a
-// test-clock advance) and the threshold fire's watermark invoice commit in
+// (the cycle close, BillDueNow, a cross-interval swap, a test-clock advance)
+// and the threshold fire's watermark invoice commit in
 // the transaction that froze that window, after reading its usage. So when
 // the read shows the window frozen, it was frozen before this event existed,
 // and nothing counted it. A close that commits between the read and the
@@ -83,8 +83,8 @@ type OpenPeriod struct {
 	ThresholdWatermark
 }
 
-// ThresholdWatermark is how far the threshold fires (with no reset) of a
-// subscription's current period billed its sum and count buckets. Read
+// ThresholdWatermark is how far the threshold fires of a subscription's
+// current period billed its sum and count buckets. Read
 // from the period's threshold invoices for every subscription, whether or
 // not it still has thresholds: the close keys the watermark on the
 // invoices, not on the setting.

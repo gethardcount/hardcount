@@ -863,7 +863,6 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 //
 //	{
 //	  "amount_gte": 50000,                    // optional, integer cents
-//	  "reset_billing_cycle": true,            // optional, defaults FALSE (Stripe keep-anchor; see BillingThresholdsInput)
 //	  "item_thresholds": [                    // optional, always-array
 //	    {"subscription_item_id": "si_xxx", "usage_gte": "1000"}
 //	  ]
@@ -871,7 +870,8 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 //
 // At least one of amount_gte or item_thresholds must be supplied. Returns
 // 422 on validation failure (terminal sub, unknown item id, negative
-// usage_gte, multi-currency item set, etc).
+// usage_gte, multi-currency item set, an unknown field such as the removed
+// reset_billing_cycle, etc). A fire always keeps the billing period.
 //
 // Replaces the full set on every call: the per-item rows for any item not
 // in the new slice are deleted by the store.

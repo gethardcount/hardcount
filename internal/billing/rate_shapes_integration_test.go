@@ -175,9 +175,8 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 			readAll()
 
 			if !tc.testClock {
-				noReset := false
 				if _, err := lf.subSvc.SetBillingThresholds(ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{
-					AmountGTE: 1, ResetBillingCycle: &noReset,
+					AmountGTE: 1,
 				}); err != nil {
 					t.Fatalf("set thresholds: %v", err)
 				}

@@ -236,9 +236,9 @@ func TestRunCycle_UnloadableTimezoneFailsClosed(t *testing.T) {
 
 // thresholdFixture crosses a $500 spend threshold mid-period: 1000 calls at
 // $1 plus the $49 base.
-func thresholdFixture(t *testing.T, reset bool, settings SettingsReader, taxCalcs *recordingTaxCalcs) (*Engine, *mockInvoices) {
+func thresholdFixture(t *testing.T, settings SettingsReader, taxCalcs *recordingTaxCalcs) (*Engine, *mockInvoices) {
 	t.Helper()
-	engine, _, invoices := setupThresholdEngine(&domain.BillingThresholds{AmountGTE: 50000, ResetBillingCycle: reset}, 1000)
+	engine, _, invoices := setupThresholdEngine(&domain.BillingThresholds{AmountGTE: 50000}, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	engine.settings = settings
 	if taxCalcs != nil {
@@ -248,24 +248,20 @@ func thresholdFixture(t *testing.T, reset bool, settings SettingsReader, taxCalc
 }
 
 func TestScanThresholds_EverySettingsReadFailsClosed(t *testing.T) {
-	for _, reset := range []bool{false, true} {
-		t.Run(map[bool]string{false: "continue_cycle", true: "reset_cycle"}[reset], func(t *testing.T) {
-			failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
-				engine, invoices := thresholdFixture(t, reset, s, taxCalcs)
-				_, errs := engine.ScanThresholds(context.Background(), 50)
-				if len(errs) > 0 {
-					return len(invoices.invoices), errs[0]
-				}
-				return len(invoices.invoices), nil
-			})
-		})
-	}
+	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
+		engine, invoices := thresholdFixture(t, s, taxCalcs)
+		_, errs := engine.ScanThresholds(context.Background(), 50)
+		if len(errs) > 0 {
+			return len(invoices.invoices), errs[0]
+		}
+		return len(invoices.invoices), nil
+	})
 }
 
 func TestScanThresholds_HonorsDueOnReceipt(t *testing.T) {
 	ts := defaultTermsSettings()
 	ts.NetPaymentTerms = 0
-	engine, invoices := thresholdFixture(t, false, &flakySettings{ts: ts}, nil)
+	engine, invoices := thresholdFixture(t, &flakySettings{ts: ts}, nil)
 
 	if fired, errs := engine.ScanThresholds(context.Background(), 50); fired != 1 || len(errs) > 0 {
 		t.Fatalf("ScanThresholds: fired=%d errs=%v, want one fire", fired, errs)

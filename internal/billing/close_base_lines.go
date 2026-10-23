@@ -27,8 +27,9 @@ type closeBaseLine struct {
 // segsByItem is windowSegments over the period; plans must already hold
 // every plan a segment references. terminalCycleClose skips the upcoming
 // in_advance base when a scheduled cancel fires at this boundary;
-// thresholdBilled skips the in_arrears base when a reset=false threshold
-// invoice already billed it this cycle.
+// thresholdBilled skips the in_arrears base when this cycle's threshold
+// invoice carries one (thresholdWatermark.billedBase): only a fire made before
+// fires stopped billing the base.
 func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, terminalCycleClose, thresholdBilled bool) []closeBaseLine {
 	var out []closeBaseLine
 
@@ -152,16 +153,11 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 			continue
 		}
 
-		// in_arrears: emit per-segment lines — UNLESS a threshold invoice
-		// already billed this cycle's base. fireThreshold bills the FULL
-		// (unprorated) in_arrears base for every item on the sub at fire
-		// time, so re-emitting any segment here double-bills it. Known
-		// imprecision: an item added AFTER the fire wasn't on the
-		// threshold invoice and is under-billed by its partial-period
-		// base — accepted; the alternative (segment-level reconciliation
-		// against the threshold invoice's lines) over-bills in the
-		// mirrored cases, and under-billing is the safer failure for a
-		// rare same-cycle combo.
+		// in_arrears: emit per-segment lines, prorated as with no fire — a
+		// threshold fire bills usage only. The one exception is a fire made
+		// before that change: it billed the FULL in_arrears base for every
+		// item on the sub at fire time, so re-emitting any segment here would
+		// double-bill it.
 		if thresholdBilled {
 			continue
 		}
@@ -191,8 +187,8 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 	// in_arrears only — in_advance items removed mid-period already
 	// paid upfront for the period; refund flows through the cancel-
 	// proration / removed-item credit path (not this loop).
-	// Skipped when a threshold invoice billed this cycle — same
-	// double-bill guard as Pass 1 (an item removed after the fire had
+	// Skipped when this cycle's threshold invoice carries a base — same
+	// double-bill guard as Pass 1 (an item removed after such a fire had
 	// its full base on the threshold invoice).
 	for itemID, segments := range segsByItem {
 		if thresholdBilled {

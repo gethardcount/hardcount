@@ -400,7 +400,6 @@ export const api = {
   // decimal-string per ADR-005 to round-trip fractional meter quantities.
   setSubscriptionBillingThresholds: (id: string, body: {
     amount_gte?: number
-    reset_billing_cycle?: boolean
     item_thresholds?: { subscription_item_id: string; usage_gte: string }[]
   }) =>
     apiRequest<Subscription>('PUT', `/subscriptions/${id}/billing-thresholds`, body),
@@ -711,7 +710,6 @@ export interface SubscriptionItemThreshold {
 // multi-currency subs reject amount_gte at PUT time.
 export interface BillingThresholds {
   amount_gte?: number
-  reset_billing_cycle: boolean
   item_thresholds: SubscriptionItemThreshold[]
 }
 

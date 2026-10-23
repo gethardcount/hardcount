@@ -6949,6 +6949,13 @@ export const getSetSubscriptionBillingThresholdsUrl = (id: string,) => {
  * block usage. Set `amount_gte`, `item_thresholds`, or both. The
  * first threshold reached triggers the invoice.
  *
+ * The threshold invoice bills the period's usage so far, and no base
+ * fee. The period keeps its dates, the base fee is billed as it would
+ * be with no threshold, and the period's next invoice bills the rest
+ * of the usage.
+ * `reset_billing_cycle`, which started a new period at the threshold
+ * invoice, was removed; a body that sends it is refused with 422.
+ *
  * Each call replaces the whole configuration. Item thresholds left
  * out of the body are removed.
  * @summary Set billing thresholds
@@ -8929,12 +8936,11 @@ export const getVoidInvoiceUrl = (id: string,) => {
  * it) and resolves any active dunning run with `invoice_voided`.
  * Fires the `invoice.voided` webhook event.
  *
- * A spend-threshold invoice (`billing_reason = threshold`) that fired
- * with `reset_billing_cycle: false` and is voided before its period's
- * invoice is built gives its charges back: that invoice bills them
- * too. Voided after that, or
- * fired with `reset_billing_cycle: true`, its charges are billed on no
- * invoice; bill them with a one-off invoice if they should be charged.
+ * A spend-threshold invoice (`billing_reason = threshold`) that is
+ * voided before its period's invoice is built gives its charges back:
+ * that invoice bills them too. Voided after that, its charges are
+ * billed on no invoice; bill them with a one-off invoice if they
+ * should be charged.
  *
  * A paid invoice cannot be voided: issue a credit note instead.
  * @summary Void an invoice

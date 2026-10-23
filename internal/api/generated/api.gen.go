@@ -6060,7 +6060,10 @@ type Subscription struct {
 	// Never set on a subscription attached to a test clock.
 	BillingFailure BillingFailure `json:"billing_failure,omitempty"`
 
-	// BillingThresholds Limits that make Velox invoice before the period ends.
+	// BillingThresholds Limits that make Velox invoice before the period ends. A threshold
+	// invoice bills the period's usage so far, and no base fee. The period
+	// keeps its dates, the base fee is billed as it would be with no
+	// threshold, and the period's next invoice bills the rest of the usage.
 	BillingThresholds SubscriptionBillingThresholds `json:"billing_thresholds,omitempty"`
 	BillingTime       SubscriptionBillingTime       `json:"billing_time"`
 
@@ -6110,14 +6113,14 @@ type SubscriptionBillingTime string
 // SubscriptionStatus defines model for Subscription.Status.
 type SubscriptionStatus string
 
-// SubscriptionBillingThresholds Limits that make Velox invoice before the period ends.
+// SubscriptionBillingThresholds Limits that make Velox invoice before the period ends. A threshold
+// invoice bills the period's usage so far, and no base fee. The period
+// keeps its dates, the base fee is billed as it would be with no
+// threshold, and the period's next invoice bills the rest of the usage.
 type SubscriptionBillingThresholds struct {
-	// AmountGte Running-subtotal threshold in cents. Absent when not set.
+	// AmountGte Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
 	AmountGte      int64                       `json:"amount_gte,omitempty"`
 	ItemThresholds []SubscriptionItemThreshold `json:"item_thresholds"`
-
-	// ResetBillingCycle Whether a threshold invoice starts a new billing period.
-	ResetBillingCycle bool `json:"reset_billing_cycle"`
 }
 
 // SubscriptionItem One priced line of a subscription. It pairs a plan with a quantity.
@@ -6577,10 +6580,9 @@ type UsageEvent struct {
 	// subscription that prices this meter already invoiced the
 	// event's time, so the event is stored but billed on no invoice,
 	// now or later. Bill it with a one-off invoice if it should be
-	// charged. A spend-threshold invoice that fired with
-	// `reset_billing_cycle: false` counts only once it is paid: until
-	// then it can be voided, and then the period's invoice bills the
-	// event. Absent otherwise, which is not a promise that the event
+	// charged. A spend-threshold invoice counts only once it is
+	// paid: until then it can be voided, and then the period's
+	// invoice bills the event. Absent otherwise, which is not a promise that the event
 	// will be billed. Never sent on a replay or a read.
 	BillingStatus UsageEventBillingStatus `json:"billing_status,omitempty"`
 	CustomerId    string                  `json:"customer_id"`
@@ -6616,10 +6618,9 @@ type UsageEvent struct {
 // subscription that prices this meter already invoiced the
 // event's time, so the event is stored but billed on no invoice,
 // now or later. Bill it with a one-off invoice if it should be
-// charged. A spend-threshold invoice that fired with
-// `reset_billing_cycle: false` counts only once it is paid: until
-// then it can be voided, and then the period's invoice bills the
-// event. Absent otherwise, which is not a promise that the event
+// charged. A spend-threshold invoice counts only once it is
+// paid: until then it can be voided, and then the period's
+// invoice bills the event. Absent otherwise, which is not a promise that the event
 // will be billed. Never sent on a replay or a read.
 type UsageEventBillingStatus string
 
@@ -8272,7 +8273,7 @@ type PostV1SubscriptionsIdActivateParams struct {
 
 // SetSubscriptionBillingThresholdsJSONBody defines parameters for SetSubscriptionBillingThresholds.
 type SetSubscriptionBillingThresholdsJSONBody struct {
-	// AmountGte Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
+	// AmountGte Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
 	AmountGte      int64 `json:"amount_gte,omitempty"`
 	ItemThresholds []struct {
 		// SubscriptionItemId An item of this subscription. Each item can appear once.
@@ -8281,11 +8282,6 @@ type SetSubscriptionBillingThresholdsJSONBody struct {
 		// UsageGte Invoice early when the item's usage in the period reaches this quantity. A decimal string, 0 or more (e.g. "1000" or "3.14").
 		UsageGte string `json:"usage_gte"`
 	} `json:"item_thresholds,omitempty"`
-
-	// ResetBillingCycle `true` starts a new billing period when a threshold
-	// invoice is issued. `false` keeps the period; the rest of
-	// the period's usage is billed at its normal end.
-	ResetBillingCycle bool `json:"reset_billing_cycle,omitempty"`
 }
 
 // SetSubscriptionBillingThresholdsParams defines parameters for SetSubscriptionBillingThresholds.

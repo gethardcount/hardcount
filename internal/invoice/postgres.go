@@ -4171,9 +4171,12 @@ func (s *PostgresStore) ThresholdWatermarks(ctx context.Context, tenantID, subsc
 // invoice for the cycle window [periodStart, periodEnd) that still bills its
 // window (thresholdBillsWindow: not voided; a written-off one counts). It is
 // the "billed through" watermark of every closer: usage before its
-// billing_period_end (and the in_arrears base fee) landed on it, so the
-// closer bills only the residual window; without it a
-// reset_billing_cycle=false fire would be billed twice. Window-scoped by
+// billing_period_end landed on it, so the closer bills only the residual
+// window; without it a threshold fire's window would be billed twice. A fire
+// bills no base fee, so the invoice existing says nothing about the base:
+// only one made before that change carries a base line, and the closers skip
+// the base on that line alone (billing.thresholdWatermark.billedBase).
+// Window-scoped by
 // billing_period_start so the watermark generalizes to several fires per
 // cycle. errs.ErrNotFound when the cycle has no such invoice.
 func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) (domain.Invoice, error) {

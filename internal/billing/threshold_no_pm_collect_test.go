@@ -38,7 +38,7 @@ func thresholdNoPMFixture() (*Engine, *mockInvoices, *recordingCharger, *fakeNoP
 		CurrentBillingPeriodStart: &periodStart,
 		CurrentBillingPeriodEnd:   &periodEnd,
 		NextBillingAt:             &nextBilling,
-		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000, ResetBillingCycle: true},
+		BillingThresholds:         &domain.BillingThresholds{AmountGTE: 100000},
 	}
 	base := &mockSubs{subs: map[string]domain.Subscription{"sub_1": sub}, cycleUpdated: make(map[string]bool)}
 	subs := &thresholdMockSubs{mockSubs: base, candidates: []domain.Subscription{sub}}

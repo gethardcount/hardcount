@@ -54,10 +54,10 @@ func SnapshotOf(sub domain.Subscription) PeriodSnapshot {
 }
 
 // ErrWatermarkMoved: the row's period or status no longer matches the
-// caller's PeriodSnapshot — another closer (a cycle close, a threshold reset,
+// caller's PeriodSnapshot — another closer (a cycle close, a threshold fire,
 // a plan swap, a cancel) committed first. Everything derived from that
 // snapshot is stale; the caller wrote nothing, rolls back and re-reads.
-// A backward move is legal (a swap or a reset truncates a period); a STALE
+// A backward move is legal (a swap truncates a period); a STALE
 // move is not — the snapshot, not monotonicity, is the guard (ADR-115).
 var ErrWatermarkMoved = errors.New("subscription: billing period moved under the caller's snapshot")
 
@@ -113,7 +113,7 @@ type Store interface {
 	// the subscription and proves `expected` (status, period start, watermark)
 	// in the same statement, then re-stamps the period boundaries,
 	// next_billing_at and the billing anchor day. Every closer — cycle close,
-	// threshold fire (reset or verify-only), plan swap — runs it as the FIRST
+	// threshold fire (verify-only), plan swap — runs it as the FIRST
 	// statement of its tx, so nothing derived from a stale snapshot can commit.
 	// 0 rows → ErrWatermarkMoved (ErrNotFound if the row is gone).
 	ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
@@ -203,8 +203,8 @@ type Store interface {
 	// pause used to each fire the event (HA-readiness hazard 5).
 	ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
-	// SetBillingThresholds writes the (amount_gte, reset_cycle, item_thresholds)
-	// triple onto the row in one transaction. Replaces the full item_thresholds
+	// SetBillingThresholds writes the (amount_gte, item_thresholds) pair onto
+	// the row in one transaction. Replaces the full item_thresholds
 	// set — the per-item rows for any item not in the new slice are deleted.
 	// Rejects a canceled row since a threshold on a terminated sub
 	// has no meaning. The service layer is responsible for validating that

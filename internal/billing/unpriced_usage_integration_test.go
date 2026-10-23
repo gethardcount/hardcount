@@ -108,9 +108,9 @@ func seedUnpricedSub(t *testing.T, ctx context.Context, f *thresholdFixture, ext
 		INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
-			billing_threshold_amount_gte, billing_threshold_reset_cycle,
+			billing_threshold_amount_gte,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $3, $4, 'active', 'anniversary', $5, $6, $6, $7, FALSE, $8, $8)
+		) VALUES ($1, $2, $3, $3, $4, 'active', 'anniversary', $5, $6, $6, $7, $8, $8)
 	`, subID, f.tenantID, "code-"+ext, cust.ID, f.cycleStart, f.cycleEnd, gte, now); err != nil {
 		t.Fatalf("insert sub: %v", err)
 	}

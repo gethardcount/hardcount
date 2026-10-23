@@ -521,10 +521,9 @@ components:
             subscription that prices this meter already invoiced the
             event's time, so the event is stored but billed on no invoice,
             now or later. Bill it with a one-off invoice if it should be
-            charged. A spend-threshold invoice that fired with
-            `reset_billing_cycle: false` counts only once it is paid: until
-            then it can be voided, and then the period's invoice bills the
-            event. Absent otherwise, which is not a promise that the event
+            charged. A spend-threshold invoice counts only once it is
+            paid: until then it can be voided, and then the period's
+            invoice bills the event. Absent otherwise, which is not a promise that the event
             will be billed. Never sent on a replay or a read.
 
     DocumentBillTo:
@@ -2371,16 +2370,17 @@ components:
 
     SubscriptionBillingThresholds:
       type: object
-      required: [reset_billing_cycle, item_thresholds]
-      description: Limits that make Velox invoice before the period ends.
+      required: [item_thresholds]
+      description: |
+        Limits that make Velox invoice before the period ends. A threshold
+        invoice bills the period's usage so far, and no base fee. The period
+        keeps its dates, the base fee is billed as it would be with no
+        threshold, and the period's next invoice bills the rest of the usage.
       properties:
         amount_gte:
           type: integer
           format: int64
-          description: Running-subtotal threshold in cents. Absent when not set.
-        reset_billing_cycle:
-          type: boolean
-          description: Whether a threshold invoice starts a new billing period.
+          description: Usage threshold in cents, compared with the period's usage so far (the base fee is not counted). Absent when not set.
         item_thresholds:
           type: array
           items:
@@ -8596,6 +8596,13 @@ paths:
         block usage. Set `amount_gte`, `item_thresholds`, or both. The
         first threshold reached triggers the invoice.
 
+        The threshold invoice bills the period's usage so far, and no base
+        fee. The period keeps its dates, the base fee is billed as it would
+        be with no threshold, and the period's next invoice bills the rest
+        of the usage.
+        `reset_billing_cycle`, which started a new period at the threshold
+        invoice, was removed; a body that sends it is refused with 422.
+
         Each call replaces the whole configuration. Item thresholds left
         out of the body are removed.
       parameters:
@@ -8616,14 +8623,7 @@ paths:
                   type: integer
                   format: int64
                   minimum: 1
-                  description: Invoice early when the period's running subtotal reaches this amount, in cents of the subscription's currency.
-                reset_billing_cycle:
-                  type: boolean
-                  default: false
-                  description: |
-                    `true` starts a new billing period when a threshold
-                    invoice is issued. `false` keeps the period; the rest of
-                    the period's usage is billed at its normal end.
+                  description: Invoice early when the period's usage so far reaches this amount, in cents of the subscription's currency. The base fee is not counted.
                 item_thresholds:
                   type: array
                   items:
@@ -10033,12 +10033,11 @@ paths:
         it) and resolves any active dunning run with `invoice_voided`.
         Fires the `invoice.voided` webhook event.
 
-        A spend-threshold invoice (`billing_reason = threshold`) that fired
-        with `reset_billing_cycle: false` and is voided before its period's
-        invoice is built gives its charges back: that invoice bills them
-        too. Voided after that, or
-        fired with `reset_billing_cycle: true`, its charges are billed on no
-        invoice; bill them with a one-off invoice if they should be charged.
+        A spend-threshold invoice (`billing_reason = threshold`) that is
+        voided before its period's invoice is built gives its charges back:
+        that invoice bills them too. Voided after that, its charges are
+        billed on no invoice; bill them with a one-off invoice if they
+        should be charged.
 
         A paid invoice cannot be voided: issue a credit note instead.
       parameters:

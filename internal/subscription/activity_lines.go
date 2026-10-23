@@ -211,7 +211,7 @@ func describeUpdate(meta map[string]any, lb lineLabels) activity.Line {
 		// B9: the amount as money in the subscription's currency, never cents.
 		l.Kind, l.Title = kindThresholdsSet, "Spend thresholds set"
 		if amt, ok := metaInt(meta, "amount_gte"); ok && amt > 0 {
-			l.Detail = append(l.Detail, activity.Segment{activity.M(amt, metaString(meta, "currency")), activity.T(" total")})
+			l.Detail = append(l.Detail, activity.Segment{activity.M(amt, metaString(meta, "currency")), activity.T(" usage total")})
 		}
 		if n, ok := metaInt(meta, "item_threshold_count"); ok && n > 0 {
 			l.Detail = append(l.Detail, activity.Text(fmt.Sprintf("%d item threshold%s", n, plural(int(n)))))

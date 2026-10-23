@@ -252,9 +252,8 @@ func (lf *liveFixture) closeEveryPeriod(t *testing.T) int {
 // must fire exactly once. Returns the instant the fire billed through.
 func (lf *liveFixture) fire(t *testing.T, amountGTE int64) time.Time {
 	t.Helper()
-	noReset := false
 	if _, err := lf.subSvc.SetBillingThresholds(lf.ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{
-		AmountGTE: amountGTE, ResetBillingCycle: &noReset,
+		AmountGTE: amountGTE,
 	}); err != nil {
 		t.Fatalf("set thresholds: %v", err)
 	}

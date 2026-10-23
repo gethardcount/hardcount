@@ -278,7 +278,7 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 			return err
 		}, true},
 		{"SetBillingThresholds", parked(bfRow{nextBilling: due}, due), func(id string) error {
-			_, err := s.store.SetBillingThresholds(s.ctx, s.tenantID, id, domain.BillingThresholds{AmountGTE: 5000, ResetBillingCycle: true})
+			_, err := s.store.SetBillingThresholds(s.ctx, s.tenantID, id, domain.BillingThresholds{AmountGTE: 5000})
 			return err
 		}, true},
 		{"ClearBillingThresholds", parked(bfRow{nextBilling: due}, due), func(id string) error {

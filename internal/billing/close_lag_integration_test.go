@@ -122,9 +122,8 @@ func TestThresholdScan_DueMidPeriodCancel_DoesNotBillPastCancelAt(t *testing.T) 
 	if _, err := r.f.subSvc.ScheduleCancel(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.ScheduleCancelInput{CancelAt: &cancelAt}); err != nil {
 		t.Fatalf("schedule cancel: %v", err)
 	}
-	resetFalse := false
 	if _, err := r.f.subSvc.SetBillingThresholds(r.at(p0.Add(24*time.Hour)), r.f.tenantID, r.f.subID, subscription.BillingThresholdsInput{
-		AmountGTE: 7000, ResetBillingCycle: &resetFalse,
+		AmountGTE: 7000,
 	}); err != nil {
 		t.Fatalf("set thresholds: %v", err)
 	}

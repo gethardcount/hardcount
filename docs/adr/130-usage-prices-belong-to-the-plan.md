@@ -637,10 +637,10 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   deferred locks. Trigger: the first account with several operators.
 - **A new subscriber later on the day of an edit** pays the old price for
   the first period, because the pin is the period start, a midnight.
-  (Today a spend threshold with `reset_billing_cycle=true` starts a period
-  at the invoice's own instant,
-  `internal/billing/threshold_scan.go:907-913`. Its removal was approved on
-  2026-10-23 and ships in its own PR.)
+  (A spend threshold with `reset_billing_cycle=true` used to start a period
+  at the invoice's own instant. *Removed 2026-10-23 in its own PR (#1371): a
+  threshold invoice no longer starts a period, so PR-4 carries no reset
+  re-anchor and no reset base.*)
 - **After a mid-period swap** between two plans that price one meter, the
   period bills two lines, and tiers restart in the second window.
 - **The threshold invoice becomes window-aware:** one line per plan window

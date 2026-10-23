@@ -39,8 +39,8 @@ import (
 // Granularity: one usage bucket (a meter, or one pricing rule of a meter)
 // over one billing window, the unit each path prices. A meter whose buckets
 // or windows have different signs bills its positive ones in full. The
-// window is not always the billing period: after a reset_billing_cycle=false
-// threshold invoice the close and the cancel price usage from that invoice's
+// window is not always the billing period: after a threshold invoice the
+// close and the cancel price usage from that invoice's
 // end, and a meter added or removed mid-period is priced over its own
 // segment. The row names each meter's window.
 
