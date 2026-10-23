@@ -120,3 +120,27 @@ test('a manual invoice is fixed to the profile or live plan currency, not to an 
   assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'invoice' }), null)
   assert.equal(invoiceCurrencyPin({ currency: 'USD', source: 'workspace' }), null)
 })
+
+// Review round 2 (#1361): POST /v1/invoices pins the currency to the plan of a
+// draft, trialing or active subscription. The page counted only active and
+// trialing, so for a customer whose only subscription is a draft in EUR the
+// New invoice picker opened free in USD and submit failed with 409.
+test('a draft subscription sets the currency, as the server pin counts it', () => {
+  const c = resolveCustomerCurrency({
+    subscriptions: [{ status: 'draft', items: [{ plan_id: 'pln_eur' }], created_at: '2026-10-20T00:00:00Z' }],
+    plans,
+    invoices: [{ currency: 'USD', created_at: '2026-10-01T00:00:00Z' }],
+    workspaceDefault: 'USD',
+  })
+  assert.deepEqual(c, { currency: 'EUR', source: 'subscription' })
+  assert.notEqual(invoiceCurrencyPin(c), null)
+})
+
+test('an archived subscription does not set the currency', () => {
+  const c = resolveCustomerCurrency({
+    subscriptions: [{ status: 'archived', items: [{ plan_id: 'pln_eur' }] }],
+    plans,
+    workspaceDefault: 'USD',
+  })
+  assert.deepEqual(c, { currency: 'USD', source: 'workspace' })
+})

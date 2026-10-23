@@ -465,3 +465,35 @@ func TestCreditCurrency_LiveBalanceAndCostDashboardPerCurrency(t *testing.T) {
 		t.Errorf("cost dashboard credits = %v, want an entry per currency (USD 5000, EUR 1000); body: %v", credits, dash["credits"])
 	}
 }
+
+// T9b (routes): the public cost dashboard splits each currency's credit into
+// what is left of the prepaid commit and of the promotional credit, each in
+// its own currency. A EUR commit must not show on the USD entry, nor a USD
+// promotional grant on the EUR one.
+func TestCreditCurrency_CostDashboardCommitAndPromoPerCurrency(t *testing.T) {
+	e := newCcyEnv(t, "Credit Dashboard Kinds")
+	cust := e.customer(t, "ccy-dash-kinds")
+	commitInv := flowStr(e.call(t, "POST", "/v1/invoices", map[string]any{
+		"customer_id": cust, "currency": "EUR", "line_items": []map[string]any{{
+			"description": "Prepaid commit", "line_type": "add_on", "quantity": 1,
+			"unit_amount_cents": 9000, "commit_granted_cents": 10000,
+		}},
+	}).want(t, 201, "create EUR commit invoice").body, "id")
+	e.call(t, "POST", "/v1/invoices/"+commitInv+"/finalize", nil).want(t, 200, "finalize EUR commit invoice")
+	e.call(t, "POST", "/v1/credits/grant", map[string]any{
+		"customer_id": cust, "currency": "USD", "amount_cents": 700, "description": "welcome", "grant_kind": "promotional",
+	}).want(t, 201, "grant USD promotional")
+
+	token := flowStr(e.call(t, "POST", "/v1/customers/"+cust+"/rotate-cost-dashboard-token", nil).want(t, 200, "rotate token").body, "token")
+	dash := flowDo(t, e.ts, "GET", "/v1/public/cost-dashboard/"+token, flowReq{}).want(t, 200, "cost dashboard").body
+	got := map[string][3]int64{} // balance, commit remaining, promotional remaining
+	for _, c := range flowList(dash, "credits") {
+		got[flowStr(c, "currency")] = [3]int64{
+			flowInt(c, "balance_cents"), flowInt(c, "commit_remaining_cents"), flowInt(c, "promotional_remaining_cents"),
+		}
+	}
+	want := map[string][3]int64{"EUR": {10000, 10000, 0}, "USD": {700, 0, 700}}
+	if len(got) != len(want) || got["EUR"] != want["EUR"] || got["USD"] != want["USD"] {
+		t.Errorf("cost dashboard credits balance/commit/promotional = %v, want %v; body: %v", got, want, dash["credits"])
+	}
+}

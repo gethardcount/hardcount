@@ -778,3 +778,69 @@ func TestLiveBalance_CountsEverySubscriptionPastOnePage(t *testing.T) {
 		t.Errorf("unbilled usage = %d, want 2500; 0 means the read stopped at the first page of subscriptions", got)
 	}
 }
+
+// A customer billed in EUR who also holds USD credit: the subscription's
+// unbilled usage is set against the EUR credit, the credit its next invoice
+// draws, and the USD credit is left whole. This is the stop-serving gate
+// (docs/stop-usage-when-credit-runs-out.md): reading the usage against USD
+// would show EUR credit left that the close will not find. The close then
+// draws exactly what the estimate said, in each currency.
+func TestLiveBalance_UsageCountsAgainstTheInvoiceCurrency(t *testing.T) {
+	lf := newLiveFixture(t, "Live Balance Invoice Currency", 10000) // USD 100.00
+	if _, err := lf.creditSvc.Grant(lf.ctx, lf.tenantID, credit.GrantInput{
+		Currency: "EUR", CustomerID: lf.customerID, AmountCents: 1000, Description: "prepaid EUR",
+	}); err != nil {
+		t.Fatalf("grant EUR credit: %v", err)
+	}
+	// The fixture's plan and its meter's price are moved to EUR together, as
+	// ADR-100 keeps them: the subscription bills in EUR.
+	lf.exec(t, `UPDATE plans SET currency = 'EUR' WHERE id = $1`, lf.planID)
+	lf.exec(t, `UPDATE rating_rule_versions SET currency = 'EUR' WHERE tenant_id = $1`, lf.tenantID)
+	lf.ingestUsage(t, lf.ctx, 60, 100) // 6,000 calls at 1c = 60.00 EUR
+
+	got, err := lf.dashboard.GetByToken(lf.ctx, lf.token)
+	if err != nil {
+		t.Fatalf("dashboard: %v", err)
+	}
+	dash := map[string]usage.CostDashboardCredits{}
+	for _, c := range got.(usage.CostDashboardProjection).Credits {
+		dash[c.Currency] = c
+	}
+	live := map[string]domain.CreditLiveCurrency{}
+	for _, b := range lf.liveAll(t).Balances {
+		live[b.Currency] = b
+	}
+	want := map[string][3]int64{ // balance, unbilled, estimated remaining
+		"EUR": {1000, 6000, 0},
+		"USD": {10000, 0, 10000},
+	}
+	if len(live) != len(want) || len(dash) != len(want) {
+		t.Fatalf("live entries %v, dashboard entries %v; want exactly EUR and USD", live, dash)
+	}
+	for ccy, w := range want {
+		l, d := live[ccy], dash[ccy]
+		if gotL := [3]int64{l.BalanceCents, l.UnbilledUsageCents, l.EstimatedRemainingCents}; gotL != w {
+			t.Errorf("live %s balance/unbilled/estimated = %v, want %v (the EUR subscription's usage counts against EUR credit only)", ccy, gotL, w)
+		}
+		if gotD := [3]int64{d.BalanceCents, d.UnbilledUsageCents, d.EstimatedRemainingCents}; gotD != w {
+			t.Errorf("dashboard %s balance/unbilled/estimated = %v, want %v", ccy, gotD, w)
+		}
+	}
+
+	if n := lf.closeEveryPeriod(t); n != 1 {
+		t.Fatalf("cycle close produced %d invoices, want 1", n)
+	}
+	settled, err := lf.creditSvc.GetBalance(lf.ctx, lf.tenantID, lf.customerID)
+	if err != nil {
+		t.Fatalf("read balance: %v", err)
+	}
+	after := map[string]int64{}
+	for _, b := range settled {
+		after[b.Currency] = b.BalanceCents
+	}
+	for ccy, w := range want {
+		if after[ccy] != w[2] {
+			t.Errorf("settled %s balance after the close = %d, want %d (what the estimate said)", ccy, after[ccy], w[2])
+		}
+	}
+}
