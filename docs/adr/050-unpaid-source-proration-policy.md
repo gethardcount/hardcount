@@ -1,7 +1,7 @@
 # ADR-050: Unpaid-source proration — block charges, adjust credits
 
 **Date:** 2026-06-08
-**Status:** Accepted (amended 2026-10-12; amended 2026-10-22: the net-credit side uses the one crediting rule of ADR-118)
+**Status:** Accepted (amended 2026-10-12; amended 2026-10-22: the net-credit side uses the one crediting rule of ADR-118; amended 2026-10-23: a written-off invoice is unpaid)
 
 ## Summary
 
@@ -207,3 +207,88 @@ later failed. `ProrationDetail.Type` is `"credit"` when any share goes to
 the balance (a paid invoice, or one whose charge is in flight, which normally
 succeeds), otherwise `"adjustment"`. A credit that went both ways records the
 open-invoice part as `adjusted_cents`, and the timeline shows both parts.
+
+## Amendment 2026-10-23: a written-off invoice is unpaid
+
+A written-off (`uncollectible`) invoice is billed but unpaid. A write-off
+ends collection, not the sale (ADR-111), and it can still be paid later
+(ADR-113). So this policy treats it as it treats an unpaid invoice: the
+same refusals and the same money. The one difference is its status: an
+unpaid invoice relieved to nothing due is settled as paid, and a
+written-off one stays written off (below).
+
+Scope: the lookups below find the invoices that billed the subscription's
+current period in advance (the base invoice, and for credits also that
+period's proration invoices). A written-off invoice from an earlier period,
+or a one-off invoice, plays no part in a subscription change, written off
+or not.
+
+- **Net charge.** `FindBaseInvoiceForPeriod` now returns a written-off base,
+  so an upgrade, added item or seat increase over it is refused with
+  `unpaid_invoice_blocks_change`, the same 409 as over an unpaid one: record
+  the payment or void the invoice first. Before, the lookup skipped it, the
+  change took the "no base invoice yet" branch, and nothing was charged for
+  the rest of the period. As for an unpaid base, a charge still being
+  confirmed with Stripe (in flight, a park included) does not block. A base
+  with nothing left to pay (no amount due, tax done) does not block either:
+  an unpaid one is settled as paid at that point, and a written-off one is
+  owed nothing (review round 1: it used to be refused with "0.00
+  outstanding").
+- **Net credit.** `FindFundingInvoicesForPeriod` now returns written-off
+  invoices. A cancel, swap, downgrade, removed item or seat decrease credits
+  one as it credits an unpaid one. It writes an adjustment credit note that
+  lowers what the invoice asks for, capped at amount due plus credits
+  applied. A cancel or a change of billing interval on the period's first
+  day voids the invoice instead, under the same conditions as an unpaid
+  one (`reliefTx`): nothing paid on it, no charge on it in flight (a park
+  included) and nothing billed on it but the period's base. A customer who pays the written-off
+  invoice later pays only for the time used, the same money as paying the
+  unpaid invoice after the same change. Before, the lookup skipped it and no
+  relief was written, so a later payment paid for the unused time too.
+
+The unpaid path is the right one, not the paid one: nothing was received,
+so a balance credit would be a refundable credit for money never paid (the
+rule above).
+
+Known limit (review round 2). ADR-113's way to collect a written-off debt
+is a fresh recovery invoice, and nothing links that invoice to the
+written-off one. After the customer pays it, the written-off invoice still
+has its amount due: an increase over it is refused, and a cancel or
+downgrade lowers what it asks for instead of crediting the customer. A
+payment recorded on the written-off invoice itself ends in the same money
+as paying the unpaid one; one collected on a recovery invoice does not. The
+runbook (`manual-interventions.md`) gives the ways round: a plan change
+scheduled for the period's end, and a manual credit grant for the unused
+time. Not decided here: whether a recovery invoice should name the
+invoice it recovers, or a written-off base should stop blocking increases.
+
+What it took beyond the two lookups (one predicate, `baseFundsPeriod`,
+`status <> 'voided'`):
+
+- The credit-note writer accepts an engine relief note (`issue_pending`) on
+  a written-off invoice, and `Issue` no longer voids a draft as an orphan
+  when its invoice is written off; only a void does. The note takes the
+  unpaid branch: `ApplyCreditNoteTx` lowers a written-off invoice's amount
+  due, and the note reverses its own slice of tax, which a write-off never
+  reversed (ADR-111). An operator credit note on a written-off invoice is
+  still refused at create.
+- A written-off invoice left with nothing due stays written off.
+  `SettleZeroDueTx` settles only a finalized invoice: a credit note moves no
+  money, and ADR-113 lets only a recorded payment settle a written-off one.
+- The reconciler scan for held relief drafts (`ListPendingClawbackDrafts`)
+  releases only a voided source. A draft on a written-off invoice whose
+  charge is in flight (a park, ADR-107) waits until the stale-hold sweep
+  ends the park (ADR-127), then issues on the branch the payment status
+  picks. So that the sweep can end it, a written-off park keeps its charge
+  hold when Stripe refuses the check for good (not connected, key rejected,
+  customer missing); the sweep used to clear it, and then nothing looked at
+  the invoice again (ADR-127 amendment 2026-10-23). While Stripe cannot be
+  asked, the draft waits, with an ERROR each check.
+
+Tests: `TestE2E_WrittenOffBase_UpgradeIsRefusedAsUnpaid`,
+`TestE2E_WrittenOffBase_CancelThenLatePayment`,
+`TestE2E_WrittenOffBase_RemovedItemLowersWhatIsDue` (each with the unpaid and
+paid controls), `TestE2E_WrittenOffBase_NothingDue_UpgradeGoesAhead` (with the
+unpaid control), `TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues`,
+`TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers`,
+`TestIssue_WrittenOffWhileWaitingForItsRow_StillRelieves`.

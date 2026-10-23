@@ -370,12 +370,18 @@ neither a double charge, both registered: an upgrade over a written-off
 base issues no proration charge for the rest of the period (the
 "no base invoice yet" branch); and a customer who cancels mid-period and
 later pays the written-off base gets no relief for the unused time.
+*(Changed 2026-10-23: both lookups now keep a written-off invoice, as
+billed but unpaid, so both edges are closed. See the
+[ADR-050 amendment](050-unpaid-source-proration-policy.md#amendment-2026-10-23-a-written-off-invoice-is-unpaid).)*
 
 **Not changed: Stripe Checkout on a write-off.** A write-off closes
 Velox's Checkout claim but does not expire the session at Stripe; only a
 void calls `StopCollection`. Under this decision a payment through a page
 the customer still has open settles the invoice once and cleanly, so it
 is hygiene, not part of this fix. Separate follow-up.
+*(Changed 2026-10-23: a write-off now expires the invoice's open Checkout
+sessions at Stripe, the same call and handling a void uses, without the
+PaymentIntent cancel.)*
 
 **Upgrade note.** At deploy, an open cycle whose threshold invoice is
 written off no longer re-bills that window at its close. An operator who

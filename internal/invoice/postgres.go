@@ -1630,6 +1630,12 @@ func (s *PostgresStore) LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, ten
 // the invoice (the caller grants them to the balance on the same tx). The two
 // add up to the note's total.
 //
+// An open receivable is a finalized or written-off (uncollectible) invoice
+// not yet paid: a write-off ends collection, not what is owed, so a relief
+// note lowers what a written-off invoice asks for as it does an unpaid one's
+// (ADR-050 amendment 2026-10-23). A written-off invoice left with nothing due
+// stays written off: SettleZeroDueTx settles only a finalized one.
+//
 // Both subtractions are exact. A note that asks for more than is due, or to
 // take back more credits than are applied, is refused with
 // credit_note_exceeds_invoice: a silent clamp here relieved an invoice by more
@@ -1650,7 +1656,7 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 			amount_due_cents = amount_due_cents - $1,
 			credits_applied_cents = credits_applied_cents - $2,
 			updated_at = $3
-		WHERE id = $4 AND status = 'finalized' AND payment_status <> 'succeeded'
+		WHERE id = $4 AND status IN ('finalized', 'uncollectible') AND payment_status <> 'succeeded'
 		  AND amount_due_cents >= $1 AND credits_applied_cents >= $2
 		RETURNING `+invCols,
 		reduceCents, creditsReturnedCents, now, id,
@@ -1672,7 +1678,7 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 		if rerr != nil {
 			return domain.Invoice{}, rerr
 		}
-		if status == string(domain.InvoiceFinalized) && payment != string(domain.PaymentSucceeded) {
+		if (status == string(domain.InvoiceFinalized) || status == string(domain.InvoiceUncollectible)) && payment != string(domain.PaymentSucceeded) {
 			return domain.Invoice{}, errs.InvalidState(fmt.Sprintf(
 				"credit note asks to reduce invoice %s by %d with %d due and to return %d credits with %d applied",
 				id, reduceCents, due, creditsReturnedCents, applied)).
@@ -3942,6 +3948,16 @@ func (s *PostgresStore) GetByStripeInvoiceID(ctx context.Context, tenantID, stri
 	return inv, err
 }
 
+// baseFundsPeriod is the one status predicate for "this invoice charged the
+// period's in_advance base", shared by FindBaseInvoiceForPeriod and
+// FindFundingInvoicesForPeriod: every status but voided. A void annuls the
+// charge. A write-off does not: it ends collection, not the sale (ADR-111), so
+// a written-off invoice is billed but unpaid, and a mid-period change treats
+// it exactly as it treats an unpaid one (ADR-050 amendment 2026-10-23). The
+// threshold watermark keeps a written-off invoice for the same reason
+// (thresholdBillsWindow).
+const baseFundsPeriod = `i.status <> 'voided'`
+
 // FindBaseInvoiceForPeriod is the proration-credit gate: returns the
 // invoice carrying an in_advance base line for the given subscription
 // period. The line's `billing_period_start` matches the period the
@@ -3951,13 +3967,10 @@ func (s *PostgresStore) GetByStripeInvoiceID(ctx context.Context, tenantID, stri
 // adjust unpaid invoice" (Chargebee Adjustment / Stripe none) shape
 // applies.
 //
-// Voided / uncollectible invoices are filtered out — they don't
-// represent revenue the customer paid for, even if their line items
-// match the period. This is deliberately NOT the threshold watermark's
-// predicate (thresholdBillsWindow, which keeps a written-off invoice):
-// that one asks whether a window was billed; this one asks whether there
-// is a collectible charge to relieve or to gate a change on, and a
-// write-off ends collection. ORDER BY created_at DESC + LIMIT 1 surfaces the
+// A voided invoice is filtered out: it charged nothing. A written-off
+// (uncollectible) one is kept (baseFundsPeriod): it is billed but unpaid, so
+// an upgrade over it is refused as over an unpaid one (ADR-050 amendment
+// 2026-10-23). ORDER BY created_at DESC + LIMIT 1 surfaces the
 // most-recent matching invoice (relevant for plan-swap chains within
 // the same period that re-issued the base line).
 func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {
@@ -3974,7 +3987,7 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 	err = tx.QueryRowContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.subscription_id = $1
-		  AND i.status NOT IN ('voided', 'uncollectible')
+		  AND `+baseFundsPeriod+`
 		  AND EXISTS (
 		    SELECT 1 FROM invoice_line_items li
 		    WHERE li.invoice_id = i.id
@@ -3990,8 +4003,8 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 	return inv, err
 }
 
-// FindFundingInvoicesForPeriod returns EVERY non-voided/non-uncollectible
-// invoice that prepaid the cycle [periodStart, periodEnd) for a subscription —
+// FindFundingInvoicesForPeriod returns EVERY non-voided invoice that
+// prepaid the cycle [periodStart, periodEnd) for a subscription —
 // the day-1 base invoice AND any mid-period proration invoice that a plan
 // upgrade / quantity increase issued against the same cycle. The single-result
 // FindBaseInvoiceForPeriod misses the latter, because a mid-period proration
@@ -4011,10 +4024,10 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 //     lines' billing_period_start is NULL, so the line predicate can't see
 //     it — the header is the reliable key.)
 //
-// Uncollectible is excluded for the reason FindBaseInvoiceForPeriod gives: a
-// relief credit note on a written-off invoice would be voided as an orphan
-// before it issued (creditnote holdIssue), so a written-off source has no
-// room to credit, and nothing collectible on it to relieve.
+// A written-off (uncollectible) invoice is kept, as in FindBaseInvoiceForPeriod
+// (baseFundsPeriod): it is billed but unpaid, so a cancel, swap or decrease
+// credits it as it credits an unpaid one, lowering what it asks for, and a
+// later payment pays only the time used (ADR-050 amendment 2026-10-23).
 //
 // Ordered base-first (subscription_update sorts last) then created_at ASC, so a
 // caller allocating a fixed total across the set has a deterministic order for
@@ -4033,7 +4046,7 @@ func (s *PostgresStore) FindFundingInvoicesForPeriod(ctx context.Context, tenant
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.subscription_id = $1
-		  AND i.status NOT IN ('voided', 'uncollectible')
+		  AND `+baseFundsPeriod+`
 		  AND (
 		    EXISTS (
 		      SELECT 1 FROM invoice_line_items li

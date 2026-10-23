@@ -184,7 +184,8 @@ type Service struct {
 	audit          AuditLogger
 	events         domain.EventDispatcher
 	// collectionStopper and dunningResolver are AfterVoid's Stripe and
-	// dunning legs. Only a test leaves them unwired.
+	// dunning legs; collectionStopper is also MarkUncollectible's Checkout
+	// expiry. Only a test leaves them unwired.
 	collectionStopper PaymentCanceler
 	dunningResolver   DunningResolver
 	// setupLinkEmailOff is true when this server cannot email a setup link
@@ -203,7 +204,8 @@ func (s *Service) SetSetupLinkEmailConfigured(configured bool) { s.setupLinkEmai
 
 // SetCollectionStopper wires the Stripe leg every committed void runs
 // (AfterVoid): expire the invoice's live Checkout sessions, then cancel its
-// PaymentIntent. Satisfied by *payment.Stripe.
+// PaymentIntent. A committed write-off runs the session expiry alone.
+// Satisfied by *payment.Stripe.
 func (s *Service) SetCollectionStopper(p PaymentCanceler) { s.collectionStopper = p }
 
 // SetDunningResolver wires the dunning leg every committed void runs
@@ -1991,6 +1993,13 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 	// Void and credit note still reverse — see reverseInvoiceTax. That
 	// asymmetry is the decision: they change what was supplied; this does not.
 
+	// The write-off has committed, so every leg below runs to the end even if
+	// the caller's context ends now (an API timeout, a client disconnect, a
+	// dunning tick stopping), as in AfterVoid. The audit row and the event go
+	// first: they are local writes, and the Stripe expiry after them can take
+	// as long as Stripe does.
+	ctx = context.WithoutCancel(ctx)
+
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", updated.ID, updated.InvoiceNumber, map[string]any{
 			"action":           "marked_uncollectible",
@@ -2007,6 +2016,16 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 			"amount_due_cents": updated.AmountDueCents,
 			"currency":         updated.Currency,
 		})
+	}
+
+	// Stop the invoice being payable on a Checkout page the customer still has
+	// open: the flip above closed Velox's claims in its transaction, and this
+	// expires the sessions at Stripe, the same call and handling a void uses
+	// (AfterVoid). Best-effort: a session whose expiry fails ends at its
+	// ExpiresAt (at most an hour after it opened); a payment through it
+	// settles the invoice once.
+	if s.collectionStopper != nil {
+		s.collectionStopper.ExpireCheckoutSessions(ctx, tenantID, updated)
 	}
 	return updated, nil
 }

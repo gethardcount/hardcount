@@ -50,7 +50,8 @@ type ProrationInvoiceCreator interface {
 	GetByProrationSource(ctx context.Context, tenantID, subscriptionID, subscriptionItemID string, changeType domain.ItemChangeType, changeAt time.Time) (domain.Invoice, error)
 	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
 	// FindBaseInvoiceForPeriod gates immediate in_advance proration on
-	// whether the source invoice was actually paid. Mirrors the engine's
+	// whether the source invoice was actually paid; a written-off one is
+	// unpaid (ADR-050 amendment 2026-10-23). Mirrors the engine's
 	// cancel-relief paid/unpaid split; same industry rationale (Chargebee
 	// Refundable vs Adjustment / Stripe proration_behavior=none).
 	FindBaseInvoiceForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error)
@@ -2257,9 +2258,13 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 
 	// A net charge needs the period's base invoice: none yet (a fresh
 	// subscription whose first prebill has not been generated) defers to cycle
-	// close, and an UNPAID one blocks the change (ADR-050). An in-flight base
-	// is not unpaid: the charge goes ahead, and a later decrease's credit is
-	// drafted and held until that charge settles (ADR-059).
+	// close, and an UNPAID one blocks the change (ADR-050). A written-off base
+	// is unpaid: it blocks the same way (ADR-050 amendment 2026-10-23). An
+	// in-flight base is not unpaid: the charge goes ahead, and a later
+	// decrease's credit is drafted and held until that charge settles
+	// (ADR-059). A base with nothing left to pay (no amount due, tax done)
+	// blocks nothing: an unpaid one in that state is settled as paid, and a
+	// written-off one stays written off (ADR-113) but is owed nothing.
 	if h.invoices != nil && sub.CurrentBillingPeriodStart != nil {
 		// A single-row lookup is right here: it only routes paid vs unpaid.
 		resolved, lookupErr := h.invoices.FindBaseInvoiceForPeriod(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart) //nolint:forbidigo // single-invoice-ok: paid/unpaid routing gate only
@@ -2273,7 +2278,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			)
 			return nil, nil
 		}
-		if !resolved.PaymentInFlight() && resolved.PaymentStatus != domain.PaymentSucceeded {
+		owesNothing := resolved.AmountDueCents == 0 && resolved.TaxStatus == domain.InvoiceTaxOK
+		if !resolved.PaymentInFlight() && resolved.PaymentStatus != domain.PaymentSucceeded && !owesNothing {
 			return nil, unpaidSourceBlocksCharge(ctx, sub, spec, resolved)
 		}
 	}

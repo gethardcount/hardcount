@@ -29,6 +29,9 @@ func (c *countingStopper) StopCollection(_ context.Context, _ string, inv domain
 	c.stopped = append(c.stopped, inv.ID)
 }
 
+// ExpireCheckoutSessions is a write-off's leg; these tests void.
+func (*countingStopper) ExpireCheckoutSessions(context.Context, string, domain.Invoice) {}
+
 // recordingEvents records the outbound webhook events dunning sends.
 type recordingEvents struct{ types []string }
 

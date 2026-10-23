@@ -1,7 +1,7 @@
 # ADR-127: A lost charge result is resolved by asking Stripe before anything irreversible
 
 **Date:** 2026-10-19
-**Status:** Accepted (amended 2026-10-20)
+**Status:** Accepted (amended 2026-10-20; amended 2026-10-23: a written-off park keeps its hold when Stripe refuses)
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) (the charge-intent
 ledger, parked since 2026-07-31), and since the 2026-10-20 amendment
 [ADR-108](108-parked-invoices-search-and-adopt.md) (the Stripe Search sweep). PR #1291 drafted a second record-based
@@ -130,7 +130,7 @@ directly, never through the charge breaker. It keeps the ones whose
 | nothing else, any other status | clears |
 | no Stripe customer on file | as "nothing": no charge can have been sent |
 | a read that may succeed later | keeps; stamps the row so it rotates (not an `unknown` invoice that names its PaymentIntent: see below) |
-| Stripe not connected, key rejected (401) or without permission (403), customer not in the account | keeps on an open invoice (ERROR every check; write-off is the exit); clears on a closed one |
+| Stripe not connected, key rejected (401) or without permission (403), customer not in the account | keeps on an open invoice (ERROR every check; write-off is the exit) and on a written-off park (2026-10-23); clears on any other closed one |
 
 A parked invoice (an unclear answer that named no PaymentIntent) is checked
 here too, with one difference for "nothing": see the 2026-10-20 amendment.
@@ -287,7 +287,7 @@ release it), so this sweep already listed it. It now finishes it.
 | nothing, or only failed, canceled or refunded in full, less than 24 hours after the hold | keeps the hold, stamps the row (`waiting`) | same |
 | the same, 24 hours or more after the hold | `UnparkAfterNoPayment` (`released`) | same; nothing charges a written-off invoice (ADR-113), so this only ends the park |
 | no Stripe customer on file | as "nothing" | same |
-| a read refused for good | keeps; ERROR every check; write-off is the exit (R9) | clears (as before) |
+| a read refused for good | keeps; ERROR every check; write-off is the exit (R9) | keeps; ERROR every check (changed 2026-10-23, below) |
 
 `UnparkAfterNoPayment` is one compare-and-set on the hold, the counter and
 the parked shape. It sets `payment_status` back to `failed` when the parked
@@ -426,3 +426,17 @@ not be read about for a day, or one with no hold (R13).
 
 **Not in this amendment:** follow-up B (an unclear answer with no PaymentIntent
 id saves nothing and becomes a lost result) and follow-up C, as above.
+
+## Amendment 2026-10-23: a written-off park keeps its hold when Stripe refuses
+
+When Stripe refuses the check for good (not connected, key rejected,
+customer missing), the sweep keeps a written-off park's hold, stamped, with
+an ERROR every check, as it does an open park's. It used to clear it: the
+invoice stayed parked with no hold, and nothing looked at it again, even
+once Stripe could be asked. Since the
+[ADR-050 amendment](050-unpaid-source-proration-policy.md#amendment-2026-10-23-a-written-off-invoice-is-unpaid)
+a relief credit note on a parked written-off invoice waits for the park to
+end, so it would have waited for good. The kept hold refuses nothing new: a
+parked invoice already refuses void and offline payment, and nothing
+charges a written-off one (ADR-113). Once Stripe answers, the table above
+applies. Test: `TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers`.

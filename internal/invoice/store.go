@@ -227,12 +227,11 @@ type Store interface {
 
 	// FindBaseInvoiceForPeriod returns the most-recent NON-VOIDED invoice
 	// carrying a base-fee line item with billing_period_start = the given
-	// periodStart for the given subscription. Used by proration-credit
-	// paths (handleItemProration on downgrade) to verify
-	// the customer actually paid for the current period before granting
-	// a "refund" — industry standard (Chargebee distinguishes Refundable
-	// vs Adjustment credit notes based on this; Stripe warns operators
-	// to disable proration when the latest invoice is unpaid).
+	// periodStart for the given subscription. A written-off one counts: it
+	// is billed but unpaid. handleItemProration reads it to refuse a net
+	// charge while the period's base is unpaid (ADR-050) — industry
+	// standard (Recurly blocks a change on a past-due invoice; Stripe warns
+	// operators to disable proration when the latest invoice is unpaid).
 	//
 	// For in_advance plans, the cycle-close invoice from the prior period
 	// (or BillOnCreate's day-1 invoice for new subs) carries the base

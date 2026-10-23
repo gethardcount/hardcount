@@ -3874,6 +3874,23 @@ export interface paths {
          *     A written-off spend-threshold invoice keeps its charges billed: no
          *     later invoice bills them again unless the invoice is then voided.
          *     `POST /v1/invoices/{id}/void` says when a void gives them back.
+         *
+         *     Asks Stripe to expire any Checkout session still open for the
+         *     invoice. If Stripe refuses or cannot be reached, the session stays
+         *     payable until it expires, at most an hour after it opened.
+         *
+         *     If the invoice billed its subscription's current period in advance,
+         *     it still counts as unpaid for that subscription. While it has an
+         *     amount due, a plan change, added item or seat increase that would
+         *     charge for the rest of the period is refused with
+         *     `unpaid_invoice_blocks_change`, unless a charge on the invoice is
+         *     still being confirmed with Stripe. A cancel, downgrade, removed item
+         *     or plan swap lowers what it asks for by the unused time; a cancel or
+         *     a change of billing interval on the period's first day voids it
+         *     instead, if nothing is paid on it, no charge on it is being
+         *     confirmed with Stripe and it bills nothing else. A written-off invoice from an earlier period, or one not
+         *     tied to a subscription's period, does not affect subscription
+         *     changes.
          */
         post: operations["markInvoiceUncollectible"];
         delete?: never;
@@ -13298,7 +13315,8 @@ export interface operations {
              *     another live subscription of the customer; or the plan's
              *     currency differs from the subscription's. Code
              *     `unpaid_invoice_blocks_change`: the invoice for the current
-             *     period is unpaid; settle or void it first. Code
+             *     period is unpaid (a written-off invoice is unpaid); settle or
+             *     void it first. Code
              *     `unbilled_period`: a billing period ended and could not be
              *     invoiced; retry billing first.
              */
@@ -13439,8 +13457,8 @@ export interface operations {
              *     plan is archived, its meters overlap another live subscription
              *     of the customer, or its currency differs. Code
              *     `unpaid_invoice_blocks_change`: an increase would charge against
-             *     an unpaid invoice for the current period; settle or void it
-             *     first. Code `subscription_period_moved`: the billing period
+             *     an unpaid invoice for the current period (a written-off invoice
+             *     is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
              *     changed while the request ran; read the subscription again and
              *     retry. Code `item_changed`: a plan change found the
              *     subscription's items changed by another request that finished

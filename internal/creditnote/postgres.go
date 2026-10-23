@@ -270,21 +270,17 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 // relief. The NOT-EXISTS source-terminal gate is the only eligibility predicate;
 // once a draft's source settles it becomes eligible regardless of draft age.
 //
-// WHY THE STATUS TERM (2026-07-31). "Waits until the source settles" assumed
-// every source eventually settles. ADR-107 broke that assumption: a PARKED
-// invoice ('unknown' with no PaymentIntent id) never settles, so its draft was
-// excluded here permanently — no issue, no void, no error log, and the gauge
-// counting it as "pending" forever. Writing the invoice off did not release it
-// either, because this predicate tested payment_status ALONE and a write-off
-// does not change payment_status: the payment question stays open even though
-// the invoice is closed.
-//
-// The status term says a TERMINAL invoice no longer defers anything. It does
-// not decide the outcome — Issue()'s orphan guard already voids a draft whose
-// source was voided or written off ("source annulled before issue", audited,
-// no money movement). That code was correct and simply unreachable, because
-// this query never handed the draft to it. The bug was eligibility, not
-// behaviour, which is why the fix is a predicate rather than a new rule.
+// THE STATUS TERM. A voided source defers nothing: Issue()'s orphan guard
+// voids its draft ("source annulled before issue", audited, no money
+// movement). Added 2026-07-31 for parked invoices (ADR-107: 'unknown' with no
+// PaymentIntent id), whose drafts then waited for good, with written-off
+// sources released too so Issue voided their drafts. Two later changes undo
+// that half: ADR-127 has the stale-hold sweep answer a park by asking Stripe,
+// so a parked source does settle; and since 2026-10-23 a written-off source is
+// billed but unpaid, so its draft issues and lowers what the invoice asks for
+// (ADR-050 amendment). A draft on a written-off source whose charge is in
+// flight therefore waits like any other, and Issue picks the channel once the
+// payment status is known.
 //
 // OBSERVABILITY (2026-07-06 truth pass): a draft deferred behind an
 // in-flight source is EXCLUDED by the NOT-EXISTS above, so it never
@@ -314,7 +310,7 @@ func (s *PostgresStore) ListPendingClawbackDrafts(ctx context.Context, batch int
 		    WHERE i.id = credit_notes.invoice_id
 		      AND i.tenant_id = credit_notes.tenant_id
 		      AND i.payment_status IN ('processing', 'unknown')
-		      AND i.status NOT IN ('voided', 'uncollectible')
+		      AND i.status <> 'voided'
 		  )
 		ORDER BY updated_at ASC
 		LIMIT $2`, livemode, batch)
@@ -365,7 +361,7 @@ func (s *PostgresStore) ListPendingClawbackDraftsForClock(ctx context.Context, t
 		    WHERE i.id = credit_notes.invoice_id
 		      AND i.tenant_id = credit_notes.tenant_id
 		      AND i.payment_status IN ('processing', 'unknown')
-		      AND i.status NOT IN ('voided', 'uncollectible')
+		      AND i.status <> 'voided'
 		  )
 		ORDER BY updated_at ASC
 		LIMIT $3`, tenantID, clockID, batch)
