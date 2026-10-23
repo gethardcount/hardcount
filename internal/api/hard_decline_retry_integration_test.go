@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/dunning"
+	"github.com/sagarsuperuser/velox/internal/email"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/payment"
 	"github.com/sagarsuperuser/velox/internal/paymentmethods"
@@ -488,5 +490,69 @@ func TestHardDecline_CardAlreadySavedBesideReplacesTheRefusedDefault_RealStore(t
 	}
 	if len(r.charges.charged) != 2 || r.charges.charged[1] != "pm_spare" {
 		t.Errorf("Stripe charges %v, want the spare card charged second", r.charges.charged)
+	}
+}
+
+// Review of #1360 (round 2): the payment-failed email for a card the bank
+// refused for good must not tell the customer the card won't be charged
+// again. Only dunning retries skip it (RetryBlockingDecline is per invoice
+// and per retry): Collect payment on the same invoice, and the charge of the
+// customer's next invoice, both charge that card, and each sends the email
+// again. Real Postgres, the production outbox sender.
+func TestHardDecline_PaymentFailedEmailDoesNotPromiseTheCardIsNotChargedAgain_RealStore(t *testing.T) {
+	r := newHardDeclineRig(t, "Hard Decline Email Copy")
+	r.charger.SetEmailPaymentFailed(email.NewOutboxSender(email.NewOutboxStore(r.db)), &customerEmailFetcherAdapter{store: r.customers})
+	custID := r.customerWithCard("lostx", "pm_lostx")
+	lost := func(pi string) scriptedCharge {
+		return scriptedCharge{err: stripeDeclined(pi, "lost_card", "Your card was declined.")}
+	}
+	r.charges.answers = []scriptedCharge{lost("pi_x_1"), lost("pi_x_2"), lost("pi_x_3")}
+
+	first := r.finalizedInvoice(custID, "INV-X-1")
+	if _, err := r.chargeAsCycle(first, "cus_stripe_lostx", "pm_lostx"); err == nil {
+		t.Fatal("the lost-card charge returned no error")
+	}
+	// Collect payment on the same invoice: the same claim and charge call.
+	if _, err := r.chargeAsCycle(r.invoice(first.ID), "cus_stripe_lostx", "pm_lostx"); err == nil {
+		t.Fatal("Collect on the lost card returned no error")
+	}
+	// The customer's next invoice charges the default card, still pm_lostx.
+	second := r.finalizedInvoice(custID, "INV-X-2")
+	if _, err := r.chargeAsCycle(second, "cus_stripe_lostx", "pm_lostx"); err == nil {
+		t.Fatal("the next invoice's charge returned no error")
+	}
+	if want := []string{"pm_lostx", "pm_lostx", "pm_lostx"}; strings.Join(r.charges.charged, ",") != strings.Join(want, ",") {
+		t.Fatalf("Stripe charges %v, want %v", r.charges.charged, want)
+	}
+
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(r.ctx, `SELECT COALESCE(payload->>'reason', '') FROM email_outbox
+		WHERE tenant_id = $1 AND email_type = 'payment_failed' ORDER BY created_at, id`, r.tenantID)
+	if err != nil {
+		t.Fatalf("read email outbox: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var reasons []string
+	for rows.Next() {
+		var reason string
+		if err := rows.Scan(&reason); err != nil {
+			t.Fatalf("scan email outbox: %v", err)
+		}
+		reasons = append(reasons, reason)
+	}
+	if len(reasons) != 3 {
+		t.Fatalf("payment-failed emails %q, want one per charge", reasons)
+	}
+	for i, reason := range reasons {
+		if !strings.Contains(reason, "different card") {
+			t.Errorf("email %d reason %q does not ask for a different card", i+1, reason)
+		}
+		if strings.Contains(strings.ToLower(reason), "again") {
+			t.Errorf("email %d reason %q says the card won't be tried again; Collect and the next invoice charge it", i+1, reason)
+		}
 	}
 }

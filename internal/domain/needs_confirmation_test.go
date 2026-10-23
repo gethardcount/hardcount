@@ -72,6 +72,10 @@ func TestNeedsConfirmationAttention(t *testing.T) {
 		if att.ProviderResponse != failed.LastPaymentError || strings.Contains(att.Detail, "off session") {
 			t.Errorf("retrying=%v: provider response %q / detail %q", retrying, att.ProviderResponse, att.Detail)
 		}
+		// 3-D Secure can pass without a challenge, so the bank may not ask.
+		if strings.Contains(att.Detail, "bank asks them") || !strings.Contains(att.Detail, "bank may ask them to confirm") {
+			t.Errorf("retrying=%v: detail must say the bank may ask, not that it will:\n%s", retrying, att.Detail)
+		}
 		promises := strings.Contains(att.Detail, "keeps its schedule")
 		if promises != retrying {
 			t.Errorf("retrying=%v: detail promises retries = %v:\n%s", retrying, promises, att.Detail)

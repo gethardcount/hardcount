@@ -26,13 +26,16 @@ func TestConfirmPaymentEmail_AsksToConfirmWithThePayLink(t *testing.T) {
 		t.Errorf("subject %q, want the invoice number and \"confirm your payment\"", subject)
 	}
 	for part, body := range map[string]string{"html": html, "text": text} {
-		for _, want := range []string{"INV-0042", "Your bank asked you to confirm the payment", "pay the invoice"} {
+		// "may ask": 3-D Secure on the hosted page can pass without a
+		// challenge, and a customer paying with another card may not be
+		// asked (review of #1360, round 2).
+		for _, want := range []string{"INV-0042", "Your bank asked you to confirm the payment", "pay the invoice", "Your bank may ask you to confirm"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s part does not say %q:\n%s", part, want, body)
 			}
 		}
 		lower := strings.ToLower(body)
-		for _, never := range []string{"declin", "try again", "attempt", "unsuccessful", "off session", "authentication"} {
+		for _, never := range []string{"declin", "try again", "attempt", "unsuccessful", "off session", "authentication", "will ask"} {
 			if strings.Contains(lower, never) {
 				t.Errorf("%s part says %q:\n%s", part, never, body)
 			}
