@@ -183,6 +183,9 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		}
 		return domain.Subscription{}, err
 	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
+		return domain.Subscription{}, err
+	}
 
 	// Insert each requested item in the same tx. The UNIQUE (subscription_id,
 	// plan_id) constraint rejects duplicate plans in the same request.
@@ -1141,6 +1144,9 @@ func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id 
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
 		return domain.Subscription{}, err
 	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
+		return domain.Subscription{}, err
+	}
 	// ADR-101: activation IS the items' billable open.
 	if err := intervalOpenForItems(ctx, tx, sub, "activate"); err != nil {
 		return domain.Subscription{}, err
@@ -1218,6 +1224,9 @@ func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, 
 		return domain.Subscription{}, err
 	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
 		return domain.Subscription{}, err
 	}
 	// ADR-101: trial conversion IS the items' billable open — at the
@@ -1327,6 +1336,9 @@ func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id st
 		return domain.Subscription{}, err
 	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
 		return domain.Subscription{}, err
 	}
 	// ADR-101: the early end resets the period anchor above, so the open
@@ -2021,12 +2033,13 @@ func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, ex
 // (ADR-115). That mode leaves the FOR KEY SHARE of an invoice insert's
 // foreign-key check free.
 //
-// With every item writer taking this row first, all writers of a
-// subscription's state lock in one order: subscription row, item rows,
-// billing_intervals, invoices. The dunning pause takes the same order: its
-// write (SetDunningPause) and the payment that lifts it (LockDunningPauseTx,
-// before the payment locks the invoice) lock the subscription row first,
-// except when the pause commits after the payment's check (see
+// Every writer of a subscription's state takes this row first. A writer that
+// references more than one plan takes them next (lockPlansTx); item rows,
+// billing_intervals and invoices come after. The dunning pause takes the same
+// order: its write (SetDunningPause) and the payment that lifts it
+// (LockDunningPauseTx, before the payment locks the invoice) lock the
+// subscription row first, except when the pause commits after the payment's
+// check (see
 // LockDunningPauseTx). So two of them cannot deadlock, and a change
 // that read the state under this lock (LockForItemChangeTx) has seen every
 // item change that committed before it. A transaction that already holds the
@@ -2054,6 +2067,71 @@ func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) erro
 		return errs.ErrNotFound
 	}
 	return err
+}
+
+// lockPlansTx takes every plan a writer will reference, in ascending id, in
+// one statement (D08 §4.21). FOR KEY SHARE is the lock the foreign-key checks
+// on subscription_items, subscription_item_changes and billing_intervals
+// take, so those checks then find it held.
+//
+// Without it, the checks take plans in the order the statements reach them.
+// A swap A→B reaches B first (the item's new plan_id), then A (the change
+// row's from_plan_id). The meter-in-use guard (D05, CountSubsUsingMeterTx)
+// locks the plans that list a meter FOR UPDATE in ascending id. With
+// id(A) < id(B) the two waited on each other, and Postgres aborted one with
+// a deadlock error (40P01). Both now take plans in the same order.
+//
+// A writer that references more than one plan calls it right after its
+// subscription row, before it locks any other row. D05 is the only plan lock
+// that blocks FOR KEY SHARE, and it waits only for plans. A writer that waits
+// for a plan while it holds another row can still close a cycle through a
+// third transaction: one that holds a higher plan and waits for that row. The
+// cross-interval swap is the case: an activation holds plan B and waits for
+// the tenant's number row to number its invoice, D05 holds A and waits for B,
+// and a swap off A that has numbered its refund credit note waits for A. So
+// the swap takes its plans (LockPlansTx) after its period CAS and before its
+// refund drafts. Item add and schedule call it too, though one plan is in
+// order by itself. Quantity change and removal reference only the item's own
+// plan and leave it to their foreign-key checks. Those run in the item write,
+// before the proration invoice or clawback credit note takes a number, and
+// must stay there (internal/api TestE2E_ItemChange_ReachesItsPlanBeforeTheNumberRow).
+//
+// The order is the database's ORDER BY id, the one D05 uses. A plan RLS hides
+// from the transaction is not locked here; its foreign-key check still
+// refuses or locks it as before.
+func lockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
+	ids := make([]string, 0, len(planIDs))
+	seen := make(map[string]bool, len(planIDs))
+	for _, id := range planIDs {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`SELECT id FROM plans WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`,
+		postgres.StringArray(ids),
+	); err != nil {
+		return fmt.Errorf("lock plans: %w", err)
+	}
+	return nil
+}
+
+// itemPlanIDs is the plan of each item.
+func itemPlanIDs(items []domain.SubscriptionItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, it := range items {
+		ids = append(ids, it.PlanID)
+	}
+	return ids
+}
+
+// LockPlansTx: see the Store interface.
+func (s *PostgresStore) LockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
+	return lockPlansTx(ctx, tx, planIDs)
 }
 
 // LockForItemChangeTx: see the Store interface. tenantID is accepted for
@@ -2132,6 +2210,9 @@ func (s *PostgresStore) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID stri
 // own tx; AddItemTx delegates commit to the caller.
 func (s *PostgresStore) addItemInTx(ctx context.Context, tx *sql.Tx, tenantID string, item domain.SubscriptionItem) (domain.SubscriptionItem, error) {
 	if err := lockSubscriptionRow(ctx, tx, item.SubscriptionID); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if err := lockPlansTx(ctx, tx, []string{item.PlanID}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	qty := item.Quantity
@@ -2241,6 +2322,19 @@ func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sq
 	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
+	// The swap references the item's current plan (the change row's
+	// from_plan_id) and the new one. The current plan cannot change now:
+	// every item writer takes the subscription row first.
+	var currentPlanID string
+	if err := tx.QueryRowContext(ctx, `SELECT plan_id FROM subscription_items WHERE id = $1`, itemID).Scan(&currentPlanID); err != nil {
+		if err == sql.ErrNoRows {
+			return domain.SubscriptionItem{}, errs.ErrNotFound
+		}
+		return domain.SubscriptionItem{}, err
+	}
+	if err := lockPlansTx(ctx, tx, []string{currentPlanID, newPlanID}); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	// Clears any scheduled change — an immediate swap supersedes a pending one.
 	// deleted_at IS NULL: as in updateItemQuantityInTx.
 	var stored domain.SubscriptionItem
@@ -2299,6 +2393,9 @@ func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, 
 	if err := lockSubscriptionOfItem(ctx, tx, itemID); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
+	if err := lockPlansTx(ctx, tx, []string{pendingPlanID}); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	now := clock.Now(ctx)
 	var stored domain.SubscriptionItem
 	// deleted_at IS NULL: as in updateItemQuantityInTx.
@@ -2353,6 +2450,14 @@ func (s *PostgresStore) ClearItemPendingPlan(ctx context.Context, tenantID, item
 	return stored, nil
 }
 
+// duePendingItemsWhere selects a subscription's items whose scheduled plan
+// change is due at $1 ($2 is the subscription id).
+const duePendingItemsWhere = `subscription_id = $2
+		  AND deleted_at IS NULL
+		  AND pending_plan_id IS NOT NULL
+		  AND pending_plan_effective_at IS NOT NULL
+		  AND pending_plan_effective_at <= $1`
+
 func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tenantID, subscriptionID string, now time.Time) ([]domain.SubscriptionItem, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2360,6 +2465,34 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 	}
 	defer postgres.Rollback(tx)
 	if err := lockSubscriptionRow(ctx, tx, subscriptionID); err != nil {
+		return nil, err
+	}
+	// Each due item references its current plan (the change row's
+	// from_plan_id) and its pending one. The same predicate as the UPDATE
+	// below, read under the subscription row lock, so the set cannot change.
+	var duePlans []string
+	if err := func() error {
+		rows, err := tx.QueryContext(ctx, `
+			SELECT plan_id, pending_plan_id FROM subscription_items
+			WHERE `+duePendingItemsWhere,
+			now, subscriptionID,
+		)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var cur, pending string
+			if err := rows.Scan(&cur, &pending); err != nil {
+				return err
+			}
+			duePlans = append(duePlans, cur, pending)
+		}
+		return rows.Err()
+	}(); err != nil {
+		return nil, fmt.Errorf("read due plan changes: %w", err)
+	}
+	if err := lockPlansTx(ctx, tx, duePlans); err != nil {
 		return nil, err
 	}
 
@@ -2377,11 +2510,7 @@ func (s *PostgresStore) ApplyDuePendingItemPlansAtomic(ctx context.Context, tena
 		    pending_plan_id = NULL,
 		    pending_plan_effective_at = NULL,
 		    updated_at = $1
-		WHERE subscription_id = $2
-		  AND deleted_at IS NULL
-		  AND pending_plan_id IS NOT NULL
-		  AND pending_plan_effective_at IS NOT NULL
-		  AND pending_plan_effective_at <= $1
+		WHERE `+duePendingItemsWhere+`
 		RETURNING `+itemCols,
 		now, subscriptionID,
 	)

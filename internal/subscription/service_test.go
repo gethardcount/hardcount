@@ -635,6 +635,10 @@ func (m *memStore) LockForItemChangeTx(ctx context.Context, _ *sql.Tx, tenantID,
 	return m.Get(ctx, tenantID, subscriptionID)
 }
 
+// LockPlansTx: no locks in memory. The order is proven against real Postgres
+// in plan_lock_order_integration_test.go.
+func (m *memStore) LockPlansTx(context.Context, *sql.Tx, []string) error { return nil }
+
 // WithTenantTx: no transactions in memory; the *Tx methods ignore the tx.
 func (m *memStore) WithTenantTx(_ context.Context, _ string, fn func(tx *sql.Tx) error) error {
 	return fn(nil)
