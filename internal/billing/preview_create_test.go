@@ -417,14 +417,14 @@ func TestDecodeCreatePreviewRequest(t *testing.T) {
 // distinct entries, blank-currency lines (e.g. zero-fee plans) excluded.
 func TestComputePreviewTotals(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
-		totals := computePreviewTotals(nil)
+		totals := mustPreviewTotals(t, nil)
 		if len(totals) != 0 {
 			t.Errorf("expected empty totals, got %d", len(totals))
 		}
 	})
 
 	t.Run("single currency", func(t *testing.T) {
-		totals := computePreviewTotals([]PreviewLine{
+		totals := mustPreviewTotals(t, []PreviewLine{
 			{Currency: "USD", AmountCents: 100},
 			{Currency: "USD", AmountCents: 250},
 		})
@@ -437,7 +437,7 @@ func TestComputePreviewTotals(t *testing.T) {
 	})
 
 	t.Run("multi currency stable order", func(t *testing.T) {
-		totals := computePreviewTotals([]PreviewLine{
+		totals := mustPreviewTotals(t, []PreviewLine{
 			{Currency: "USD", AmountCents: 100},
 			{Currency: "EUR", AmountCents: 200},
 			{Currency: "USD", AmountCents: 50},
@@ -455,7 +455,7 @@ func TestComputePreviewTotals(t *testing.T) {
 	})
 
 	t.Run("blank-currency lines excluded", func(t *testing.T) {
-		totals := computePreviewTotals([]PreviewLine{
+		totals := mustPreviewTotals(t, []PreviewLine{
 			{Currency: "", AmountCents: 999},
 			{Currency: "USD", AmountCents: 100},
 		})
@@ -466,4 +466,13 @@ func TestComputePreviewTotals(t *testing.T) {
 			t.Errorf("expected 100, got %d", totals[0].AmountCents)
 		}
 	})
+}
+
+func mustPreviewTotals(t *testing.T, lines []PreviewLine) []PreviewTotal {
+	t.Helper()
+	totals, err := computePreviewTotals(lines)
+	if err != nil {
+		t.Fatalf("computePreviewTotals: %v", err)
+	}
+	return totals
 }

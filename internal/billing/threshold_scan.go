@@ -94,7 +94,7 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 	// advances past failing subs so one bad row can't wedge the scan or cause a
 	// re-evaluation within the same tick. The fire-once probe in
 	// scanOneThreshold is what keeps a full drain affordable — already-fired
-	// subs cost one indexed lookup, not a previewWithWindow aggregation.
+	// subs cost one indexed lookup, not a window-preview aggregation.
 	fired := 0
 	var errsOut []error
 	afterID := ""
@@ -266,7 +266,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// this sub is done until the period rolls. Pre-fix the scan re-evaluated
 	// and re-fired every tick after a crossing: each re-fire burned an invoice number + a paid Stripe Tax
 	// calculation before the dedup index rejected it (~600/cycle). The probe
-	// also skips the expensive previewWithWindow aggregation for already-fired
+	// also skips the expensive window-preview aggregation for already-fired
 	// subs — what makes the drained scan affordable.
 	//
 	// This probe is a check-then-act OPTIMIZATION, not the exactly-once
@@ -606,11 +606,17 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		// once. The amount still counts toward the amount_gte cap
 		// (committed spend; the fire-once probe bounds this to one fire per
 		// cycle, so counting it cannot loop).
-		capRunning += pl.AmountCents
+		// Checked: a wrapped running total would read below the cap and
+		// miss the fire.
+		if capRunning, err = addCents(capRunning, pl.AmountCents); err != nil {
+			return thresholdEval{}, fmt.Errorf("threshold running total: %w", err)
+		}
 		if nonAdditive(pl.Aggregation) {
 			continue
 		}
-		billedSubtotal += pl.AmountCents
+		if billedSubtotal, err = addCents(billedSubtotal, pl.AmountCents); err != nil {
+			return thresholdEval{}, fmt.Errorf("threshold invoice subtotal: %w", err)
+		}
 		// A usage line's window is the one it was rated over: its plan's
 		// stretch of the period, from its meter's usage floor.
 		ps, pe := pl.windowStart, pl.windowEnd

@@ -1266,14 +1266,18 @@ func (e *Engine) hydrateSegmentPlans(ctx context.Context, sub domain.Subscriptio
 // month-end-CLAMPED from a higher anchor reconstructs the clamped
 // day (a ≤3-day denominator error in that one rare combination) —
 // strictly narrower than the up-to-half-cycle error it replaces.
-func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Time, periodDays int, currency string, loc *time.Location, billingTime domain.SubscriptionBillingTime, lineItems *[]domain.InvoiceLineItem, subtotal *int64) {
+func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Time, periodDays int, currency string, loc *time.Location, billingTime domain.SubscriptionBillingTime, lineItems *[]domain.InvoiceLineItem, subtotal *int64) error {
 	segDays := roundDays(seg.end.Sub(seg.start))
 	if segDays <= 0 {
-		return
+		return nil
 	}
 	anchorDay := domain.AnchorDayFor(periodStart, billingTime, plan.BillingInterval, loc)
 	fullCycleDays := roundDays(advanceBillingPeriod(periodStart, plan.BillingInterval, loc, anchorDay).Sub(periodStart))
-	baseFee := plan.BaseAmountCents * seg.quantity
+	fullFee, err := baseFeeCents(plan, seg.quantity)
+	if err != nil {
+		return err
+	}
+	baseFee := fullFee
 	description := fmt.Sprintf("%s - base fee (qty %d)", plan.Name, seg.quantity)
 
 	// Prorate when:
@@ -1282,13 +1286,17 @@ func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Tim
 	//   (b) the period itself is partial (creation mid-cycle), independent
 	//       of segments — same formula reduces correctly.
 	if segDays > 0 && fullCycleDays > 0 && segDays < fullCycleDays {
-		baseFee = money.RoundHalfToEven(plan.BaseAmountCents*seg.quantity*int64(segDays), int64(fullCycleDays))
+		if baseFee, err = prorateCents(fullFee, segDays, fullCycleDays); err != nil {
+			return err
+		}
 		description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, seg.quantity, segDays, fullCycleDays)
 	} else if periodDays > 0 && fullCycleDays > 0 && periodDays < fullCycleDays {
 		// Backstop for the periodDays<fullCycleDays case when only a
 		// single segment exists and equals the whole period — preserves
 		// the pre-segment-aware partial-creation behavior.
-		baseFee = money.RoundHalfToEven(plan.BaseAmountCents*seg.quantity*int64(periodDays), int64(fullCycleDays))
+		if baseFee, err = prorateCents(fullFee, periodDays, fullCycleDays); err != nil {
+			return err
+		}
 		description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, seg.quantity, periodDays, fullCycleDays)
 	}
 
@@ -1309,7 +1317,8 @@ func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Tim
 		BillingPeriodStart: &segStart,
 		BillingPeriodEnd:   &segEnd,
 	})
-	*subtotal += baseFee
+	*subtotal, err = addCents(*subtotal, baseFee)
+	return err
 }
 
 // errPeriodMoved: billOnePeriod wrote NOTHING because its snapshot went stale —
@@ -1696,12 +1705,16 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	}
 
 	// Every invoice with priced lines passes here, so this is where its
-	// amounts are held to int64 cents: callers sum their lines unchecked,
-	// and when the lines' sizes sum inside int64, no sum of them wrapped.
+	// amounts are held to int64 cents: when the lines' sizes sum inside
+	// int64, no sum of them wraps, whatever the caller or the steps below
+	// add up. (The callers' own sums are checked too.)
 	if err := checkLineAmountsFit(lineItems); err != nil {
 		return TaxApplication{}, err
 	}
-	subtotal = commitInvoiceSubtotal(lineItems, subtotal)
+	subtotal, err := commitInvoiceSubtotal(lineItems, subtotal)
+	if err != nil {
+		return TaxApplication{}, err
+	}
 	app := TaxApplication{
 		SubtotalCents: subtotal,
 		DiscountCents: discount,
@@ -1897,12 +1910,17 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	// produced — leave that line item untouched, as the positional loop
 	// always has. A commit line was never sent: it is stamped untaxed, and
 	// its price counts toward the net subtotal as it stands.
-	expanded := expandTaxResultLines(res.Lines, lineGroups, lineItems)
+	expanded, err := expandTaxResultLines(res.Lines, lineGroups, lineItems)
+	if err != nil {
+		return TaxApplication{}, err
+	}
 	var netSubtotalSum int64
 	for i := range lineItems {
 		if lineItems[i].IsCommitLine() {
 			stampUntaxedCommitLine(&lineItems[i], commitReason)
-			netSubtotalSum += lineItems[i].AmountCents
+			if netSubtotalSum, err = addCents(netSubtotalSum, lineItems[i].AmountCents); err != nil {
+				return TaxApplication{}, fmt.Errorf("invoice net subtotal: %w", err)
+			}
 			continue
 		}
 		if i >= len(expanded) {
@@ -1927,7 +1945,9 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 			return TaxApplication{}, fmt.Errorf("line %d total with tax: %w", i, domain.ErrAmountOverflow)
 		}
 		lineItems[i].TotalAmountCents = total
-		netSubtotalSum += net
+		if netSubtotalSum, err = addCents(netSubtotalSum, net); err != nil {
+			return TaxApplication{}, fmt.Errorf("invoice net subtotal: %w", err)
+		}
 	}
 
 	// Inclusive mode: the provider returned net line amounts; rewrite
@@ -1936,8 +1956,19 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 		app.SubtotalCents = netSubtotalSum
 		// Gross paid == subtotal - discount, which after tax carve-out is
 		// netSubtotalSum - netDiscount + tax. Solve for netDiscount.
-		gross := subtotal - discount
-		app.DiscountCents = max(netSubtotalSum+res.TotalTaxCents-gross, 0)
+		gross, err := subCents(subtotal, discount)
+		if err != nil {
+			return TaxApplication{}, fmt.Errorf("invoice gross: %w", err)
+		}
+		netWithTax, err := addCents(netSubtotalSum, res.TotalTaxCents)
+		if err != nil {
+			return TaxApplication{}, fmt.Errorf("invoice net with tax: %w", err)
+		}
+		netDiscount, err := subCents(netWithTax, gross)
+		if err != nil {
+			return TaxApplication{}, fmt.Errorf("invoice discount: %w", err)
+		}
+		app.DiscountCents = max(netDiscount, 0)
 	}
 	// The invoice total (subtotal − discount + tax) must fit too; callers
 	// work it out unchecked from these three.
@@ -2848,9 +2879,15 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// Base-fee lines: segment-aware for in_arrears, one upcoming-period
 	// line for in_advance. closeBaseFeeLines is shared with the operator
 	// preview (previewCycle) so the estimate and the invoice cannot drift.
-	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, terminalCycleClose, wm.billedBase()) {
+	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, terminalCycleClose, wm.billedBase())
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	for _, bl := range baseLines {
 		lineItems = append(lineItems, bl.line)
-		subtotal += bl.line.AmountCents
+		if subtotal, err = addCents(subtotal, bl.line.AmountCents); err != nil {
+			return nil, 0, nil, fmt.Errorf("invoice subtotal: %w", err)
+		}
 	}
 
 	// Segment-aware usage billing (Orb shape): each meter is billed
@@ -2882,7 +2919,9 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 		return nil, 0, nil, err
 	}
 	lineItems = append(lineItems, usageLines...)
-	subtotal += usageSubtotal
+	if subtotal, err = addCents(subtotal, usageSubtotal); err != nil {
+		return nil, 0, nil, fmt.Errorf("invoice subtotal: %w", err)
+	}
 	return lineItems, subtotal, thresholdBilledThrough, nil
 }
 
@@ -3612,16 +3651,23 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 	if err != nil {
 		return domain.Invoice{}, nil, false, err
 	}
-	baseLines := onCreateBaseLines(sub, plans, advanceItems, periodStart, periodEnd, invoiceCurrency, billingLoc)
+	baseLines, err := onCreateBaseLines(sub, plans, advanceItems, periodStart, periodEnd, invoiceCurrency, billingLoc)
+	if err != nil {
+		return domain.Invoice{}, nil, false, err
+	}
 	lineItems := make([]domain.InvoiceLineItem, 0, len(baseLines)+len(carry))
 	subtotal := int64(0)
 	for _, bl := range baseLines {
 		lineItems = append(lineItems, bl.line)
-		subtotal += bl.line.AmountCents
+		if subtotal, err = addCents(subtotal, bl.line.AmountCents); err != nil {
+			return domain.Invoice{}, nil, false, fmt.Errorf("invoice subtotal: %w", err)
+		}
 	}
 	for _, li := range carry {
 		lineItems = append(lineItems, li)
-		subtotal += li.AmountCents
+		if subtotal, err = addCents(subtotal, li.AmountCents); err != nil {
+			return domain.Invoice{}, nil, false, fmt.Errorf("invoice subtotal: %w", err)
+		}
 	}
 
 	if subtotal <= 0 {
@@ -3677,7 +3723,7 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 // buildOnCreateInvoice unchanged so the operator preview of a trialing
 // subscription (previewTrialEnd) shows the invoice the trial end issues with
 // this one copy of the math.
-func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, advanceItems []domain.SubscriptionItem, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location) []closeBaseLine {
+func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, advanceItems []domain.SubscriptionItem, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location) ([]closeBaseLine, error) {
 	out := make([]closeBaseLine, 0, len(advanceItems))
 	periodDays := roundDays(periodEnd.Sub(periodStart))
 	for _, it := range advanceItems {
@@ -3685,12 +3731,18 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 		if plan.BaseAmountCents <= 0 {
 			continue
 		}
-		baseFee := plan.BaseAmountCents * it.Quantity
+		fullFee, err := baseFeeCents(plan, it.Quantity)
+		if err != nil {
+			return nil, err
+		}
+		baseFee := fullFee
 		description := fmt.Sprintf("%s - base fee (qty %d)", plan.Name, it.Quantity)
 
 		fullCycleDays := roundDays(advanceBillingPeriod(periodStart, plan.BillingInterval, billingLoc, sub.BillingAnchorDay).Sub(periodStart))
 		if periodDays > 0 && fullCycleDays > 0 && periodDays < fullCycleDays {
-			baseFee = money.RoundHalfToEven(plan.BaseAmountCents*it.Quantity*int64(periodDays), int64(fullCycleDays))
+			if baseFee, err = prorateCents(fullFee, periodDays, fullCycleDays); err != nil {
+				return nil, err
+			}
 			description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, it.Quantity, periodDays, fullCycleDays)
 		}
 
@@ -3714,7 +3766,7 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 			BillingPeriodEnd:   &baseEndCopy,
 		}})
 	}
-	return out
+	return out, nil
 }
 
 // FinalizeOnCreateInvoice runs the post-persist steps for a day-1 in_advance
@@ -3892,7 +3944,9 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 				if !ok || segPlan.BaseAmountCents <= 0 || segPlan.BaseBillTiming == domain.BillInAdvance {
 					continue
 				}
-				emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal)
+				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal); err != nil {
+					return nil, 0, err
+				}
 			}
 		}
 
@@ -3908,7 +3962,9 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 				if !ok || segPlan.BaseAmountCents <= 0 || segPlan.BaseBillTiming == domain.BillInAdvance {
 					continue
 				}
-				emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal)
+				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal); err != nil {
+					return nil, 0, err
+				}
 			}
 		}
 	}
@@ -3947,7 +4003,9 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 		return nil, 0, err
 	}
 	lineItems = append(lineItems, usageLines...)
-	subtotal += usageSubtotal
+	if subtotal, err = addCents(subtotal, usageSubtotal); err != nil {
+		return nil, 0, fmt.Errorf("invoice subtotal: %w", err)
+	}
 	return lineItems, subtotal, nil
 }
 
@@ -4258,9 +4316,18 @@ func (e *Engine) unusedBaseForPeriod(ctx context.Context, sub domain.Subscriptio
 		if fullCycleDays <= 0 {
 			continue
 		}
-		baseFee := plan.BaseAmountCents * it.Quantity
-		if unused := money.RoundHalfToEven(baseFee*int64(unusedDays), int64(fullCycleDays)); unused > 0 {
-			totalUnused += unused
+		baseFee, err := baseFeeCents(plan, it.Quantity)
+		if err != nil {
+			return 0, err
+		}
+		unused, err := prorateCents(baseFee, unusedDays, fullCycleDays)
+		if err != nil {
+			return 0, err
+		}
+		if unused > 0 {
+			if totalUnused, err = addCents(totalUnused, unused); err != nil {
+				return 0, fmt.Errorf("unused base: %w", err)
+			}
 		}
 	}
 	return totalUnused, nil
@@ -4533,7 +4600,9 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 		}
 		r.DraftIDs = append(r.DraftIDs, cn.ID)
 		if sh.ToBalance {
-			r.CreditedCents += sh.GrossCents
+			if r.CreditedCents, err = addCents(r.CreditedCents, sh.GrossCents); err != nil {
+				return domain.Relief{}, fmt.Errorf("%s: credited total: %w", what, err)
+			}
 		}
 	}
 	return r, nil

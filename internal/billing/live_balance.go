@@ -93,7 +93,10 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 		if err != nil {
 			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: subscription %s currency: %w", sub.ID, err)
 		}
-		unbilled[strings.ToUpper(currency)] += cents
+		cur := strings.ToUpper(currency)
+		if unbilled[cur], err = addCents(unbilled[cur], cents); err != nil {
+			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: unbilled usage in %s: %w", cur, err)
+		}
 	}
 	currencies := make([]string, 0, len(balances)+len(unbilled))
 	for c := range balances {
@@ -111,11 +114,16 @@ func (e *Engine) LiveCreditBalance(ctx context.Context, tenantID, customerID str
 		ComputedAt: e.clock.Now(ctx),
 	}
 	for _, c := range currencies {
+		// unbilled is a sum of usage amounts, so never negative.
+		remaining, err := addCents(balances[c], -unbilled[c])
+		if err != nil {
+			return domain.CreditLiveBalance{}, fmt.Errorf("live credit balance: remaining in %s: %w", c, err)
+		}
 		out.Balances = append(out.Balances, domain.CreditLiveCurrency{
 			Currency:                c,
 			BalanceCents:            balances[c],
 			UnbilledUsageCents:      unbilled[c],
-			EstimatedRemainingCents: max(balances[c]-unbilled[c], 0),
+			EstimatedRemainingCents: max(remaining, 0),
 		})
 	}
 	return out, nil
@@ -198,7 +206,9 @@ func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription
 	var total int64
 	for _, b := range cp.buckets {
 		if b.priced {
-			total += b.amount
+			if total, err = addCents(total, b.amount); err != nil {
+				return 0, "", fmt.Errorf("unbilled usage: %w", err)
+			}
 		}
 	}
 	return total, cp.planCurrency, nil

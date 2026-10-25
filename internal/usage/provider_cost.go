@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -196,6 +197,12 @@ type CustomerCostByModel struct {
 	Events     int64
 }
 
+// The int64 range of a provider-cost sum, which Postgres adds as numeric.
+var (
+	maxInt64Micros = decimal.NewFromInt(math.MaxInt64)
+	minInt64Micros = decimal.NewFromInt(math.MinInt64)
+)
+
 func (s *PostgresStore) CustomerProviderCost(ctx context.Context, tenantID, customerID string, from, to time.Time) (byModel []CustomerCostByModel, unresolvedEvents int64, err error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -203,9 +210,11 @@ func (s *PostgresStore) CustomerProviderCost(ctx context.Context, tenantID, cust
 	}
 	defer postgres.Rollback(tx)
 
+	// The sum is read as numeric (SUM of bigint) and range-checked here, so
+	// a total past int64 is a named error rather than a cast failure.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT COALESCE(properties->>'model', properties->>'model_raw', '(unknown)') AS model,
-			COALESCE(SUM(provider_cost_micros), 0)::BIGINT,
+			COALESCE(SUM(provider_cost_micros), 0),
 			COUNT(*)
 		FROM usage_events
 		WHERE tenant_id = $1 AND customer_id = $2
@@ -220,9 +229,14 @@ func (s *PostgresStore) CustomerProviderCost(ctx context.Context, tenantID, cust
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var m CustomerCostByModel
-		if err := rows.Scan(&m.Model, &m.CostMicros, &m.Events); err != nil {
+		var sum decimal.Decimal
+		if err := rows.Scan(&m.Model, &sum, &m.Events); err != nil {
 			return nil, 0, err
 		}
+		if sum.GreaterThan(maxInt64Micros) || sum.LessThan(minInt64Micros) {
+			return nil, 0, fmt.Errorf("provider cost of model %q: %w", m.Model, domain.ErrAmountOverflow)
+		}
+		m.CostMicros = sum.IntPart()
 		byModel = append(byModel, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -380,12 +394,18 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 			if r.NoPrice {
 				continue
 			}
+			var err error
 			if model := r.DimensionMatch["model"]; model != "" {
-				revenueByModel[model] += r.AmountCents
+				revenueByModel[model], err = domain.SumCents(revenueByModel[model], r.AmountCents)
 			} else {
-				rep.UnattributedRevenueCents += r.AmountCents
+				rep.UnattributedRevenueCents, err = domain.SumCents(rep.UnattributedRevenueCents, r.AmountCents)
 			}
-			rep.RevenueCents += r.AmountCents
+			if err == nil {
+				rep.RevenueCents, err = domain.SumCents(rep.RevenueCents, r.AmountCents)
+			}
+			if err != nil {
+				return MarginReport{}, fmt.Errorf("margin revenue: %w", err)
+			}
 		}
 	}
 
@@ -406,7 +426,9 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 
 	seen := map[string]bool{}
 	for _, c := range byModel {
-		rep.costMicros += c.CostMicros
+		if rep.costMicros, err = domain.SumCents(rep.costMicros, c.CostMicros); err != nil {
+			return MarginReport{}, fmt.Errorf("margin cost: %w", err)
+		}
 		rep.CostedEvents += c.Events
 		row := MarginModelRow{Model: c.Model, CostCents: domain.MicrosToCents(c.CostMicros), costMicros: c.CostMicros}
 		if rev, ok := revenueByModel[c.Model]; ok {

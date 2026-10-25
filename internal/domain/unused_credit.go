@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"math"
 	"sort"
 
 	"github.com/sagarsuperuser/velox/internal/platform/money"
@@ -77,7 +78,12 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		}
 		netCap := grossCap
 		if inv.SubtotalCents > 0 && inv.TotalAmountCents > 0 {
-			netCap = money.RoundHalfToEven(grossCap*inv.SubtotalCents, inv.TotalAmountCents)
+			// Worked in 128 bits. A cap past int64 cents is above any
+			// netCents, so MaxInt64 allocates exactly as the exact cap would.
+			var ok bool
+			if netCap, ok = money.MulDivRoundHalfToEven(grossCap, inv.SubtotalCents, inv.TotalAmountCents); !ok {
+				netCap = math.MaxInt64
+			}
 		}
 		cands = append(cands, candidate{inv: inv, pos: pos, grossCap: grossCap, netCap: netCap})
 	}
@@ -105,7 +111,12 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		}
 		gross := nets[i]
 		if c.inv.SubtotalCents > 0 {
-			gross = money.RoundHalfToEven(nets[i]*c.inv.TotalAmountCents, c.inv.SubtotalCents)
+			// Worked in 128 bits. A gross past int64 cents is above the
+			// room, so the room is what the min below would keep.
+			var ok bool
+			if gross, ok = money.MulDivRoundHalfToEven(nets[i], c.inv.TotalAmountCents, c.inv.SubtotalCents); !ok {
+				gross = c.grossCap
+			}
 		}
 		gross = min(gross, c.grossCap) // net→gross rounding never passes the room
 		if gross <= 0 {

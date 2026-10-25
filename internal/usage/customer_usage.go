@@ -262,7 +262,10 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	warnings = append(warnings, w...)
 
 	subSummaries := buildSubscriptionSummaries(activeSubs, plansByID)
-	totals := computeTotals(meters)
+	totals, err := computeTotals(meters)
+	if err != nil {
+		return CustomerUsageResult{}, err
+	}
 
 	// Daily time series for the chart. Cheap relative to the rating reads —
 	// single SQL pass with date_trunc + sum. On store error we degrade to an
@@ -452,12 +455,16 @@ func (s *CustomerUsageService) composeMeters(ctx context.Context, tenantID strin
 			}
 			p := &m.Prices[i]
 			p.Quantity = p.Quantity.Add(r.Quantity)
-			p.AmountCents += r.AmountCents
+			if p.AmountCents, err = domain.SumCents(p.AmountCents, r.AmountCents); err != nil {
+				return nil, nil, fmt.Errorf("meter %q price total: %w", meter.EventName, err)
+			}
 			if r.PriceID == "" {
 				continue
 			}
 			m.TotalQuantity = m.TotalQuantity.Add(r.Quantity)
-			m.TotalAmountCents += r.AmountCents
+			if m.TotalAmountCents, err = domain.SumCents(m.TotalAmountCents, r.AmountCents); err != nil {
+				return nil, nil, fmt.Errorf("meter %q total: %w", meter.EventName, err)
+			}
 		}
 		for i := range m.Prices {
 			p := &m.Prices[i]
@@ -546,7 +553,7 @@ func buildSubscriptionSummaries(subs []domain.Subscription, plansByID map[string
 // and emits one bucket per distinct currency. Order is insertion-stable
 // (first currency seen wins position 0) so the response is deterministic
 // across calls.
-func computeTotals(meters []CustomerUsageMeter) []CustomerUsageTotal {
+func computeTotals(meters []CustomerUsageMeter) ([]CustomerUsageTotal, error) {
 	bucket := map[string]int64{}
 	var order []string
 	for _, m := range meters {
@@ -556,13 +563,17 @@ func computeTotals(meters []CustomerUsageMeter) []CustomerUsageTotal {
 		if _, ok := bucket[m.Currency]; !ok {
 			order = append(order, m.Currency)
 		}
-		bucket[m.Currency] += m.TotalAmountCents
+		sum, err := domain.SumCents(bucket[m.Currency], m.TotalAmountCents)
+		if err != nil {
+			return nil, fmt.Errorf("usage total in %s: %w", m.Currency, err)
+		}
+		bucket[m.Currency] = sum
 	}
 	out := make([]CustomerUsageTotal, 0, len(order))
 	for _, cur := range order {
 		out = append(out, CustomerUsageTotal{Currency: cur, AmountCents: bucket[cur]})
 	}
-	return out
+	return out, nil
 }
 
 func nilToEmptyStrings(s []string) []string {

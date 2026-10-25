@@ -3,8 +3,10 @@ package analytics
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"log/slog"
+	"math/big"
 	"net/http"
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
@@ -531,8 +533,25 @@ func computeMRRMovement(ctx context.Context, tx *sql.Tx, start, end any, currenc
 		return m, err
 	}
 
-	m.Net = m.New + m.Expansion - m.Contraction - m.Churned
+	if m.Net, err = netMRR(m); err != nil {
+		return m, err
+	}
 	return m, nil
+}
+
+// netMRR is New + Expansion − Contraction − Churned, each step checked: a
+// total past int64 is an error, never a wrapped figure. The four parts are
+// SQL sums of non-negative amounts.
+func netMRR(m MRRMovementTotals) (int64, error) {
+	// Summed in big integers so only the net must fit int64, not each step.
+	net := new(big.Int).SetInt64(m.New)
+	net.Add(net, big.NewInt(m.Expansion))
+	net.Sub(net, big.NewInt(m.Contraction))
+	net.Sub(net, big.NewInt(m.Churned))
+	if !net.IsInt64() {
+		return 0, fmt.Errorf("net MRR: %w", domain.ErrAmountOverflow)
+	}
+	return net.Int64(), nil
 }
 
 // churnRate = canceled-in-period / active-at-period-start.

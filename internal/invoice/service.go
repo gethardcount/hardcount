@@ -811,7 +811,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		if li.IsCommitLine() {
 			commitLines++
 		}
-		subtotal += li.AmountCents
+		if subtotal, err = domain.SumCents(subtotal, li.AmountCents); err != nil {
+			return domain.Invoice{}, errs.Invalid("line_items", "the line items' total is too large")
+		}
 		items = append(items, li)
 	}
 	// One commit per invoice (ADR-078). The store enforces it too, on both

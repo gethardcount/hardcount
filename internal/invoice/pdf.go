@@ -1234,7 +1234,9 @@ type jurisdictionTaxRow struct {
 // aggregateTaxByJurisdiction sums tax by (jurisdiction, rate_bp) across line
 // items so the PDF can render a multi-row breakdown when the invoice spans
 // more than one jurisdiction. Lines without a jurisdiction or without tax
-// are ignored. Results are sorted by label for deterministic output.
+// are ignored. Rows come in the order their key first appears. The
+// sums are checked: when one does not fit int64 cents there is no breakdown
+// (nil), and the PDF shows the invoice's tax total alone, never a wrapped row.
 func aggregateTaxByJurisdiction(lineItems []domain.InvoiceLineItem) []jurisdictionTaxRow {
 	type key struct {
 		jurisdiction string
@@ -1250,7 +1252,11 @@ func aggregateTaxByJurisdiction(lineItems []domain.InvoiceLineItem) []jurisdicti
 		if _, seen := agg[k]; !seen {
 			order = append(order, k)
 		}
-		agg[k] += li.TaxAmountCents
+		sum, err := domain.SumCents(agg[k], li.TaxAmountCents)
+		if err != nil {
+			return nil
+		}
+		agg[k] = sum
 	}
 	rows := make([]jurisdictionTaxRow, 0, len(order))
 	for _, k := range order {
