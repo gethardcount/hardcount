@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // A canceled subscription carries no cancel schedule and no pending plan
@@ -136,12 +138,17 @@ func (r *liveStateRig) requireRetired(label string, sub domain.Subscription) {
 // pending plan change but with its pause, without writing an item-change
 // row (clearing the pending columns is no plan or quantity change). A writer
 // that runs billFn must give it the row with its pause: the final invoice is
-// decided against the pause in force at the cancel instant.
+// decided against the pause in force at the cancel instant. Each writer
+// queues one subscription.canceled whose subscription is the stored row
+// (ADR-131): queued before the retire, it would still show the pending plan
+// change, and on the operator cancel the schedule.
 //
 // Mutation: drop retireLiveOnlyStateTx from any one writer and its case
-// fails; drop its items UPDATE and every case fails.
+// fails; drop its items UPDATE and every case fails; queue the event before
+// the retire and every case fails.
 func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 	r := newLiveStateRig(t, "Cancel Retires Live State")
+	r.store.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
 
 	type writer struct {
 		name   string
@@ -215,8 +222,58 @@ func TestCancelWriters_RetireLiveOnlyState(t *testing.T) {
 			if after := r.itemChanges(sub.ID); after != changesBefore {
 				t.Errorf("item-change rows %d → %d: clearing a pending plan is not a plan change", changesBefore, after)
 			}
+			sent := r.canceledEvent(sub.ID)
+			var sentSub domain.Subscription
+			if err := json.Unmarshal(sent, &sentSub); err != nil {
+				t.Fatalf("decode subscription.canceled: %v", err)
+			}
+			r.requireRetired("subscription.canceled", sentSub)
+			var sentMap any
+			if err := json.Unmarshal(sent, &sentMap); err != nil {
+				t.Fatalf("decode subscription.canceled: %v", err)
+			}
+			sentJSON, _ := json.Marshal(sentMap)
+			want, _ := json.Marshal(domain.SubscriptionWebhookData(stored, nil)[domain.WebhookResourceSubscription])
+			if string(sentJSON) != string(want) {
+				t.Errorf("subscription.canceled is not the stored row:\n event %s\nstored %s", sentJSON, want)
+			}
 		})
 	}
+}
+
+// canceledEvent is the subscription, as JSON, of the one
+// subscription.canceled queued for subID.
+func (r *liveStateRig) canceledEvent(subID string) json.RawMessage {
+	r.t.Helper()
+	var raws [][]byte
+	if err := r.db.WithTenantTx(r.ctx, r.tenantID, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(r.ctx, `SELECT payload FROM webhook_outbox
+			WHERE event_type = $1 AND payload->'subscription'->>'id' = $2`, domain.EventSubscriptionCanceled, subID)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var raw []byte
+			if err := rows.Scan(&raw); err != nil {
+				return err
+			}
+			raws = append(raws, raw)
+		}
+		return rows.Err()
+	}); err != nil {
+		r.t.Fatalf("read outbox: %v", err)
+	}
+	if len(raws) != 1 {
+		r.t.Fatalf("subscription.canceled rows for %s: %d, want 1", subID, len(raws))
+	}
+	var payload struct {
+		Subscription json.RawMessage `json:"subscription"`
+	}
+	if err := json.Unmarshal(raws[0], &payload); err != nil {
+		r.t.Fatalf("decode subscription.canceled: %v", err)
+	}
+	return payload.Subscription
 }
 
 // TestMigration_ClearsLiveOnlyStateOnCanceledSubs: every cancel before this

@@ -37,6 +37,11 @@ const (
 // as an idempotent no-op, the schedule paths skip the row.
 var ErrNotPaused = errors.New("subscription: collection is not paused")
 
+// ErrNoScheduledCancel is returned by ClearScheduledCancellation when the row
+// exists but has no cancel scheduled: the clear changed nothing, so
+// subscription.cancel_cleared must not be sent.
+var ErrNoScheduledCancel = errors.New("subscription: no cancel is scheduled")
+
 // PeriodSnapshot is the period state a writer derived its inputs from — the
 // status, period start and watermark it read before building an invoice or
 // computing a new period. Every period-closing write proves it in the WHERE
@@ -160,8 +165,8 @@ type Store interface {
 	// ErrTrialCancelConflict (caller re-reads and routes).
 	CancelAtTrialEnd(ctx context.Context, tenantID, id string, observedTrialEnd time.Time) (domain.Subscription, error)
 
-	// ClearScheduledCancellation clears any cancel_at and cancel_at_period_end
-	// on the row. Idempotent.
+	// ClearScheduledCancellation clears cancel_at and cancel_at_period_end.
+	// A row with neither set returns ErrNoScheduledCancel and is not written.
 	ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// FireScheduledCancellationTx is the terminal cycle close (ADR-115): on

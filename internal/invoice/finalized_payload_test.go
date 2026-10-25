@@ -2,34 +2,21 @@ package invoice
 
 import (
 	"context"
-	"maps"
-	"slices"
+	"encoding/json"
+	"errors"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// The same list the billing engine's test pins for its own invoice.finalized
-// sender: an operator-finalized draft and an engine-born invoice send the same
-// fields.
-var invoiceFinalizedKeys = []string{
-	"amount_due_cents",
-	"credits_applied_cents",
-	"currency",
-	"customer_id",
-	"invoice_id",
-	"invoice_number",
-	"payment_status",
-	"status",
-	"total_amount_cents",
-}
-
-// Finalizing a draft sends invoice.finalized with credits_applied_cents read
-// from the finalized row (#1281). The value is normally 0, because credit is
-// applied when the invoice is collected, after this event. A draft built
-// before credit moved to collection (ADR-116) can already carry credit, and
-// the payload must then say so, or amount_due_cents and total_amount_cents
-// disagree with no field to explain the gap.
+// Finalizing a draft sends invoice.finalized carrying the finalized invoice
+// (ADR-131), the same data the billing engine sends for an invoice born
+// finalized. Credit is normally applied when the invoice is collected, after
+// this event. A draft built before credit moved to collection (ADR-116) can
+// already carry credit, and the invoice in the event then says so, so its
+// amount_due_cents and total_amount_cents add up (#1281).
 func TestFinalize_InvoiceFinalizedPayloadCarriesCreditsApplied(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, nil, newMemNumberer())
@@ -54,25 +41,75 @@ func TestFinalize_InvoiceFinalizedPayloadCarriesCreditsApplied(t *testing.T) {
 		t.Fatalf("finalize: %v", err)
 	}
 
-	var payload map[string]any
+	var data map[string]any
 	for _, ev := range events.events {
 		if ev.eventType == domain.EventInvoiceFinalized {
-			payload = ev.payload
+			data = ev.payload
 		}
 	}
-	if payload == nil {
+	if data == nil {
 		t.Fatalf("no invoice.finalized event; got %+v", events.events)
 	}
-	if got := slices.Sorted(maps.Keys(payload)); !slices.Equal(got, invoiceFinalizedKeys) {
-		t.Errorf("payload keys:\n got %v\nwant %v", got, invoiceFinalizedKeys)
+	if err := domain.CheckWebhookData(domain.EventInvoiceFinalized, data); err != nil {
+		t.Fatal(err)
 	}
-	if got := payload["credits_applied_cents"]; got != int64(2500) {
-		t.Errorf("credits_applied_cents: got %#v, want int64(2500)", got)
+	if want := domain.InvoiceWebhookData(final, nil); !reflect.DeepEqual(data, want) {
+		t.Errorf("data is not the finalized invoice:\n got %v\nwant %v", data, want)
 	}
-	if got := payload["amount_due_cents"]; got != final.AmountDueCents {
-		t.Errorf("amount_due_cents: got %#v, want %d (the finalized row)", got, final.AmountDueCents)
+	got := data[domain.WebhookResourceInvoice].(map[string]any)
+	if got["credits_applied_cents"] != json.Number("2500") {
+		t.Errorf("credits_applied_cents: got %#v, want 2500", got["credits_applied_cents"])
 	}
-	if got := payload["total_amount_cents"]; got != final.TotalAmountCents {
-		t.Errorf("total_amount_cents: got %#v, want %d", got, final.TotalAmountCents)
+	if got["amount_due_cents"] != json.Number("7500") || got["total_amount_cents"] != json.Number("10000") {
+		t.Errorf("amounts: due %v total %v, want 7500 and 10000", got["amount_due_cents"], got["total_amount_cents"])
+	}
+}
+
+// getFailsAfterFinalize is memStore whose reads fail once the finalize write
+// has run.
+type getFailsAfterFinalize struct {
+	*memStore
+	finalized bool
+}
+
+func (s *getFailsAfterFinalize) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time) (domain.Invoice, error) {
+	s.finalized = true
+	return s.memStore.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt)
+}
+
+func (s *getFailsAfterFinalize) Get(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
+	if s.finalized {
+		return domain.Invoice{}, errors.New("connection reset")
+	}
+	return s.memStore.Get(ctx, tenantID, id)
+}
+
+// When Finalize cannot read the invoice after its writes, the finalize
+// stands and invoice.finalized is not sent: an event never carries a row
+// the database did not hold (ADR-131 rule 5).
+func TestFinalize_RereadFailsSendsNoEvent(t *testing.T) {
+	store := &getFailsAfterFinalize{memStore: newMemStore()}
+	svc := NewService(store, nil, newMemNumberer())
+	events := &captureEvents{}
+	svc.SetEventDispatcher(events)
+	ctx := context.Background()
+
+	inv, err := svc.Create(ctx, "t1", CreateInput{
+		CustomerID: "cus_1",
+		LineItems:  []AddLineItemInput{{Description: "Consulting", Quantity: 1, UnitAmountCents: 10000}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Finalize(ctx, "t1", inv.ID); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if got := store.invoices[inv.ID].Status; got != domain.InvoiceFinalized {
+		t.Fatalf("status %s, want finalized", got)
+	}
+	for _, ev := range events.events {
+		if ev.eventType == domain.EventInvoiceFinalized {
+			t.Fatalf("invoice.finalized sent after the re-read failed: %v", ev.payload)
+		}
 	}
 }
