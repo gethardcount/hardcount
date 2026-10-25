@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -510,4 +511,80 @@ func normalizeJSON(t *testing.T, v any) any {
 		t.Fatalf("decode: %v", err)
 	}
 	return out
+}
+
+// failingAudit refuses every audit write.
+type failingAudit struct{}
+
+func (failingAudit) Log(context.Context, string, string, string, string, string, map[string]any) error {
+	return errors.New("audit down")
+}
+
+func (failingAudit) LogInTx(context.Context, *sql.Tx, audit.Entry) error {
+	return errors.New("audit down")
+}
+
+// dunningPausedRows reads the "Collection paused" audit rows dunning wrote
+// for the rig's subscription.
+func (r *dunningPauseRig) dunningPausedRows(logger *audit.Logger) []domain.AuditEntry {
+	r.t.Helper()
+	rows, _, err := logger.Query(r.ctx, r.tenantID, audit.QueryFilter{ResourceType: "subscription", ResourceID: r.subID})
+	if err != nil {
+		r.t.Fatalf("query audit: %v", err)
+	}
+	var out []domain.AuditEntry
+	for _, row := range rows {
+		if row.Metadata["action"] == domain.SubAuditCollectionPaused && row.Metadata["triggered_by"] == "dunning" {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// Dunning's "Collection paused" audit row is written in the pause's
+// transaction, beside its subscription.collection_paused event: the pause,
+// the row and the event commit together or not at all. Written after the
+// commit, a failed or lost row was never written again, since a re-attempt
+// finds the pause in force and returns early.
+func TestPauseCollectionForDunning_AuditRowInThePauseTx(t *testing.T) {
+	t.Run("one row with the pause, none on a re-attempt", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Pause Audit")
+		r.subs.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
+		logger := audit.NewLogger(r.db)
+		svc := NewService(r.subs, nil)
+		svc.SetAuditLogger(logger)
+		x := r.invoice("INV-A3-AU1", 1000)
+		for i := 0; i < 2; i++ {
+			if applied, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, x); err != nil || !applied {
+				t.Fatalf("PauseCollectionForDunning #%d = %v, %v; want applied", i+1, applied, err)
+			}
+		}
+		rows := r.dunningPausedRows(logger)
+		if len(rows) != 1 {
+			t.Fatalf("%d dunning \"Collection paused\" rows, want 1", len(rows))
+		}
+		if rows[0].Metadata["invoice_id"] != x {
+			t.Errorf("invoice_id = %v, want %s", rows[0].Metadata["invoice_id"], x)
+		}
+		if evs := r.collectionPausedEvents(); len(evs) != 1 {
+			t.Errorf("%d subscription.collection_paused events, want 1", len(evs))
+		}
+	})
+
+	t.Run("audit write fails: nothing commits", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Pause Audit Fail")
+		r.subs.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
+		svc := NewService(r.subs, nil)
+		svc.SetAuditLogger(failingAudit{})
+		x := r.invoice("INV-A3-AU2", 1000)
+		if applied, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, x); err == nil {
+			t.Fatalf("PauseCollectionForDunning with the audit log down = applied %v, nil; want the error", applied)
+		}
+		if pc := r.pause(); pc != nil {
+			t.Errorf("pause = %+v after a failed audit write, want none (one transaction)", pc)
+		}
+		if evs := r.collectionPausedEvents(); len(evs) != 0 {
+			t.Errorf("%d subscription.collection_paused events after a failed audit write, want none", len(evs))
+		}
+	})
 }
