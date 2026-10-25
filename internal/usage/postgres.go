@@ -29,16 +29,22 @@ func (s *PostgresStore) Ingest(ctx context.Context, tenantID string, event domai
 	return s.IngestAudited(ctx, tenantID, event, nil)
 }
 
-// IngestAudited is Ingest with an in-tx audit emission hook (ADR-090).
+// IngestAudited is Ingest with a hook, emit, run on the ingest's transaction
+// after the insert, only when the row was written. An emit error rolls the
+// write back.
 //
-// Live ingest (POST /v1/usage-events, /batch, the LiteLLM spend callback)
-// passes nil: it is machine metering at up to ~1000/s, usage_events IS the
-// record, and a row per event would double the write volume of the hottest
-// path for no forensic gain. BACKFILL is the exception and passes an emitter:
-// an operator inserting BACKDATED usage is changing what a customer will be
-// billed for a period that may already have closed — an operator action on the
-// money path, not machine telemetry. Sharing the ingest tx means a backfilled
-// event that cannot be recorded is not ingested at all.
+// The single and backfill doors read the meter's aggregation there
+// (open_period.go). Batch reads it in IngestBatch's hook, and the LiteLLM
+// doors in IngestResolvingHeld's and IngestCallResolvingHeld's. Only
+// BACKFILL also writes an audit row there (ADR-090):
+// live ingest (POST /v1/usage-events, /batch, the LiteLLM spend callback) is
+// machine metering at up to ~1000/s, usage_events IS the record, and a row
+// per event would double the write volume of the hottest path for no
+// forensic gain. An operator inserting BACKDATED usage is changing what a
+// customer will be billed for a period that may already have closed — an
+// operator action on the money path, not machine telemetry. Sharing the
+// ingest tx means a backfilled event that cannot be recorded is not ingested
+// at all.
 func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, event domain.UsageEvent, emit func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -52,7 +58,7 @@ func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, even
 	}
 	if emit != nil {
 		if err := emit(tx, event); err != nil {
-			return domain.UsageEvent{}, fmt.Errorf("audit emission: %w", err)
+			return domain.UsageEvent{}, fmt.Errorf("ingest emission: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -73,8 +79,10 @@ func (s *PostgresStore) IngestAudited(ctx context.Context, tenantID string, even
 // Keyed duplicates (replay of a fully-committed batch, or the same key
 // twice within one batch) are counted in deduped, not errors — matching
 // the LiteLLM door's replay contract. inserted lists the indices of the
-// events written, so the caller can tell which rows this batch wrote.
-func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) (inserted []int, deduped int, err error) {
+// events written, so the caller can tell which rows this batch wrote. after,
+// when not nil, runs on the transaction after every insert, with inserted;
+// an error from it rolls the batch back.
+func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(tx *sql.Tx, inserted []int) error) (inserted []int, deduped int, err error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, 0, err
@@ -90,6 +98,11 @@ func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events
 			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)
 		default:
 			inserted = append(inserted, i)
+		}
+	}
+	if after != nil {
+		if err := after(tx, inserted); err != nil {
+			return nil, 0, err
 		}
 	}
 	if err := tx.Commit(); err != nil {

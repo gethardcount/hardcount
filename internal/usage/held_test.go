@@ -122,10 +122,10 @@ func (h *heldMemStore) ReleaseHeld(context.Context, string, ReleaseHeldInput, fu
 func (h *heldMemStore) DiscardHeld(context.Context, string, string, string, func(*sql.Tx, int) error) (int, error) {
 	return 0, nil
 }
-func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent) (domain.UsageEvent, error) {
-	return h.Ingest(ctx, tenantID, ev)
+func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent, after func(*sql.Tx, domain.UsageEvent) error) (domain.UsageEvent, error) {
+	return h.IngestAudited(ctx, tenantID, ev, after)
 }
-func (h *heldMemStore) IngestCallResolvingHeld(_ context.Context, _ string, call StoreCall) (CallResult, error) {
+func (h *heldMemStore) IngestCallResolvingHeld(_ context.Context, _ string, call StoreCall, after func(*sql.Tx, CallResult) error) (CallResult, error) {
 	evs := call.Events
 	if h.callLegacy {
 		evs = call.Legacy
@@ -136,7 +136,13 @@ func (h *heldMemStore) IngestCallResolvingHeld(_ context.Context, _ string, call
 			written = append(written, i)
 		}
 	}
-	return CallResult{Inserted: len(written), Deduplicated: len(evs) - len(written), Legacy: h.callLegacy, Written: written}, nil
+	res := CallResult{Inserted: len(written), Deduplicated: len(evs) - len(written), Legacy: h.callLegacy, Written: written}
+	if after != nil {
+		if err := after(nil, res); err != nil {
+			return CallResult{}, err
+		}
+	}
+	return res, nil
 }
 func (h *heldMemStore) HoldCall(_ context.Context, _ string, call HeldCall) (CallResult, error) {
 	h.held = append(h.held, call.Events...)

@@ -33,12 +33,16 @@ type HeldStore interface {
 	DiscardHeld(ctx context.Context, tenantID, externalCustomerID, eventName string, emit func(tx *sql.Tx, n int) error) (int, error)
 	// IngestResolvingHeld is the live LiteLLM ingest: it writes the event
 	// unless a held row with the same key was discarded, and resolves a
-	// held row with the same key as released.
-	IngestResolvingHeld(ctx context.Context, tenantID string, event domain.UsageEvent) (domain.UsageEvent, error)
+	// held row with the same key as released. after, when not nil, runs on
+	// the transaction after the insert, only when the row was written; an
+	// error from it rolls the write back.
+	IngestResolvingHeld(ctx context.Context, tenantID string, event domain.UsageEvent, after func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error)
 	// IngestCallResolvingHeld writes every event of one LiteLLM call in one
 	// transaction, with IngestResolvingHeld's per-key rules and the
-	// pre-split replay guard.
-	IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error)
+	// pre-split replay guard. after, when not nil, runs on the transaction
+	// after the inserts, with what the call wrote; an error from it rolls
+	// the call back.
+	IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall, after func(tx *sql.Tx, res CallResult) error) (CallResult, error)
 	// HoldCall holds every event of one LiteLLM call in one transaction,
 	// with the same replay guard.
 	HoldCall(ctx context.Context, tenantID string, call HeldCall) (CallResult, error)
@@ -419,8 +423,10 @@ func (s *PostgresStore) DiscardHeld(ctx context.Context, tenantID, externalCusto
 //
 // SELECT ... FOR UPDATE takes the held row's lock, the same lock
 // ReleaseHeld's and DiscardHeld's UPDATEs take, so whichever runs second
-// sees the first one's status.
-func (s *PostgresStore) IngestResolvingHeld(ctx context.Context, tenantID string, event domain.UsageEvent) (domain.UsageEvent, error) {
+// sees the first one's status. after runs on the transaction once the event
+// is written (the service reads the meter's aggregation there), never for a
+// duplicate.
+func (s *PostgresStore) IngestResolvingHeld(ctx context.Context, tenantID string, event domain.UsageEvent, after func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.UsageEvent{}, err
@@ -458,6 +464,11 @@ func (s *PostgresStore) IngestResolvingHeld(ctx context.Context, tenantID string
 				released_customer_id = $2, released_event_id = $3
 			WHERE id = $1 AND status = 'held'
 		`, heldID, event.CustomerID, eventID); err != nil {
+			return domain.UsageEvent{}, err
+		}
+	}
+	if ingestErr == nil && after != nil {
+		if err := after(tx, out); err != nil {
 			return domain.UsageEvent{}, err
 		}
 	}
@@ -582,18 +593,22 @@ func callKeys(groups ...[]string) []string {
 // released with no event: its tokens are already billed inside :input. Any
 // other quantity, or none, means the split mapping.
 //
+// after, when not nil, runs on the transaction after the inserts, with what
+// the call wrote (the service reads the meter's aggregation there); an error
+// from it rolls the call back.
+//
 // A deadlock (another transaction locking the call's held rows in another
 // order, such as ReleaseHeld's claim) aborts the transaction; it is run
-// once more before the error reaches the caller.
-func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
-	res, err := s.ingestCallTx(ctx, tenantID, call)
+// once more, after included, before the error reaches the caller.
+func (s *PostgresStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall, after func(tx *sql.Tx, res CallResult) error) (CallResult, error) {
+	res, err := s.ingestCallTx(ctx, tenantID, call, after)
 	if postgres.IsDeadlock(err) {
-		res, err = s.ingestCallTx(ctx, tenantID, call)
+		res, err = s.ingestCallTx(ctx, tenantID, call, after)
 	}
 	return res, err
 }
 
-func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
+func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call StoreCall, after func(tx *sql.Tx, res CallResult) error) (CallResult, error) {
 	eventKey := func(e domain.UsageEvent) string { return e.IdempotencyKey }
 	keysOf := func(evs []domain.UsageEvent) []string {
 		out := make([]string, 0, len(evs))
@@ -707,6 +722,11 @@ func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call 
 			if err := markHeldReleased(ctx, tx, h.id, ev.CustomerID, eventID); err != nil {
 				return CallResult{}, err
 			}
+		}
+	}
+	if after != nil {
+		if err := after(tx, res); err != nil {
+			return CallResult{}, err
 		}
 	}
 	if err := tx.Commit(); err != nil {

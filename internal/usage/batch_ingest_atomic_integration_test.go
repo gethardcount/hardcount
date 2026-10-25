@@ -64,7 +64,7 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	bad.MeterID = "mtr_does_not_exist"
 	if _, _, err := store.IngestBatch(ctx, tenantID, []domain.UsageEvent{
 		evt("", 1), evt("", 2), bad,
-	}); err == nil {
+	}, nil); err == nil {
 		t.Fatal("batch with an FK-violating row must fail")
 	}
 	if got := countEvents(); got != 0 {
@@ -81,7 +81,7 @@ func TestBatchIngest_Atomic(t *testing.T) {
 		evt("key-b", 20), // fresh
 		evt("key-c", 30), // fresh…
 		evt("key-c", 30), // …and its intra-batch duplicate
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("dedup batch must succeed: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	// keyless rows are two distinct usage facts.
 	inserted, deduped, err = store.IngestBatch(ctx, tenantID, []domain.UsageEvent{
 		evt("", 5), evt("", 5),
-	})
+	}, nil)
 	if err != nil || len(inserted) != 2 || deduped != 0 {
 		t.Fatalf("keyless batch: got inserted=%v deduped=%d err=%v, want 2/0/nil", inserted, deduped, err)
 	}
@@ -129,7 +129,7 @@ func TestBatchIngest_Atomic(t *testing.T) {
 	}
 	costed := evt("key-cogs", 1000)
 	costed.Dimensions = map[string]any{"provider": "anthropic", "model": "claude-x", "token_type": "input"}
-	if _, _, err := store.IngestBatch(ctx, tenantID, []domain.UsageEvent{costed}); err != nil {
+	if _, _, err := store.IngestBatch(ctx, tenantID, []domain.UsageEvent{costed}, nil); err != nil {
 		t.Fatalf("costed batch: %v", err)
 	}
 	stamped, err := store.GetByIdempotencyKey(ctx, tenantID, "key-cogs")

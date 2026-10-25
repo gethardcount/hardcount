@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"time"
 
@@ -94,10 +95,10 @@ func CallInputKey(key string) (string, bool) {
 // IngestCall writes one call's events in one transaction. Each event gets
 // Ingest's checks and timestamp rules; a key held and then discarded is not
 // written, and a key still held is written and its held row released (see
-// PostgresStore.IngestCallResolvingHeld). Every event of both mappings is
-// classified against the open periods before the write (open_period.go);
-// only the rows the store newly wrote, in the mapping it wrote, count as
-// after_close.
+// PostgresStore.IngestCallResolvingHeld). The customer's open periods are
+// read before the write, and the rows the store newly wrote, in the mapping
+// it wrote, are classified on its transaction after the inserts
+// (open_period.go); only they count as after_close.
 func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput) (CallResult, error) {
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable
@@ -140,34 +141,37 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	if err != nil {
 		return CallResult{}, err
 	}
-	// The open periods are read BEFORE the write: see open_period.go.
-	cache := periodCacheFrom(ctx)
-	classes := func(evs []domain.UsageEvent) ([]Class, error) {
-		out := make([]Class, len(evs))
-		for i, ev := range evs {
-			c, err := s.classifyEvent(ctx, tenantID, ev, cache)
-			if err != nil {
-				return nil, err
-			}
-			out[i] = c
+	// The open periods are read BEFORE the write, the meter's aggregation on
+	// the write's transaction after the inserts: see open_period.go.
+	periods, err := s.openPeriodsFor(ctx, tenantID, in.CustomerID, periodCacheFrom(ctx))
+	if err != nil {
+		return CallResult{}, err
+	}
+	var writtenClass map[int]Class
+	res, err := s.held.IngestCallResolvingHeld(ctx, tenantID, StoreCall{Events: events, Legacy: legacy, LegacyKey: in.LegacyKey}, func(tx *sql.Tx, res CallResult) error {
+		// Set afresh on every run: the store runs the call again after a
+		// deadlock.
+		writtenClass = make(map[int]Class, len(res.Written))
+		evs := events
+		if res.Legacy {
+			evs = legacy
 		}
-		return out, nil
-	}
-	eventsClass, err := classes(events)
-	if err != nil {
-		return CallResult{}, err
-	}
-	legacyClass, err := classes(legacy)
-	if err != nil {
-		return CallResult{}, err
-	}
-	res, err := s.held.IngestCallResolvingHeld(ctx, tenantID, StoreCall{Events: events, Legacy: legacy, LegacyKey: in.LegacyKey})
+		meters := map[string]MeterBuckets{}
+		for _, i := range res.Written {
+			c, err := s.classifyWritten(ctx, tx, evs[i], periods, meters)
+			if err != nil {
+				return err
+			}
+			writtenClass[i] = c
+		}
+		return nil
+	})
 	if err != nil {
 		return res, err
 	}
-	written, writtenLate, writtenClass := events, eventsLate, eventsClass
+	written, writtenLate := events, eventsLate
 	if res.Legacy {
-		written, writtenLate, writtenClass = legacy, legacyLate, legacyClass
+		written, writtenLate = legacy, legacyLate
 	}
 	for _, ev := range writtenLate {
 		recordLate(ctx, ev)

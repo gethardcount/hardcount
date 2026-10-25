@@ -289,7 +289,12 @@ before the event existed. A frozen window must also stay frozen: a built
 period invoice is never re-opened, and a threshold window counts only
 once its invoice is paid (above). A close that commits between the read and the
 write is not seen, and that event goes unflagged; a missed flag is
-accepted, a wrong one is not. Only the write flags. A replay answers with
+accepted, a wrong one is not. The meter's aggregation is read the other way
+round: on the ingest's own transaction, after its insert (since 2026-10-25).
+The insert holds the meter row until commit, so the aggregation read there
+is the one the event is counted under, and an aggregation change waits
+(ADR-130 §2). Read before the write, a change committing in between could
+make a flag wrong. Only the write flags. A replay answers with
 the original row and no `billing_status`, because recomputing the status
 later could call an event the close did bill "after_close". A crash after
 the commit loses that row's flag; the client's retry dedups and is not
@@ -301,7 +306,8 @@ silent. A failed read of the periods refuses the request with 503
 `ingest_unavailable`, like a failed customer or meter lookup, so nothing is
 written without its signal. The read costs one tenant transaction per
 customer per request, plus one per active or trialing subscription for its
-threshold invoices, and one per meter when an event could be after_close.
+threshold invoices. When an event could be after_close, its meter is read
+once per write, on the write's transaction.
 Measured locally on the close-lag rig with one subscription: single ingest
 went from about 2.5 ms to about 4.2 ms per event (about 0.7 ms of it is the
 threshold-invoice read); a 1,000-event batch for one customer was

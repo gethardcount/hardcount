@@ -28,6 +28,16 @@ import (
 // and nothing counted it. A close that commits between the read and the
 // write is not seen: that event goes unflagged, never wrongly flagged.
 //
+// The meter's aggregation is read the other way round: on the write's own
+// transaction, after its insert (classifyWritten). The insert's foreign key
+// holds the meter row FOR KEY SHARE until commit, and an aggregation PATCH
+// locks the meter FOR UPDATE before it reads whether the meter has events
+// (ADR-130 §2). So the aggregation read there is the one the event is
+// counted under: a PATCH that committed first is seen, and a later one
+// waits, then is refused. Read before the write, a PATCH committing in
+// between could make the flag wrong, not only missed: before a paid
+// threshold invoice's end, the close bills a max event but not a sum one.
+//
 // A threshold invoice that is not paid can still be voided, and then the
 // period's close bills usage from the period start again (#243). A write-off
 // does not reopen the window (ADR-066 amendment 2026-10-23), but a
@@ -235,20 +245,19 @@ type OpenPeriodReader interface {
 	// OpenPeriods returns the OpenPeriod of every active and trialing
 	// subscription of the customer.
 	OpenPeriods(ctx context.Context, tenantID, customerID string) ([]OpenPeriod, error)
-	// MeterBuckets returns the meter's MeterBuckets.
-	MeterBuckets(ctx context.Context, tenantID, meterID string) (MeterBuckets, error)
 	// MeterBucketsTx returns the meter's MeterBuckets, read on tx (which
-	// carries the tenant). A write that reads inside its open transaction
-	// uses it, so it never waits for a second connection.
+	// carries the tenant): the transaction that wrote the meter's rows,
+	// after its inserts, so the read sees the aggregation they are counted
+	// under and never waits for a second connection.
 	MeterBucketsTx(ctx context.Context, tx *sql.Tx, meterID string) (MeterBuckets, error)
 }
 
-// periodCache holds one request's reads, so a batch reads each customer's
-// periods and each meter's buckets once. Every read still happens before
-// the writes it classifies. Not for concurrent use.
+// periodCache holds one request's open-period reads, so a batch reads each
+// customer's periods once. Every read still happens before the writes it
+// classifies. The meters are not kept here: each write reads them on its
+// own transaction (classifyWritten). Not for concurrent use.
 type periodCache struct {
 	periods map[string][]OpenPeriod
-	meters  map[string]MeterBuckets
 }
 
 type periodCacheKey struct{}
@@ -257,42 +266,52 @@ type periodCacheKey struct{}
 // the ingest calls made with it. A door that ingests many rows one call at a
 // time (the LiteLLM callback) uses it for its request.
 func WithPeriodCache(ctx context.Context) context.Context {
-	return context.WithValue(ctx, periodCacheKey{}, &periodCache{periods: map[string][]OpenPeriod{}, meters: map[string]MeterBuckets{}})
+	return context.WithValue(ctx, periodCacheKey{}, &periodCache{periods: map[string][]OpenPeriod{}})
 }
 
 func periodCacheFrom(ctx context.Context) *periodCache {
 	if c, ok := ctx.Value(periodCacheKey{}).(*periodCache); ok {
 		return c
 	}
-	return &periodCache{periods: map[string][]OpenPeriod{}, meters: map[string]MeterBuckets{}}
+	return &periodCache{periods: map[string][]OpenPeriod{}}
 }
 
-// classifyEvent classifies one prepared row against the customer's open
-// periods. With no reader wired it is Outside. A failed read is returned
-// wrapped in errIngestUnavailable: the doors answer 503 and nothing is
-// written, the same contract as a failed customer or meter lookup.
-func (s *Service) classifyEvent(ctx context.Context, tenantID string, ev domain.UsageEvent, cache *periodCache) (Class, error) {
+// openPeriodsFor reads the customer's open periods before the write. With
+// no reader wired it reads nothing, and every row is Outside. A failed read
+// is returned wrapped in errIngestUnavailable: the doors answer 503 and
+// nothing is written, the same contract as a failed customer or meter
+// lookup.
+func (s *Service) openPeriodsFor(ctx context.Context, tenantID, customerID string, cache *periodCache) ([]OpenPeriod, error) {
 	if s.periods == nil {
-		return Outside, nil
+		return nil, nil
 	}
-	periods, ok := cache.periods[ev.CustomerID]
-	if !ok {
-		var err error
-		periods, err = s.periods.OpenPeriods(ctx, tenantID, ev.CustomerID)
-		if err != nil {
-			return Outside, fmt.Errorf("%w: open periods: %w", errIngestUnavailable, err)
-		}
-		cache.periods[ev.CustomerID] = periods
+	if periods, ok := cache.periods[customerID]; ok {
+		return periods, nil
 	}
+	periods, err := s.periods.OpenPeriods(ctx, tenantID, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: open periods: %w", errIngestUnavailable, err)
+	}
+	cache.periods[customerID] = periods
+	return periods, nil
+}
+
+// classifyWritten classifies one row the write just inserted, against
+// periods read before the write. The meter is read only when the class
+// depends on it, on tx, after the insert (see the top of this file); meters
+// keeps what this transaction already read. A failed read is returned
+// wrapped in errIngestUnavailable and rolls the write back: 503, nothing
+// written.
+func (s *Service) classifyWritten(ctx context.Context, tx *sql.Tx, ev domain.UsageEvent, periods []OpenPeriod, meters map[string]MeterBuckets) (Class, error) {
 	return classify(ev.Timestamp, ev.MeterID, periods, func() (MeterBuckets, error) {
-		if b, ok := cache.meters[ev.MeterID]; ok {
+		if b, ok := meters[ev.MeterID]; ok {
 			return b, nil
 		}
-		b, err := s.periods.MeterBuckets(ctx, tenantID, ev.MeterID)
+		b, err := s.periods.MeterBucketsTx(ctx, tx, ev.MeterID)
 		if err != nil {
 			return MeterBuckets{}, fmt.Errorf("%w: meter buckets: %w", errIngestUnavailable, err)
 		}
-		cache.meters[ev.MeterID] = b
+		meters[ev.MeterID] = b
 		return b, nil
 	})
 }
