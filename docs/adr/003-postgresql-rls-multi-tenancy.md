@@ -40,6 +40,8 @@ The application database user has RLS enforced; only the migration user can bypa
 - Shared indexes and connection pools across tenants — efficient resource utilization
 - Adding a new tenant is a row insert, not a DDL operation
 
+**Correction (2026-10-25):** the first bullet suggests the queries filter by tenant and RLS is a second layer. Most do not. A typical store query is `SELECT ... FROM invoices WHERE id = $1` (`internal/invoice/postgres.go`), with no `tenant_id` or `livemode` filter of its own. For these queries the `tenant_isolation` policy is the only filter: it keeps tenants apart, and it keeps test rows apart from live ones. Only `TxBypass` work filters by tenant in its own SQL.
+
 ### Negative
 - Large tenants sharing indexes with small tenants can cause query plan degradation (noisy neighbor)
 - RLS adds a small overhead to every query (PostgreSQL must evaluate the policy predicate)
