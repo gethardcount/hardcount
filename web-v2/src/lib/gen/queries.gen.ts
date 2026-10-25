@@ -6555,9 +6555,10 @@ export const getClearSubscriptionScheduledCancelUrl = (id: string,) => {
 }
 
 /**
- * Removes a scheduled cancel. Calling it on a subscription with no
- * schedule returns the subscription unchanged. Sends the
- * `subscription.cancel_cleared` webhook event.
+ * Removes a scheduled cancel and sends the
+ * `subscription.cancel_cleared` webhook event. Calling it on a
+ * subscription with no schedule returns the subscription unchanged
+ * and sends no event.
  *
  * If the scheduled date has already passed, the cancel has taken
  * effect and the request answers 409.
@@ -6723,9 +6724,9 @@ export const getResumeSubscriptionCollectionUrl = (id: string,) => {
 /**
  * Ends a collection pause. The period that is running bills
  * normally; a period that ended during the pause keeps its draft
- * invoice. Calling it on a subscription that is not paused returns
- * the subscription unchanged. Sends the
- * `subscription.collection_resumed` webhook event.
+ * invoice. Sends the `subscription.collection_resumed` webhook
+ * event. Calling it on a subscription that is not paused returns the
+ * subscription unchanged and sends no event.
  * @summary Resume collection
  */
 export const resumeSubscriptionCollection = async (id: string, options?: RequestInit): Promise<Subscription> => {

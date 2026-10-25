@@ -14,7 +14,12 @@
 export interface WebhookStreamFrame {
   event_id: string;
   event_type: string;
-  /** The payload's `customer_id`, or empty. */
+  /**
+     * The customer the event is about: the `customer_id` of the
+     * resource in `data` (its `id` for a `customer.*` event), or empty.
+     * For an event queued before `data` held the resource, its
+     * `data.customer_id`.
+     */
   customer_id: string;
   /**
      * Delivery state. Live frames send `pending`, `succeeded` or

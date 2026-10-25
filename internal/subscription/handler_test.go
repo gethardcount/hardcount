@@ -729,13 +729,7 @@ func TestHandler_UpdateItem_ImmediatePlanChangeFiresItemUpdated(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionItemUpdated, eventTypes(dispatcher.events))
 	}
-	item, _ := ev.payload["item"].(map[string]any)
-	if item == nil {
-		t.Fatalf("payload.item missing: %v", ev.payload)
-	}
-	if item["item_id"] != itemID {
-		t.Errorf("item_id: got %v, want %q", item["item_id"], itemID)
-	}
+	item := eventItem(t, ev.eventType, ev.payload, itemID)
 	if item["plan_id"] != "plan_new" {
 		t.Errorf("plan_id: got %v, want plan_new (post-change plan expected)", item["plan_id"])
 	}
@@ -776,8 +770,8 @@ func TestHandler_UpdateItem_ScheduledPlanChangeFiresPendingChangeScheduled(t *te
 	if !ok {
 		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionPendingChangeScheduled, eventTypes(dispatcher.events))
 	}
-	if ev.payload["new_plan_id"] != "plan_new" {
-		t.Errorf("new_plan_id: got %v, want plan_new", ev.payload["new_plan_id"])
+	if item := eventItem(t, ev.eventType, ev.payload, itemID); item["pending_plan_id"] != "plan_new" {
+		t.Errorf("pending_plan_id: got %v, want plan_new", item["pending_plan_id"])
 	}
 	// item.updated must NOT also fire for a scheduled change — the intent is
 	// observable but the item hasn't mutated yet.
@@ -1284,8 +1278,11 @@ func TestHandler_ScheduleCancel_FiresEvent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionCancelScheduled, eventTypes(dispatcher.events))
 	}
-	if ev.payload["cancel_at_period_end"] != true {
-		t.Errorf("payload cancel_at_period_end: got %v, want true", ev.payload["cancel_at_period_end"])
+	if err := domain.CheckWebhookData(ev.eventType, ev.payload); err != nil {
+		t.Fatal(err)
+	}
+	if sub := ev.payload[domain.WebhookResourceSubscription].(map[string]any); sub["cancel_at_period_end"] != true {
+		t.Errorf("subscription.cancel_at_period_end: got %v, want true", sub["cancel_at_period_end"])
 	}
 }
 
@@ -1375,8 +1372,12 @@ func TestHandler_PauseCollection_FiresEvent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionCollectionPaused, eventTypes(dispatcher.events))
 	}
-	if ev.payload["behavior"] != "keep_as_draft" {
-		t.Errorf("payload behavior: got %v, want keep_as_draft", ev.payload["behavior"])
+	if err := domain.CheckWebhookData(ev.eventType, ev.payload); err != nil {
+		t.Fatal(err)
+	}
+	sub := ev.payload[domain.WebhookResourceSubscription].(map[string]any)
+	if pc, _ := sub["pause_collection"].(map[string]any); pc["behavior"] != "keep_as_draft" {
+		t.Errorf("subscription.pause_collection: got %v, want behavior keep_as_draft", sub["pause_collection"])
 	}
 }
 
@@ -1501,6 +1502,67 @@ func TestHandler_ClearScheduledCancel_FiresEvent(t *testing.T) {
 
 	if _, ok := dispatcher.firstOfType(domain.EventSubscriptionCancelCleared); !ok {
 		t.Fatalf("expected %s, got types=%v", domain.EventSubscriptionCancelCleared, eventTypes(dispatcher.events))
+	}
+}
+
+// TestHandler_NothingToUndo_SendsNoEvent: resuming collection that is not
+// paused, or clearing a cancel that is not scheduled, answers 200 with the
+// subscription and changes nothing. So it sends no event and writes no audit
+// entry: a receiver that acts on subscription.collection_resumed or
+// .cancel_cleared must not act on a change that did not happen.
+func TestHandler_NothingToUndo_SendsNoEvent(t *testing.T) {
+	cases := []struct {
+		name   string
+		path   string
+		call   func(h *Handler, w http.ResponseWriter, r *http.Request)
+		absent string
+	}{
+		{"resume collection, not paused", "/pause-collection", (*Handler).resumeCollection, domain.EventSubscriptionCollectionResumed},
+		{"clear scheduled cancel, none scheduled", "/scheduled-cancel", (*Handler).clearScheduledCancel, domain.EventSubscriptionCancelCleared},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tenantID := "t1"
+			store := newMemStore()
+			subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
+			before, err := store.Get(ctx, tenantID, subID)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+
+			dispatcher := &capturingDispatcher{}
+			audits := &capturingAudit{}
+			h := NewHandler(NewService(store, nil))
+			h.SetEventDispatcher(dispatcher)
+			h.SetAuditLogger(audits)
+
+			req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+tc.path, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", subID)
+			req = req.WithContext(context.WithValue(
+				context.WithValue(ctx, chi.RouteCtxKey, rctx),
+				auth.TestTenantIDKey(), tenantID,
+			))
+			rr := httptest.NewRecorder()
+			tc.call(h, rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
+			}
+			var got domain.Subscription
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if got.ID != subID || !got.UpdatedAt.Equal(before.UpdatedAt) {
+				t.Errorf("response: id %s updated_at %v, want %s unchanged at %v", got.ID, got.UpdatedAt, subID, before.UpdatedAt)
+			}
+			if len(dispatcher.events) != 0 {
+				t.Errorf("events sent %v, want none (%s for a change that did not happen)", eventTypes(dispatcher.events), tc.absent)
+			}
+			if len(audits.entries) != 0 {
+				t.Errorf("audit entries %v, want none", audits.actions())
+			}
+		})
 	}
 }
 
@@ -1749,4 +1811,25 @@ func TestHandler_Create_RefusesEmptyOrNullStatus(t *testing.T) {
 	if sub.Status != domain.SubscriptionActive {
 		t.Fatalf("status left out: got %q, want active", sub.Status)
 	}
+}
+
+// eventItem checks an item event against the payload rule (ADR-131) and
+// returns the item it names from the subscription it carries.
+func eventItem(t *testing.T, eventType string, data map[string]any, itemID string) map[string]any {
+	t.Helper()
+	if err := domain.CheckWebhookData(eventType, data); err != nil {
+		t.Fatal(err)
+	}
+	if data["item_id"] != itemID {
+		t.Fatalf("item_id: got %v, want %q", data["item_id"], itemID)
+	}
+	sub := data[domain.WebhookResourceSubscription].(map[string]any)
+	items, _ := sub["items"].([]any)
+	for _, it := range items {
+		if m := it.(map[string]any); m["id"] == itemID {
+			return m
+		}
+	}
+	t.Fatalf("item %s is not in the subscription's items: %v", itemID, items)
+	return nil
 }
