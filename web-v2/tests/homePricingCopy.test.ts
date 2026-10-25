@@ -22,6 +22,10 @@ test('price changes say when they apply, before saving', () => {
   assert.match(planPricesNotice(true), /prices the plan had at its start/)
   assert.match(planPricesNotice(true), /starts later today/)
   assert.match(planPricesNotice(true), /moves to this plan or adds it partway through its period/)
+  // A move from a plan with another billing interval starts a new period at
+  // the move (applyCrossIntervalPlanSwapTx), so it is priced then.
+  assert.match(planPricesNotice(true), /usually midnight on its first day/)
+  assert.match(planPricesNotice(true), /another billing interval starts a new period then, so it gets a change at once/)
   assert.match(planPricesNotice(false), /apply at once/)
 })
 
@@ -42,6 +46,8 @@ test('removing a price names the overrides it ends', () => {
   assert.match(priceRemoveSentence(true, 0), /^From each subscriber's next billing period/)
   assert.match(priceRemoveSentence(true, 0), /starts later today/)
   assert.match(priceRemoveSentence(true, 0), /moves to this plan or adds it partway through its period/)
+  assert.match(priceRemoveSentence(true, 0), /usually midnight on its first day/)
+  assert.match(priceRemoveSentence(true, 0), /another billing interval starts a new period then, so it doesn't pay this price/)
   assert.match(priceRemoveSentence(true, 1), /ends 1 customer override of it/)
   assert.match(priceRemoveSentence(true, 3), /ends 3 customer overrides of it/)
   assert.match(priceRemoveSentence(true, null), /ends any customer override/)

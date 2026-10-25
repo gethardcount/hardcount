@@ -433,6 +433,49 @@ func TestE2E_PlanPrices_TeardownSubscriptionWriterAndPriceWrite(t *testing.T) {
 	}
 }
 
+// TestE2E_PlanPrices_TeardownAgainstSubscriptionCreate (review round 3): a
+// subscription create for a clock customer inserts a row with foreign keys
+// to the customer and to the clock. The insert locks the customer first. A
+// teardown holds its clock FOR UPDATE and later deletes that customer. So the
+// create reads its clock FOR KEY SHARE before the insert: it waits at the
+// clock holding nothing the teardown deletes, the teardown finishes, and the
+// create answers 404 because the customer went with the clock.
+//
+// Mutation: drop the create's clock read, and the create waits at the clock
+// while it holds the customer the teardown deletes: Postgres aborts one of
+// them with 40P01 (a 500).
+func TestE2E_PlanPrices_TeardownAgainstSubscriptionCreate(t *testing.T) {
+	r := newPPRig(t, "teardown create")
+	admin := testutil.AdminPool(t)
+	calls := r.meter("calls", "sum")
+	plan, _ := r.plan("pro", perUnit(calls, "10", nil))
+	clk := r.clock("tdc", time.Now().UTC().AddDate(0, 0, -20).Truncate(time.Second))
+	first, _, _ := r.clockSub("pp-tdc-1", clk, plan)
+	second := r.customer("pp-tdc-2", clk)
+
+	// Stop the teardown after its clock lock, before it deletes customers.
+	h := hold(t, admin, `SELECT 1 FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, first)
+	teardown := r.async(http.MethodDelete, "/v1/test-clocks/"+clk, nil)
+	testutil.WaitForLockWaiter(t, context.Background(), admin, "DELETE FROM subscriptions")
+	create := r.async(http.MethodPost, "/v1/subscriptions", map[string]any{
+		"code": "pp-tdc-new", "display_name": "PP", "customer_id": second, "billing_time": "anniversary",
+		"items": []map[string]any{{"plan_id": plan, "quantity": 1}},
+	})
+	// The create waits at the clock: in its clock read (with the fix) or in
+	// its insert's foreign-key check (without it).
+	waitForAnyLockWaiter(t, admin, "INSERT INTO subscriptions", "FROM test_clocks")
+	h.release()
+	if got := wait(t, "teardown", teardown); got.code >= 300 {
+		t.Fatalf("teardown: %d %s (a 500 is the deadlock in the server log)", got.code, got.raw)
+	}
+	if got := wait(t, "create", create); got.code != http.StatusNotFound {
+		t.Fatalf("create: %d %s, want 404 (the customer went with the clock; a 500 is the deadlock in the server log)", got.code, got.raw)
+	}
+	if n := r.count(`SELECT count(*) FROM customers WHERE test_clock_id = $1`, clk); n != 0 {
+		t.Errorf("%d customers of the clock left after the teardown", n)
+	}
+}
+
 // waitForAnyLockWaiter returns once a backend waits on a lock in a statement
 // matching one of patterns.
 func waitForAnyLockWaiter(t *testing.T, admin *sql.DB, patterns ...string) {
