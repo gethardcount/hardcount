@@ -2,8 +2,11 @@ package subscription
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/testutil"
+	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // The two store writers of A3 (ADR-036 amendment 2026-10-22) on real
@@ -376,4 +380,134 @@ func TestPauseInvoice_Check(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "subscriptions_pause_collection_invoice_id_check") {
 		t.Fatalf("an invoice id with no pause: %v, want the CHECK to refuse it", err)
 	}
+}
+
+// collectionPausedEvents reads the subscription.collection_paused rows the
+// outbox holds for the rig's subscription, oldest first.
+func (r *dunningPauseRig) collectionPausedEvents() []map[string]any {
+	r.t.Helper()
+	rows, err := testutil.AdminPool(r.t).Query(`
+		SELECT payload FROM webhook_outbox
+		WHERE event_type = $1 AND payload->'subscription'->>'id' = $2
+		ORDER BY created_at, id`, domain.EventSubscriptionCollectionPaused, r.subID)
+	if err != nil {
+		r.t.Fatalf("read outbox: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []map[string]any
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			r.t.Fatalf("scan outbox row: %v", err)
+		}
+		var data map[string]any
+		if err := json.Unmarshal(raw, &data); err != nil {
+			r.t.Fatalf("decode outbox row: %v", err)
+		}
+		out = append(out, data)
+	}
+	if err := rows.Err(); err != nil {
+		r.t.Fatalf("read outbox: %v", err)
+	}
+	return out
+}
+
+// failingOutbox refuses every enqueue.
+type failingOutbox struct{}
+
+func (failingOutbox) Enqueue(context.Context, *sql.Tx, string, string, map[string]any) (string, error) {
+	return "", errors.New("outbox down")
+}
+
+// Dunning's pause queues subscription.collection_paused (triggered_by
+// dunning) in its own transaction: once when it pauses, never when a pause
+// was already in force or the invoice was paid first, and not at all when
+// the pause rolls back.
+func TestSetDunningPause_QueuesCollectionPausedInTheTx(t *testing.T) {
+	t.Run("written once, with the row as stored", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Paused Event")
+		r.subs.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
+		x := r.invoice("INV-A3-EV1", 1000)
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x); err != nil || outcome != DunningPauseWritten {
+			t.Fatalf("SetDunningPause = %v, %v; want written", outcome, err)
+		}
+		// A re-attempted exhaustion finds the pause in force: no second event.
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x); err != nil || outcome != DunningPauseAlreadyHeld {
+			t.Fatalf("second SetDunningPause = %v, %v; want DunningPauseAlreadyHeld", outcome, err)
+		}
+		evs := r.collectionPausedEvents()
+		if len(evs) != 1 {
+			t.Fatalf("%d subscription.collection_paused events queued, want 1", len(evs))
+		}
+		if err := domain.CheckWebhookData(domain.EventSubscriptionCollectionPaused, evs[0]); err != nil {
+			t.Error(err)
+		}
+		if evs[0]["triggered_by"] != "dunning" {
+			t.Errorf("triggered_by = %v, want dunning", evs[0]["triggered_by"])
+		}
+		stored, err := r.subs.Get(r.ctx, r.tenantID, r.subID)
+		if err != nil {
+			t.Fatalf("get subscription: %v", err)
+		}
+		want := domain.SubscriptionWebhookData(stored, nil)[domain.WebhookResourceSubscription]
+		if got := evs[0][domain.WebhookResourceSubscription]; !reflect.DeepEqual(normalizeJSON(t, got), normalizeJSON(t, want)) {
+			t.Errorf("event subscription = %v\nwant the stored row %v", got, want)
+		}
+	})
+
+	t.Run("operator pause in force: no event", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Paused Event Held")
+		r.subs.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
+		x := r.invoice("INV-A3-EV2", 1000)
+		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
+			t.Fatalf("operator pause: %v", err)
+		}
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x); err != nil || outcome != DunningPauseAlreadyHeld {
+			t.Fatalf("SetDunningPause = %v, %v; want DunningPauseAlreadyHeld", outcome, err)
+		}
+		if evs := r.collectionPausedEvents(); len(evs) != 0 {
+			t.Errorf("%d subscription.collection_paused events queued, want none", len(evs))
+		}
+	})
+
+	t.Run("invoice paid first: no event", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Paused Event Settled")
+		r.subs.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
+		x := r.invoice("INV-A3-EV3", 1000)
+		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, x, "", time.Now().UTC()); err != nil {
+			t.Fatalf("pay: %v", err)
+		}
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x); err != nil || outcome != DunningPauseInvoiceSettled {
+			t.Fatalf("SetDunningPause = %v, %v; want DunningPauseInvoiceSettled", outcome, err)
+		}
+		if evs := r.collectionPausedEvents(); len(evs) != 0 {
+			t.Errorf("%d subscription.collection_paused events queued, want none", len(evs))
+		}
+	})
+
+	t.Run("enqueue fails: the pause rolls back", func(t *testing.T) {
+		r := newDunningPauseRig(t, "A3 Paused Event Rollback")
+		r.subs.SetOutboxEnqueuer(failingOutbox{})
+		x := r.invoice("INV-A3-EV4", 1000)
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x); err == nil {
+			t.Fatal("SetDunningPause with the outbox down succeeded, want the error")
+		}
+		if pc := r.pause(); pc != nil {
+			t.Errorf("pause = %+v after a failed enqueue, want none (one transaction)", pc)
+		}
+	})
+}
+
+// normalizeJSON round-trips v through JSON so typed and decoded values compare.
+func normalizeJSON(t *testing.T, v any) any {
+	t.Helper()
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var out any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return out
 }
