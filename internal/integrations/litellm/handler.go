@@ -170,7 +170,7 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := SpendResponse{Errors: []SpendRowError{}}
-	// One open-period read per customer and meter for the whole request.
+	// One open-period read per customer for the whole request.
 	ctx := usage.WithPeriodCache(r.Context())
 
 	for _, payload := range body {
@@ -285,8 +285,8 @@ func (h *Handler) persist(ctx context.Context, tenantID string, m Mapping) (call
 		// never 503, or LiteLLM retries it until max_retries is spent.
 		// Classified on Kind sentinels only — a DomainError's Code is not
 		// a verdict signal (a future infra error carrying a code would be
-		// misfiled as per-row). A failed open-period read is neither, so
-		// it is a non-verdict: 503, nothing written.
+		// misfiled as per-row). A failed open-period or aggregation read is
+		// neither, so it is a non-verdict: 503, nothing written.
 		if errors.Is(err, errs.ErrValidation) || errors.Is(err, errs.ErrNotFound) {
 			return callOutcome{}, err
 		}

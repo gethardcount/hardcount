@@ -30,11 +30,9 @@ import (
 // patchBeforeTheInsert is the concurrent resolver for an ingest's
 // after_close signals. Its open-period read, made before the ingest writes,
 // starts an aggregation PATCH and holds it open after the PATCH has locked
-// the meter and read no usage. The PATCH commits at the first of two
-// points: a meter read made before the write (MeterBuckets, which answers
-// the aggregation it read before the commit), or 300 ms later. Either way it
-// commits after the period read and before the insert can take the meter
-// row.
+// the meter and read no usage. The PATCH commits 300 ms later: after the
+// period read, and before the insert can take the meter row. A meter read
+// made before the insert sees the old aggregation.
 type patchBeforeTheInsert struct {
 	f         ingestAggFixture
 	to        string
@@ -63,19 +61,6 @@ func (r *patchBeforeTheInsert) OpenPeriods(context.Context, string, string) ([]u
 }
 
 func (r *patchBeforeTheInsert) letCommit() { r.commit.Do(func() { close(r.paused.release) }) }
-
-// MeterBuckets is a meter read before the write, off the ingest's
-// transaction. It reads the committed aggregation, then lets the PATCH
-// commit before it answers.
-func (r *patchBeforeTheInsert) MeterBuckets(ctx context.Context, tenantID, meterID string) (usage.MeterBuckets, error) {
-	m, err := r.f.psvc.GetMeter(ctx, tenantID, meterID)
-	r.letCommit()
-	<-r.patchDone
-	if err != nil {
-		return usage.MeterBuckets{}, err
-	}
-	return usage.BucketsOf(m), nil
-}
 
 func (r *patchBeforeTheInsert) MeterBucketsTx(ctx context.Context, tx *sql.Tx, meterID string) (usage.MeterBuckets, error) {
 	m, err := pricing.NewPostgresStore(r.f.db).GetMeterTx(ctx, tx, meterID)

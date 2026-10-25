@@ -202,10 +202,6 @@ func (r *orderReader) OpenPeriods(context.Context, string, string) ([]OpenPeriod
 	return []OpenPeriod{{Start: opMay, End: opJun, Floor: opAt(opApr), Meters: meters("mtr_1"), NextMeters: meters("mtr_1")}}, nil
 }
 
-func (r *orderReader) MeterBuckets(context.Context, string, string) (MeterBuckets, error) {
-	return MeterBuckets{Additive: true}, nil
-}
-
 func (r *orderReader) MeterBucketsTx(context.Context, *sql.Tx, string) (MeterBuckets, error) {
 	return MeterBuckets{Additive: true}, nil
 }
@@ -221,9 +217,9 @@ func (s orderStore) IngestAudited(ctx context.Context, tenantID string, e domain
 	return s.memStore.IngestAudited(ctx, tenantID, e, emit)
 }
 
-func (s orderStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) ([]int, int, error) {
+func (s orderStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(*sql.Tx, []int) error) ([]int, int, error) {
 	s.log.steps = append(s.log.steps, "write")
-	return s.memStore.IngestBatch(ctx, tenantID, events)
+	return s.memStore.IngestBatch(ctx, tenantID, events, after)
 }
 
 // TestIngest_ReadsOpenPeriodsBeforeTheWrite: the order is what keeps the
@@ -398,9 +394,9 @@ type callOrderStore struct {
 	log *stepLog
 }
 
-func (s *callOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
+func (s *callOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall, after func(*sql.Tx, CallResult) error) (CallResult, error) {
 	s.log.steps = append(s.log.steps, "write")
-	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call)
+	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call, after)
 }
 
 // heldOrderStore logs every write of the held store's ingest doors and of
@@ -415,19 +411,19 @@ func (s *heldOrderStore) IngestAudited(ctx context.Context, tenantID string, e d
 	return s.heldMemStore.IngestAudited(ctx, tenantID, e, emit)
 }
 
-func (s *heldOrderStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) ([]int, int, error) {
+func (s *heldOrderStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(*sql.Tx, []int) error) ([]int, int, error) {
 	s.log.steps = append(s.log.steps, "write")
-	return s.heldMemStore.IngestBatch(ctx, tenantID, events)
+	return s.heldMemStore.IngestBatch(ctx, tenantID, events, after)
 }
 
-func (s *heldOrderStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent) (domain.UsageEvent, error) {
+func (s *heldOrderStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent, after func(*sql.Tx, domain.UsageEvent) error) (domain.UsageEvent, error) {
 	s.log.steps = append(s.log.steps, "write")
-	return s.heldMemStore.IngestResolvingHeld(ctx, tenantID, ev)
+	return s.heldMemStore.IngestResolvingHeld(ctx, tenantID, ev, after)
 }
 
-func (s *heldOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
+func (s *heldOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall, after func(*sql.Tx, CallResult) error) (CallResult, error) {
 	s.log.steps = append(s.log.steps, "write")
-	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call)
+	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call, after)
 }
 
 // aggOrderReader answers a period whose paid threshold invoice billed
@@ -440,11 +436,6 @@ func (r *aggOrderReader) OpenPeriods(context.Context, string, string) ([]OpenPer
 	wm := opAt(opMay.AddDate(0, 0, 19))
 	return []OpenPeriod{{Start: opMay, End: opJun, Floor: opAt(opApr), Meters: meters("mtr_1"), NextMeters: meters("mtr_1"),
 		ThresholdWatermark: ThresholdWatermark{BilledThrough: wm, PaidThrough: wm}}}, nil
-}
-
-func (r *aggOrderReader) MeterBuckets(context.Context, string, string) (MeterBuckets, error) {
-	r.log.steps = append(r.log.steps, "meter")
-	return MeterBuckets{Additive: true}, nil
 }
 
 func (r *aggOrderReader) MeterBucketsTx(context.Context, *sql.Tx, string) (MeterBuckets, error) {

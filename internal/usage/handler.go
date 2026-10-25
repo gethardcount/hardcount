@@ -328,8 +328,8 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 // errIngestUnavailable marks a NON-verdict: a customer or meter lookup from
-// resolve, or the service's open-period read (open_period.go), that the
-// store could not answer (failover, a lost pool, a cancelled request). The
+// resolve, or the service's open-period or aggregation read (open_period.go),
+// that the store could not answer (failover, a lost pool, a cancelled request). The
 // three ingest doors answer it with 503 so the client retries, the same
 // contract as the LiteLLM door. Never returned to the caller as text.
 var errIngestUnavailable = errors.New("usage: lookup store unavailable")
@@ -337,7 +337,8 @@ var errIngestUnavailable = errors.New("usage: lookup store unavailable")
 // respondIngestUnavailable writes the 503 for errIngestUnavailable. The raw
 // error is logged, never sent to the caller (ADR-026). "Nothing was recorded"
 // holds at every door because resolve and the open-period read run before
-// any write.
+// any write, and the aggregation read runs on the write's transaction, so a
+// failed one rolls the write back.
 func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID string, err error) {
 	slog.ErrorContext(r.Context(), "usage ingest: lookup store unavailable — request refused for client retry",
 		"tenant_id", tenantID,
@@ -357,7 +358,7 @@ func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID s
 // original row can't be read.
 func (h *Handler) respondIngestError(w http.ResponseWriter, r *http.Request, tenantID, idempotencyKey string, err error) {
 	if errors.Is(err, errIngestUnavailable) {
-		// The open-period read failed before the write: nothing recorded.
+		// An open-period or aggregation read failed: nothing recorded.
 		respondIngestUnavailable(w, r, tenantID, err)
 		return
 	}
@@ -644,7 +645,8 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 
 	if len(ingestErrs) > 0 {
 		// A store that gave no answer refuses the batch for retry; nothing
-		// was written (the open-period read runs before the write).
+		// was written (the open-period read runs before the write, and a
+		// failed aggregation read rolls the batch back).
 		for _, e := range ingestErrs {
 			if errors.Is(e, errIngestUnavailable) {
 				respondIngestUnavailable(w, r, tenantID, e)

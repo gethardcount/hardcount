@@ -241,12 +241,24 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	// The open periods are read BEFORE the write: see open_period.go.
-	class, err := s.classifyEvent(ctx, tenantID, prepared, periodCacheFrom(ctx))
+	// The open periods are read BEFORE the write, the meter's aggregation on
+	// the write's transaction after the insert: see open_period.go.
+	periods, err := s.openPeriodsFor(ctx, tenantID, prepared.CustomerID, periodCacheFrom(ctx))
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	event, err := s.store.IngestAudited(ctx, tenantID, prepared, emit)
+	var class Class
+	event, err := s.store.IngestAudited(ctx, tenantID, prepared, func(tx *sql.Tx, out domain.UsageEvent) error {
+		c, err := s.classifyWritten(ctx, tx, prepared, periods, map[string]MeterBuckets{})
+		if err != nil {
+			return err
+		}
+		class = c
+		if emit == nil {
+			return nil
+		}
+		return emit(tx, out)
+	})
 	if err == nil {
 		// Count only rows that actually landed. An idempotency-replay errors
 		// out of store.Ingest (no new row), so it isn't counted — the metric
@@ -259,8 +271,8 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 }
 
 // markAfterClose sets billing_status on a row the write just inserted and
-// records it, when the row was classified AfterClose before the write. A
-// replay never reaches here: it is an error out of the store.
+// records it, when the write classified the row AfterClose. A replay never
+// reaches here: it is an error out of the store.
 func markAfterClose(ctx context.Context, event *domain.UsageEvent, class Class) {
 	if class != AfterClose {
 		return
@@ -428,7 +440,8 @@ type BatchResult struct {
 // "quantity too large" across a 500-event batch was undebuggable) and
 // abort before any write. Idempotency replays count as deduplicated —
 // success, not failure — matching the LiteLLM door. A failed open-period
-// read aborts before any write too (errIngestUnavailable).
+// read aborts before any write too, and a failed meter read rolls the batch
+// back (errIngestUnavailable).
 func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []IngestInput) (BatchResult, []error) {
 	prepared := make([]domain.UsageEvent, 0, len(events))
 	var batchErrs []error
@@ -444,18 +457,26 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 		return BatchResult{}, batchErrs
 	}
 
-	// The open periods are read BEFORE the write: see open_period.go.
+	// The open periods are read BEFORE the write, each meter's aggregation on
+	// the write's transaction after the inserts: see open_period.go.
 	cache := periodCacheFrom(ctx)
-	classes := make([]Class, len(prepared))
-	for i, ev := range prepared {
-		c, err := s.classifyEvent(ctx, tenantID, ev, cache)
-		if err != nil {
+	for _, ev := range prepared {
+		if _, err := s.openPeriodsFor(ctx, tenantID, ev.CustomerID, cache); err != nil {
 			return BatchResult{}, []error{err}
 		}
-		classes[i] = c
 	}
-
-	inserted, deduped, err := s.store.IngestBatch(ctx, tenantID, prepared)
+	classes := make([]Class, len(prepared))
+	inserted, deduped, err := s.store.IngestBatch(ctx, tenantID, prepared, func(tx *sql.Tx, inserted []int) error {
+		meters := map[string]MeterBuckets{}
+		for _, i := range inserted {
+			c, err := s.classifyWritten(ctx, tx, prepared[i], cache.periods[prepared[i].CustomerID], meters)
+			if err != nil {
+				return err
+			}
+			classes[i] = c
+		}
+		return nil
+	})
 	if err != nil {
 		return BatchResult{}, []error{err}
 	}

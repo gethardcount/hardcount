@@ -152,6 +152,12 @@ is a break. v0.9.0 is also a clean break: there is no upgrade from Velox
 - The release's counts (`in_open_period` and the rest) read the meter's
   aggregation on the release's own transaction, after its inserts, so they
   follow the aggregation its events are counted under.
+- Ingest does the same since 2026-10-25, at every door: single, batch,
+  backfill and the LiteLLM call. The after_close flag, its counter and its
+  WARN read the aggregation on the ingest's own transaction, after its
+  insert. Before, they read it before the write. A change committing in
+  between could make them follow the old aggregation. Billed amounts were
+  not affected.
 - A hold takes no meter lock any more, which also removes the race #1376
   listed between a hold and a meter created during it.
 

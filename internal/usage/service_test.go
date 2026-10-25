@@ -57,7 +57,7 @@ func (m *memStore) IngestAudited(ctx context.Context, tenantID string, e domain.
 	return out, nil
 }
 
-func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) ([]int, int, error) {
+func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(tx *sql.Tx, inserted []int) error) ([]int, int, error) {
 	staged := newMemStore()
 	for k, v := range m.events {
 		staged.events[k] = v
@@ -73,6 +73,11 @@ func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []do
 			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)
 		default:
 			inserted = append(inserted, i)
+		}
+	}
+	if after != nil {
+		if err := after(nil, inserted); err != nil {
+			return nil, 0, err
 		}
 	}
 	m.events = staged.events
