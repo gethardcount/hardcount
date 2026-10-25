@@ -118,7 +118,7 @@ func TestExpandTaxResultLines_PartitionMatchesCreateTimeSplit(t *testing.T) {
 	// (NetAmountCents == request amount).
 	res := []tax.ResultLine{{Ref: "line_0", NetAmountCents: 1800, TaxAmountCents: 180, TaxRate: 10}}
 
-	out := expandTaxResultLines(res, groups, lines)
+	out := mustExpand(t, res, groups, lines)
 	if len(out) != 2 {
 		t.Fatalf("got %d expanded lines, want 2", len(out))
 	}
@@ -145,7 +145,7 @@ func TestExpandTaxResultLines_BankersRemainderStaysOnAbsorber(t *testing.T) {
 	// An odd total that doesn't divide evenly: T=181 on net 1800.
 	// creditTax = RHTE(181×−1200, 1800) = RHTE(−120.67) = −121; charge = 302.
 	res := []tax.ResultLine{{Ref: "line_0", NetAmountCents: 1800, TaxAmountCents: 181}}
-	out := expandTaxResultLines(res, groups, lines)
+	out := mustExpand(t, res, groups, lines)
 	if out[0].TaxAmountCents != -121 || out[1].TaxAmountCents != 302 {
 		t.Errorf("partition = (%d, %d), want (−121, 302)", out[0].TaxAmountCents, out[1].TaxAmountCents)
 	}
@@ -159,7 +159,7 @@ func TestExpandTaxResultLines_InclusiveScalesNets(t *testing.T) {
 	_, groups, _ := collapseTaxRequestLines(lines, "")
 	// Inclusive: provider carved net 1636 (+164 tax) out of the gross 1800.
 	res := []tax.ResultLine{{Ref: "line_0", NetAmountCents: 1636, TaxAmountCents: 164}}
-	out := expandTaxResultLines(res, groups, lines)
+	out := mustExpand(t, res, groups, lines)
 	if got := out[0].NetAmountCents + out[1].NetAmountCents; got != 1636 {
 		t.Errorf("nets sum to %d, want the carved 1636", got)
 	}
@@ -174,7 +174,7 @@ func TestExpandTaxResultLines_InclusiveScalesNets(t *testing.T) {
 func TestExpandTaxResultLines_MissingProviderLinesLeaveRefEmpty(t *testing.T) {
 	lines := []domain.InvoiceLineItem{{AmountCents: 1000, Quantity: 1}, {AmountCents: 2000, Quantity: 1}}
 	_, groups, _ := collapseTaxRequestLines(lines, "")
-	out := expandTaxResultLines([]tax.ResultLine{{Ref: "line_0", NetAmountCents: 1000, TaxAmountCents: 100}}, groups, lines)
+	out := mustExpand(t, []tax.ResultLine{{Ref: "line_0", NetAmountCents: 1000, TaxAmountCents: 100}}, groups, lines)
 	if out[0].Ref == "" {
 		t.Errorf("produced line 0 lost its ref")
 	}
@@ -237,4 +237,13 @@ func TestApplyTaxToLineItems_ManualRetryPreservesSplitPartition(t *testing.T) {
 		t.Errorf("per-line = (%d, %d), want (−120, 300) — the clamp-and-redistribute bug is back",
 			lines[0].TaxAmountCents, lines[1].TaxAmountCents)
 	}
+}
+
+func mustExpand(t *testing.T, res []tax.ResultLine, groups [][]int, lines []domain.InvoiceLineItem) []tax.ResultLine {
+	t.Helper()
+	out, err := expandTaxResultLines(res, groups, lines)
+	if err != nil {
+		t.Fatalf("expandTaxResultLines: %v", err)
+	}
+	return out
 }

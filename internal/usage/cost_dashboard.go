@@ -343,7 +343,10 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 
 	for _, t := range res.Totals {
 		proj.Totals = append(proj.Totals, CostDashboardTotal(t))
-		proj.ProjectedTotalCents += t.AmountCents
+		var err error
+		if proj.ProjectedTotalCents, err = domain.SumCents(proj.ProjectedTotalCents, t.AmountCents); err != nil {
+			return CostDashboardProjection{}, fmt.Errorf("cost dashboard projected total: %w", err)
+		}
 	}
 	proj.Credits = credits
 

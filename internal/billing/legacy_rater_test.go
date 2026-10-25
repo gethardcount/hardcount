@@ -35,6 +35,11 @@ package billing
 // invoice that carries one (wm.billedBase).
 // Shared helpers this PR does not change (the window builders, the base-fee
 // lines, the usage reads, the watermark, line descriptions) are not copied.
+// A fourth edit came with checked money math: the shared base-fee helpers
+// and computePreviewTotals return an error now, which the old loops pass on.
+// The old loops' own sums stay unchecked, so a call the new code refuses
+// with domain.ErrAmountOverflow (an amount past int64, which the old loops
+// wrapped) is not compared; overflowRefusals names those calls.
 // PR-4 deletes this file with the rating-rule tables.
 
 import (
@@ -85,6 +90,33 @@ type rateDifferential struct {
 	diffs    []string
 	unstable []string // entry and test of each call of a movesBetweenRuns test whose new result moved
 	memo     []string // entry and test of each call skipped under an aggregation memo
+	overflow []string // entry and test of each call the new code refused with ErrAmountOverflow
+}
+
+// refusedOverflow reports whether the new code refused the call with
+// domain.ErrAmountOverflow, and records it: the old loops wrapped such
+// sums, so there is nothing to compare.
+func (d *rateDifferential) refusedOverflow(entry string, err error) bool {
+	if !errors.Is(err, domain.ErrAmountOverflow) {
+		return false
+	}
+	test := currentTest()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.overflow = append(d.overflow, entry+" in "+test)
+	return true
+}
+
+// OverflowRefusals is how many calls the differential left uncompared
+// because the new code refused them with ErrAmountOverflow.
+func OverflowRefusals() int {
+	d, ok := rateTap.(*rateDifferential)
+	if !ok {
+		return 0
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.overflow)
 }
 
 // noTap is the context the differential rates on, so its own calls are not
@@ -146,6 +178,10 @@ func (d *rateDifferential) buildLineItems(ctx context.Context, e *Engine, sub do
 	// The new code rates on the caller's map, which it hydrates with segment
 	// plans as before.
 	got, res := run(plans)
+	if d.refusedOverflow("period close", res.err) {
+		mergeLeftOut(unpriced, belowZero, res.u, res.b)
+		return res.lines, res.subtotal, res.bt, res.err
+	}
 	want := guard(func() string {
 		u2, b2 := unpricedUsage{}, netNegativeUsage{}
 		l2, s2, bt2, err2 := e.legacyBuildLineItems(ctx, sub, now, periodStart, periodEnd, clonePlans(given), cur, loc, u2, b2)
@@ -177,6 +213,10 @@ func (d *rateDifferential) buildCancelLineItems(ctx context.Context, e *Engine, 
 		return renderClose(r.lines, r.subtotal, nil, r.err, r.u, r.b), r
 	}
 	got, res := run(plans)
+	if d.refusedOverflow("immediate cancel or swap", res.err) {
+		mergeLeftOut(unpriced, belowZero, res.u, res.b)
+		return res.lines, res.subtotal, res.err
+	}
 	want := guard(func() string {
 		u2, b2 := unpricedUsage{}, netNegativeUsage{}
 		l2, s2, err2 := e.legacyBuildCancelLineItems(ctx, sub, wm, clonePlans(given), cur, periodStart, canceledAt, loc, u2, b2, suffix)
@@ -192,26 +232,33 @@ func (d *rateDifferential) buildCancelLineItems(ctx context.Context, e *Engine, 
 	return res.lines, res.subtotal, res.err
 }
 
-func (d *rateDifferential) previewWindow(ctx context.Context, e *Engine, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error) {
+func (d *rateDifferential) previewWindow(ctx context.Context, e *Engine, sub domain.Subscription, periodStart, periodEnd time.Time, scope previewScope) (PreviewResult, error) {
+	asClose := scope == scopeClose
 	entry := "preview, flat window"
-	switch {
-	case asClose:
+	switch scope {
+	case scopeClose:
 		entry = "preview, close mirror"
-	case callerIs("evaluateThresholds"):
+	case scopeThreshold:
 		entry = "spend-threshold evaluation"
 	}
 	if underMemo(ctx) {
 		d.skipMemo(entry)
-		return e.previewWindow(noTap(ctx), sub, periodStart, periodEnd, asClose)
+		return e.previewWindow(noTap(ctx), sub, periodStart, periodEnd, scope)
 	}
 	ctx = noTap(ctx)
 	run := func() (string, PreviewResult, error) {
-		res, err := e.previewWindow(ctx, sub, periodStart, periodEnd, asClose)
+		res, err := e.previewWindow(ctx, sub, periodStart, periodEnd, scope)
 		return renderPreview(res, err), res, err
 	}
 	got, res, err := run()
+	if d.refusedOverflow(entry, err) {
+		return res, err
+	}
 	want := guard(func() string {
-		res2, err2 := e.legacyPreviewWindow(ctx, sub, periodStart, periodEnd, asClose)
+		res2, err2 := e.legacyPreviewWindow(ctx, sub, periodStart, periodEnd, scope)
+		if scope == scopeThreshold && err2 == nil {
+			res2 = legacyThresholdView(res2)
+		}
 		return renderPreview(res2, err2)
 	})
 	d.compare(entry, sub, got, want, func() string { s, _, _ := run(); return s })
@@ -230,6 +277,9 @@ func (d *rateDifferential) unbilledUsageCents(ctx context.Context, e *Engine, su
 		return fmt.Sprintf("total=%d currency=%q err=%s", total, cur, errText(err)), total, cur, err
 	}
 	got, total, cur, err := run()
+	if d.refusedOverflow("live balance", err) {
+		return total, cur, err
+	}
 	want := guard(func() string {
 		t2, c2, err2 := e.legacyUnbilledUsageCents(ctx, sub)
 		return fmt.Sprintf("total=%d currency=%q err=%s", t2, c2, errText(err2))
@@ -369,6 +419,7 @@ func (d *rateDifferential) writeCoverage(w io.Writer) {
 	_, _ = fmt.Fprintf(w, "\nCalls compared: %v. Differences: %d.\n", d.calls, len(d.diffs))
 	_, _ = fmt.Fprintf(w, "Not compared (a movesBetweenRuns test; the new result moved between two runs): %d %v\n", len(d.unstable), d.unstable)
 	_, _ = fmt.Fprintf(w, "Skipped under the cost dashboard's aggregation memo: %d %v\n", len(d.memo), d.memo)
+	_, _ = fmt.Fprintf(w, "Not compared (refused with ErrAmountOverflow; the old loops wrapped): %d %v\n", len(d.overflow), d.overflow)
 }
 
 // lineDiff shows the lines of the two renderings that differ.
@@ -424,22 +475,6 @@ func currentTest() string {
 	}
 }
 
-// callerIs reports whether fn is on the stack.
-func callerIs(fn string) bool {
-	pcs := make([]uintptr, 64)
-	n := runtime.Callers(2, pcs)
-	frames := runtime.CallersFrames(pcs[:n])
-	for {
-		f, more := frames.Next()
-		if strings.HasSuffix(f.Function, "."+fn) {
-			return true
-		}
-		if !more {
-			return false
-		}
-	}
-}
-
 // --- rendering ----------------------------------------------------------------
 
 // The renderings are exact: every field of every line, decimals by
@@ -460,6 +495,24 @@ func renderClose(lines []domain.InvoiceLineItem, subtotal int64, billedThrough *
 	return sb.String()
 }
 
+// legacyThresholdView is the old flat window as the threshold evaluation
+// sees it (scopeThreshold): no base lines, the first one's currency kept,
+// and no totals (legacyPreviewWindow skips them for this scope).
+func legacyThresholdView(res PreviewResult) PreviewResult {
+	lines := make([]PreviewLine, 0, len(res.Lines))
+	for _, l := range res.Lines {
+		if l.LineType == "base_fee" {
+			if res.baseCurrency == "" {
+				res.baseCurrency = l.Currency
+			}
+			continue
+		}
+		lines = append(lines, l)
+	}
+	res.Lines, res.Totals = lines, nil
+	return res
+}
+
 func renderPreview(res PreviewResult, err error) string {
 	res.GeneratedAt = time.Time{} // the clock reading, not a rating result
 	lines := res.Lines
@@ -477,6 +530,7 @@ func renderPreview(res PreviewResult, err error) string {
 	for _, lo := range res.leftOut {
 		fmt.Fprintf(&sb, "left_out=%s\n", canon(reflect.ValueOf(lo)))
 	}
+	fmt.Fprintf(&sb, "base_currency=%s\n", res.baseCurrency)
 	fmt.Fprintf(&sb, "floors.trial_end=%s\n", canon(reflect.ValueOf(res.floors.trialEnd)))
 	meters := make([]string, 0, len(res.floors.coverageEnds))
 	for m := range res.floors.coverageEnds {
@@ -565,7 +619,7 @@ func canon(v reflect.Value) string {
 			f := v.Type().Field(i)
 			if !f.IsExported() {
 				if v.Type() == reflect.TypeOf(PreviewResult{}) {
-					continue // leftOut and floors are rendered by renderPreview
+					continue // leftOut, floors and baseCurrency are rendered by renderPreview
 				}
 				panic(fmt.Sprintf("canon: unexported field %s.%s", v.Type(), f.Name))
 			}
@@ -839,7 +893,11 @@ func (e *Engine) legacyBuildLineItems(ctx context.Context, sub domain.Subscripti
 	// Base-fee lines: segment-aware for in_arrears, one upcoming-period
 	// line for in_advance. closeBaseFeeLines is shared with the operator
 	// preview (previewCycle) so the estimate and the invoice cannot drift.
-	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, terminalCycleClose, wm.billedBase()) {
+	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, invoiceCurrency, billingLoc, terminalCycleClose, wm.billedBase())
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	for _, bl := range baseLines {
 		lineItems = append(lineItems, bl.line)
 		subtotal += bl.line.AmountCents
 	}
@@ -1177,7 +1235,9 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 				if !ok || segPlan.BaseAmountCents <= 0 || segPlan.BaseBillTiming == domain.BillInAdvance {
 					continue
 				}
-				emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal)
+				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal); err != nil {
+					return nil, 0, err
+				}
 			}
 		}
 
@@ -1193,7 +1253,9 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 				if !ok || segPlan.BaseAmountCents <= 0 || segPlan.BaseBillTiming == domain.BillInAdvance {
 					continue
 				}
-				emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal)
+				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal); err != nil {
+					return nil, 0, err
+				}
 			}
 		}
 	}
@@ -1419,7 +1481,8 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 	return lineItems, subtotal, nil
 }
 
-func (e *Engine) legacyPreviewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error) {
+func (e *Engine) legacyPreviewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, scope previewScope) (PreviewResult, error) {
+	asClose := scope == scopeClose
 	plans := make(map[string]domain.Plan, len(sub.Items))
 	planNames := make([]string, 0, len(sub.Items))
 	var allMeterIDs []string
@@ -1587,7 +1650,12 @@ func (e *Engine) legacyPreviewWindow(ctx context.Context, sub domain.Subscriptio
 		}
 	}
 
-	result.Totals = computePreviewTotals(result.Lines)
+	if scope == scopeThreshold {
+		return result, nil // as previewWindow: the threshold adds its own total
+	}
+	if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
+		return PreviewResult{}, err
+	}
 	return result, nil
 }
 
@@ -1603,7 +1671,9 @@ func (e *Engine) legacyPreviewAsClose(ctx context.Context, sub domain.Subscripti
 	if sub.Status == domain.SubscriptionTrialing && trialCancelsFree(sub) {
 		// handleTrialState cancels free at trial end: no invoice.
 		result.Warnings = append(result.Warnings, "A cancel is scheduled for the end of the trial, so no invoice will be issued.")
-		result.Totals = computePreviewTotals(result.Lines)
+		if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
+			return PreviewResult{}, err
+		}
 		return result, nil
 	}
 	if sub.Status == domain.SubscriptionTrialing {
@@ -1646,7 +1716,11 @@ func (e *Engine) legacyPreviewAsClose(ctx context.Context, sub domain.Subscripti
 	// The close runs at periodEnd; a scheduled cancel firing there skips
 	// the upcoming in_advance base.
 	terminal := shouldFireScheduledCancel(sub, periodEnd, periodEnd)
-	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, terminal, wm.billedBase()) {
+	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, terminal, wm.billedBase())
+	if err != nil {
+		return PreviewResult{}, err
+	}
+	for _, bl := range baseLines {
 		result.Lines = append(result.Lines, PreviewLine{
 			LineType:        "base_fee",
 			Description:     bl.line.Description,
@@ -1708,7 +1782,9 @@ func (e *Engine) legacyPreviewAsClose(ctx context.Context, sub domain.Subscripti
 			wm.billedThrough.In(loc).Format("Jan 2, 2006 15:04 MST")))
 	}
 
-	result.Totals = computePreviewTotals(result.Lines)
+	if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
+		return PreviewResult{}, err
+	}
 	return result, nil
 }
 

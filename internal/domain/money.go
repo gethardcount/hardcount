@@ -4,6 +4,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/sagarsuperuser/velox/internal/platform/money"
 )
 
 // MulCents and AddCents are overflow-checked arithmetic for non-negative
@@ -27,6 +29,17 @@ func AddCents(a, b int64) (int64, error) {
 		return 0, ErrAmountOverflow
 	}
 	return a + b, nil
+}
+
+// SumCents adds two minor-unit amounts of any sign (a ledger entry, a credit
+// back), returning ErrAmountOverflow when the sum does not fit int64. Inside
+// int64 it is a + b.
+func SumCents(a, b int64) (int64, error) {
+	c, ok := money.Add(a, b)
+	if !ok {
+		return 0, ErrAmountOverflow
+	}
+	return c, nil
 }
 
 // FormatMoneyMinor renders a minor-unit amount for operator-facing prose:
