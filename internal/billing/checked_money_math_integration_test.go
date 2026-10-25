@@ -340,3 +340,59 @@ func TestCheckedMath_CancelUsageSumPastInt64(t *testing.T) {
 		t.Errorf("%d invoices, want none", len(invs))
 	}
 }
+
+// A threshold counts and bills usage only, so its fire does not depend on
+// the base fee: not on base × quantity fitting int64, and not on base plus
+// usage fitting. Each case fires a usage-only invoice that fits.
+func TestCheckedMath_ThresholdFiresWhenBasePlusUsagePastInt64(t *testing.T) {
+	const hugeUsage = 4_999_999_999_999_999_995 // 5 units at 999999999999999999
+	cases := []struct {
+		name      string
+		base, qty int64
+		huge      bool // one bucket of hugeUsage cents, else 100 cents
+		item      bool // an item (usage_gte) threshold, else amount_gte
+		want      int64
+	}{
+		// 5e18 base and 5e18 usage each fit; their sum does not.
+		{name: "base plus usage", base: 5_000_000_000_000_000_000, qty: 1, huge: true, want: hugeUsage},
+		// 5e18 × 2 seats does not fit; 100 cents of usage does.
+		{name: "base times quantity", base: 5_000_000_000_000_000_000, qty: 2, want: 100},
+		{name: "base times quantity, item threshold", base: 5_000_000_000_000_000_000, qty: 2, item: true, want: 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lf := newLiveFixture(t, "Checked Threshold "+tc.name, 0)
+			setBase(t, lf, tc.base, tc.qty)
+			if tc.huge {
+				v := createRule(t, lf, flatRule("model_huge", "999999999999999999"))
+				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
+					MeterID: lf.meterID, RatingRuleVersionID: v.ID, DimensionMatch: map[string]any{"model": "huge"}, Priority: 10,
+				})
+				insertUsageAt(t, lf, lf.cycleStart.Add(time.Minute), "5", map[string]any{"model": "huge"})
+			} else {
+				insertUsageAt(t, lf, lf.cycleStart.Add(time.Minute), "100", nil)
+			}
+			in := subscription.BillingThresholdsInput{AmountGTE: 1}
+			if tc.item {
+				in = subscription.BillingThresholdsInput{ItemThresholds: []subscription.ItemThresholdInput{{SubscriptionItemID: lf.itemID, UsageGTE: "1"}}}
+			}
+			if _, err := lf.subSvc.SetBillingThresholds(lf.ctx, lf.tenantID, lf.subID, in); err != nil {
+				t.Fatalf("set thresholds: %v", err)
+			}
+			fired, errs := lf.engine.ScanThresholds(lf.ctx, 50)
+			if fired != 1 || len(errs) != 0 {
+				t.Fatalf("threshold scan: fired=%d errs=%v, want one fire and no error", fired, errs)
+			}
+			invs := lf.listInvoices(t, lf.ctx)
+			if len(invs) != 1 {
+				t.Fatalf("%d invoices, want the threshold invoice", len(invs))
+			}
+			inv := invs[0]
+			if inv.BillingReason != domain.BillingReasonThreshold || inv.Status != domain.InvoiceFinalized ||
+				inv.SubtotalCents != tc.want || inv.TotalAmountCents != tc.want {
+				t.Errorf("invoice reason/status/subtotal/total = %s/%s/%d/%d, want threshold/finalized/%d/%d",
+					inv.BillingReason, inv.Status, inv.SubtotalCents, inv.TotalAmountCents, tc.want, tc.want)
+			}
+		})
+	}
+}

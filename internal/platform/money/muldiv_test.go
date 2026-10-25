@@ -38,9 +38,8 @@ func TestMulDiv_MatchesExactMath(t *testing.T) {
 		if ok && got != want.Int64() {
 			t.Fatalf("MulDivRoundHalfToEven(%d, %d, %d) = %d, want %s", a, b, d, got, want)
 		}
-		// Where the product fits int64 (and 2d does, which RoundHalfToEven
-		// needs), the result is RoundHalfToEven's.
-		if (a == 0 || b <= math.MaxInt64/a) && d <= math.MaxInt64/2 {
+		// Where the product fits int64, the result is RoundHalfToEven's.
+		if a == 0 || b <= math.MaxInt64/a {
 			if rh := RoundHalfToEven(a*b, d); rh != got {
 				t.Fatalf("MulDivRoundHalfToEven(%d, %d, %d) = %d, RoundHalfToEven = %d", a, b, d, got, rh)
 			}
@@ -53,6 +52,8 @@ func TestMulDiv_MatchesExactMath(t *testing.T) {
 		{maxV, maxV, maxV}, {maxV, maxV, maxV - 1}, {maxV, 2, 1}, {maxV, 2, 2},
 		{100_000_000_000_000, 200_000, 1_000_000}, {4_999_999_999_999_999_995, 200_000, 1_000_000},
 		{3, 5, 2}, {1, 3, 2}, {maxV, 3, 2},
+		// A denominator above MaxInt64/2 with a remainder above half of it.
+		{2, 2_325_000_000_000_000_000, 4_700_000_000_000_000_000}, {maxV - 1, 1, maxV},
 	} {
 		check(c[0], c[1], c[2])
 	}
@@ -102,7 +103,8 @@ func TestMulDivSigned_MatchesExactMath(t *testing.T) {
 			t.Fatalf("MulDivRoundHalfToEvenSigned(%d, %d, %d) = %d, want %s", a, b, d, got, q)
 		}
 		prod := new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
-		if prod.IsInt64() && prod.Int64() != math.MinInt64 && d <= math.MaxInt64/2 {
+		// The helper refuses a result of MinInt64 (its range is symmetric).
+		if prod.IsInt64() && prod.Int64() != math.MinInt64 {
 			if rh := RoundHalfToEven(a*b, d); rh != got {
 				t.Fatalf("MulDivRoundHalfToEvenSigned(%d, %d, %d) = %d, RoundHalfToEven = %d", a, b, d, got, rh)
 			}
@@ -117,6 +119,7 @@ func TestMulDivSigned_MatchesExactMath(t *testing.T) {
 		// 65535 × 281479271743489 = 2^64 − 1: halved, MaxInt64 with a tie
 		// that rounds up past it.
 		{65535, 281479271743489, 2}, {-65535, 281479271743489, 2},
+		{-2, 2_325_000_000_000_000_000, 4_700_000_000_000_000_000}, {minV, 1, 4}, {minV, 1, maxV},
 	} {
 		check(c[0], c[1], c[2])
 	}

@@ -1,6 +1,11 @@
 package money
 
-import "testing"
+import (
+	"math"
+	"math/big"
+	"math/rand"
+	"testing"
+)
 
 func TestRoundHalfToEven(t *testing.T) {
 	cases := []struct {
@@ -41,5 +46,41 @@ func TestRoundHalfToEven(t *testing.T) {
 				t.Errorf("RoundHalfToEven(%d, %d) = %d, want %d", tc.num, tc.denom, got, tc.want)
 			}
 		})
+	}
+}
+
+// RoundHalfToEven agrees with exact big-integer math for every num and every
+// denom > 0, MinInt64 and denominators above MaxInt64/2 included.
+func TestRoundHalfToEven_MatchesExactMath(t *testing.T) {
+	check := func(num, denom int64) {
+		t.Helper()
+		p := new(big.Int).Abs(big.NewInt(num))
+		q, r := new(big.Int).QuoRem(p, big.NewInt(denom), new(big.Int))
+		twice := new(big.Int).Mul(r, big.NewInt(2))
+		if c := twice.Cmp(big.NewInt(denom)); c > 0 || (c == 0 && q.Bit(0) == 1) {
+			q.Add(q, big.NewInt(1))
+		}
+		if num < 0 {
+			q.Neg(q)
+		}
+		if got := RoundHalfToEven(num, denom); got != q.Int64() {
+			t.Fatalf("RoundHalfToEven(%d, %d) = %d, want %s", num, denom, got, q)
+		}
+	}
+	const maxV, minV = math.MaxInt64, math.MinInt64
+	for _, c := range [][2]int64{
+		{4_650_000_000_000_000_000, 4_700_000_000_000_000_000}, {-4_650_000_000_000_000_000, 4_700_000_000_000_000_000},
+		{maxV - 1, maxV}, {maxV, maxV}, {maxV, maxV - 1}, {minV, 1}, {minV, 2}, {minV, 3}, {minV, maxV},
+		{maxV / 2, maxV}, {maxV/2 + 1, maxV},
+	} {
+		check(c[0], c[1])
+	}
+	rng := rand.New(rand.NewSource(3))
+	for range 20000 {
+		num := rng.Int63() >> rng.Intn(63)
+		if rng.Intn(2) == 0 {
+			num = -num
+		}
+		check(num, rng.Int63()>>rng.Intn(63)+1)
 	}
 }
