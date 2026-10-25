@@ -92,7 +92,28 @@ type PreviewResult struct {
 	// for the threshold fire: it stamps each usage line with its meter's
 	// window start and counts item thresholds over the same windows.
 	floors usageFloors
+	// baseCurrency is the currency of the first item plan with a base fee,
+	// set only for the threshold evaluation (scopeThreshold), which has no
+	// base lines to read it from.
+	baseCurrency string
 }
+
+// previewScope says what a window preview is for.
+type previewScope int
+
+const (
+	// scopeEstimate is the flat window estimate (create_preview with a
+	// window): base and usage lines, and their totals.
+	scopeEstimate previewScope = iota
+	// scopeClose mirrors the cycle close (previewCycle).
+	scopeClose
+	// scopeThreshold is the spend-threshold evaluation. A threshold neither
+	// counts nor bills base fees, so this scope has usage lines only and no
+	// totals: a base fee, or base plus usage, too large for int64 cents does
+	// not stop a usage-only fire that fits. The first base plan's currency
+	// is kept in baseCurrency.
+	scopeThreshold
+)
 
 // previewCycle estimates the invoice the cycle close will issue for the
 // subscription's CURRENT period. It is what the operator surfaces show (the
@@ -119,25 +140,31 @@ func (e *Engine) previewCycle(ctx context.Context, sub domain.Subscription) (Pre
 	if sub.Status == domain.SubscriptionTrialing && sub.TrialEndAt != nil && sub.TrialEndAt.After(periodEnd) {
 		return e.previewWithWindow(ctx, sub, periodStart, periodEnd)
 	}
-	return e.previewWindow(ctx, sub, periodStart, periodEnd, true)
+	return e.previewWindow(ctx, sub, periodStart, periodEnd, scopeClose)
 }
 
-// previewWithWindow is the explicit-period variant. Used by the
-// create_preview service when the caller passes a custom window, and by the
-// threshold scan, which persists these lines as a fire invoice and depends
-// on the FULL (unprorated) in_arrears base line (it prorates reset-mode
-// bases itself). Both paths converge in previewWindow so the per-line
-// composition stays in one place.
+// previewWithWindow is the explicit-period variant, used by the
+// create_preview service when the caller passes a custom window.
+// previewThresholdWindow is the threshold scan's, which persists the usage
+// lines as a fire invoice. Every scope converges in previewWindow so the
+// per-line composition stays in one place.
 func (e *Engine) previewWithWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time) (PreviewResult, error) {
-	return e.previewWindow(ctx, sub, periodStart, periodEnd, false)
+	return e.previewWindow(ctx, sub, periodStart, periodEnd, scopeEstimate)
 }
 
-// previewWindow composes the preview. asClose=true mirrors the cycle close
-// for [periodStart, periodEnd] (previewCycle); asClose=false is the flat
-// window estimate (previewWithWindow).
-func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error) {
+// previewThresholdWindow is the flat window's usage lines, for the
+// spend-threshold evaluation (scopeThreshold).
+func (e *Engine) previewThresholdWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time) (PreviewResult, error) {
+	return e.previewWindow(ctx, sub, periodStart, periodEnd, scopeThreshold)
+}
+
+// previewWindow composes the preview: scopeClose mirrors the cycle close for
+// [periodStart, periodEnd] (previewCycle), scopeEstimate is the flat window
+// estimate (previewWithWindow), and scopeThreshold is its usage lines alone
+// (previewThresholdWindow).
+func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, scope previewScope) (PreviewResult, error) {
 	if tapped(ctx) {
-		return rateTap.previewWindow(ctx, e, sub, periodStart, periodEnd, asClose)
+		return rateTap.previewWindow(ctx, e, sub, periodStart, periodEnd, scope)
 	}
 	plans := make(map[string]domain.Plan, len(sub.Items))
 	planNames := make([]string, 0, len(sub.Items))
@@ -192,7 +219,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		GeneratedAt:        e.clock.Now(ctx),
 	}
 
-	if asClose {
+	if scope == scopeClose {
 		return e.previewAsClose(ctx, sub, plans, allMeterIDs, periodStart, periodEnd, result)
 	}
 
@@ -206,6 +233,12 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	for _, it := range sub.Items {
 		plan := plans[it.PlanID]
 		if plan.BaseAmountCents <= 0 {
+			continue
+		}
+		if scope == scopeThreshold {
+			if result.baseCurrency == "" {
+				result.baseCurrency = plan.Currency
+			}
 			continue
 		}
 		baseFee, err := baseFeeCents(plan, it.Quantity)
@@ -314,6 +347,9 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		}
 	}
 
+	if scope == scopeThreshold {
+		return result, nil // the threshold adds its own running total
+	}
 	if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
 		return PreviewResult{}, err
 	}

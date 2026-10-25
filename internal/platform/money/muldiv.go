@@ -49,8 +49,9 @@ func MulDivRoundHalfToEven(a, b, d int64) (int64, bool) {
 // MulDivRoundHalfToEvenSigned is MulDivRoundHalfToEven for a and b of any
 // sign: |a×b| / d rounded half to even, with the sign of a×b put back, so
 // negatives round symmetrically as RoundHalfToEven's do. Wherever a×b fits
-// int64 the result is RoundHalfToEven(a*b, d). Requires d > 0; ok is false
-// when the result does not fit int64.
+// int64 and is not MinInt64 the result is RoundHalfToEven(a*b, d). Requires
+// d > 0; ok is false when the result does not fit int64 or is MinInt64 (the
+// range is symmetric).
 func MulDivRoundHalfToEvenSigned(a, b, d int64) (int64, bool) {
 	if d <= 0 {
 		return 0, false

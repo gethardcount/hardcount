@@ -232,21 +232,22 @@ func (d *rateDifferential) buildCancelLineItems(ctx context.Context, e *Engine, 
 	return res.lines, res.subtotal, res.err
 }
 
-func (d *rateDifferential) previewWindow(ctx context.Context, e *Engine, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error) {
+func (d *rateDifferential) previewWindow(ctx context.Context, e *Engine, sub domain.Subscription, periodStart, periodEnd time.Time, scope previewScope) (PreviewResult, error) {
+	asClose := scope == scopeClose
 	entry := "preview, flat window"
-	switch {
-	case asClose:
+	switch scope {
+	case scopeClose:
 		entry = "preview, close mirror"
-	case callerIs("evaluateThresholds"):
+	case scopeThreshold:
 		entry = "spend-threshold evaluation"
 	}
 	if underMemo(ctx) {
 		d.skipMemo(entry)
-		return e.previewWindow(noTap(ctx), sub, periodStart, periodEnd, asClose)
+		return e.previewWindow(noTap(ctx), sub, periodStart, periodEnd, scope)
 	}
 	ctx = noTap(ctx)
 	run := func() (string, PreviewResult, error) {
-		res, err := e.previewWindow(ctx, sub, periodStart, periodEnd, asClose)
+		res, err := e.previewWindow(ctx, sub, periodStart, periodEnd, scope)
 		return renderPreview(res, err), res, err
 	}
 	got, res, err := run()
@@ -254,7 +255,10 @@ func (d *rateDifferential) previewWindow(ctx context.Context, e *Engine, sub dom
 		return res, err
 	}
 	want := guard(func() string {
-		res2, err2 := e.legacyPreviewWindow(ctx, sub, periodStart, periodEnd, asClose)
+		res2, err2 := e.legacyPreviewWindow(ctx, sub, periodStart, periodEnd, scope)
+		if scope == scopeThreshold && err2 == nil {
+			res2 = legacyThresholdView(res2)
+		}
 		return renderPreview(res2, err2)
 	})
 	d.compare(entry, sub, got, want, func() string { s, _, _ := run(); return s })
@@ -471,22 +475,6 @@ func currentTest() string {
 	}
 }
 
-// callerIs reports whether fn is on the stack.
-func callerIs(fn string) bool {
-	pcs := make([]uintptr, 64)
-	n := runtime.Callers(2, pcs)
-	frames := runtime.CallersFrames(pcs[:n])
-	for {
-		f, more := frames.Next()
-		if strings.HasSuffix(f.Function, "."+fn) {
-			return true
-		}
-		if !more {
-			return false
-		}
-	}
-}
-
 // --- rendering ----------------------------------------------------------------
 
 // The renderings are exact: every field of every line, decimals by
@@ -507,6 +495,24 @@ func renderClose(lines []domain.InvoiceLineItem, subtotal int64, billedThrough *
 	return sb.String()
 }
 
+// legacyThresholdView is the old flat window as the threshold evaluation
+// sees it (scopeThreshold): no base lines, the first one's currency kept,
+// and no totals (legacyPreviewWindow skips them for this scope).
+func legacyThresholdView(res PreviewResult) PreviewResult {
+	lines := make([]PreviewLine, 0, len(res.Lines))
+	for _, l := range res.Lines {
+		if l.LineType == "base_fee" {
+			if res.baseCurrency == "" {
+				res.baseCurrency = l.Currency
+			}
+			continue
+		}
+		lines = append(lines, l)
+	}
+	res.Lines, res.Totals = lines, nil
+	return res
+}
+
 func renderPreview(res PreviewResult, err error) string {
 	res.GeneratedAt = time.Time{} // the clock reading, not a rating result
 	lines := res.Lines
@@ -524,6 +530,7 @@ func renderPreview(res PreviewResult, err error) string {
 	for _, lo := range res.leftOut {
 		fmt.Fprintf(&sb, "left_out=%s\n", canon(reflect.ValueOf(lo)))
 	}
+	fmt.Fprintf(&sb, "base_currency=%s\n", res.baseCurrency)
 	fmt.Fprintf(&sb, "floors.trial_end=%s\n", canon(reflect.ValueOf(res.floors.trialEnd)))
 	meters := make([]string, 0, len(res.floors.coverageEnds))
 	for m := range res.floors.coverageEnds {
@@ -612,7 +619,7 @@ func canon(v reflect.Value) string {
 			f := v.Type().Field(i)
 			if !f.IsExported() {
 				if v.Type() == reflect.TypeOf(PreviewResult{}) {
-					continue // leftOut and floors are rendered by renderPreview
+					continue // leftOut, floors and baseCurrency are rendered by renderPreview
 				}
 				panic(fmt.Sprintf("canon: unexported field %s.%s", v.Type(), f.Name))
 			}
@@ -1474,7 +1481,8 @@ func (e *Engine) legacyBuildCancelLineItems(ctx context.Context, sub domain.Subs
 	return lineItems, subtotal, nil
 }
 
-func (e *Engine) legacyPreviewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error) {
+func (e *Engine) legacyPreviewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, scope previewScope) (PreviewResult, error) {
+	asClose := scope == scopeClose
 	plans := make(map[string]domain.Plan, len(sub.Items))
 	planNames := make([]string, 0, len(sub.Items))
 	var allMeterIDs []string
@@ -1642,6 +1650,9 @@ func (e *Engine) legacyPreviewWindow(ctx context.Context, sub domain.Subscriptio
 		}
 	}
 
+	if scope == scopeThreshold {
+		return result, nil // as previewWindow: the threshold adds its own total
+	}
 	if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
 		return PreviewResult{}, err
 	}

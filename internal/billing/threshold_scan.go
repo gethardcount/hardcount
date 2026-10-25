@@ -511,22 +511,24 @@ func (e *Engine) healStrandedZeroDue(ctx context.Context, tenantID string, inv d
 }
 
 // evaluateThresholds computes the partial-cycle running totals for a sub and
-// reports whether any configured cap has been crossed. Reuses
-// previewWithWindow's per-item base-fee + per-(meter, rule) usage line
-// computation so the scan and the cycle scan agree on what "running total"
-// means — fed to the same priority+claim LATERAL JOIN as the natural cycle.
+// reports whether any configured cap has been crossed. Reuses the window
+// preview's per-(meter, rule) usage line computation so the scan and the
+// cycle scan agree on what "running total" means — fed to the same
+// priority+claim LATERAL JOIN as the natural cycle.
+//
+// A threshold counts and bills usage only. Base fees stay with the period's
+// own invoice: an in_advance base is prepaid by BillOnCreate or the previous
+// close, and an in_arrears base is billed by the period's close or immediate
+// cancel, prorated as it would be with no fire. The fire used to bill the
+// full in_arrears base, so a cancel after it charged the whole period's base
+// for part of it. So the window preview has no base lines here
+// (scopeThreshold), and a base fee too large for int64 cents does not stop
+// the fire.
 func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription, periodStart, now time.Time) (thresholdEval, error) {
-	preview, err := e.previewWithWindow(ctx, sub, periodStart, now)
+	preview, err := e.previewThresholdWindow(ctx, sub, periodStart, now)
 	if err != nil {
 		return thresholdEval{}, err
 	}
-
-	// A threshold counts and bills usage only. Base fees stay with the
-	// period's own invoice: an in_advance base is prepaid by BillOnCreate or
-	// the previous close, and an in_arrears base is billed by the period's
-	// close or immediate cancel, prorated as it would be with no fire. The
-	// fire used to bill the full in_arrears base, so a cancel after it
-	// charged the whole period's base for part of it.
 
 	// Roll up TWO totals across the previewed lines (ADR-066 §4 subtotal
 	// split). capRunning is the amount_gte comparison + event payload — the
@@ -538,17 +540,11 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 	// already filtered upstream at PATCH time, so summing across lines is
 	// safe — there's only one currency.
 	var capRunning, billedSubtotal int64
-	currency := ""
+	// The first base plan's currency names the invoice's, as when the base
+	// rode the fire; with no base fee, the first billed line's does.
+	currency := preview.baseCurrency
 	lineItems := make([]domain.InvoiceLineItem, 0, len(preview.Lines))
 	for _, pl := range preview.Lines {
-		if pl.LineType == "base_fee" {
-			// Not billed here, but its currency (the plan's) still names the
-			// invoice's, as when the base rode the fire.
-			if currency == "" {
-				currency = pl.Currency
-			}
-			continue
-		}
 		// Non-additive buckets (a max or last meter's) cannot be
 		// split across a threshold fire and a cycle close: max[0,t1) +
 		// max[t1,end) ≥ max[0,end). ADR-066 §4: DROP the line from the

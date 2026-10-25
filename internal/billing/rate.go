@@ -565,7 +565,7 @@ var rateTap rateTapper
 type rateTapper interface {
 	buildLineItems(ctx context.Context, e *Engine, sub domain.Subscription, now, periodStart, periodEnd time.Time, plans map[string]domain.Plan, invoiceCurrency string, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, *time.Time, error)
 	buildCancelLineItems(ctx context.Context, e *Engine, sub domain.Subscription, wm thresholdWatermark, plans map[string]domain.Plan, invoiceCurrency string, periodStart, canceledAt time.Time, billingLoc *time.Location, unpriced unpricedUsage, belowZero netNegativeUsage, usageSuffix string) ([]domain.InvoiceLineItem, int64, error)
-	previewWindow(ctx context.Context, e *Engine, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error)
+	previewWindow(ctx context.Context, e *Engine, sub domain.Subscription, periodStart, periodEnd time.Time, scope previewScope) (PreviewResult, error)
 	unbilledUsageCents(ctx context.Context, e *Engine, sub domain.Subscription) (int64, string, error)
 }
 

@@ -30,8 +30,8 @@ func TestCustomerProviderCost_SumRangeChecked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("meter: %v", err)
 	}
-	// 30 micros per token.
-	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.00003")
+	// 0.003 cents (30 micros) per token.
+	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.003")
 	store := usage.NewPostgresStore(db)
 	svc := usage.NewService(store)
 	dims := map[string]any{"provider": "anthropic", "model": "claude-3.5-sonnet", "token_type": "input"}
