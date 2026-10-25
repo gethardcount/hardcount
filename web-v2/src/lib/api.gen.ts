@@ -2618,7 +2618,8 @@ export interface paths {
          *     replaces the current pause, including one dunning set; the pause is
          *     then yours (`set_by: operator`), and a payment no longer lifts it.
          *
-         *     Sends the `subscription.collection_paused` webhook event.
+         *     Sends the `subscription.collection_paused` webhook event, with
+         *     `triggered_by: operator`.
          */
         put: operations["pauseSubscriptionCollection"];
         post?: never;
@@ -9284,7 +9285,11 @@ export interface components {
              */
             retry_days: number[];
             /**
-             * @description What happens to the subscription when retries run out.
+             * @description What happens to the subscription when retries run out. `pause`
+             *     pauses collection, unless it is already paused, and sends
+             *     `subscription.collection_paused` with `triggered_by: dunning`.
+             *     `cancel` cancels it and sends `subscription.canceled` with
+             *     `canceled_by: dunning`.
              * @default pause
              * @enum {string}
              */

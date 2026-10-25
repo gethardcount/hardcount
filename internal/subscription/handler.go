@@ -701,7 +701,11 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The subscription's pause_collection holds behavior and resumes_at.
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionPaused, sub, nil)
+	// Dunning's pause sends the same event from its own transaction
+	// (PostgresStore.SetDunningPause), with triggered_by dunning.
+	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
+		"triggered_by": "operator",
+	})
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }

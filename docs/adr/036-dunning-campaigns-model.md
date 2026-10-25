@@ -481,11 +481,13 @@ turn automatic collection back on for each draft). A void or a write-off of
 the invoice does not lift the pause; only its payment does. A canceled
 subscription keeps its pause.
 
-**Not built.** A dunning pause sends no `subscription.collection_paused`
-webhook (the operator's does). The operator's resume sends
-`subscription.collection_resumed` even when nothing was paused. The
-resumer's clear does not check that `resumes_at` is unchanged since it
-listed the row. Each waits for a reported need.
+**Not built.** The resumer's clear does not check that `resumes_at` is
+unchanged since it listed the row. It waits for a reported need.
+
+**Built later.** A dunning pause sends `subscription.collection_paused`
+with `triggered_by: dunning`, queued in the pause's transaction (#1384,
+2026-10-25); the operator's pause carries `triggered_by: operator`. The
+operator's resume sends nothing when nothing was paused (#1377).
 
 ## Amendment 2026-10-23 — the schedule is one list of days
 

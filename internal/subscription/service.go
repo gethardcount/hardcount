@@ -2097,29 +2097,27 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 	return ItemChangeResult{Item: item, EffectiveAt: now, pricedFrom: itemChangeBase{sub: sub, item: item}}, nil
 }
 
-// cancelActorLabel derives the timeline's "canceled by …" vocabulary from
-// the request identity (ADR-090 D16): a dashboard session or API key reads
-// as "operator", a stamped customer actor as "customer". Background callers
-// name themselves via WithCancelOrigin (the dunning adapter stamps
-// "dunning"); an unstamped background cancel is honestly "system".
+// cancelActorLabel derives the timeline's "canceled by …" vocabulary
+// (ADR-090 D16). The machinery that decided the cancel names itself via
+// WithCancelOrigin (the dunning adapter stamps "dunning"), and that stamp
+// wins over the request identity: dunning can run inside a request, such as
+// a test-clock advance made with an API key, and the cancel is still
+// dunning's. Without a stamp, a dashboard session or API key reads as
+// "operator", a stamped customer actor as "customer", and a background
+// cancel is honestly "system".
 //
 // The SAME function feeds the outbound subscription.canceled webhook
 // (postgres.go, enqueued in the cancel tx), so the webhook and the audit
 // row can never disagree about who canceled.
 func cancelActorLabel(ctx context.Context) string {
+	if origin := CancelOrigin(ctx); origin != "" {
+		return origin
+	}
 	switch actorType, _ := audit.ResolveActor(ctx); actorType {
 	case "user", "api_key":
 		return "operator"
 	case "customer":
 		return "customer"
-	}
-	// Background caller. The machinery that drove the cancel STAMPS its own
-	// identity (WithCancelOrigin) rather than us inferring it from the
-	// absence of a request actor — an unlabeled background canceller is
-	// honestly "system", never a guess at whichever background path happens
-	// to exist today.
-	if origin := CancelOrigin(ctx); origin != "" {
-		return origin
 	}
 	return "system"
 }
@@ -2796,12 +2794,14 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 // returns: true when this call paused it, and when a pause was already in
 // force (the operator's, which it leaves as it is, this run's earlier
 // attempt, or another invoice's dunning pause). It is false when the invoice was paid before the pause could
-// land; nothing is paused then. The "Collection paused" row is written only
-// when this call paused collection, so a re-attempted exhaustion writes no
-// second row.
+// land; nothing is paused then. The "Collection paused" row and the
+// subscription.collection_paused event (triggered_by dunning, queued in the
+// pause's transaction) come only when this call paused collection, so a
+// re-attempted exhaustion writes no second row and sends no second event.
 //
 // The pause lifts when invoiceID is paid (ADR-036 amendment 2026-10-22,
-// PostgresStore.ReleaseDunningPauseTx).
+// PostgresStore.ReleaseDunningPauseTx). Dunning never resumes collection
+// itself.
 func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, invoiceID string) (bool, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	// The ended period's invoice follows the pause state at its end, as

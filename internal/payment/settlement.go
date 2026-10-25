@@ -70,7 +70,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 			// (auto-refund deferred, ADR-068). An empty recorded PI counts:
 			// the invoice settled via credits/offline and a card charge
 			// still landed.
-			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents,
+			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
 				"second successful charge on an already-paid invoice")
 			return nil
 		}
@@ -129,7 +129,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 			// webhook forever is wrong — the transition will never succeed.
 			// Escalate the per-cause event (the money is owed BACK, distinct
 			// from duplicate_charge) and absorb.
-			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentReceivedOnVoidedInvoice, paymentIntentID, capturedCents,
+			s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentReceivedOnVoidedInvoice, paymentIntentID, capturedCents, nil,
 				"payment succeeded against a non-payable invoice")
 			return nil
 		}
@@ -141,7 +141,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		// invoice records its PI only at settle, so the stale comparison
 		// would false-alarm on every routine concurrent same-PI redelivery).
 		if paymentIntentID != "" && fresh.StripePaymentIntentID != paymentIntentID {
-			s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents,
+			s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentDuplicateCharge, paymentIntentID, capturedCents, nil,
 				"second successful charge lost the settle race to a different PaymentIntent")
 			return nil
 		}
@@ -195,7 +195,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// window) settles the invoice but books the WRONG figure — detect it,
 	// never silently absorb it.
 	if capturedCents > 0 && capturedCents != fresh.AmountPaidCents {
-		s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentAmountMismatch, paymentIntentID, capturedCents,
+		s.escalatePaymentAnomaly(ctx, tenantID, fresh, domain.EventPaymentAmountMismatch, paymentIntentID, capturedCents, nil,
 			"captured amount differs from the amount booked at settle")
 	}
 
@@ -496,8 +496,10 @@ func receiptAmountCents(capturedCents int64, fresh domain.Invoice) int64 {
 // and stamps the durable anomaly marker the dashboard attention banner reads
 // (operators — the load-bearing surface: with auto-refund deferred, the
 // operator IS the refund mechanism). Best-effort by design: detection must
-// never fail the settlement that triggered it.
-func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, msg string) {
+// never fail the settlement that triggered it. extra holds the event's
+// other keys (domain.WebhookEventExtras), such as currency_mismatch's
+// charge_currency; nil for none.
+func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice, eventType, incomingPI string, capturedCents int64, extra map[string]any, msg string) {
 	slog.ErrorContext(ctx, "payment anomaly: "+msg,
 		"event", eventType,
 		"invoice_id", inv.ID,
@@ -515,10 +517,14 @@ func (s *Stripe) escalatePaymentAnomaly(ctx context.Context, tenantID string, in
 		// amount_mismatch it is this charge (the settle just recorded it);
 		// on currency_mismatch and received_on_voided_invoice it is whatever
 		// the invoice held when the charge arrived (docs/webhooks.md).
-		if err := s.events.Dispatch(ctx, tenantID, eventType, domain.InvoiceWebhookData(inv, map[string]any{
+		data := map[string]any{
 			"incoming_payment_intent_id": incomingPI,
 			"captured_cents":             capturedCents,
-		})); err != nil {
+		}
+		for k, v := range extra {
+			data[k] = v
+		}
+		if err := s.events.Dispatch(ctx, tenantID, eventType, domain.InvoiceWebhookData(inv, data)); err != nil {
 			slog.ErrorContext(ctx, "payment anomaly: event dispatch failed", "event", eventType, "invoice_id", inv.ID, "error", err)
 		}
 	}

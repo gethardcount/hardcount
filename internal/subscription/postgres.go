@@ -39,8 +39,9 @@ type OutboxEnqueuer interface {
 
 // SetOutboxEnqueuer wires transactional lifecycle events (2026-07-05,
 // DispatchTx-seam subscription subset): subscription.created / .activated /
-// .canceled / .trial_ended are enqueued IN the transition tx, so a crash in
-// the old commit→dispatch window can no longer silently drop them — a
+// .canceled / .trial_ended, and dunning's .collection_paused, are enqueued
+// IN the transition tx, so a crash in the old commit→dispatch window can
+// no longer silently drop them — a
 // dropped emission left no row anywhere (nothing to replay, nothing to
 // reconcile). Optional — when unset (narrow tests), no events are enqueued.
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
@@ -917,6 +918,9 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 // by another invoice's dunning, keeps its invoice. A pause whose resumes_at
 // has passed but which the resumer has not cleared yet is not in force, and
 // is replaced. errs.InvalidState covers a canceled subscription.
+//
+// When it pauses, it queues subscription.collection_paused (triggered_by
+// dunning) in the same transaction.
 func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -970,6 +974,14 @@ func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, in
 		return domain.Subscription{}, 0, err
 	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	// Queued with the pause, so it is sent exactly when the pause commits.
+	// A re-attempted exhaustion finds the pause in force above and queues
+	// nothing, so a post-commit send that a crash dropped would never come.
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
+		"triggered_by": "dunning",
+	}); err != nil {
 		return domain.Subscription{}, 0, err
 	}
 	if err := tx.Commit(); err != nil {

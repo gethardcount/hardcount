@@ -838,6 +838,14 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 	if by := cancelAuditCanceledBy(t, call, advanceSub); by != "dunning" {
 		t.Errorf("cancel audit row canceled_by = %q, want dunning", by)
 	}
+	// The subscription's timeline says why, from that row.
+	timeline, err := json.Marshal(call("GET", "/v1/subscriptions/"+advanceSub+"/timeline", nil).want(t, 200, "get timeline").body)
+	if err != nil {
+		t.Fatalf("encode timeline: %v", err)
+	}
+	if !strings.Contains(string(timeline), "Payment retries ran out") {
+		t.Errorf("timeline does not say the cancel was dunning's (Payment retries ran out): %s", timeline)
+	}
 	checkEventResource(t, "invoice.marked_uncollectible (dunning)", got[domain.EventInvoiceMarkedUncollectible], getInvoice(dayOneID))
 
 	// A cycle close bills a subscription in arrears.

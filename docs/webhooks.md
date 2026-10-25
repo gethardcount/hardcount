@@ -325,7 +325,7 @@ the charge's Stripe PaymentIntent (`stripe_payment_intent_id`), its error
 | `payment.failed` | A charge the invoice was waiting on failed. Sent once per charge attempt (PaymentIntent). A decline on the hosted payment page does not send it, because the customer saw it there and can try again. *(always sent)* | — |
 | `payment.duplicate_charge` | A second charge succeeded on an invoice that was already paid. Refund it. | `incoming_payment_intent_id`, `captured_cents` |
 | `payment.amount_mismatch` | A charge settled for a different amount than the invoice owed | `incoming_payment_intent_id`, `captured_cents` |
-| `payment.currency_mismatch` | A charge settled in a different currency than the invoice's. The payment is recorded as usual and nothing is converted. Review it in Stripe. | `incoming_payment_intent_id`, `captured_cents` |
+| `payment.currency_mismatch` | A charge settled in a different currency than the invoice's. `charge_currency` is the charge's currency, in upper case; compare it with the invoice's `currency`. The payment is recorded as usual and nothing is converted. Review it in Stripe. | `incoming_payment_intent_id`, `captured_cents`, `charge_currency` |
 | `payment.received_on_voided_invoice` | Money arrived for a voided invoice. Refund it. | `incoming_payment_intent_id`, `captured_cents` |
 | `payment.dispute_opened` | A customer disputed a card payment with their bank (a chargeback), and Velox recorded it against the invoice. Sent once per dispute. *(always sent)* | `dispute` |
 | `payment.dispute_closed` | A recorded dispute closed. Sent again if Stripe turns a loss into a win. *(always sent)* | `dispute` |
@@ -379,11 +379,11 @@ schedule's is its `cancel_at` and `cancel_effective_at`.
 |---|---|---|
 | `subscription.created` | A subscription was created *(always sent)* | — |
 | `subscription.activated` | A draft subscription was activated *(always sent)* | — |
-| `subscription.canceled` | A subscription was canceled. `canceled_by` is `operator`, `customer`, `schedule`, `dunning` or `system`. A cancel at trial end carries `reason: trial_end_cancel`. *(always sent)* | `canceled_by`, `reason` |
+| `subscription.canceled` | A subscription was canceled. `canceled_by` is `operator`, `customer`, `schedule`, `dunning` or `system`. A cancel by dunning says `dunning`, also when a test-clock advance ran it. A cancel at trial end carries `reason: trial_end_cancel`. *(always sent)* | `canceled_by`, `reason` |
 | `subscription.trial_ended` | A trial ended. `triggered_by` is `operator` or `schedule`, and `ended_at` is when it ended. *(always sent)* | `ended_at`, `triggered_by` |
 | `subscription.trial_extended` | A trial's end date moved later. The new end is the subscription's `trial_end_at`. `triggered_by` is `operator` | `triggered_by` |
 | `subscription.cancel_scheduled` / `.cancel_cleared` | A cancel at period end was scheduled, or the schedule was removed. Clearing when no cancel is scheduled sends nothing | — |
-| `subscription.collection_paused` | Collection was paused: invoices stay drafts. The subscription's `pause_collection` says how and until when | — |
+| `subscription.collection_paused` | Collection was paused: invoices stay drafts. The subscription's `pause_collection` says how and until when. `triggered_by` is `operator` or `dunning` (payment retries ran out and your policy pauses). Dunning's pause is saved with the change, so its event is never lost ([rule 3](#three-rules-for-your-receiver)). Dunning never resumes collection itself: the pause lasts until that invoice is paid (`subscription.collection_resumed` with `triggered_by: payment`) or you resume it | `triggered_by` |
 | `subscription.collection_resumed` | Collection resumed; a resume call on a subscription that is not paused sends nothing. `triggered_by` is `operator`, `schedule` (its resume date came) or `payment` (a payment ended a pause that dunning set). A `schedule` or `payment` resume carries `resumed_at` | `triggered_by`, `resumed_at` |
 | `subscription.item.added` / `.updated` / `.removed` | A plan or quantity on the subscription was added, changed or removed. `item_id` names the item; a removed item is no longer in `items` | `item_id` |
 | `subscription.pending_change.scheduled` / `.canceled` | A plan change for the next billing period was scheduled or canceled. The item's `pending_plan_id` and `pending_plan_effective_at` show it | `item_id` |

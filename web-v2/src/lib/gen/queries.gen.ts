@@ -6649,7 +6649,8 @@ export const getPauseSubscriptionCollectionUrl = (id: string,) => {
  * replaces the current pause, including one dunning set; the pause is
  * then yours (`set_by: operator`), and a payment no longer lifts it.
  *
- * Sends the `subscription.collection_paused` webhook event.
+ * Sends the `subscription.collection_paused` webhook event, with
+ * `triggered_by: operator`.
  * @summary Pause collection
  */
 export const pauseSubscriptionCollection = async (id: string,

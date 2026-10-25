@@ -9,7 +9,11 @@
  */
 
 /**
- * What happens to the subscription when retries run out.
+ * What happens to the subscription when retries run out. `pause`
+ * pauses collection, unless it is already paused, and sends
+ * `subscription.collection_paused` with `triggered_by: dunning`.
+ * `cancel` cancels it and sends `subscription.canceled` with
+ * `canceled_by: dunning`.
  */
 export type DunningPolicyInputFinalSubscriptionAction = typeof DunningPolicyInputFinalSubscriptionAction[keyof typeof DunningPolicyInputFinalSubscriptionAction];
 
