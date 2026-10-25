@@ -498,8 +498,8 @@ func TestService_Instantiate_RefusesDivergentRatingRule(t *testing.T) {
 	// declared per-token rate.
 	if _, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "opus45_input", Name: "Opus input (negotiated)",
-		Mode: domain.PricingFlat, Currency: "USD",
-		FlatAmountCents: decimal.RequireFromString("0.001"),
+		Mode: domain.PricingPerUnit, Currency: "USD",
+		UnitAmountCents: decimal.RequireFromString("0.001"),
 	}); err != nil {
 		t.Fatalf("pre-create rule: %v", err)
 	}
@@ -532,8 +532,8 @@ func TestService_Instantiate_AdoptsMatchingRatingRule(t *testing.T) {
 
 	pre, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "opus45_input", Name: "Opus input (pre-created)",
-		Mode: domain.PricingFlat, Currency: "USD",
-		FlatAmountCents: decimal.RequireFromString("0.0005"),
+		Mode: domain.PricingPerUnit, Currency: "USD",
+		UnitAmountCents: decimal.RequireFromString("0.0005"),
 	})
 	if err != nil {
 		t.Fatalf("pre-create rule: %v", err)
@@ -586,8 +586,8 @@ func TestService_Instantiate_RefusesCrossCurrencyMeterAdoption(t *testing.T) {
 	// Operator already bills the shared `tokens` meter in USD via a custom
 	// key (disjoint from every recipe key).
 	rule, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "custom_tokens_usd", Name: "custom", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.RequireFromString("0.0004"),
+		RuleKey: "custom_tokens_usd", Name: "custom", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.RequireFromString("0.0004"),
 	})
 	if err != nil {
 		t.Fatalf("pre-create rule: %v", err)

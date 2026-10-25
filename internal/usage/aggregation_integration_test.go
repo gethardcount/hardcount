@@ -302,8 +302,8 @@ func insertTestRatingRule(t *testing.T, db *postgres.DB, tenantID, key string) s
 	defer postgres.Rollback(tx)
 
 	_, err = tx.ExecContext(context.Background(), `
-		INSERT INTO rating_rule_versions (id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency, flat_amount_cents)
-		VALUES ($1, $2, $3, $4, 1, 'active', 'flat', 'USD', 100)
+		INSERT INTO rating_rule_versions (id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency, unit_amount_cents)
+		VALUES ($1, $2, $3, $4, 1, 'active', 'per_unit', 'USD', 100)
 	`, id, tenantID, key, key)
 	if err != nil {
 		t.Fatalf("insert rrv: %v", err)

@@ -11,15 +11,16 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
-// The three rates of a rating rule and a price override (flat_amount_cents,
-// graduated_tiers[].unit_amount_cents, overage_unit_amount_cents) are request
+// The three amounts of a rating rule and a price override (unit_amount_cents,
+// tiers[].unit_amount_cents, package_amount_cents) are request
 // decimals with documented limits: a JSON number or a string holding one, at
 // most 100 characters, 0 or more, under 10^18 cents, at most 12 decimal
 // places. A value outside them is a 422 that names the field and nothing is
-// stored, in every mode (a rate the mode does not use is stored too). A zero
-// is stored as plain 0.
+// stored. A rate the mode does not use must be 0
+// (TestPriceShapes_UnusedFieldsRefused). A zero is stored as plain 0.
 //
 // Mutation-verify: drop the domain.CheckDecimal call in checkRate → the
 // size, scale and zero cases go red; parse the rates with shopspring's
@@ -35,45 +36,37 @@ type rateField struct {
 
 // rates is the three rates of a stored rule or override, or of a response.
 type rates struct {
-	FlatAmountCents        decimal.Decimal     `json:"flat_amount_cents"`
-	GraduatedTiers         []domain.RatingTier `json:"graduated_tiers"`
-	OverageUnitAmountCents decimal.Decimal     `json:"overage_unit_amount_cents"`
+	UnitAmountCents    decimal.Decimal     `json:"unit_amount_cents"`
+	Tiers              []domain.RatingTier `json:"tiers"`
+	PackageAmountCents decimal.Decimal     `json:"package_amount_cents"`
 }
 
 var rateFields = []rateField{
 	{
-		param: "flat_amount_cents",
-		frag:  func(raw string) string { return `"mode":"flat","flat_amount_cents":` + raw },
-		pick:  func(r rates) decimal.Decimal { return r.FlatAmountCents },
+		param: "unit_amount_cents",
+		frag:  func(raw string) string { return `"mode":"per_unit","unit_amount_cents":` + raw },
+		pick:  func(r rates) decimal.Decimal { return r.UnitAmountCents },
 	},
 	{
-		param: "graduated_tiers[0].unit_amount_cents",
+		param: "tiers[0].unit_amount_cents",
 		frag: func(raw string) string {
-			return `"mode":"graduated","graduated_tiers":[{"up_to":100,"unit_amount_cents":` + raw + `},{"up_to":0,"unit_amount_cents":"1"}]`
+			return `"mode":"graduated","tiers":[{"up_to":100,"unit_amount_cents":` + raw + `},{"up_to":null,"unit_amount_cents":"1"}]`
 		},
-		pick: func(r rates) decimal.Decimal { return r.GraduatedTiers[0].UnitAmountCents },
+		pick: func(r rates) decimal.Decimal { return r.Tiers[0].UnitAmountCents },
 	},
 	{
-		param: "graduated_tiers[1].unit_amount_cents",
+		param: "tiers[1].unit_amount_cents",
 		frag: func(raw string) string {
-			return `"mode":"graduated","graduated_tiers":[{"up_to":100,"unit_amount_cents":"1"},{"up_to":0,"unit_amount_cents":` + raw + `}]`
+			return `"mode":"graduated","tiers":[{"up_to":100,"unit_amount_cents":"1"},{"up_to":null,"unit_amount_cents":` + raw + `}]`
 		},
-		pick: func(r rates) decimal.Decimal { return r.GraduatedTiers[1].UnitAmountCents },
+		pick: func(r rates) decimal.Decimal { return r.Tiers[1].UnitAmountCents },
 	},
 	{
-		param: "overage_unit_amount_cents",
+		param: "package_amount_cents",
 		frag: func(raw string) string {
-			return `"mode":"package","package_size":100,"package_amount_cents":500,"overage_unit_amount_cents":` + raw
+			return `"mode":"package","package_size":100,"package_amount_cents":` + raw
 		},
-		pick: func(r rates) decimal.Decimal { return r.OverageUnitAmountCents },
-	},
-	{
-		// A rate the mode does not use is stored, so it has the same limits.
-		param: "flat_amount_cents",
-		frag: func(raw string) string {
-			return `"mode":"graduated","graduated_tiers":[{"up_to":0,"unit_amount_cents":"1"}],"flat_amount_cents":` + raw
-		},
-		pick: func(r rates) decimal.Decimal { return r.FlatAmountCents },
+		pick: func(r rates) decimal.Decimal { return r.PackageAmountCents },
 	},
 }
 
@@ -94,7 +87,7 @@ var rateDoors = []rateDoor{
 			rr := doJSON(t, h.createRatingRule, http.MethodPost, "/", `{"rule_key":"r","name":"r","currency":"USD",`+frag+`}`, nil)
 			for _, r := range store.rules {
 				return rr, func(f rateField) decimal.Decimal {
-					return f.pick(rates{r.FlatAmountCents, r.GraduatedTiers, r.OverageUnitAmountCents})
+					return f.pick(rates{r.UnitAmountCents, r.Tiers, r.PackageAmountCents})
 				}, true
 			}
 			return rr, nil, false
@@ -106,7 +99,7 @@ var rateDoors = []rateDoor{
 			store := newMemStore()
 			svc := NewService(store)
 			rule, err := svc.CreateRatingRule(context.Background(), "tnt_test", CreateRatingRuleInput{
-				RuleKey: "r", Name: "r", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+				RuleKey: "r", Name: "r", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 			})
 			if err != nil {
 				t.Fatalf("seed rule: %v", err)
@@ -115,7 +108,7 @@ var rateDoors = []rateDoor{
 			rr := doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"vlx_cus_1","rating_rule_version_id":"`+rule.ID+`",`+frag+`}`, nil)
 			for _, o := range store.overrides {
 				return rr, func(f rateField) decimal.Decimal {
-					return f.pick(rates{o.FlatAmountCents, o.GraduatedTiers, o.OverageUnitAmountCents})
+					return f.pick(rates{o.UnitAmountCents, o.Tiers, o.PackageAmountCents})
 				}, true
 			}
 			return rr, nil, false
@@ -292,9 +285,9 @@ func TestCreateRatingRuleTx_RatesTakeTheLimits(t *testing.T) {
 		name string
 		rule domain.RatingRuleVersion
 	}{
-		{"flat 13 places", domain.RatingRuleVersion{Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0.0000000000001")}},
-		{"tier 10^18", domain.RatingRuleVersion{Mode: domain.PricingGraduated, GraduatedTiers: []domain.RatingTier{{UpTo: 0, UnitAmountCents: decimal.RequireFromString("1e18")}}}},
-		{"negative overage", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageSize: 10, OverageUnitAmountCents: decimal.NewFromInt(-1)}},
+		{"per_unit 13 places", domain.RatingRuleVersion{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0000000000001")}},
+		{"tier 10^18", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: decimal.RequireFromString("1e18")}}}},
+		{"negative package amount", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageSize: 10, PackageAmountCents: decimal.NewFromInt(-1)}},
 	} {
 		store := newMemStore()
 		tc.rule.RuleKey, tc.rule.Name, tc.rule.Currency = "r", "r", "USD"
@@ -308,9 +301,46 @@ func TestCreateRatingRuleTx_RatesTakeTheLimits(t *testing.T) {
 	// A zero is stored as plain 0 here too.
 	store := newMemStore()
 	got, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", domain.RatingRuleVersion{
-		RuleKey: "r", Name: "r", Currency: "USD", Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0e99999"),
+		RuleKey: "r", Name: "r", Currency: "USD", Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0e99999"),
 	})
-	if err != nil || got.FlatAmountCents.Exponent() != 0 {
-		t.Errorf("zero: got %s (exponent %d), err %v; want plain 0", got.FlatAmountCents, got.FlatAmountCents.Exponent(), err)
+	if err != nil || got.UnitAmountCents.Exponent() != 0 {
+		t.Errorf("zero: got %s (exponent %d), err %v; want plain 0", got.UnitAmountCents, got.UnitAmountCents.Exponent(), err)
+	}
+}
+
+// The recipe installer's save entrypoint takes the public route's shape
+// check too, so a price it saves always rates and carries only its mode's
+// fields. The recipe parser checks the same before an install, but the
+// save path does not rely on it.
+//
+// Mutation-verify: drop the validatePricingShape call in CreateRatingRuleTx
+// → red.
+func TestCreateRatingRuleTx_ShapeChecked(t *testing.T) {
+	upTo := func(n int64) *int64 { return &n }
+	one := decimal.NewFromInt(1)
+	open := []domain.RatingTier{{UpTo: upTo(100), UnitAmountCents: one}, {UpTo: nil, UnitAmountCents: one}}
+	for _, tc := range []struct {
+		name, param string
+		rule        domain.RatingRuleVersion
+	}{
+		{"a bounded last tier", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: upTo(100), UnitAmountCents: one}, {UpTo: upTo(1000), UnitAmountCents: one}}}},
+		{"an open tier before the last", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: one}, {UpTo: upTo(100), UnitAmountCents: one}}}},
+		{"graduated with no tiers", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated}},
+		{"a package of size 0", "package_size", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageAmountCents: one}},
+		{"per_unit with tiers", "tiers", domain.RatingRuleVersion{Mode: domain.PricingPerUnit, UnitAmountCents: one, Tiers: open}},
+		{"package with a unit amount", "unit_amount_cents", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageSize: 10, PackageAmountCents: one, UnitAmountCents: one}},
+		{"an unknown mode", "mode", domain.RatingRuleVersion{Mode: "flat", UnitAmountCents: one}},
+	} {
+		store := newMemStore()
+		tc.rule.RuleKey, tc.rule.Name, tc.rule.Currency = "r", "r", "USD"
+		_, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", tc.rule)
+		if err == nil {
+			t.Errorf("%s: accepted", tc.name)
+		} else if field := errs.Field(err); field != tc.param {
+			t.Errorf("%s: refused naming %q (%v), want %q", tc.name, field, err, tc.param)
+		}
+		if len(store.rules) != 0 {
+			t.Errorf("%s: %d rules stored, want 0", tc.name, len(store.rules))
+		}
 	}
 }

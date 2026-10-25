@@ -37,8 +37,8 @@ func liveMeter(t *testing.T, f *recipeIntegrationFixture, ctx context.Context, t
 	defaultID := ""
 	if defaultCents > 0 {
 		r, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-			RuleKey: "tokens_default", Name: "Tokens default", Mode: domain.PricingFlat,
-			Currency: "USD", FlatAmountCents: decimal.NewFromInt(defaultCents),
+			RuleKey: "tokens_default", Name: "Tokens default", Mode: domain.PricingPerUnit,
+			Currency: "USD", UnitAmountCents: decimal.NewFromInt(defaultCents),
 		})
 		if err != nil {
 			t.Fatalf("default rule: %v", err)
@@ -53,8 +53,8 @@ func liveMeter(t *testing.T, f *recipeIntegrationFixture, ctx context.Context, t
 	}
 	if existingModel != "" {
 		r, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-			RuleKey: "my_model", Name: "My model", Mode: domain.PricingFlat,
-			Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+			RuleKey: "my_model", Name: "My model", Mode: domain.PricingPerUnit,
+			Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 		})
 		if err != nil {
 			t.Fatalf("model rule: %v", err)

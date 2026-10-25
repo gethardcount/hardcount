@@ -28,17 +28,18 @@ var (
 	// QuantityLimits fit the NUMERIC(38,12) quantity columns: usage
 	// quantities and item usage thresholds.
 	QuantityLimits = DecimalLimits{IntDigits: 26, Scale: 12}
-	// RateLimits bound a per-unit rate in cents. A rate under 10^18 cents
-	// prices one unit inside int64 cents, the type every invoice amount
+	// RateLimits bound a price amount in cents: a per-unit rate, a tier
+	// rate or a package amount. A rate under 10^18 cents prices one unit
+	// (or one package) inside int64 cents, the type every invoice amount
 	// is held in; 12 places is Stripe's unit_amount_decimal precision.
 	// The limit does not bound what a rate bills: rate × quantity, the
 	// invoice's sum and its total with tax are each refused with
 	// ErrAmountOverflow when they do not fit int64 (ComputeAmountCents,
 	// billing.ApplyTaxToLineItems).
 	RateLimits = DecimalLimits{IntDigits: 18, Scale: 12}
-	// ProviderCostLimits fit provider_cost_rates.cost_per_token,
-	// NUMERIC(20,12) (dollars per token).
-	ProviderCostLimits = DecimalLimits{IntDigits: 8, Scale: 12}
+	// ProviderCostLimits fit provider_cost_rates.unit_cost_cents,
+	// NUMERIC(22,12) (cents per token).
+	ProviderCostLimits = DecimalLimits{IntDigits: 10, Scale: 12}
 )
 
 // MaxDecimalChars is the longest text a request decimal may be written in.
@@ -71,9 +72,9 @@ func CheckDecimal(field string, d decimal.Decimal, lim DecimalLimits) (decimal.D
 	return d, nil
 }
 
-// CheckRate checks a per-unit rate in cents (a rating rule's or a price
-// override's flat_amount_cents, tier unit_amount_cents and
-// overage_unit_amount_cents): inside RateLimits and 0 or more. A negative
+// CheckRate checks a price amount in cents (a rating rule's or a price
+// override's unit_amount_cents, tier unit_amount_cents and
+// package_amount_cents): inside RateLimits and 0 or more. A negative
 // rate is a discount misspelled; credits are the discount primitive
 // (ADR-039).
 func CheckRate(field string, d decimal.Decimal) (decimal.Decimal, error) {

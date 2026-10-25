@@ -137,7 +137,7 @@ Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Ev
 
 ## What's inside
 
-- **Pricing:** flat, per-unit, graduated and package prices; rates per model and token type on one meter; a base fee plus usage on one invoice; prepaid credit that later usage draws down. [AI pricing](docs/ai-pricing.md)
+- **Pricing:** per-unit, graduated and package prices; rates per model and token type on one meter; a base fee plus usage on one invoice; prepaid credit that later usage draws down. [AI pricing](docs/ai-pricing.md)
 - **Billing you can trust:** Velox never bills the same period twice, because the database refuses a second invoice for it. Every usage line on an invoice links to the events behind it. [How Velox is engineered](docs/ENGINEERING.md)
 - **Getting paid:** cards through Stripe, with automatic retries and emails when a payment fails. Customers can also pay another way, such as a bank transfer, and you mark the invoice paid. [Card payment failure handling](docs/payments.md)
 - **Running it:** one Go program with its background jobs inside, Postgres and Redis. No telemetry and no licence check. [Self-host](docs/self-host.md)

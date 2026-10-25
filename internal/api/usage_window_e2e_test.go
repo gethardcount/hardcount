@@ -308,7 +308,7 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 	trialEnd := dayAt(18, 0)
 	r.newTrialEndingAt(trialEnd)
 	r.must(http.MethodPost, "/v1/rating-rules", dayAt(12, 0), map[string]any{
-		"rule_key": "calls", "name": "Calls repriced", "mode": "flat", "currency": "USD", "flat_amount_cents": 2,
+		"rule_key": "calls", "name": "Calls repriced", "mode": "per_unit", "currency": "USD", "unit_amount_cents": 2,
 	}, http.StatusCreated)
 	r.ingest(dayAt(10, 0), 40)
 	r.ingest(dayAt(19, 0), 7)

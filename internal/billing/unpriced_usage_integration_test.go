@@ -61,8 +61,8 @@ func unpricedCounter(t *testing.T, meterID string) float64 {
 func tokensMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key string) domain.Meter {
 	t.Helper()
 	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key + "_a", Name: key + " a", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		RuleKey: key + "_a", Name: key + " a", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -245,8 +245,8 @@ func TestUnpricedUsage_CycleClose_CountsBothPaths(t *testing.T) {
 
 	tok := tokensMeter(t, ctx, f, "tok_cyc")
 	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "seats_flat", Name: "Seats", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
+		RuleKey: "seats_flat", Name: "Seats", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -360,8 +360,8 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 	defer cancel()
 
 	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "gpu_a", Name: "GPU a", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		RuleKey: "gpu_a", Name: "GPU a", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -532,8 +532,8 @@ func TestUnpricedUsage_PricedAfterThresholdFire(t *testing.T) {
 			}
 
 			rrB, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-				RuleKey: key + "_b", Name: key + " b", Mode: domain.PricingFlat,
-				Currency: "USD", FlatAmountCents: decimal.NewFromInt(int64(2 + i)),
+				RuleKey: key + "_b", Name: key + " b", Mode: domain.PricingPerUnit,
+				Currency: "USD", UnitAmountCents: decimal.NewFromInt(int64(2 + i)),
 			})
 			if err != nil {
 				t.Fatalf("create rule b: %v", err)

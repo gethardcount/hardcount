@@ -41,7 +41,7 @@ func cancelFailLoudFixture() (domain.Subscription, *mockPricing, *mockUsage, *mo
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
 		},
 	}
 	return sub, pricing, &mockUsage{totals: map[string]int64{"mtr_api": 500}}, &mockInvoices{}

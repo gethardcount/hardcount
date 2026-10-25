@@ -119,8 +119,8 @@ func TestBatchIngest_Atomic(t *testing.T) {
 		t.Fatalf("begin rate tx: %v", err)
 	}
 	if _, err := rateTx.ExecContext(ctx, `
-		INSERT INTO provider_cost_rates (id, tenant_id, livemode, provider, model, token_type, cost_per_token)
-		VALUES ('vlx_pcr_batchtest', $1, false, 'anthropic', 'claude-x', 'input', 0.000002)`,
+		INSERT INTO provider_cost_rates (id, tenant_id, livemode, provider, model, token_type, unit_cost_cents)
+		VALUES ('vlx_pcr_batchtest', $1, false, 'anthropic', 'claude-x', 'input', 0.0002)`,
 		tenantID); err != nil {
 		t.Fatalf("seed cost rate: %v", err)
 	}
@@ -137,6 +137,6 @@ func TestBatchIngest_Atomic(t *testing.T) {
 		t.Fatalf("get costed event: %v", err)
 	}
 	if stamped.ProviderCostMicros == nil || *stamped.ProviderCostMicros != 2000 {
-		t.Fatalf("provider_cost_micros: got %v, want 2000 (0.000002 × 1000 × 1e6)", stamped.ProviderCostMicros)
+		t.Fatalf("provider_cost_micros: got %v, want 2000 (0.0002¢ × 1000 × 1e4)", stamped.ProviderCostMicros)
 	}
 }

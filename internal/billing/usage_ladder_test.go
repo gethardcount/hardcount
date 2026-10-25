@@ -11,9 +11,9 @@ import (
 )
 
 func graduated10then2() domain.RatingRuleVersion {
-	return domain.RatingRuleVersion{ID: "rrv_g", Mode: domain.PricingGraduated, GraduatedTiers: []domain.RatingTier{
-		{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(10)},
-		{UpTo: 0, UnitAmountCents: decimal.NewFromInt(2)},
+	return domain.RatingRuleVersion{ID: "rrv_g", Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+		{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+		{UpTo: nil, UnitAmountCents: decimal.NewFromInt(2)},
 	}}
 }
 
@@ -65,19 +65,18 @@ func TestUsageLadder_UnchangedWithoutASeed(t *testing.T) {
 	}
 }
 
-// A package rule whose overage costs more than the package is non-monotone:
-// a slice can floor at 0, and a later slice of the same bucket recovers it,
-// so the period bills F(total) when it can.
-func TestUsageLadder_NonMonotonePackageRecovers(t *testing.T) {
-	rule := domain.RatingRuleVersion{ID: "rrv_p", Mode: domain.PricingPackage, PackageSize: 1000, PackageAmountCents: 500,
-		OverageUnitAmountCents: decimal.NewFromInt(1)}
-	fire, _ := domain.ComputeAmountCents(rule, d(999)) // 999¢
+// A package continues across the fire too (ADR-130 §3): the fire billed a
+// whole package for 999 units, so the close bills nothing more until the
+// 1001st unit starts a second one. fire + close = F(total).
+func TestUsageLadder_PackageContinuesFromTheFire(t *testing.T) {
+	rule := domain.RatingRuleVersion{ID: "rrv_p", Mode: domain.PricingPackage, PackageSize: 1000, PackageAmountCents: decimal.NewFromInt(500)}
+	fire, _ := domain.ComputeAmountCents(rule, d(999)) // one whole package: 500¢
 	l := newUsageLadder(fireWatermark(usageLine("mtr", "rrv_p", 999, fire)))
-	a1, _ := l.price(rule, "mtr", "mtr|", domain.AggregationSum, d(1)) // F(1000)=500 < 999 billed
-	a2, _ := l.price(rule, "mtr", "mtr|", domain.AggregationSum, d(999))
+	a1, err1 := l.price(rule, "mtr", "mtr|", domain.AggregationSum, d(1)) // F(1000) = 500, already billed
+	a2, err2 := l.price(rule, "mtr", "mtr|", domain.AggregationSum, d(999))
 	total, _ := domain.ComputeAmountCents(rule, d(1999))
-	if a1 != 0 || fire+a1+a2 != total {
-		t.Errorf("slices %d, %d after fire %d: sum %d, want floor at 0 then F(1999) = %d", a1, a2, fire, fire+a1+a2, total)
+	if err1 != nil || err2 != nil || fire != 500 || a1 != 0 || a2 != 500 || fire+a1+a2 != total {
+		t.Errorf("fire %d, slices %d, %d (%v, %v): want 500, 0, 500 = F(1999) = %d", fire, a1, a2, err1, err2, total)
 	}
 }
 
@@ -100,11 +99,11 @@ func TestUsageLadder_SeedIgnoresThePersistedNetAmount(t *testing.T) {
 	}
 }
 
-// Flat rules price exactly as before the ladder existed.
-func TestUsageLadder_FlatUnchanged(t *testing.T) {
-	flat := domain.RatingRuleVersion{ID: "rrv_f", Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(10)}
+// Per-unit rules price exactly as before the ladder existed.
+func TestUsageLadder_PerUnitUnchanged(t *testing.T) {
+	flat := domain.RatingRuleVersion{ID: "rrv_f", Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(10)}
 	wm := fireWatermark(usageLine("mtr", "rrv_f", 700, 7000), usageLine("mtr", "rrv_g", 700, 7000))
 	if a, _ := newUsageLadder(wm).price(flat, "mtr", "mtr|", domain.AggregationSum, d(600)); a != 6000 {
-		t.Errorf("flat after a fire = %d, want 6000 (unchanged)", a)
+		t.Errorf("per_unit after a fire = %d, want 6000 (unchanged)", a)
 	}
 }

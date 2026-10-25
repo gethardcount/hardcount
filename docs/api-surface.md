@@ -72,6 +72,25 @@ Before you send usage, read [the retry rules](#sending-usage-safely).
 | `POST` | `/v1/meters/{id}/pricing-rules` | Add a pricing rule that prices events by their dimensions |
 | `GET` | `/v1/plans` | List plans |
 
+**A price has one `mode`:**
+
+- `per_unit` bills quantity × `unit_amount_cents`.
+- `graduated` bills by `tiers`, each `{up_to, unit_amount_cents}`. A tier
+  prices the units above the tier before it, up to its `up_to`. The last
+  tier has `up_to: null` (no upper limit), and only the last.
+- `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`.
+  A part package bills as a whole one.
+
+A price takes only its mode's fields. A field the mode does not use must be
+0 or left out, or the request is refused with 422.
+
+**Units.** A field named `*_cents` is in the currency's smallest unit, such
+as cents for USD. A price you send is a decimal string with at most 12
+decimal places: `"0.0003"` is $3.00 per million units. An invoice line
+rounds to whole cents once. Provider costs follow the same rule:
+`unit_cost_cents` is US cents per token, and usage events and the margin
+report give cost as `provider_cost_cents` and `cost_cents`.
+
 ### Customers and subscriptions
 
 A subscription puts a customer on a plan.

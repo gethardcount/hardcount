@@ -41,10 +41,10 @@ func TestSpend_CachedCallCostOnRealStore(t *testing.T) {
 	// The same rates LiteLLM used, so the table and the observed figures
 	// agree and the only difference is whether a token is counted twice.
 	for tt, rate := range map[string]string{
-		TokenTypeInput: "0.000003", TokenTypeCacheRead: "0.0000003", TokenTypeOutput: "0.000015",
+		TokenTypeInput: "0.0003", TokenTypeCacheRead: "0.00003", TokenTypeOutput: "0.0015",
 	} {
 		if _, err := store.UpsertProviderCostRate(ctx, tenantID, domain.ProviderCostRate{
-			Provider: "anthropic", Model: "claude-sonnet-4.5", TokenType: tt, CostPerToken: decimal.RequireFromString(rate), Currency: "USD",
+			Provider: "anthropic", Model: "claude-sonnet-4.5", TokenType: tt, UnitCostCents: decimal.RequireFromString(rate), Currency: "USD",
 		}); err != nil {
 			t.Fatalf("rate %s: %v", tt, err)
 		}

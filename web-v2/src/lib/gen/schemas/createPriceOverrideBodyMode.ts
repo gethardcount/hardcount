@@ -8,11 +8,14 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * As on `POST /v1/rating-rules`, also for the fields a mode does not use.
+ */
 export type CreatePriceOverrideBodyMode = typeof CreatePriceOverrideBodyMode[keyof typeof CreatePriceOverrideBodyMode];
 
 
 export const CreatePriceOverrideBodyMode = {
-  flat: 'flat',
+  per_unit: 'per_unit',
   graduated: 'graduated',
   package: 'package',
 } as const;

@@ -132,8 +132,8 @@ func TestRunCycle_NetNegativeBucket_MultiRuleMeter(t *testing.T) {
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
 	pricing.meters["mtr_api"] = domain.Meter{ID: "mtr_api", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"}
-	pricing.rules["rrv_in"] = domain.RatingRuleVersion{ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)}
-	pricing.rules["rrv_out"] = domain.RatingRuleVersion{ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)}
+	pricing.rules["rrv_in"] = domain.RatingRuleVersion{ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}
+	pricing.rules["rrv_out"] = domain.RatingRuleVersion{ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)}
 	pricing.meterPricingRules = map[string][]domain.MeterPricingRule{
 		"mtr_api": {
 			{ID: "mpr_in", MeterID: "mtr_api", RatingRuleVersionID: "rrv_in", DimensionMatch: map[string]any{"type": "in"}},
@@ -229,9 +229,9 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 			"mtr_seats":  {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seat"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
-			"rrv_in":   {ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},
-			"rrv_out":  {ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
-			"rrv_seat": {ID: "rrv_seat", RuleKey: "seat", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5)},
+			"rrv_in":   {ID: "rrv_in", RuleKey: "tok_in", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)},
+			"rrv_out":  {ID: "rrv_out", RuleKey: "tok_out", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
+			"rrv_seat": {ID: "rrv_seat", RuleKey: "seat", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5)},
 		},
 		meterPricingRules: map[string][]domain.MeterPricingRule{
 			"mtr_tokens": {
@@ -331,8 +331,8 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 			"mtr_storage": {ID: "mtr_storage", EventName: "storage", Name: "Storage", Unit: "GB", Aggregation: "sum", RatingRuleVersionID: "rrv_storage"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api":     {ID: "rrv_api", RuleKey: "api", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},
-			"rrv_storage": {ID: "rrv_storage", RuleKey: "storage", Version: 1, Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(100)},
+			"rrv_api":     {ID: "rrv_api", RuleKey: "api", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)},
+			"rrv_storage": {ID: "rrv_storage", RuleKey: "storage", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)},
 		},
 	}
 	usage := &mockUsage{

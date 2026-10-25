@@ -115,7 +115,7 @@ func count(out map[string]any, field string) int {
 func (r *lagRig) newMeter(key, agg string) string {
 	r.t.Helper()
 	rule := r.must(http.MethodPost, "/v1/rating-rules", lagP0, map[string]any{
-		"rule_key": key, "name": key, "mode": "flat", "currency": "USD", "flat_amount_cents": 1,
+		"rule_key": key, "name": key, "mode": "per_unit", "currency": "USD", "unit_amount_cents": 1,
 	}, http.StatusCreated)
 	m := r.must(http.MethodPost, "/v1/meters", lagP0, map[string]any{
 		"event_name": key, "name": key, "unit": key, "aggregation": agg, "rating_rule_version_id": rule["id"],

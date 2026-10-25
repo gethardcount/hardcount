@@ -60,8 +60,8 @@ func newMeterEditFixture(t *testing.T) meterEditFixture {
 func (f meterEditFixture) rule(t *testing.T, key string, cents int64) domain.RatingRuleVersion {
 	t.Helper()
 	r, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key, Name: key, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(cents),
+		RuleKey: key, Name: key, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(cents),
 	})
 	if err != nil {
 		t.Fatalf("create rule %s: %v", key, err)
@@ -347,8 +347,8 @@ func TestMeterEditGuard_AllowsEditsThatRepriceNothing(t *testing.T) {
 		pm := f.pricedMeter(t, "free_samekey")
 		f.sub(t, pm.plan.ID, "active")
 		v2, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-			RuleKey: pm.def.RuleKey, Name: pm.def.Name, Mode: domain.PricingFlat,
-			Currency: "USD", FlatAmountCents: decimal.NewFromInt(9),
+			RuleKey: pm.def.RuleKey, Name: pm.def.Name, Mode: domain.PricingPerUnit,
+			Currency: "USD", UnitAmountCents: decimal.NewFromInt(9),
 		})
 		if err != nil {
 			t.Fatalf("publish v2: %v", err)

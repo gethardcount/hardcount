@@ -7,19 +7,19 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { RecipeRatingRuleGraduatedTiersItem } from './recipeRatingRuleGraduatedTiersItem';
+import type { PriceTier } from './priceTier';
 import type { RecipeRatingRuleMode } from './recipeRatingRuleMode';
 
 export interface RecipeRatingRule {
   key: string;
   name?: string;
+  /** As on RatingRule. */
   mode: RecipeRatingRuleMode;
   currency: string;
-  /** Per-unit rate in cents, as a decimal string (see RatingRule.flat_amount_cents). */
-  flat_amount_cents: string;
-  graduated_tiers?: RecipeRatingRuleGraduatedTiersItem[];
+  /** Price per unit in cents, as a decimal string (see RatingRule.unit_amount_cents). */
+  unit_amount_cents: string;
+  tiers?: PriceTier[];
   package_size?: number;
-  package_amount_cents?: number;
-  /** Per-unit overage rate in cents, as a decimal string. */
-  overage_unit_amount_cents: string;
+  /** Price of one package in cents, as a decimal string. */
+  package_amount_cents: string;
 }

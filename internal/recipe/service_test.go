@@ -285,7 +285,7 @@ func mapKeys(m map[string]any) []string {
 
 func TestRatingRuleFromRecipe(t *testing.T) {
 	got := ratingRuleFromRecipe(domain.RecipeRatingRule{
-		Key: "tier1", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(100),
+		Key: "tier1", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
 	})
 	if got.RuleKey != "tier1" {
 		t.Errorf("RuleKey: got %q", got.RuleKey)

@@ -1,6 +1,6 @@
 # ADR-045: Decimal per-unit pricing rates + multi-dim cycle billing
 
-**Status:** Accepted; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decimal package rates, `flat` becomes `per_unit`, overage goes; not built yet) and by the 2026-10-24 amendment below (rate limits; built)
+**Status:** Accepted; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (decimal package rates, `flat` becomes `per_unit`, overage goes; built in #1381) and by the 2026-10-24 amendment below (rate limits; built)
 **Date:** 2026-06-01
 **Relates to:** ADR-044 (canonical AI token metering model). Follows the
 precedent of ADR-042 (tax rate `bigint` bp → `NUMERIC`).
@@ -8,7 +8,7 @@ precedent of ADR-042 (tax rate `bigint` bp → `NUMERIC`).
 migration 0001, and the single-rule-only usage-billing path in
 `billing.billOnePeriod`.
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR, with the 2026-10-24 amendment below, describes the code. `package_amount_cents` becomes a decimal like the per-unit rates, `flat_amount_cents` becomes `unit_amount_cents` (mode `per_unit`) and `overage_unit_amount_cents` goes (PR-3). Invoice amounts stay whole cents. ADR-130's limit of 12 decimal places is built already (the 2026-10-24 amendment).
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and built in #1381 (PR-3). Where this ADR says otherwise, ADR-130 describes the code. `package_amount_cents` becomes a decimal like the per-unit rates, `flat_amount_cents` becomes `unit_amount_cents` (mode `per_unit`) and `overage_unit_amount_cents` goes (PR-3). Invoice amounts stay whole cents. ADR-130's limit of 12 decimal places is built already (the 2026-10-24 amendment).
 
 ## Summary
 

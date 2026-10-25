@@ -229,7 +229,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		}
 		r := scopeRefs{ext: tag + "_cus", meterKey: tag + "_meter"}
 		r.rule = id(create("POST", "/v1/rating-rules", map[string]any{
-			"rule_key": tag + "_rule", "name": "rule", "mode": "flat", "currency": "USD", "flat_amount_cents": 100,
+			"rule_key": tag + "_rule", "name": "rule", "mode": "per_unit", "currency": "USD", "unit_amount_cents": 100,
 		}))
 		r.meter = id(create("POST", "/v1/meters", map[string]any{
 			"event_name": r.meterKey, "name": "meter", "unit": "unit", "aggregation": "sum", "rating_rule_version_id": r.rule,
@@ -264,11 +264,11 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			}
 		})
 		r.override = id(create("POST", "/v1/price-overrides", map[string]any{
-			"customer_id": cus2, "rating_rule_version_id": r.rule, "mode": "flat", "flat_amount_cents": 50,
+			"customer_id": cus2, "rating_rule_version_id": r.rule, "mode": "per_unit", "unit_amount_cents": 50,
 		}))
 		r.hook = id(create("POST", "/v1/webhook-endpoints/endpoints", map[string]any{"url": "https://example.com/" + tag})["endpoint"].(map[string]any))
 		r.rate = id(create("PUT", "/v1/provider-costs", map[string]any{
-			"provider": "openai", "model": "model-" + tag, "token_type": "input", "cost_per_token": "0.000001",
+			"provider": "openai", "model": "model-" + tag, "token_type": "input", "unit_cost_cents": "0.0001",
 		}))
 		// createAPIKeyWithMode derives the key id from the key itself.
 		mode := strings.SplitN(strings.TrimPrefix(key, "vlx_secret_"), "_", 2)
@@ -362,7 +362,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"customer_id": f.cus, "line_items": line}
 		}, 404, "customer not found", 201},
 		{"fixed: price override create [customer_id]", "POST", fixed("/v1/price-overrides"), func(o, f scopeRefs) any {
-			return map[string]any{"customer_id": f.cus, "rating_rule_version_id": o.rule, "mode": "flat", "flat_amount_cents": 50}
+			return map[string]any{"customer_id": f.cus, "rating_rule_version_id": o.rule, "mode": "per_unit", "unit_amount_cents": 50}
 		}, 404, "customer not found", 201},
 		{"fixed: billing profile upsert [path customer]", "PUT", at("/v1/customers/%s/billing-profile", cus), func(_, _ scopeRefs) any {
 			return map[string]any{"legal_name": "Legal", "country": "US"}
@@ -435,7 +435,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			return map[string]any{"rating_rule_version_id": f.rule, "dimension_match": map[string]any{"k": "v"}}
 		}, 422, "", 409},
 		{"price override create [rating_rule_version_id]", "POST", fixed("/v1/price-overrides"), func(o, f scopeRefs) any {
-			return map[string]any{"customer_id": o.cus, "rating_rule_version_id": f.rule, "mode": "flat", "flat_amount_cents": 50}
+			return map[string]any{"customer_id": o.cus, "rating_rule_version_id": f.rule, "mode": "per_unit", "unit_amount_cents": 50}
 		}, 422, "", 201},
 		{"price override delete [path override]", "DELETE", at("/v1/price-overrides/%s", func(f scopeRefs) string { return f.override }), none, 404, "", 200},
 		{"usage ingest [event_name]", "POST", fixed("/v1/usage-events"), func(o, f scopeRefs) any {

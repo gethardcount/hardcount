@@ -15,78 +15,75 @@ import (
 // message. The limits are the service's (checkRates), so a Go caller such as
 // the recipe installer gets the same ones.
 
-// rateTierRequest is one graduated tier on the wire.
+// rateTierRequest is one graduated tier on the wire. up_to is a whole number,
+// or null for the open last tier.
 type rateTierRequest struct {
-	UpTo            int64           `json:"up_to"`
+	UpTo            *int64          `json:"up_to"`
 	UnitAmountCents json.RawMessage `json:"unit_amount_cents"`
 }
 
 type ratingRuleRequest struct {
-	RuleKey                string             `json:"rule_key"`
-	Name                   string             `json:"name"`
-	Mode                   domain.PricingMode `json:"mode"`
-	Currency               string             `json:"currency"`
-	FlatAmountCents        json.RawMessage    `json:"flat_amount_cents"`
-	GraduatedTiers         []rateTierRequest  `json:"graduated_tiers"`
-	PackageSize            int64              `json:"package_size"`
-	PackageAmountCents     int64              `json:"package_amount_cents"`
-	OverageUnitAmountCents json.RawMessage    `json:"overage_unit_amount_cents"`
+	RuleKey            string             `json:"rule_key"`
+	Name               string             `json:"name"`
+	Mode               domain.PricingMode `json:"mode"`
+	Currency           string             `json:"currency"`
+	UnitAmountCents    json.RawMessage    `json:"unit_amount_cents"`
+	Tiers              []rateTierRequest  `json:"tiers"`
+	PackageSize        int64              `json:"package_size"`
+	PackageAmountCents json.RawMessage    `json:"package_amount_cents"`
 }
 
 func (r ratingRuleRequest) input() (CreateRatingRuleInput, error) {
-	flat, tiers, overage, err := parseRates(r.FlatAmountCents, r.GraduatedTiers, r.OverageUnitAmountCents)
+	unit, tiers, pkg, err := parseRates(r.UnitAmountCents, r.Tiers, r.PackageAmountCents)
 	if err != nil {
 		return CreateRatingRuleInput{}, err
 	}
 	return CreateRatingRuleInput{
 		RuleKey: r.RuleKey, Name: r.Name, Mode: r.Mode, Currency: r.Currency,
-		FlatAmountCents: flat, GraduatedTiers: tiers,
-		PackageSize: r.PackageSize, PackageAmountCents: r.PackageAmountCents,
-		OverageUnitAmountCents: overage,
+		UnitAmountCents: unit, Tiers: tiers,
+		PackageSize: r.PackageSize, PackageAmountCents: pkg,
 	}, nil
 }
 
 type overrideRequest struct {
-	CustomerID             string             `json:"customer_id"`
-	RatingRuleVersionID    string             `json:"rating_rule_version_id"`
-	Mode                   domain.PricingMode `json:"mode"`
-	FlatAmountCents        json.RawMessage    `json:"flat_amount_cents"`
-	GraduatedTiers         []rateTierRequest  `json:"graduated_tiers"`
-	PackageSize            int64              `json:"package_size"`
-	PackageAmountCents     int64              `json:"package_amount_cents"`
-	OverageUnitAmountCents json.RawMessage    `json:"overage_unit_amount_cents"`
-	Reason                 string             `json:"reason,omitempty"`
+	CustomerID          string             `json:"customer_id"`
+	RatingRuleVersionID string             `json:"rating_rule_version_id"`
+	Mode                domain.PricingMode `json:"mode"`
+	UnitAmountCents     json.RawMessage    `json:"unit_amount_cents"`
+	Tiers               []rateTierRequest  `json:"tiers"`
+	PackageSize         int64              `json:"package_size"`
+	PackageAmountCents  json.RawMessage    `json:"package_amount_cents"`
+	Reason              string             `json:"reason,omitempty"`
 }
 
 func (r overrideRequest) input() (CreateOverrideInput, error) {
-	flat, tiers, overage, err := parseRates(r.FlatAmountCents, r.GraduatedTiers, r.OverageUnitAmountCents)
+	unit, tiers, pkg, err := parseRates(r.UnitAmountCents, r.Tiers, r.PackageAmountCents)
 	if err != nil {
 		return CreateOverrideInput{}, err
 	}
 	return CreateOverrideInput{
 		CustomerID: r.CustomerID, RatingRuleVersionID: r.RatingRuleVersionID, Mode: r.Mode,
-		FlatAmountCents: flat, GraduatedTiers: tiers,
-		PackageSize: r.PackageSize, PackageAmountCents: r.PackageAmountCents,
-		OverageUnitAmountCents: overage, Reason: r.Reason,
+		UnitAmountCents: unit, Tiers: tiers,
+		PackageSize: r.PackageSize, PackageAmountCents: pkg, Reason: r.Reason,
 	}, nil
 }
 
-// parseRates reads the three rates. An absent or null rate is 0, as it was
-// when the body decoded straight into decimals: a mode leaves the rates it
-// does not use unset. An absent graduated_tiers stays nil.
-func parseRates(flatRaw json.RawMessage, tierReqs []rateTierRequest, overageRaw json.RawMessage) (flat decimal.Decimal, tiers []domain.RatingTier, overage decimal.Decimal, err error) {
-	if flat, _, err = domain.ParseDecimal("flat_amount_cents", flatRaw); err != nil {
+// parseRates reads the amounts. An absent or null amount is 0, as it was
+// when the body decoded straight into decimals: a mode leaves the amounts it
+// does not use unset. An absent tiers stays nil.
+func parseRates(unitRaw json.RawMessage, tierReqs []rateTierRequest, pkgRaw json.RawMessage) (unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Decimal, err error) {
+	if unit, _, err = domain.ParseDecimal("unit_amount_cents", unitRaw); err != nil {
 		return
 	}
 	if tierReqs != nil {
 		tiers = make([]domain.RatingTier, len(tierReqs))
 		for i, t := range tierReqs {
 			tiers[i].UpTo = t.UpTo
-			if tiers[i].UnitAmountCents, _, err = domain.ParseDecimal(fmt.Sprintf("graduated_tiers[%d].unit_amount_cents", i), t.UnitAmountCents); err != nil {
+			if tiers[i].UnitAmountCents, _, err = domain.ParseDecimal(fmt.Sprintf("tiers[%d].unit_amount_cents", i), t.UnitAmountCents); err != nil {
 				return
 			}
 		}
 	}
-	overage, _, err = domain.ParseDecimal("overage_unit_amount_cents", overageRaw)
+	pkg, _, err = domain.ParseDecimal("package_amount_cents", pkgRaw)
 	return
 }

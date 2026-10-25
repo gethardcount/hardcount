@@ -39,9 +39,9 @@ func TestParseRecipe_RefusesRemovedMeterFields(t *testing.T) {
 	withRule := strings.Replace(minimalRecipe, "plans:\n", `rating_rules:
   - key: calls_rate
     name: Calls
-    mode: flat
+    mode: per_unit
     currency: USD
-    flat_amount_cents: '1'
+    unit_amount_cents: '1'
 pricing_rules:
   - meter: calls
     rating_rule: calls_rate
@@ -115,5 +115,48 @@ func TestParseRecipe_LegacyFinalActionNamesReplacement(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "final_subscription_action") {
 		t.Errorf("error should name the replacement keys, got %v", err)
+	}
+}
+
+// TestParseRecipe_PriceShapes: a recipe's rating rules take ADR-130 §3's
+// shapes and words. A graduated rule's last tier is open (`up_to: null`, or
+// no up_to) and only the last; a package has a size above 0 and a decimal
+// amount. The old words, `flat`, flat_amount_cents, graduated_tiers and
+// overage_unit_amount_cents, fail the load, and so does a tier table that
+// could not rate, before any install writes it.
+func TestParseRecipe_PriceShapes(t *testing.T) {
+	withRule := func(rule string) string {
+		return strings.Replace(minimalRecipe, "plans:\n", "rating_rules:\n  - key: calls_rate\n    name: Calls\n    currency: USD\n"+rule+"plans:\n", 1)
+	}
+	for name, rule := range map[string]string{
+		"per_unit":                 "    mode: per_unit\n    unit_amount_cents: '0.0035'\n",
+		"graduated, up_to null":    "    mode: graduated\n    tiers:\n      - {up_to: 100, unit_amount_cents: '5'}\n      - {up_to: null, unit_amount_cents: '1'}\n",
+		"graduated, no last up_to": "    mode: graduated\n    tiers:\n      - {up_to: 100, unit_amount_cents: '5'}\n      - {unit_amount_cents: '1'}\n",
+		"package at a decimal":     "    mode: package\n    package_size: 1000\n    package_amount_cents: '0.2'\n",
+	} {
+		if _, err := parseRecipe([]byte(withRule(rule))); err != nil {
+			t.Errorf("%s: %v, want it to parse", name, err)
+		}
+	}
+	for name, rule := range map[string]string{
+		"mode flat":                  "    mode: flat\n    unit_amount_cents: '1'\n",
+		"flat_amount_cents":          "    mode: per_unit\n    flat_amount_cents: '1'\n",
+		"graduated_tiers":            "    mode: graduated\n    graduated_tiers:\n      - {up_to: 0, unit_amount_cents: '1'}\n",
+		"overage_unit_amount_cents":  "    mode: package\n    package_size: 10\n    package_amount_cents: '1'\n    overage_unit_amount_cents: '1'\n",
+		"a bounded last tier":        "    mode: graduated\n    tiers:\n      - {up_to: 100, unit_amount_cents: '5'}\n      - {up_to: 1000, unit_amount_cents: '1'}\n",
+		"the last tier at up_to 0":   "    mode: graduated\n    tiers:\n      - {up_to: 100, unit_amount_cents: '5'}\n      - {up_to: 0, unit_amount_cents: '1'}\n",
+		"an open tier before last":   "    mode: graduated\n    tiers:\n      - {up_to: null, unit_amount_cents: '5'}\n      - {up_to: 100, unit_amount_cents: '1'}\n",
+		"no tiers":                   "    mode: graduated\n",
+		"a package of size 0":        "    mode: package\n    package_size: 0\n    package_amount_cents: '1'\n",
+		"a package amount 13 places": "    mode: package\n    package_size: 10\n    package_amount_cents: '0.0000000000001'\n",
+		// A rule carries only its mode's fields.
+		"per_unit with tiers":          "    mode: per_unit\n    unit_amount_cents: '1'\n    tiers:\n      - {up_to: 100, unit_amount_cents: '5'}\n      - {up_to: null, unit_amount_cents: '1'}\n",
+		"per_unit with a package size": "    mode: per_unit\n    unit_amount_cents: '1'\n    package_size: 100\n",
+		"graduated with a unit amount": "    mode: graduated\n    unit_amount_cents: '1'\n    tiers:\n      - {up_to: null, unit_amount_cents: '1'}\n",
+		"package with tiers":           "    mode: package\n    package_size: 10\n    package_amount_cents: '1'\n    tiers:\n      - {up_to: null, unit_amount_cents: '1'}\n",
+	} {
+		if _, err := parseRecipe([]byte(withRule(rule))); err == nil {
+			t.Errorf("%s: parsed, want the load to fail", name)
+		}
 	}
 }

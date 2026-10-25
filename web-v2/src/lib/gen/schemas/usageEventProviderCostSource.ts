@@ -9,7 +9,7 @@
  */
 
 /**
- * Where `provider_cost_micros` came from: `table` (your provider
+ * Where `provider_cost_cents` came from: `table` (your provider
  * cost rates), `observed` (the cost the sender reported), or
  * `not_applicable` (the meter has no costed dimensions). Absent when
  * the cost is unknown.

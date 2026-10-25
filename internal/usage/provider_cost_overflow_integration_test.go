@@ -15,8 +15,8 @@ import (
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
-// The ingest INSERT stamps provider_cost_micros = cost_per_token × quantity ×
-// 10^6, a BIGINT. A quantity inside its limits, at a rate inside its limits,
+// The ingest INSERT stamps provider_cost_micros = unit_cost_cents × quantity ×
+// 10^4, a BIGINT. A quantity inside its limits, at a rate inside its limits,
 // can give a cost that does not fit. The stamp is the operator's cost, not
 // what the customer is billed, so such an event is still stored and billed:
 // it gets no cost and counts as unresolved, which leaves the margin out
@@ -39,9 +39,9 @@ func TestIngest_ProviderCostTooLargeIsStoredWithNoCost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("meter: %v", err)
 	}
-	// 0.00003 dollars = 30 micros per token. MaxInt64 / 30 = 307445734561825860.2,
+	// 0.003 cents = 30 micros per token. MaxInt64 / 30 = 307445734561825860.2,
 	// and MinInt64 / 30 = -307445734561825860.3.
-	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.00003")
+	seedRate(t, db, ctx, tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.003")
 	store := usage.NewPostgresStore(db)
 	svc := usage.NewService(store)
 	dims := map[string]any{"provider": "anthropic", "model": "claude-3.5-sonnet", "token_type": "input"}

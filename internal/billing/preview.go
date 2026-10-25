@@ -51,7 +51,7 @@ type PreviewLine struct {
 	// plans if the emission order ever changed (2026-07-10 design review).
 	PlanID         string            `json:"-"`
 	BaseBillTiming domain.BillTiming `json:"-"`
-	// NominalUnitAmountDecimal carries the flat-mode configured per-unit rate
+	// NominalUnitAmountDecimal carries the per_unit configured rate
 	// (decimal cents) from the OVERRIDE-APPLIED rule, internal-only (json:"-")
 	// so an overage invoice line built from this preview shows the clean
 	// nominal rate like a cycle usage line (ADR-054 re-examination). Nil for

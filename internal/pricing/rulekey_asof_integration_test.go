@@ -48,7 +48,7 @@ func TestGetRuleByKeyAsOf_ResolvesVersionInForce(t *testing.T) {
 
 	v1, err := svc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "tokens", Name: "Tokens v1",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create v1: %v", err)
@@ -57,7 +57,7 @@ func TestGetRuleByKeyAsOf_ResolvesVersionInForce(t *testing.T) {
 
 	v2, err := svc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "tokens", Name: "Tokens v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(2),
 	})
 	if err != nil {
 		t.Fatalf("create v2: %v", err)
@@ -127,7 +127,7 @@ func TestOverrideEffectivityWindows(t *testing.T) {
 	}
 	rule, err := svc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "gpu", Name: "GPU",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(10),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(10),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -139,7 +139,7 @@ func TestOverrideEffectivityWindows(t *testing.T) {
 	// Deal A (5c), in place before the period opened.
 	a, err := svc.CreateOverride(ctx, tenantID, pricing.CreateOverrideInput{
 		CustomerID: cust.ID, RatingRuleVersionID: rule.ID,
-		Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5),
+		Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5),
 	})
 	if err != nil {
 		t.Fatalf("create override A: %v", err)
@@ -152,7 +152,7 @@ func TestOverrideEffectivityWindows(t *testing.T) {
 	// Mid-period re-negotiation (7c): closes A's window now, opens B.
 	b, err := svc.CreateOverride(ctx, tenantID, pricing.CreateOverrideInput{
 		CustomerID: cust.ID, RatingRuleVersionID: rule.ID,
-		Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(7),
+		Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(7),
 	})
 	if err != nil {
 		t.Fatalf("create override B: %v", err)
@@ -163,16 +163,16 @@ func TestOverrideEffectivityWindows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("as-of period open: %v", err)
 	}
-	if !got.FlatAmountCents.Equal(decimal.NewFromInt(5)) {
-		t.Errorf("as-of period open: got %s cents, want 5 (the edit prices from the NEXT period)", got.FlatAmountCents)
+	if !got.UnitAmountCents.Equal(decimal.NewFromInt(5)) {
+		t.Errorf("as-of period open: got %s cents, want 5 (the edit prices from the NEXT period)", got.UnitAmountCents)
 	}
 	// The next period (opening after the edit) resolves B.
 	got, err = svc.GetOverrideByKeyAsOf(ctx, tenantID, cust.ID, "gpu", now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("as-of next period: %v", err)
 	}
-	if !got.FlatAmountCents.Equal(decimal.NewFromInt(7)) {
-		t.Errorf("as-of next period: got %s cents, want 7", got.FlatAmountCents)
+	if !got.UnitAmountCents.Equal(decimal.NewFromInt(7)) {
+		t.Errorf("as-of next period: got %s cents, want 7", got.UnitAmountCents)
 	}
 
 	// DELETE ends the deal from the next period; the in-flight period
@@ -187,8 +187,8 @@ func TestOverrideEffectivityWindows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("as-of period open after delete: %v", err)
 	}
-	if !got.FlatAmountCents.Equal(decimal.NewFromInt(5)) {
-		t.Errorf("period in flight after delete: got %s, want 5 (historical window intact)", got.FlatAmountCents)
+	if !got.UnitAmountCents.Equal(decimal.NewFromInt(5)) {
+		t.Errorf("period in flight after delete: got %s, want 5 (historical window intact)", got.UnitAmountCents)
 	}
 
 	// Second DELETE of the same row: clean 404.

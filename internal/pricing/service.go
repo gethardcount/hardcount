@@ -80,15 +80,14 @@ func (s *Service) SetSubscriptionPlanUsageReader(r SubscriptionPlanUsageReader) 
 // ---------------------------------------------------------------------------
 
 type CreateRatingRuleInput struct {
-	RuleKey                string              `json:"rule_key"`
-	Name                   string              `json:"name"`
-	Mode                   domain.PricingMode  `json:"mode"`
-	Currency               string              `json:"currency"`
-	FlatAmountCents        decimal.Decimal     `json:"flat_amount_cents"`
-	GraduatedTiers         []domain.RatingTier `json:"graduated_tiers"`
-	PackageSize            int64               `json:"package_size"`
-	PackageAmountCents     int64               `json:"package_amount_cents"`
-	OverageUnitAmountCents decimal.Decimal     `json:"overage_unit_amount_cents"`
+	RuleKey            string              `json:"rule_key"`
+	Name               string              `json:"name"`
+	Mode               domain.PricingMode  `json:"mode"`
+	Currency           string              `json:"currency"`
+	UnitAmountCents    decimal.Decimal     `json:"unit_amount_cents"`
+	Tiers              []domain.RatingTier `json:"tiers"`
+	PackageSize        int64               `json:"package_size"`
+	PackageAmountCents decimal.Decimal     `json:"package_amount_cents"`
 }
 
 func (s *Service) CreateRatingRule(ctx context.Context, tenantID string, input CreateRatingRuleInput) (domain.RatingRuleVersion, error) {
@@ -134,16 +133,15 @@ func (s *Service) CreateRatingRule(ctx context.Context, tenantID string, input C
 	}
 
 	rule := domain.RatingRuleVersion{
-		RuleKey:                input.RuleKey,
-		Name:                   input.Name,
-		LifecycleState:         domain.RatingRuleActive,
-		Mode:                   input.Mode,
-		Currency:               currency,
-		FlatAmountCents:        input.FlatAmountCents,
-		GraduatedTiers:         input.GraduatedTiers,
-		PackageSize:            input.PackageSize,
-		PackageAmountCents:     input.PackageAmountCents,
-		OverageUnitAmountCents: input.OverageUnitAmountCents,
+		RuleKey:            input.RuleKey,
+		Name:               input.Name,
+		LifecycleState:     domain.RatingRuleActive,
+		Mode:               input.Mode,
+		Currency:           currency,
+		UnitAmountCents:    input.UnitAmountCents,
+		Tiers:              input.Tiers,
+		PackageSize:        input.PackageSize,
+		PackageAmountCents: input.PackageAmountCents,
 	}
 
 	// Validate the pricing config by computing a test amount (shape
@@ -204,94 +202,61 @@ func validateRatingRuleInput(input *CreateRatingRuleInput) error {
 		return err
 	}
 	var err error
-	if input.FlatAmountCents, input.GraduatedTiers, input.OverageUnitAmountCents, err = checkRates(
-		input.FlatAmountCents, input.GraduatedTiers, input.OverageUnitAmountCents); err != nil {
+	if input.UnitAmountCents, input.Tiers, input.PackageAmountCents, err = checkRates(
+		input.UnitAmountCents, input.Tiers, input.PackageAmountCents); err != nil {
 		return err
 	}
 
-	return validatePricingShape(input.Mode, input.GraduatedTiers, input.PackageSize, input.PackageAmountCents)
+	return validatePricingShape(input.Mode, input.UnitAmountCents, input.Tiers, input.PackageSize, input.PackageAmountCents)
 }
 
-// checkRates checks every rate of a rating rule or a price override against
-// domain.CheckRate and returns the rates to store. It runs in every mode, on
-// the rates the mode does not use too, because they are stored as well; and
-// it runs before anything prices the rule, so no arithmetic sees a rate
-// outside the limits.
-func checkRates(flat decimal.Decimal, tiers []domain.RatingTier, overage decimal.Decimal) (decimal.Decimal, []domain.RatingTier, decimal.Decimal, error) {
+// checkRates checks every amount of a rating rule or a price override
+// against domain.CheckRate and returns the amounts to store. It runs in every
+// mode, on the amounts the mode does not use too (validatePricingShape then
+// refuses any of those that is not 0), and before anything prices the rule,
+// so no arithmetic sees an amount outside the limits.
+func checkRates(unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Decimal) (decimal.Decimal, []domain.RatingTier, decimal.Decimal, error) {
 	var err error
-	if flat, err = domain.CheckRate("flat_amount_cents", flat); err != nil {
+	if unit, err = domain.CheckRate("unit_amount_cents", unit); err != nil {
 		return decimal.Decimal{}, nil, decimal.Decimal{}, err
 	}
 	if tiers != nil {
 		checked := make([]domain.RatingTier, len(tiers))
 		for i, t := range tiers {
-			if t.UnitAmountCents, err = domain.CheckRate(fmt.Sprintf("graduated_tiers[%d].unit_amount_cents", i), t.UnitAmountCents); err != nil {
+			if t.UnitAmountCents, err = domain.CheckRate(fmt.Sprintf("tiers[%d].unit_amount_cents", i), t.UnitAmountCents); err != nil {
 				return decimal.Decimal{}, nil, decimal.Decimal{}, err
 			}
 			checked[i] = t
 		}
 		tiers = checked
 	}
-	if overage, err = domain.CheckRate("overage_unit_amount_cents", overage); err != nil {
+	if pkg, err = domain.CheckRate("package_amount_cents", pkg); err != nil {
 		return decimal.Decimal{}, nil, decimal.Decimal{}, err
 	}
-	return flat, tiers, overage, nil
+	return unit, tiers, pkg, nil
 }
 
-// validatePricingShape enforces the FULL pricing contract at authoring
-// time — shared by rating-rule creation and customer overrides. The
-// tier rules mirror ComputeAmountCents' rating-time checks exactly
-// (domain/pricing.go): the old validation probed ComputeAmountCents at
-// qty=1, which breaks out of the tier loop before reaching tier 2, so
-// a non-monotonic table ([{up_to:100},{up_to:50}]) or one without a
-// catch-all passed authoring and then hard-failed billOnePeriod at the
-// first cycle close whose quantity crossed tier 1 — blocking the sub's
-// invoice every tick.
+// validatePricingShape enforces the shape of a price at authoring time —
+// shared by rating-rule creation (both entrypoints) and customer overrides.
+// It is domain.CheckPriceShape: the mode's fields and only those (a field
+// the mode does not use must be zero, tiers empty). The tier rules are
+// domain.CheckTiers, the same check ComputeAmountCents runs, so a table authoring accepts always rates: the old qty=1 probe never
+// reached tier 2, so a non-monotonic table or one without an open last tier
+// passed authoring and then failed the cycle close every tick.
 //
-// The rates' sign and size are checkRates', which runs first. Zero is a legal
-// rate: "this dimension is free" (a $0 embedding model, an internal meter
-// tracked but not billed), and a zero-price tier expresses an included
+// The amounts' sign and size are checkRates', which runs first. Zero is a
+// legal amount: "this dimension is free" (a $0 embedding model, an internal
+// meter tracked but not billed), and a zero-price tier expresses an included
 // allowance — "first 1M tokens free, then $2/M" (Stripe documents a $0 first
 // tier as the canonical graduated free-tier shape).
-func validatePricingShape(mode domain.PricingMode, tiers []domain.RatingTier, pkgSize, pkgAmount int64) error {
-	switch mode {
-	case domain.PricingFlat:
-	case domain.PricingGraduated:
-		if len(tiers) == 0 {
-			return errs.Invalid("graduated_tiers", "at least one pricing tier is required")
+func validatePricingShape(mode domain.PricingMode, unit decimal.Decimal, tiers []domain.RatingTier, pkgSize int64, pkg decimal.Decimal) error {
+	if err := domain.CheckPriceShape(mode, unit, tiers, pkgSize, pkg); err != nil {
+		var fe *domain.PriceFieldError
+		if errors.As(err, &fe) {
+			return errs.Invalid(fe.Field, fe.Reason)
 		}
-		lastUpper := int64(0)
-		for i, tier := range tiers {
-			if tier.UpTo < 0 {
-				return errs.Invalid("graduated_tiers", fmt.Sprintf("tier %d: up_to must be positive, or 0 for the final catch-all tier", i+1))
-			}
-			if tier.UpTo == 0 {
-				if i != len(tiers)-1 {
-					return errs.Invalid("graduated_tiers", fmt.Sprintf("tier %d: a catch-all tier (up_to=0) must be the last tier — tiers after it would never price anything", i+1))
-				}
-				continue
-			}
-			if tier.UpTo <= lastUpper {
-				return errs.Invalid("graduated_tiers", fmt.Sprintf("tier %d: up_to (%d) must be strictly greater than the previous tier's up_to (%d)", i+1, tier.UpTo, lastUpper))
-			}
-			lastUpper = tier.UpTo
-		}
-		if tiers[len(tiers)-1].UpTo != 0 {
-			return errs.Invalid("graduated_tiers", "the final tier must be a catch-all (up_to=0): a bounded last tier makes any usage beyond it unpriceable and blocks invoice generation at cycle close — to invoice early when usage runs high, set a spend threshold on the subscription")
-		}
-	case domain.PricingPackage:
-		if pkgSize <= 0 {
-			return errs.Invalid("package_size", "package size must be greater than 0")
-		}
-		// Zero-priced packages are legal for the same included-allowance
-		// reason as zero tiers (ComputeAmountCents already accepts them).
-		if pkgAmount < 0 {
-			return errs.Invalid("package_amount_cents", "package price must not be negative (use 0 for a free package)")
-		}
-	default:
-		return errs.Invalid("mode", "must be one of: flat, graduated, package")
+		return err
 	}
-
 	return nil
 }
 
@@ -1008,7 +973,7 @@ func (s *Service) pricingRuleDeleteEmission(ctx context.Context) func(tx *sql.Tx
 // Tx variants — used by recipe.Service to compose pricing inserts inside a
 // single cross-domain transaction. The recipe template layer validates
 // against the recipe schema; a Tx variant adds only the checks that layer
-// does not make (CreateRatingRuleTx: currency and rate limits).
+// does not make (CreateRatingRuleTx: currency, rate limits and the shape).
 // ---------------------------------------------------------------------------
 
 // CreateRatingRuleTx forwards to the store's tx-aware insert. Caller owns
@@ -1026,11 +991,14 @@ func (s *Service) CreateRatingRuleTx(ctx context.Context, tx *sql.Tx, tenantID s
 	if err := domain.ValidateCurrency(rule.Currency); err != nil {
 		return domain.RatingRuleVersion{}, err
 	}
-	// The rates take the same limits as on the public create route: this is
-	// the recipe path's save entrypoint.
+	// The amounts and the shape take the same checks as on the public create
+	// route: this is the recipe path's save entrypoint.
 	var err error
-	if rule.FlatAmountCents, rule.GraduatedTiers, rule.OverageUnitAmountCents, err = checkRates(
-		rule.FlatAmountCents, rule.GraduatedTiers, rule.OverageUnitAmountCents); err != nil {
+	if rule.UnitAmountCents, rule.Tiers, rule.PackageAmountCents, err = checkRates(
+		rule.UnitAmountCents, rule.Tiers, rule.PackageAmountCents); err != nil {
+		return domain.RatingRuleVersion{}, err
+	}
+	if err := validatePricingShape(rule.Mode, rule.UnitAmountCents, rule.Tiers, rule.PackageSize, rule.PackageAmountCents); err != nil {
 		return domain.RatingRuleVersion{}, err
 	}
 	existing, err := s.store.ListRatingRules(ctx, RatingRuleFilter{

@@ -8,11 +8,14 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. Send only the mode's fields: a field the mode does not use must be 0 or left out (`tiers`: `[]` or left out). Otherwise 422 with `param` naming it.
+ */
 export type PostV1RatingRulesBodyMode = typeof PostV1RatingRulesBodyMode[keyof typeof PostV1RatingRulesBodyMode];
 
 
 export const PostV1RatingRulesBodyMode = {
-  flat: 'flat',
+  per_unit: 'per_unit',
   graduated: 'graduated',
   package: 'package',
 } as const;

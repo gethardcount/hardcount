@@ -726,11 +726,24 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   await createSubscription(priced.id, recipe.created_objects.plan_ids[0])
   const saved: { id: string }[] = []
   try {
-    for (const [tokenType, cost] of [['input', '0.0000008'], ['output', '0.000004']]) {
-      saved.push(await api<{ id: string }>('PUT', '/provider-costs', {
-        provider: 'anthropic', model: 'claude-haiku-4.5', token_type: tokenType, cost_per_token: cost,
-      }))
-    }
+    // The input rate goes in on the Provider costs page, in dollars per 1M
+    // tokens; the API holds it in cents per token: $0.80 per 1M is 0.00008.
+    await page.goto('/provider-costs')
+    await page.getByLabel('Provider').fill('anthropic')
+    await page.getByLabel('Model').fill('claude-haiku-4.5')
+    await page.getByLabel('Token type').fill('input')
+    await page.getByLabel('$ per 1M tokens').fill('0.80')
+    const putting = page.waitForResponse(r => r.request().method() === 'PUT' && new URL(r.url()).pathname.endsWith('/provider-costs'))
+    await page.getByRole('button', { name: 'Save rate' }).click()
+    const put = await putting
+    expect(put.status()).toBe(200)
+    const rate = (await put.json()) as { id: string; unit_cost_cents: string }
+    saved.push(rate)
+    expect(rate.unit_cost_cents).toBe('0.00008')
+    await expect(page.getByRole('row').filter({ hasText: 'claude-haiku-4.5' }).getByRole('cell').nth(3)).toHaveText('$0.80')
+    saved.push(await api<{ id: string }>('PUT', '/provider-costs', {
+      provider: 'anthropic', model: 'claude-haiku-4.5', token_type: 'output', unit_cost_cents: '0.0004',
+    }))
     await api('POST', '/integrations/litellm/spend', {
       id: `chatcmpl-e2e-${uniq()}`,
       call_type: 'completion',
