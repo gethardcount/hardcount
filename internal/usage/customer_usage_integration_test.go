@@ -30,6 +30,9 @@ type customerUsageFixture struct {
 	subStore    *subscription.PostgresStore
 	usageSvc    *usage.Service
 	custUsage   *usage.CustomerUsageService
+	// invoices is the rater's invoice reader: set its fire to give every
+	// subscription a threshold invoice.
+	invoices *thresholdInvoices
 }
 
 func newCustomerUsageFixture(t *testing.T, name string) *customerUsageFixture {
@@ -43,7 +46,8 @@ func newCustomerUsageFixture(t *testing.T, name string) *customerUsageFixture {
 	usageStore := usage.NewPostgresStore(db)
 	usageSvc := usage.NewService(usageStore)
 	custUsage := usage.NewCustomerUsageService(usageSvc, customerStore, subStore, pricingSvc)
-	engine := billing.NewEngine(subStore, usageStore, pricingSvc, noThresholdInvoices{}, nil, nil, nil, nil, clock.Real())
+	invoices := &thresholdInvoices{}
+	engine := billing.NewEngine(subStore, usageStore, pricingSvc, invoices, nil, nil, nil, nil, clock.Real())
 	engine.SetIntervalReader(subStore)
 	custUsage.SetRater(engine)
 
@@ -55,16 +59,29 @@ func newCustomerUsageFixture(t *testing.T, name string) *customerUsageFixture {
 		subStore:    subStore,
 		usageSvc:    usageSvc,
 		custUsage:   custUsage,
+		invoices:    invoices,
 	}
 }
 
-// noThresholdInvoices is the rater's invoice reader for subscriptions that
-// have no threshold invoice: its only read is the threshold watermark. Any
-// other call panics (the embedded interface is nil).
-type noThresholdInvoices struct{ billing.InvoiceWriter }
+// thresholdInvoices is the rater's invoice reader: its only reads are the
+// threshold watermark's. With no fire, a subscription has no threshold
+// invoice; with one, every subscription has a threshold invoice with no
+// lines that billed its usage up to the fire. Any other call panics (the
+// embedded interface is nil).
+type thresholdInvoices struct {
+	billing.InvoiceWriter
+	fire *time.Time
+}
 
-func (noThresholdInvoices) GetLatestThresholdInvoiceForCycle(context.Context, string, string, time.Time, time.Time) (domain.Invoice, error) {
-	return domain.Invoice{}, errs.ErrNotFound
+func (t *thresholdInvoices) GetLatestThresholdInvoiceForCycle(context.Context, string, string, time.Time, time.Time) (domain.Invoice, error) {
+	if t.fire == nil {
+		return domain.Invoice{}, errs.ErrNotFound
+	}
+	return domain.Invoice{ID: "vlx_inv_fire", BillingPeriodEnd: *t.fire}, nil
+}
+
+func (t *thresholdInvoices) ListLineItems(context.Context, string, string) ([]domain.InvoiceLineItem, error) {
+	return nil, nil
 }
 
 // meter creates a meter.
@@ -438,5 +455,62 @@ func TestCustomerUsage_TwoSubscriptionsOnTheirOwnPeriods(t *testing.T) {
 		if !charted[id].Equal(decimal.NewFromInt(want)) {
 			t.Errorf("meter %s buckets add up to %s, want %d (its total)", id, charted[id], want)
 		}
+	}
+}
+
+// After a threshold invoice, customer usage still shows the whole current
+// period: its totals and its daily buckets count the same usage. The
+// threshold invoice billed part of it; customer usage is the period's usage,
+// not what is left to bill (that is the live balance's unbilled_usage_cents).
+//
+// Mutation: rate customer usage after the threshold watermark (the live
+// balance's read), and the meter's total drops to the usage since the fire
+// while its buckets still add up to the whole period.
+func TestCustomerUsage_WholePeriodAfterAThresholdInvoice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	f := newCustomerUsageFixture(t, "Customer Usage After A Fire")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC().Truncate(time.Hour)
+	start, end := now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour)
+	m := f.meter(t, ctx, "calls_fire")
+	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_fire", "pln_fire", []pricing.PriceInput{price(m.ID, 1, nil)}, start, end)
+	for _, ev := range []struct {
+		qty int64
+		at  time.Time
+	}{{100, start.Add(time.Hour)}, {5, now.Add(-time.Hour)}} {
+		at := ev.at
+		if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
+			CustomerID: custID, MeterID: m.ID, Quantity: decimal.NewFromInt(ev.qty), Timestamp: &at,
+		}); err != nil {
+			t.Fatalf("ingest: %v", err)
+		}
+	}
+	fire := now.Add(-2 * 24 * time.Hour) // billed the 100, not the 5
+	f.invoices.fire = &fire
+
+	res, err := f.custUsage.Get(ctx, f.tenantID, custID, usage.CustomerUsagePeriod{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(res.Meters) != 1 {
+		t.Fatalf("meters = %d, want 1", len(res.Meters))
+	}
+	got := res.Meters[0]
+	if !got.TotalQuantity.Equal(decimal.NewFromInt(105)) || got.TotalAmountCents != 105 {
+		t.Errorf("meter total = %s units, %d cents; want 105 units, 105 cents: the whole period", got.TotalQuantity, got.TotalAmountCents)
+	}
+	if len(res.Totals) != 1 || res.Totals[0].AmountCents != 105 {
+		t.Errorf("totals = %+v, want USD 105", res.Totals)
+	}
+	charted := decimal.Zero
+	for _, b := range res.Buckets {
+		charted = charted.Add(b.PerMeter[m.ID])
+	}
+	if !charted.Equal(got.TotalQuantity) {
+		t.Errorf("buckets add up to %s, the total is %s: they must count the same usage", charted, got.TotalQuantity)
 	}
 }

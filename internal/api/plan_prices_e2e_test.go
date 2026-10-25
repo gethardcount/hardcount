@@ -603,6 +603,52 @@ func TestE2E_PlanPrices_NewSubscriberOnTheDayOfAChange(t *testing.T) {
 	wantUsage(t, "second period: the changes", r.cycle(sub, p1), map[string]int64{callsPrice: 50, tokensPrice: 20})
 }
 
+// TestE2E_PlanPrices_SwapOntoAPlanAfterAChange: a subscriber who moves onto
+// a used plan mid-period is billed, for the rest of that period, at the
+// plan's prices as they were at the subscriber's period start. Every window
+// of a period is priced at the period start (ADR-130 §4 step 3, Risks): an
+// edit made earlier in the period is not billed yet, and a meter priced
+// earlier in the period is not billed at all that period. From the next
+// period the plan's current prices apply. The docs say so
+// (docs/ai-pricing.md, the API reference, the plan page).
+//
+// Mutation: price the swapped-in window at the swap instead of the period
+// start, and the first period bills the edited rate and the tokens.
+func TestE2E_PlanPrices_SwapOntoAPlanAfterAChange(t *testing.T) {
+	r := newPPRig(t, "swap after change")
+	calls := r.meter("calls", "sum")
+	tokens := r.meter("tokens", "sum")
+	planA, _ := r.plan("plan_a", perUnit(calls, "1", nil))
+	planB, bIDs := r.plan("plan_b", perUnit(calls, "3", nil))
+	callsB := bIDs[0]
+	r.subscribe(time.Time{}, r.customer("pp-sac-y", ""), planB) // plan B is used
+	sub, p0, p1 := r.subscribe(time.Time{}, r.customer("pp-sac-x", ""), planA)
+	p2 := p1.AddDate(0, 1, 0)
+
+	if w := r.must(time.Time{}, http.MethodPatch, "/v1/plans/"+planB+"/prices/"+callsB, map[string]any{"mode": "per_unit", "unit_amount_cents": "5"}, http.StatusOK); flowStr(w, "effective") != "next_period" {
+		t.Fatalf("edit on a used plan: effective %q, want next_period", flowStr(w, "effective"))
+	}
+	tokensB := flowStr(r.must(time.Time{}, http.MethodPost, "/v1/plans/"+planB+"/prices", perUnit(tokens, "2", nil), http.StatusCreated), "id")
+
+	swapAt := time.Now().UTC()
+	items := flowList(r.must(swapAt, http.MethodGet, "/v1/subscriptions/"+sub, nil, http.StatusOK), "items")
+	if len(items) != 1 {
+		t.Fatalf("items = %v", items)
+	}
+	r.must(swapAt.Add(time.Second), http.MethodPatch, "/v1/subscriptions/"+sub+"/items/"+flowStr(items[0], "id"),
+		map[string]any{"new_plan_id": planB, "immediate": true}, http.StatusOK)
+	after := swapAt.Add(time.Minute)
+	r.ingest(after.Add(time.Second), "pp-sac-x", "calls", 10, after, nil)
+	r.ingest(after.Add(time.Second), "pp-sac-x", "tokens", 10, after, nil)
+	r.run(p1.Add(time.Hour))
+	wantUsage(t, "the period of the swap: plan B as it was at the period start", r.cycle(sub, p0), map[string]int64{callsB: 30})
+
+	r.ingest(p1.Add(2*time.Hour), "pp-sac-x", "calls", 10, p1.Add(time.Hour), nil)
+	r.ingest(p1.Add(2*time.Hour), "pp-sac-x", "tokens", 10, p1.Add(time.Hour), nil)
+	r.run(p2.Add(time.Hour))
+	wantUsage(t, "the next period: plan B as it is", r.cycle(sub, p1), map[string]int64{callsB: 50, tokensB: 20})
+}
+
 // TestE2E_PlanPrices_RemovalEndsOverrides: removing a price ends its
 // customer overrides at the instant the removal takes effect for each
 // customer, and the response names them (ADR-130 §6). The open period keeps
