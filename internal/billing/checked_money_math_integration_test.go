@@ -396,3 +396,38 @@ func TestCheckedMath_ThresholdFiresWhenBasePlusUsagePastInt64(t *testing.T) {
 		})
 	}
 }
+
+// A max meter's bucket counts toward amount_gte but is left off the fire
+// invoice (ADR-066 §4). Here the max bucket and a sum bucket each fit int64
+// cents, and so does the invoice (the sum bucket alone), but the running
+// total does not: an error for the subscription, never a wrapped running
+// total below the cap that skips the fire.
+func TestCheckedMath_ThresholdCapRunningPastInt64(t *testing.T) {
+	lf := newLiveFixture(t, "Checked Threshold Cap Running", 0)
+	v := createRule(t, lf, flatRule("model_huge", "999999999999999999"))
+	seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
+		MeterID: lf.meterID, RatingRuleVersionID: v.ID, DimensionMatch: map[string]any{"model": "huge"}, Priority: 10,
+	})
+	insertUsageAt(t, lf, lf.cycleStart.Add(time.Minute), "5", map[string]any{"model": "huge"})
+
+	maxRule := createRule(t, lf, flatRule("gpu_peak", "999999999999999999"))
+	maxMeter, err := lf.pricingSvc.CreateMeter(lf.ctx, lf.tenantID, pricing.CreateMeterInput{
+		EventName: "gpu", Name: "GPU Concurrency", Unit: "gpus", Aggregation: "max", RatingRuleVersionID: maxRule.ID,
+	})
+	if err != nil {
+		t.Fatalf("create max meter: %v", err)
+	}
+	lf.exec(t, `UPDATE plans SET meter_ids = meter_ids || to_jsonb($1::text) WHERE id = $2`, maxMeter.ID, lf.planID)
+	lf.insertUsage(t, maxMeter.ID, 5, lf.cycleStart.Add(time.Minute))
+
+	if _, err := lf.subSvc.SetBillingThresholds(lf.ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{AmountGTE: 1}); err != nil {
+		t.Fatalf("set thresholds: %v", err)
+	}
+	fired, errs := lf.engine.ScanThresholds(lf.ctx, 50)
+	if fired != 0 || len(errs) != 1 || !errors.Is(errs[0], domain.ErrAmountOverflow) {
+		t.Errorf("threshold scan: fired=%d errs=%v, want no fire and one ErrAmountOverflow", fired, errs)
+	}
+	if invs := lf.listInvoices(t, lf.ctx); len(invs) != 0 {
+		t.Errorf("%d invoices, want none", len(invs))
+	}
+}

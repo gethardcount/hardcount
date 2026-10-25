@@ -94,7 +94,7 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 	// advances past failing subs so one bad row can't wedge the scan or cause a
 	// re-evaluation within the same tick. The fire-once probe in
 	// scanOneThreshold is what keeps a full drain affordable — already-fired
-	// subs cost one indexed lookup, not a previewWithWindow aggregation.
+	// subs cost one indexed lookup, not a window-preview aggregation.
 	fired := 0
 	var errsOut []error
 	afterID := ""
@@ -266,7 +266,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	// this sub is done until the period rolls. Pre-fix the scan re-evaluated
 	// and re-fired every tick after a crossing: each re-fire burned an invoice number + a paid Stripe Tax
 	// calculation before the dedup index rejected it (~600/cycle). The probe
-	// also skips the expensive previewWithWindow aggregation for already-fired
+	// also skips the expensive window-preview aggregation for already-fired
 	// subs — what makes the drained scan affordable.
 	//
 	// This probe is a check-then-act OPTIMIZATION, not the exactly-once
