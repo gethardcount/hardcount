@@ -177,6 +177,60 @@ func TestPriceShapes_TierTableCheckedWhenSaved(t *testing.T) {
 	}
 }
 
+// A price carries only its mode's fields: a field the mode does not use is
+// refused unless it is absent or zero (`tiers`: absent or []). So a per_unit
+// or package price answers `tiers: []`, and every tier the API returns
+// passed the tier check.
+//
+// Mutation-verify: drop the unused-field check (domain.CheckPriceFields) →
+// red.
+func TestPriceShapes_UnusedFieldsRefused(t *testing.T) {
+	const tiers = `"tiers":[{"up_to":null,"unit_amount_cents":"5"},{"up_to":7,"unit_amount_cents":"1"}]`
+	const goodTiers = `"tiers":[{"up_to":100,"unit_amount_cents":"5"},{"up_to":null,"unit_amount_cents":"1"}]`
+	for _, door := range shapeDoors {
+		for _, tc := range []struct{ name, price, param string }{
+			{"per_unit with tiers", `"mode":"per_unit","unit_amount_cents":"1",` + tiers, "tiers"},
+			{"per_unit with a good tier table", `"mode":"per_unit","unit_amount_cents":"1",` + goodTiers, "tiers"},
+			{"per_unit with a package size", `"mode":"per_unit","unit_amount_cents":"1","package_size":100`, "package_size"},
+			{"per_unit with a package amount", `"mode":"per_unit","unit_amount_cents":"1","package_amount_cents":"2"`, "package_amount_cents"},
+			{"graduated with a unit amount", `"mode":"graduated","unit_amount_cents":"1",` + goodTiers, "unit_amount_cents"},
+			{"graduated with a package size", `"mode":"graduated","package_size":100,` + goodTiers, "package_size"},
+			{"graduated with a package amount", `"mode":"graduated","package_amount_cents":"2",` + goodTiers, "package_amount_cents"},
+			{"package with tiers", `"mode":"package","package_size":100,"package_amount_cents":"2",` + tiers, "tiers"},
+			{"package with a unit amount", `"mode":"package","package_size":100,"package_amount_cents":"2","unit_amount_cents":"1"`, "unit_amount_cents"},
+		} {
+			rr := door.send(t, tc.price)
+			if rr.Code != http.StatusUnprocessableEntity {
+				t.Errorf("%s, %s: status %d, want 422; body %s", door.name, tc.name, rr.Code, rr.Body.String())
+				continue
+			}
+			if param, _ := errorParam(t, rr); param != tc.param {
+				t.Errorf("%s, %s: 422 names %q, want %q", door.name, tc.name, param, tc.param)
+			}
+		}
+		// Absent or zero is not a value, so it is taken, and a per_unit or
+		// package price answers an empty tier table.
+		for _, tc := range []struct{ name, price string }{
+			{"per_unit with zeros", `"mode":"per_unit","unit_amount_cents":"1","tiers":[],"package_size":0,"package_amount_cents":"0"`},
+			{"graduated with zeros", `"mode":"graduated","unit_amount_cents":"0","package_size":0,"package_amount_cents":"0.000",` + goodTiers},
+			{"package with zeros", `"mode":"package","package_size":100,"package_amount_cents":"2","unit_amount_cents":0,"tiers":[]`},
+		} {
+			rr := door.send(t, tc.price)
+			if rr.Code != http.StatusCreated {
+				t.Errorf("%s, %s: status %d, want 201; body %s", door.name, tc.name, rr.Code, rr.Body.String())
+				continue
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if tc.name != "graduated with zeros" && string(got["tiers"]) != "[]" {
+				t.Errorf("%s, %s: tiers %s, want []", door.name, tc.name, got["tiers"])
+			}
+		}
+	}
+}
+
 func TestPriceShapes_PackageAmountTakesTheDecimalLimits(t *testing.T) {
 	for _, door := range shapeDoors {
 		for _, raw := range []string{

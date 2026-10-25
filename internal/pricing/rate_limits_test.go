@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
 // The three amounts of a rating rule and a price override (unit_amount_cents,
@@ -312,5 +313,42 @@ func TestCreateRatingRuleTx_RatesTakeTheLimits(t *testing.T) {
 	})
 	if err != nil || got.UnitAmountCents.Exponent() != 0 {
 		t.Errorf("zero: got %s (exponent %d), err %v; want plain 0", got.UnitAmountCents, got.UnitAmountCents.Exponent(), err)
+	}
+}
+
+// The recipe installer's save entrypoint takes the public route's shape
+// check too, so a price it saves always rates and carries only its mode's
+// fields. The recipe parser checks the same before an install, but the
+// save path does not rely on it.
+//
+// Mutation-verify: drop the validatePricingShape call in CreateRatingRuleTx
+// → red.
+func TestCreateRatingRuleTx_ShapeChecked(t *testing.T) {
+	upTo := func(n int64) *int64 { return &n }
+	one := decimal.NewFromInt(1)
+	open := []domain.RatingTier{{UpTo: upTo(100), UnitAmountCents: one}, {UpTo: nil, UnitAmountCents: one}}
+	for _, tc := range []struct {
+		name, param string
+		rule        domain.RatingRuleVersion
+	}{
+		{"a bounded last tier", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: upTo(100), UnitAmountCents: one}, {UpTo: upTo(1000), UnitAmountCents: one}}}},
+		{"an open tier before the last", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: one}, {UpTo: upTo(100), UnitAmountCents: one}}}},
+		{"graduated with no tiers", "tiers", domain.RatingRuleVersion{Mode: domain.PricingGraduated}},
+		{"a package of size 0", "package_size", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageAmountCents: one}},
+		{"per_unit with tiers", "tiers", domain.RatingRuleVersion{Mode: domain.PricingPerUnit, UnitAmountCents: one, Tiers: open}},
+		{"package with a unit amount", "unit_amount_cents", domain.RatingRuleVersion{Mode: domain.PricingPackage, PackageSize: 10, PackageAmountCents: one, UnitAmountCents: one}},
+		{"an unknown mode", "mode", domain.RatingRuleVersion{Mode: "flat", UnitAmountCents: one}},
+	} {
+		store := newMemStore()
+		tc.rule.RuleKey, tc.rule.Name, tc.rule.Currency = "r", "r", "USD"
+		_, err := NewService(store).CreateRatingRuleTx(context.Background(), nil, "tnt_test", tc.rule)
+		if err == nil {
+			t.Errorf("%s: accepted", tc.name)
+		} else if field := errs.Field(err); field != tc.param {
+			t.Errorf("%s: refused naming %q (%v), want %q", tc.name, field, err, tc.param)
+		}
+		if len(store.rules) != 0 {
+			t.Errorf("%s: %d rules stored, want 0", tc.name, len(store.rules))
+		}
 	}
 }

@@ -149,6 +149,11 @@ func TestParseRecipe_PriceShapes(t *testing.T) {
 		"no tiers":                   "    mode: graduated\n",
 		"a package of size 0":        "    mode: package\n    package_size: 0\n    package_amount_cents: '1'\n",
 		"a package amount 13 places": "    mode: package\n    package_size: 10\n    package_amount_cents: '0.0000000000001'\n",
+		// A rule carries only its mode's fields.
+		"per_unit with tiers":          "    mode: per_unit\n    unit_amount_cents: '1'\n    tiers:\n      - {up_to: 100, unit_amount_cents: '5'}\n      - {up_to: null, unit_amount_cents: '1'}\n",
+		"per_unit with a package size": "    mode: per_unit\n    unit_amount_cents: '1'\n    package_size: 100\n",
+		"graduated with a unit amount": "    mode: graduated\n    unit_amount_cents: '1'\n    tiers:\n      - {up_to: null, unit_amount_cents: '1'}\n",
+		"package with tiers":           "    mode: package\n    package_size: 10\n    package_amount_cents: '1'\n    tiers:\n      - {up_to: null, unit_amount_cents: '1'}\n",
 	} {
 		if _, err := parseRecipe([]byte(withRule(rule))); err == nil {
 			t.Errorf("%s: parsed, want the load to fail", name)
