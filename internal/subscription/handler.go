@@ -23,6 +23,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/platform/timeline"
 	"github.com/sagarsuperuser/velox/internal/tax"
@@ -2223,8 +2224,14 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// period, so the delta for the remaining portion is (new−old) ×
 	// remaining/fullCycle. This matches the engine's day-1 stub base fee and
 	// cross-interval swap refund (both divide by fullCycleDays).
-	oldAmount := oldPlan.BaseAmountCents * spec.oldQuantity
-	newAmount := newPlan.BaseAmountCents * spec.newQuantity
+	oldAmount, ok := money.Mul(oldPlan.BaseAmountCents, spec.oldQuantity)
+	if !ok {
+		return nil, fmt.Errorf("proration: base fee of plan %s × quantity %d: %w", oldPlan.ID, spec.oldQuantity, domain.ErrAmountOverflow)
+	}
+	newAmount, ok := money.Mul(newPlan.BaseAmountCents, spec.newQuantity)
+	if !ok {
+		return nil, fmt.Errorf("proration: base fee of plan %s × quantity %d: %w", newPlan.ID, spec.newQuantity, domain.ErrAmountOverflow)
+	}
 	billingLoc, err := h.tenantLoc(ctx, sub.TenantID)
 	if err != nil {
 		return nil, err
@@ -2236,7 +2243,10 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		}
 	}
 	remainingDays := min(spec.remainingDays, denomDays)
-	proratedCents := prorationCents(oldAmount, newAmount, remainingDays, denomDays)
+	proratedCents, err := prorationCents(oldAmount, newAmount, remainingDays, denomDays)
+	if err != nil {
+		return nil, err
+	}
 
 	if proratedCents == 0 {
 		return nil, nil
@@ -2345,6 +2355,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		}
 		if h.tax != nil {
 			r, err := h.tax.ApplyTaxToLineItems(ctx, tenantID, sub.CustomerID, effectivePlan.Currency, proratedCents, discountCents, lineItems)
+			if errors.Is(err, domain.ErrAmountOverflow) {
+				// Not a tax-infra failure: an amount on this invoice does not
+				// fit int64 cents. Refuse the change; a draft would carry it.
+				return nil, fmt.Errorf("proration invoice: %w", err)
+			}
 			if err != nil {
 				// Transient tax-infra failure. Do NOT finalize with zero tax —
 				// that ships an invoice lying about authoritative amounts.
@@ -2370,6 +2385,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				taxResult = r
 			}
 		}
+		// ApplyTaxToLineItems checks that this total fits; without a tax
+		// result (deferred) it is the subtotal less a zero discount.
 		netProrated := taxResult.SubtotalCents - taxResult.DiscountCents + taxResult.TaxAmountCents
 
 		// ADR-048 Phase C: present a PLAN upgrade as the industry-standard
@@ -2402,8 +2419,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		splitEligible := spec.changeType == domain.ItemChangeTypePlan ||
 			spec.changeType == domain.ItemChangeTypeQuantity
 		if splitEligible && taxResult.SubtotalCents == proratedCents {
-			creditCents, chargeCents, creditTax, chargeTax := splitUpgradeProration(
+			creditCents, chargeCents, creditTax, chargeTax, err := splitUpgradeProration(
 				oldAmount, remainingDays, denomDays, proratedCents, taxResult.TaxAmountCents)
+			if err != nil {
+				return nil, err
+			}
 
 			// Use the tax-applied single line as the template so each split
 			// line inherits the per-line tax DISPLAY fields (rate, jurisdiction,
@@ -2431,7 +2451,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			creditLine.AmountCents = creditCents
 			creditLine.UnitAmountCents = creditCents / oldQty
 			creditLine.TaxAmountCents = creditTax
-			creditLine.TotalAmountCents = creditCents + creditTax
+			creditTotal, ok := money.Add(creditCents, creditTax)
+			if !ok {
+				return nil, fmt.Errorf("proration credit line total: %w", domain.ErrAmountOverflow)
+			}
+			creditLine.TotalAmountCents = creditTotal
 
 			chargeLine := tmpl
 			chargeLine.Description = chargeDesc
@@ -2439,7 +2463,11 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			chargeLine.AmountCents = chargeCents
 			chargeLine.UnitAmountCents = chargeCents / newQty
 			chargeLine.TaxAmountCents = chargeTax
-			chargeLine.TotalAmountCents = chargeCents + chargeTax
+			chargeTotal, ok := money.Add(chargeCents, chargeTax)
+			if !ok {
+				return nil, fmt.Errorf("proration charge line total: %w", domain.ErrAmountOverflow)
+			}
+			chargeLine.TotalAmountCents = chargeTotal
 
 			lineItems = []domain.InvoiceLineItem{creditLine, chargeLine}
 		}
@@ -2707,7 +2735,10 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 	detail.Type = "adjustment"
 	var gross int64
 	for _, sh := range shares {
-		gross += sh.GrossCents
+		var ok bool
+		if gross, ok = money.Add(gross, sh.GrossCents); !ok {
+			return nil, fmt.Errorf("credit for unused time: sum of credit shares: %w", domain.ErrAmountOverflow)
+		}
 		if sh.ToBalance {
 			detail.Type = "credit"
 		}

@@ -1936,7 +1936,10 @@ func (s *PostgresStore) GetOutstandingBalance(ctx context.Context, tenantID, cus
 		if err := rows.Scan(&a.Currency, &a.AmountCents, &n); err != nil {
 			return OutstandingBalance{}, err
 		}
-		out.TotalCents += a.AmountCents
+		var serr error
+		if out.TotalCents, serr = domain.SumCents(out.TotalCents, a.AmountCents); serr != nil {
+			return OutstandingBalance{}, fmt.Errorf("outstanding balance: %w", serr)
+		}
 		out.UnpaidCount += n
 		if a.AmountCents > 0 {
 			out.ByCurrency = append(out.ByCurrency, a)

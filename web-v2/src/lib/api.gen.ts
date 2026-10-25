@@ -13532,8 +13532,10 @@ export interface operations {
             };
             /**
              * @description Validation error: missing `customer_id`, unsupported currency,
-             *     an invalid line item (the message names the line number), or
-             *     an unknown field (`param` names it; the body must use only the fields listed here).
+             *     an invalid line item (the message names the line number), line
+             *     items whose total does not fit 64-bit cents (`param` is
+             *     `line_items`), or an unknown field (`param` names it; the body
+             *     must use only the fields listed here).
              */
             422: {
                 headers: {

@@ -2,10 +2,13 @@ package analytics
 
 import (
 	"log/slog"
+	"math"
 	"net/http"
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -179,10 +182,19 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p := touch(d)
-		if delta > 0 {
-			p.Expansion += delta
-		} else {
-			p.Contraction += -delta
+		// Each sum is checked: a total past int64 is an error, never a
+		// wrapped figure.
+		ok := delta != math.MinInt64
+		if ok && delta > 0 {
+			p.Expansion, ok = money.Add(p.Expansion, delta)
+		} else if ok {
+			p.Contraction, ok = money.Add(p.Contraction, -delta)
+		}
+		if !ok {
+			_ = rows.Close()
+			slog.Error("analytics mrr-movement: change-events sum", "error", domain.ErrAmountOverflow)
+			respond.InternalError(w, r)
+			return
 		}
 	}
 	_ = rows.Close()
@@ -191,14 +203,33 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 	data := make([]MRRMovementPoint, 0, len(byDate))
 	var totals MRRMovementTotals
 	for _, p := range byDate {
-		p.Net = p.New + p.Expansion - p.Contraction - p.Churned
-		totals.New += p.New
-		totals.Expansion += p.Expansion
-		totals.Contraction += p.Contraction
-		totals.Churned += p.Churned
+		net, err := netMRR(MRRMovementTotals{New: p.New, Expansion: p.Expansion, Contraction: p.Contraction, Churned: p.Churned})
+		ok := err == nil
+		p.Net = net
+		if ok {
+			totals.New, ok = money.Add(totals.New, p.New)
+		}
+		if ok {
+			totals.Expansion, ok = money.Add(totals.Expansion, p.Expansion)
+		}
+		if ok {
+			totals.Contraction, ok = money.Add(totals.Contraction, p.Contraction)
+		}
+		if ok {
+			totals.Churned, ok = money.Add(totals.Churned, p.Churned)
+		}
+		if !ok {
+			slog.Error("analytics mrr-movement: totals", "error", domain.ErrAmountOverflow)
+			respond.InternalError(w, r)
+			return
+		}
 		data = append(data, *p)
 	}
-	totals.Net = totals.New + totals.Expansion - totals.Contraction - totals.Churned
+	if totals.Net, err = netMRR(totals); err != nil {
+		slog.Error("analytics mrr-movement: totals", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
 	sortByDate(data)
 
 	_ = tx.Commit()

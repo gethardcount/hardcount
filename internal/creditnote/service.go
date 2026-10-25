@@ -507,8 +507,13 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 		var existingTotal, existingTaxReversed int64
 		for _, cn := range existingCNs {
 			if cn.Status != domain.CreditNoteVoided {
-				existingTotal += cn.TotalCents
-				existingTaxReversed += cn.TaxAmountCents
+				var err error
+				if existingTotal, err = domain.SumCents(existingTotal, cn.TotalCents); err != nil {
+					return domain.CreditNote{}, fmt.Errorf("credit notes on invoice %s: total: %w", input.InvoiceID, err)
+				}
+				if existingTaxReversed, err = domain.SumCents(existingTaxReversed, cn.TaxAmountCents); err != nil {
+					return domain.CreditNote{}, fmt.Errorf("credit notes on invoice %s: tax: %w", input.InvoiceID, err)
+				}
 			}
 		}
 		if subtotal > inv.TotalAmountCents-existingTotal { // never existingTotal+subtotal: that sum can wrap
@@ -925,11 +930,21 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 		if refundAmount < 0 || creditAmount < 0 || outOfBandAmount < 0 {
 			return domain.CreditNote{}, errs.Invalid("allocation", "refund_amount_cents, credit_amount_cents, and out_of_band_amount_cents must all be ≥ 0")
 		}
-		if refundAmount+creditAmount+outOfBandAmount != subtotal {
+		// The three are each >= 0 (checked above); their sum is checked too.
+		allocated, aerr := domain.SumCents(refundAmount, creditAmount)
+		if aerr == nil {
+			allocated, aerr = domain.SumCents(allocated, outOfBandAmount)
+		}
+		if aerr != nil {
+			return domain.CreditNote{}, errs.Invalid("allocation", fmt.Sprintf(
+				"refund_amount_cents + credit_amount_cents + out_of_band_amount_cents must equal credit note total %.2f",
+				float64(subtotal)/100))
+		}
+		if allocated != subtotal {
 			return domain.CreditNote{}, errs.Invalid("allocation", fmt.Sprintf(
 				"refund_amount_cents (%.2f) + credit_amount_cents (%.2f) + out_of_band_amount_cents (%.2f) = %.2f, must equal credit note total %.2f",
 				float64(refundAmount)/100, float64(creditAmount)/100, float64(outOfBandAmount)/100,
-				float64(refundAmount+creditAmount+outOfBandAmount)/100, float64(subtotal)/100,
+				float64(allocated)/100, float64(subtotal)/100,
 			))
 		}
 
@@ -942,7 +957,10 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 			if cn.Status == domain.CreditNoteVoided {
 				continue
 			}
-			existingRefunds += cn.RefundAmountCents
+			var err error
+			if existingRefunds, err = domain.SumCents(existingRefunds, cn.RefundAmountCents); err != nil {
+				return domain.CreditNote{}, fmt.Errorf("credit notes on invoice %s: refunds: %w", input.InvoiceID, err)
+			}
 		}
 		pmRefundable := inv.CardRefundableCents(existingRefunds)
 		if refundAmount > pmRefundable {
@@ -1055,7 +1073,10 @@ func commitReliefCash(grossPaid, granted, k, r int64) int64 {
 		if x >= granted {
 			return grossPaid
 		}
-		return money.RoundHalfToEven(grossPaid*x, granted)
+		// 0 < x < granted, so the quotient is below grossPaid and fits;
+		// the product is worked in 128 bits.
+		v, _ := money.MulDivRoundHalfToEven(grossPaid, x, granted)
+		return v
 	}
 	return f(k+r) - f(k)
 }
@@ -1185,11 +1206,17 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			if e.Status == domain.CreditNoteVoided {
 				continue
 			}
-			existingTotal += e.TotalCents
-			existingTaxReversed += e.TaxAmountCents
-			existingRefunds += e.RefundAmountCents
+			var serr error
+			if existingTotal, serr = domain.SumCents(existingTotal, e.TotalCents); serr == nil {
+				if existingTaxReversed, serr = domain.SumCents(existingTaxReversed, e.TaxAmountCents); serr == nil {
+					existingRefunds, serr = domain.SumCents(existingRefunds, e.RefundAmountCents)
+				}
+			}
+			if serr != nil {
+				return domain.CreditNote{}, nil, fmt.Errorf("credit notes on invoice %s: %w", input.InvoiceID, serr)
+			}
 		}
-		if existingTotal+x > inv.TotalAmountCents {
+		if x > inv.TotalAmountCents-existingTotal { // never existingTotal+x: that sum can wrap
 			return domain.CreditNote{}, nil, fmt.Errorf("commit relief invariant violated: existing CN total %d + relief %d exceeds invoice total %d", existingTotal, x, inv.TotalAmountCents)
 		}
 
@@ -1199,10 +1226,16 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		var taxAmount int64
 		netSubtotal := x
 		if inv.TotalAmountCents > 0 && inv.TaxAmountCents > 0 {
-			if existingTotal+x == inv.TotalAmountCents {
+			if x == inv.TotalAmountCents-existingTotal {
 				taxAmount = inv.TaxAmountCents - existingTaxReversed
 			} else {
-				taxAmount = inv.TaxAmountCents * x / inv.TotalAmountCents
+				// tax × x is worked in 128 bits; the quotient truncates
+				// exactly as int64 "/" did, and is below the tax (x < total).
+				q, _, ok := money.MulDivRem(inv.TaxAmountCents, x, inv.TotalAmountCents)
+				if !ok {
+					return domain.CreditNote{}, nil, fmt.Errorf("commit relief tax share: %w", domain.ErrAmountOverflow)
+				}
+				taxAmount = q
 			}
 			netSubtotal = x - taxAmount
 		}
@@ -1227,10 +1260,15 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			if refundAmount < 0 || outOfBand < 0 {
 				return domain.CreditNote{}, nil, errs.Invalid("allocation", "refund_amount_cents and out_of_band_amount_cents must be ≥ 0")
 			}
-			if refundAmount+outOfBand != x {
+			allocated, aerr := domain.SumCents(refundAmount, outOfBand)
+			if aerr != nil {
+				return domain.CreditNote{}, nil, errs.Invalid("allocation", fmt.Sprintf(
+					"allocation must sum to the derived relief amount %.2f", float64(x)/100))
+			}
+			if allocated != x {
 				return domain.CreditNote{}, nil, errs.Invalid("allocation", fmt.Sprintf(
 					"allocation must sum to the derived relief amount %.2f (refund %.2f + out_of_band %.2f = %.2f)",
-					float64(x)/100, float64(refundAmount)/100, float64(outOfBand)/100, float64(refundAmount+outOfBand)/100))
+					float64(x)/100, float64(refundAmount)/100, float64(outOfBand)/100, float64(allocated)/100))
 			}
 		}
 		// PM refund cap: never push more cash to the card than was paid
@@ -1403,7 +1441,9 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 		var existingRefunds int64
 		for _, cn := range existing {
 			if cn.Status != domain.CreditNoteVoided && cn.RefundAmountCents > 0 {
-				existingRefunds += cn.RefundAmountCents
+				if existingRefunds, err = domain.SumCents(existingRefunds, cn.RefundAmountCents); err != nil {
+					return domain.CreditNote{}, fmt.Errorf("refunds on invoice %s: %w", input.InvoiceID, err)
+				}
 			}
 		}
 		amount = inv.AmountPaidCents - existingRefunds
@@ -1509,7 +1549,9 @@ func (s *Service) UnreliefedClawbackCents(ctx context.Context, tenantID, invoice
 		// "NEVER cleared" — a comment the clearing writer contradicts, and
 		// which is corrected in the same commit as this.
 		if cn.Status == domain.CreditNoteVoided && cn.IssuedAt == nil {
-			total += cn.TotalCents
+			if total, err = domain.SumCents(total, cn.TotalCents); err != nil {
+				return 0, fmt.Errorf("credit notes on invoice %s: %w", invoiceID, err)
+			}
 		}
 	}
 	return total, nil
@@ -1529,7 +1571,9 @@ func (s *Service) CreditedCents(ctx context.Context, tenantID, invoiceID string)
 	var total int64
 	for _, cn := range cns {
 		if cn.Status != domain.CreditNoteVoided {
-			total += cn.TotalCents
+			if total, err = domain.SumCents(total, cn.TotalCents); err != nil {
+				return 0, fmt.Errorf("credit notes on invoice %s: %w", invoiceID, err)
+			}
 		}
 	}
 	return total, nil
@@ -1548,7 +1592,9 @@ func (s *Service) IssuedCreditedCents(ctx context.Context, tenantID, invoiceID s
 	var total int64
 	for _, cn := range cns {
 		if cn.Status == domain.CreditNoteIssued {
-			total += cn.TotalCents
+			if total, err = domain.SumCents(total, cn.TotalCents); err != nil {
+				return 0, fmt.Errorf("credit notes on invoice %s: %w", invoiceID, err)
+			}
 		}
 	}
 	return total, nil

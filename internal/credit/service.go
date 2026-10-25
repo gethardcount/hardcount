@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -496,7 +497,13 @@ func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID,
 	var totalUsed int64
 	currency := ""
 	for _, e := range entries {
-		totalUsed += -e.AmountCents // Convert negative to positive
+		// Usage rows are negative; their sizes add up to what was used.
+		if e.AmountCents == math.MinInt64 {
+			return 0, fmt.Errorf("reverse credits for invoice %s: usage row amount: %w", invoiceID, domain.ErrAmountOverflow)
+		}
+		if totalUsed, err = domain.SumCents(totalUsed, -e.AmountCents); err != nil {
+			return 0, fmt.Errorf("reverse credits for invoice %s: credits used: %w", invoiceID, err)
+		}
 		switch {
 		case currency == "":
 			currency = e.Currency
@@ -650,13 +657,17 @@ func (s *Service) ListGrants(ctx context.Context, tenantID, customerID string, i
 			r = &CurrencyRemaining{Currency: g.Currency}
 			byCurrency[g.Currency] = r
 		}
+		var sum *int64
 		switch g.GrantKind {
 		case string(domain.GrantKindCommit):
-			r.CommitRemainingCents += g.RemainingCents
+			sum = &r.CommitRemainingCents
 		case string(domain.GrantKindPromotional):
-			r.PromotionalRemainingCents += g.RemainingCents
+			sum = &r.PromotionalRemainingCents
 		default:
-			r.OtherRemainingCents += g.RemainingCents
+			sum = &r.OtherRemainingCents
+		}
+		if *sum, err = domain.SumCents(*sum, g.RemainingCents); err != nil {
+			return GrantsResponse{}, fmt.Errorf("remaining credit in %s: %w", g.Currency, err)
 		}
 	}
 	for _, r := range byCurrency {
