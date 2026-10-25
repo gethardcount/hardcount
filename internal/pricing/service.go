@@ -207,14 +207,14 @@ func validateRatingRuleInput(input *CreateRatingRuleInput) error {
 		return err
 	}
 
-	return validatePricingShape(input.Mode, input.Tiers, input.PackageSize)
+	return validatePricingShape(input.Mode, input.UnitAmountCents, input.Tiers, input.PackageSize, input.PackageAmountCents)
 }
 
 // checkRates checks every amount of a rating rule or a price override
 // against domain.CheckRate and returns the amounts to store. It runs in every
-// mode, on the amounts the mode does not use too, because they are stored as
-// well; and it runs before anything prices the rule, so no arithmetic sees an
-// amount outside the limits.
+// mode, on the amounts the mode does not use too (validatePricingShape then
+// refuses any of those that is not 0), and before anything prices the rule,
+// so no arithmetic sees an amount outside the limits.
 func checkRates(unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Decimal) (decimal.Decimal, []domain.RatingTier, decimal.Decimal, error) {
 	var err error
 	if unit, err = domain.CheckRate("unit_amount_cents", unit); err != nil {
@@ -238,8 +238,9 @@ func checkRates(unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Dec
 
 // validatePricingShape enforces the shape of a price at authoring time —
 // shared by rating-rule creation (both entrypoints) and customer overrides.
-// The tier rules are domain.CheckTiers, the same check ComputeAmountCents
-// runs, so a table authoring accepts always rates: the old qty=1 probe never
+// It is domain.CheckPriceShape: the mode's fields and only those (a field
+// the mode does not use must be zero, tiers empty). The tier rules are
+// domain.CheckTiers, the same check ComputeAmountCents runs, so a table authoring accepts always rates: the old qty=1 probe never
 // reached tier 2, so a non-monotonic table or one without an open last tier
 // passed authoring and then failed the cycle close every tick.
 //
@@ -248,21 +249,14 @@ func checkRates(unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Dec
 // meter tracked but not billed), and a zero-price tier expresses an included
 // allowance — "first 1M tokens free, then $2/M" (Stripe documents a $0 first
 // tier as the canonical graduated free-tier shape).
-func validatePricingShape(mode domain.PricingMode, tiers []domain.RatingTier, pkgSize int64) error {
-	switch mode {
-	case domain.PricingPerUnit:
-	case domain.PricingGraduated:
-		if err := domain.CheckTiers(tiers); err != nil {
-			return errs.Invalid("tiers", err.Error())
+func validatePricingShape(mode domain.PricingMode, unit decimal.Decimal, tiers []domain.RatingTier, pkgSize int64, pkg decimal.Decimal) error {
+	if err := domain.CheckPriceShape(mode, unit, tiers, pkgSize, pkg); err != nil {
+		var fe *domain.PriceFieldError
+		if errors.As(err, &fe) {
+			return errs.Invalid(fe.Field, fe.Reason)
 		}
-	case domain.PricingPackage:
-		if pkgSize <= 0 {
-			return errs.Invalid("package_size", "package size must be greater than 0")
-		}
-	default:
-		return errs.Invalid("mode", "must be one of: per_unit, graduated, package")
+		return err
 	}
-
 	return nil
 }
 
@@ -1004,7 +998,7 @@ func (s *Service) CreateRatingRuleTx(ctx context.Context, tx *sql.Tx, tenantID s
 		rule.UnitAmountCents, rule.Tiers, rule.PackageAmountCents); err != nil {
 		return domain.RatingRuleVersion{}, err
 	}
-	if err := validatePricingShape(rule.Mode, rule.Tiers, rule.PackageSize); err != nil {
+	if err := validatePricingShape(rule.Mode, rule.UnitAmountCents, rule.Tiers, rule.PackageSize, rule.PackageAmountCents); err != nil {
 		return domain.RatingRuleVersion{}, err
 	}
 	existing, err := s.store.ListRatingRules(ctx, RatingRuleFilter{

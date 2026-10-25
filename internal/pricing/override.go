@@ -295,7 +295,7 @@ func (s *Service) CreateOverride(ctx context.Context, tenantID string, input Cre
 		input.UnitAmountCents, input.Tiers, input.PackageAmountCents); err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
-	if err := validatePricingShape(input.Mode, input.Tiers, input.PackageSize); err != nil {
+	if err := validatePricingShape(input.Mode, input.UnitAmountCents, input.Tiers, input.PackageSize, input.PackageAmountCents); err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
 	// Compute probe against the PATCHED rule — validates the override

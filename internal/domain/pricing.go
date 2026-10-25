@@ -351,6 +351,54 @@ func ComputeAmountCents(rule RatingRuleVersion, quantity decimal.Decimal) (int64
 	}
 }
 
+// PriceFieldError names the price field CheckPriceShape refused and why.
+type PriceFieldError struct {
+	Field  string
+	Reason string
+}
+
+func (e *PriceFieldError) Error() string { return e.Field + ": " + e.Reason }
+
+// CheckPriceShape checks that a price has its mode's fields and only those.
+// per_unit uses unit_amount_cents. graduated uses tiers, which must pass
+// CheckTiers. package uses package_size, above 0, and package_amount_cents.
+// A field the mode does not use must be zero, and tiers empty, so a stored
+// price holds only what bills it. Every authoring path runs this one check:
+// both API routes, the recipe parser and the recipe save path. The amounts'
+// limits are CheckRate's.
+func CheckPriceShape(mode PricingMode, unit decimal.Decimal, tiers []RatingTier, pkgSize int64, pkgAmount decimal.Decimal) error {
+	switch mode {
+	case PricingPerUnit, PricingGraduated, PricingPackage:
+	default:
+		return &PriceFieldError{Field: "mode", Reason: "must be one of: per_unit, graduated, package"}
+	}
+	if mode != PricingPerUnit && !unit.IsZero() {
+		return &PriceFieldError{Field: "unit_amount_cents", Reason: "used only when mode is per_unit; send 0 or leave it out"}
+	}
+	if mode != PricingGraduated && len(tiers) != 0 {
+		return &PriceFieldError{Field: "tiers", Reason: "used only when mode is graduated; send [] or leave it out"}
+	}
+	if mode != PricingPackage {
+		if pkgSize != 0 {
+			return &PriceFieldError{Field: "package_size", Reason: "used only when mode is package; send 0 or leave it out"}
+		}
+		if !pkgAmount.IsZero() {
+			return &PriceFieldError{Field: "package_amount_cents", Reason: "used only when mode is package; send 0 or leave it out"}
+		}
+	}
+	switch mode {
+	case PricingGraduated:
+		if err := CheckTiers(tiers); err != nil {
+			return &PriceFieldError{Field: "tiers", Reason: err.Error()}
+		}
+	case PricingPackage:
+		if pkgSize <= 0 {
+			return &PriceFieldError{Field: "package_size", Reason: "package size must be greater than 0"}
+		}
+	}
+	return nil
+}
+
 // TierShapeError says what is wrong with a tier table. Index is the tier's
 // position, from 0.
 type TierShapeError struct {

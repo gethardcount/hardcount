@@ -9,7 +9,7 @@
  */
 
 /**
- * As on `POST /v1/rating-rules`.
+ * As on `POST /v1/rating-rules`, also for the fields a mode does not use.
  */
 export type CreatePriceOverrideBodyMode = typeof CreatePriceOverrideBodyMode[keyof typeof CreatePriceOverrideBodyMode];
 

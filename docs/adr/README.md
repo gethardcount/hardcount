@@ -45,7 +45,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [002](002-per-domain-package-architecture.md) | 2026-04-15 | Accepted | Platform & ops | Each domain package owns its store, service and handler; peer domains never import each other |
 | [003](003-postgresql-rls-multi-tenancy.md) | 2026-04-15 | Accepted | Auth & security | Every table carries `tenant_id`; Postgres Row-Level Security enforces tenant isolation |
 | [004](004-event-sourced-credit-ledger.md) | 2026-04-15 | Accepted | Credits | Append-only credit ledger: each entry carries the running balance; no entry's amount is ever edited |
-| [005](005-integer-cents-for-money.md) | 2026-04-15 | Accepted (amended) | Billing | Store and compute money as integer cents; per-unit rates later became decimals (ADR-045) |
+| [005](005-integer-cents-for-money.md) | 2026-04-15 | Accepted (amended); ADR-130 makes package prices decimal too (built in #1381) | Billing | Store and compute money as integer cents; per-unit rates later became decimals (ADR-045) |
 | [006](006-background-scheduler-vs-message-queue.md) | 2026-04-15 | Accepted (amended) | Platform & ops | Run billing and dunning on an in-process ticker; one replica runs each loop (ADR-114) |
 | [007](007-revert-to-api-key-dashboard-auth.md) | 2026-04-29 | Superseded by ADR-011 | Auth & security | The dashboard logs in with a pasted API key kept in browser storage |
 | [008](008-session-from-api-key.md) | 2026-04-29 | Superseded by ADR-011 | Auth & security | Dashboard sessions are httpOnly cookies minted from a validated API key |
@@ -85,7 +85,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [042](042-tax-rate-decimal-precision.md) | 2026-05-31 | Accepted (partly superseded) | Tax | Store tax rates as `NUMERIC(7,4)` and prorate with a whole-day ratio |
 | [043](043-drop-tax-rate-bp.md) | 2026-05-31 | Accepted | Tax | Drop the basis-point tax rate column at once; the decimal rate is the only storage |
 | [044](044-canonical-ai-token-metering-model.md) | 2026-06-01 | Accepted; ADR-130 changes decision 4 (not built yet) | Pricing & usage | Meter all AI tokens on one `tokens` meter; token type, model and provider are dimensions |
-| [045](045-decimal-per-unit-pricing-rates.md) | 2026-06-01 | Accepted; amended 2026-10-24 (rate limits); ADR-130 changes the rate fields (not built yet) | Pricing & usage | Per-unit price rates are decimals (new rates: at most 12 places, under 10^18 cents); invoice amounts stay integer cents |
+| [045](045-decimal-per-unit-pricing-rates.md) | 2026-06-01 | Accepted; amended 2026-10-24 (rate limits); ADR-130 changes the rate fields (built in #1381) | Pricing & usage | Per-unit price rates are decimals (new rates: at most 12 places, under 10^18 cents); invoice amounts stay integer cents |
 | [046](046-manual-tax-largest-remainder-apportionment.md) | 2026-06-03 | Accepted | Tax | Manual tax rounds the document total once and spreads the cents by largest remainder |
 | [047](047-invoice-tax-rate-displays-statutory-not-effective.md) | 2026-06-05 | Accepted | Tax | Invoices show the statutory tax rate when taxed lines share one; else the effective rate |
 | [048](048-credit-clawback-tax-reversal.md) | 2026-06-06 | Accepted | Credits | Credit clawbacks go through a credit note, so the proportional tax is reversed too |
@@ -106,7 +106,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [063](063-refund-status-webhook-reconciliation.md) | 2026-06-28 | Accepted (amended) | Payments | Stripe webhooks decide refund status; a retry looks the refund up before creating one |
 | [064](064-dunning-run-creation-derived-from-invoice-state.md) | 2026-07-02 | Accepted | Dunning | A decline starts dunning at once; a background sweep creates any missed run |
 | [065](065-threshold-scan-boundary-fire-once-drain.md) | 2026-07-02 | Accepted (amended) | Billing | The threshold scan skips ended periods, fires once per cycle and checks every subscription |
-| [066](066-threshold-money-semantics.md) | 2026-07-02 | Accepted (amended); ADR-130 changes the rule-bucket and window parts (not built yet) | Billing | Threshold fires prorate a reset's base; tiers continue across a fire that keeps the cycle |
+| [066](066-threshold-money-semantics.md) | 2026-07-02 | Accepted (amended); ADR-130 changes the rule-bucket part (built in #1376), the package clamp (removed in #1381) and the window parts (not built yet) | Billing | Threshold fires prorate a reset's base; tiers continue across a fire that keeps the cycle |
 | [067](067-archive-blocks-never-cancels.md) | 2026-07-02 | Accepted (amended) | Subscriptions | Archiving a customer is refused while a subscription still bills; it never cancels anything |
 | [068](068-checkout-session-dedup.md) | 2026-07-02 | Accepted (amended) | Payments | One open checkout session per invoice; hosted payment and Velox charges exclude each other |
 | [069](069-trial-cancel-semantics.md) | 2026-07-02 | Accepted | Subscriptions | Cancelling a trial is free at trial end; SQL guards enforce it at every activation |
@@ -169,7 +169,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [127](127-a-lost-charge-result-is-resolved-by-asking-stripe.md) | 2026-10-19 | Accepted (amended) | Payments | A charge whose result was lost or unclear blocks every new charge and irreversible action until a sweep has asked Stripe |
 | [128](128-activity-line-standard.md) | 2026-10-19 | Accepted | Test clocks & simulated time | Every activity line has one wording, names who acted and follows one clock rule; the backend builds the words |
 | [129](129-credit-carries-its-own-currency.md) | 2026-10-23 | Accepted | Credits | Each credit ledger row stores its currency; credit pays only invoices in it, never converted; a manual invoice uses the customer's currency |
-| [130](130-usage-prices-belong-to-the-plan.md) | 2026-10-23 | Accepted (lock order shipped; the rest not built yet) | Pricing & usage | Usage prices are rows on the plan; the most specific price wins; an edit on a used plan applies from each subscriber's next period |
+| [130](130-usage-prices-belong-to-the-plan.md) | 2026-10-23 | Accepted (lock order, one rater, one aggregation per meter and price shapes shipped; PR-4 to PR-8 not built yet) | Pricing & usage | Usage prices are rows on the plan; the most specific price wins; an edit on a used plan applies from each subscriber's next period |
 | [131](131-webhook-events-carry-their-resource.md) | 2026-10-24 | Accepted | Integrations | A webhook event's data is the resource it is about, as the API returns it, plus the few facts the resource lacks; one resource per family |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified

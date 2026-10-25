@@ -1,7 +1,7 @@
 # ADR-005: Integer Cents for Money
 
 **Date:** 2026-04-15
-**Status:** Accepted (amended 2026-06-01 — partially superseded by ADR-045 for per-unit RATE fields)
+**Status:** Accepted (amended 2026-06-01 — partially superseded by ADR-045 for per-unit RATE fields; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) §3, built in #1381: a package's price is a decimal too)
 
 ## Status
 Accepted
@@ -11,7 +11,7 @@ Accepted
 
 ## Summary
 
-Money amounts are stored and computed as `int64` cents (the currency's smallest unit), never as floats, so sums and comparisons are exact. This covers invoice and line amounts and totals, fixed fees and credit-ledger amounts. Amended 2026-06-01: per-unit price rates are now decimals, so sub-cent prices such as $3 per million tokens can be expressed ([ADR-045](045-decimal-per-unit-pricing-rates.md)). The charged amount is still rounded to a whole cent, and tax rates are `NUMERIC(7,4)` decimals ([ADR-042](042-tax-rate-decimal-precision.md)), so the float tax formula below is no longer used. Status: active, amended.
+Money amounts are stored and computed as `int64` cents (the currency's smallest unit), never as floats, so sums and comparisons are exact. This covers invoice and line amounts and totals, fixed fees and credit-ledger amounts. Amended 2026-06-01: per-unit price rates are now decimals, so sub-cent prices such as $3 per million tokens can be expressed ([ADR-045](045-decimal-per-unit-pricing-rates.md)). Amended by ADR-130 (#1381): a package's price is a decimal too, and the rate fields have new names (below). The charged amount is still rounded to a whole cent, and tax rates are `NUMERIC(7,4)` decimals ([ADR-042](042-tax-rate-decimal-precision.md)), so the float tax formula below is no longer used. Status: active, amended.
 
 ## Context
 A billing engine performs thousands of arithmetic operations on monetary values: multiplying unit prices by quantities, computing tiered/graduated pricing, applying tax rates, summing line items, applying credits. The representation of money must be correct under all these operations.
@@ -24,6 +24,8 @@ All monetary values in Velox are stored and computed as `int64` representing cen
 Conversion to display format (dollars, euros) happens exclusively at the API boundary — JSON serialization in handlers. All internal computation, storage, and comparison uses integer cents. Tax calculation is the one place where floating-point appears: `int64(math.Round(float64(subtotal) * taxRate / 100))`, converting back to integer immediately after the multiplication.
 
 > **Amendment (2026-06-01, ADR-045 — partial supersession).** The per-unit RATE fields multiplied by a (decimal) quantity — `RatingRuleVersion.FlatAmountCents`, `RatingTier.UnitAmountCents`, `RatingRuleVersion.OverageUnitAmountCents` — are now `decimal.Decimal` (PostgreSQL `NUMERIC`), not `int64` cents (a rate written since 2026-10-24 is limited to 12 decimal places and under 10^18 cents; ADR-045's amendment of that date). Sub-cent-per-unit rates (e.g. $3.00 / 1M tokens = 0.0003¢/token) are inexpressible as integer cents; ADR-045 adopts the Stripe `unit_amount_decimal` model. Everything else in this ADR stands: fixed fees (`base_amount_cents`, `package_amount_cents`), **all invoice line amounts and totals**, credit-ledger amounts, and tax remain `int64` cents, and `ComputeAmountCents` still rounds the final charge to a whole cent. Only the RATE gained precision — you still cannot bill a fractional cent.
+
+> **Amendment ([ADR-130](130-usage-prices-belong-to-the-plan.md) §3, built in #1381).** The amendment above names the fields as they were. Now the decimal fields are `RatingRuleVersion.UnitAmountCents` (was `FlatAmountCents`, mode `per_unit`, was `flat`), `RatingTier.UnitAmountCents` and `RatingRuleVersion.PackageAmountCents`. A package's price is a decimal in PostgreSQL `NUMERIC`, like the rates, because a package can cost a fraction of a cent ($0.002 per 1,000 tokens is `"0.2"`). `OverageUnitAmountCents` is gone. A customer price override has the same fields. Fixed fees such as `base_amount_cents`, all invoice line amounts and totals, credit-ledger amounts and tax amounts stay `int64` cents, and `ComputeAmountCents` still rounds the charge to a whole cent.
 
 ## Consequences
 

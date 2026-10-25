@@ -6518,8 +6518,9 @@ type UsageEvent struct {
 	Origin UsageEventOrigin `json:"origin,omitempty"`
 
 	// ProviderCostCents What serving this event cost you at your provider, in US cents as
-	// a decimal string (e.g. "0.45"), priced from your provider cost
-	// rates when the event arrived. Absent when no rate matched or the
+	// a decimal string (e.g. "0.45"), set when the event arrived: from
+	// your provider cost rates, or the cost the sender reported (see
+	// `provider_cost_source`). Absent when the cost is unknown or the
 	// event has no costed dimensions.
 	ProviderCostCents string `json:"provider_cost_cents,omitempty"`
 
@@ -7898,7 +7899,7 @@ type ListPriceOverridesParams struct {
 type CreatePriceOverrideJSONBody struct {
 	CustomerId string `json:"customer_id"`
 
-	// Mode As on `POST /v1/rating-rules`.
+	// Mode As on `POST /v1/rating-rules`, also for the fields a mode does not use.
 	Mode CreatePriceOverrideJSONBodyMode `json:"mode"`
 
 	// PackageAmountCents Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`.
@@ -7918,7 +7919,7 @@ type CreatePriceOverrideJSONBody struct {
 		UpTo            int64  `json:"up_to,omitempty"`
 	} `json:"tiers,omitempty"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field.
+	// UnitAmountCents Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field.
 	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 }
 
@@ -7990,7 +7991,7 @@ type GetV1RatingRulesParamsLifecycleState string
 type PostV1RatingRulesJSONBody struct {
 	Currency string `json:"currency"`
 
-	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. Send only the mode's fields: a field the mode does not use must be 0 or left out (`tiers`: `[]` or left out). Otherwise 422 with `param` naming it.
 	Mode PostV1RatingRulesJSONBodyMode `json:"mode"`
 	Name string                        `json:"name"`
 
@@ -8008,7 +8009,7 @@ type PostV1RatingRulesJSONBody struct {
 		UpTo            int64  `json:"up_to,omitempty"`
 	} `json:"tiers,omitempty"`
 
-	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field.
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field.
 	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 }
 

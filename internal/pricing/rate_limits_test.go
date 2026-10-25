@@ -19,8 +19,8 @@ import (
 // decimals with documented limits: a JSON number or a string holding one, at
 // most 100 characters, 0 or more, under 10^18 cents, at most 12 decimal
 // places. A value outside them is a 422 that names the field and nothing is
-// stored, in every mode (a rate the mode does not use is stored too). A zero
-// is stored as plain 0.
+// stored. A rate the mode does not use must be 0
+// (TestPriceShapes_UnusedFieldsRefused). A zero is stored as plain 0.
 //
 // Mutation-verify: drop the domain.CheckDecimal call in checkRate → the
 // size, scale and zero cases go red; parse the rates with shopspring's
@@ -67,14 +67,6 @@ var rateFields = []rateField{
 			return `"mode":"package","package_size":100,"package_amount_cents":` + raw
 		},
 		pick: func(r rates) decimal.Decimal { return r.PackageAmountCents },
-	},
-	{
-		// A rate the mode does not use is stored, so it has the same limits.
-		param: "unit_amount_cents",
-		frag: func(raw string) string {
-			return `"mode":"graduated","tiers":[{"up_to":null,"unit_amount_cents":"1"}],"unit_amount_cents":` + raw
-		},
-		pick: func(r rates) decimal.Decimal { return r.UnitAmountCents },
 	},
 }
 

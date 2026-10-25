@@ -27,8 +27,9 @@ export interface UsageEvent {
   origin?: UsageEventOrigin;
   /**
      * What serving this event cost you at your provider, in US cents as
-     * a decimal string (e.g. "0.45"), priced from your provider cost
-     * rates when the event arrived. Absent when no rate matched or the
+     * a decimal string (e.g. "0.45"), set when the event arrived: from
+     * your provider cost rates, or the cost the sender reported (see
+     * `provider_cost_source`). Absent when the cost is unknown or the
      * event has no costed dimensions.
      */
   provider_cost_cents?: string;

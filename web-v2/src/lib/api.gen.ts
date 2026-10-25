@@ -2075,12 +2075,12 @@ export interface paths {
                         rule_key: string;
                         name: string;
                         /**
-                         * @description `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+                         * @description `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. Send only the mode's fields: a field the mode does not use must be 0 or left out (`tiers`: `[]` or left out). Otherwise 422 with `param` naming it.
                          * @enum {string}
                          */
                         mode: "per_unit" | "graduated" | "package";
                         currency: string;
-                        /** @description Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
+                        /** @description Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. */
                         unit_amount_cents?: string;
                         /** @description Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. */
                         tiers?: {
@@ -7234,8 +7234,9 @@ export interface components {
             origin?: "api" | "backfill";
             /**
              * @description What serving this event cost you at your provider, in US cents as
-             *     a decimal string (e.g. "0.45"), priced from your provider cost
-             *     rates when the event arrived. Absent when no rate matched or the
+             *     a decimal string (e.g. "0.45"), set when the event arrived: from
+             *     your provider cost rates, or the cost the sender reported (see
+             *     `provider_cost_source`). Absent when the cost is unknown or the
              *     event has no costed dimensions.
              */
             provider_cost_cents?: string;
@@ -15701,11 +15702,11 @@ export interface operations {
                     /** @description Any version of the rule to override. */
                     rating_rule_version_id: string;
                     /**
-                     * @description As on `POST /v1/rating-rules`.
+                     * @description As on `POST /v1/rating-rules`, also for the fields a mode does not use.
                      * @enum {string}
                      */
                     mode: "per_unit" | "graduated" | "package";
-                    /** @description Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
+                    /** @description Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. */
                     unit_amount_cents?: string;
                     /** @description Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. */
                     tiers?: {

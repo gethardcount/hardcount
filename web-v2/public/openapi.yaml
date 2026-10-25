@@ -531,8 +531,9 @@ components:
           type: string
           description: |
             What serving this event cost you at your provider, in US cents as
-            a decimal string (e.g. "0.45"), priced from your provider cost
-            rates when the event arrived. Absent when no rate matched or the
+            a decimal string (e.g. "0.45"), set when the event arrived: from
+            your provider cost rates, or the cost the sender reported (see
+            `provider_cost_source`). Absent when the cost is unknown or the
             event has no costed dimensions.
         provider_cost_source:
           type: string
@@ -7755,6 +7756,9 @@ paths:
                     that tier's rate. `package` bills ceil(quantity ÷
                     `package_size`) × `package_amount_cents`: a part package
                     bills as a whole one.
+                    Send only the mode's fields: a field the mode does not
+                    use must be 0 or left out (`tiers`: `[]` or left out).
+                    Otherwise 422 with `param` naming it.
                 currency:
                   type: string
                 unit_amount_cents:
@@ -7764,9 +7768,8 @@ paths:
                     "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is
                     `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros
                     do not count), and at most 100 characters. A JSON number
-                    is also read. The limits hold in every mode, also for an
-                    amount the mode does not use. A value outside them is
-                    refused with 422 and `param` naming the field.
+                    is also read. A value outside them is refused with 422
+                    and `param` naming the field.
                 tiers:
                   type: array
                   description: >-
@@ -12980,16 +12983,17 @@ paths:
                 mode:
                   type: string
                   enum: [per_unit, graduated, package]
-                  description: As on `POST /v1/rating-rules`.
+                  description: >-
+                    As on `POST /v1/rating-rules`, also for the fields a mode
+                    does not use.
                 unit_amount_cents:
                   type: string
                   description: >-
                     Price per unit in cents, as a decimal string. Used when
                     `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros
                     do not count), and at most 100 characters. A JSON number
-                    is also read. The limits hold in every mode, also for an
-                    amount the mode does not use. A value outside them is
-                    refused with 422 and `param` naming the field.
+                    is also read. A value outside them is refused with 422
+                    and `param` naming the field.
                 tiers:
                   type: array
                   description: >-

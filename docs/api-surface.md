@@ -81,6 +81,9 @@ Before you send usage, read [the retry rules](#sending-usage-safely).
 - `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`.
   A part package bills as a whole one.
 
+A price takes only its mode's fields. A field the mode does not use must be
+0 or left out, or the request is refused with 422.
+
 **Units.** A field named `*_cents` is in the currency's smallest unit, such
 as cents for USD. A price you send is a decimal string with at most 12
 decimal places: `"0.0003"` is $3.00 per million units. An invoice line

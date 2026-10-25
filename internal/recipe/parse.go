@@ -245,15 +245,10 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 			}
 			dr.Tiers = append(dr.Tiers, domain.RatingTier{UpTo: t.UpTo, UnitAmountCents: ua})
 		}
-		switch mode {
-		case domain.PricingGraduated:
-			if err := domain.CheckTiers(dr.Tiers); err != nil {
-				return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q tiers: %w", raw.Key, r.Key, err)
-			}
-		case domain.PricingPackage:
-			if dr.PackageSize <= 0 {
-				return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q package_size must be greater than 0", raw.Key, r.Key)
-			}
+		// The shape check the pricing API runs: the mode's fields and only
+		// those, and a tier table that rates.
+		if err := domain.CheckPriceShape(mode, dr.UnitAmountCents, dr.Tiers, dr.PackageSize, dr.PackageAmountCents); err != nil {
+			return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q %w", raw.Key, r.Key, err)
 		}
 		out.RatingRules = append(out.RatingRules, dr)
 	}

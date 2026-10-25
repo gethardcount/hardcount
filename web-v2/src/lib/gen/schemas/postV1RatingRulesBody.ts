@@ -13,10 +13,10 @@ import type { PostV1RatingRulesBodyTiersItem } from './postV1RatingRulesBodyTier
 export type PostV1RatingRulesBody = {
   rule_key: string;
   name: string;
-  /** `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. */
+  /** `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. Send only the mode's fields: a field the mode does not use must be 0 or left out (`tiers`: `[]` or left out). Otherwise 422 with `param` naming it. */
   mode: PostV1RatingRulesBodyMode;
   currency: string;
-  /** Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
+  /** Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. */
   unit_amount_cents?: string;
   /** Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. */
   tiers?: PostV1RatingRulesBodyTiersItem[];
