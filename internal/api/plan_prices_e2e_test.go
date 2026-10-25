@@ -557,6 +557,52 @@ func TestE2E_PlanPrices_UsedPlanAppliesNextPeriod(t *testing.T) {
 	wantUsage(t, "P1: the edit and the add", r.cycle(sub, p1), map[string]int64{modelA: 50, catchAll: 20})
 }
 
+// TestE2E_PlanPrices_NewSubscriberOnTheDayOfAChange: a subscription that
+// starts on a used plan later on the day of a price change gets the change
+// from its second period, not its first. Its first period starts at midnight,
+// before the change, and a period is priced by the prices in force at its
+// start (ADR-130 §4, Risks). So its first period bills the old rate, still
+// bills a price removed that day, and does not bill a price added that day.
+// The docs say so (docs/ai-pricing.md, the API reference, the plan page).
+//
+// Mutation: price a first period at the subscription's start instead of the
+// period start, and the first period bills the edit, drops the removed
+// price and bills the added one.
+func TestE2E_PlanPrices_NewSubscriberOnTheDayOfAChange(t *testing.T) {
+	r := newPPRig(t, "same day")
+	calls := r.meter("calls", "sum")
+	extra := r.meter("extra", "sum")
+	tokens := r.meter("tokens", "sum")
+	plan, ids := r.plan("pro", perUnit(calls, "1", nil), perUnit(extra, "7", nil))
+	callsPrice, extraPrice := ids[0], ids[1]
+	r.subscribe(time.Time{}, r.customer("pp-sd-a", ""), plan) // the plan is used
+
+	for _, w := range []map[string]any{
+		r.must(time.Time{}, http.MethodPatch, "/v1/plans/"+plan+"/prices/"+callsPrice, map[string]any{"mode": "per_unit", "unit_amount_cents": "5"}, http.StatusOK),
+		r.must(time.Time{}, http.MethodDelete, "/v1/plans/"+plan+"/prices/"+extraPrice, nil, http.StatusOK),
+	} {
+		if flowStr(w, "effective") != "next_period" {
+			t.Fatalf("write on a used plan: effective %q, want next_period", flowStr(w, "effective"))
+		}
+	}
+	add := r.must(time.Time{}, http.MethodPost, "/v1/plans/"+plan+"/prices", perUnit(tokens, "2", nil), http.StatusCreated)
+	tokensPrice := flowStr(add, "id")
+
+	sub, p0, p1 := r.subscribe(time.Time{}, r.customer("pp-sd-b", ""), plan)
+	p2 := p1.AddDate(0, 1, 0)
+	for _, ev := range []string{"calls", "extra", "tokens"} {
+		r.ingest(time.Time{}, "pp-sd-b", ev, 10, recent(p0), nil)
+	}
+	r.run(p1.Add(time.Hour))
+	wantUsage(t, "first period: the prices in force at its midnight start", r.cycle(sub, p0), map[string]int64{callsPrice: 10, extraPrice: 70})
+
+	for _, ev := range []string{"calls", "extra", "tokens"} {
+		r.ingest(p1.Add(2*time.Hour), "pp-sd-b", ev, 10, p1.Add(time.Hour), nil)
+	}
+	r.run(p2.Add(time.Hour))
+	wantUsage(t, "second period: the changes", r.cycle(sub, p1), map[string]int64{callsPrice: 50, tokensPrice: 20})
+}
+
 // TestE2E_PlanPrices_RemovalEndsOverrides: removing a price ends its
 // customer overrides at the instant the removal takes effect for each
 // customer, and the response names them (ADR-130 §6). The open period keeps

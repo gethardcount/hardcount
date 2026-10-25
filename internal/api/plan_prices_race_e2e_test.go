@@ -383,6 +383,55 @@ func TestE2E_PlanPrices_TeardownAgainstWrites(t *testing.T) {
 	}
 }
 
+// TestE2E_PlanPrices_TeardownSubscriptionWriterAndPriceWrite: three parties.
+// A teardown holds its clock FOR UPDATE and waits to delete a subscription a
+// subscription writer holds; that writer next takes its plans FOR KEY SHARE;
+// a price write on the plan reads the clocks FOR SHARE. The price write
+// reads the clocks before it locks the plan (ADR-130 §8), so it waits at the
+// clock holding no plan, the writer gets its plan, and all three finish.
+//
+// Mutation: read the clocks after the plan lock, and the price write holds
+// the plan the writer waits for while it waits for the teardown's clock:
+// Postgres aborts one of the three with 40P01.
+func TestE2E_PlanPrices_TeardownSubscriptionWriterAndPriceWrite(t *testing.T) {
+	r := newPPRig(t, "teardown three")
+	admin := testutil.AdminPool(t)
+	calls := r.meter("calls", "sum")
+	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
+	clk := r.clock("td3", time.Now().UTC().AddDate(0, 0, -20).Truncate(time.Second))
+	sub, _, _ := r.clockSub("pp-td3", clk, plan)
+
+	// The subscription writer: its subscription row first, as every
+	// subscription writer does (ADR-115).
+	w := hold(t, admin, `SELECT 1 FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, sub)
+	teardown := r.async(http.MethodDelete, "/v1/test-clocks/"+clk, nil)
+	testutil.WaitForLockWaiter(t, context.Background(), admin, "DELETE FROM subscriptions")
+	edit := r.async(http.MethodPatch, "/v1/plans/"+plan+"/prices/"+ids[0], map[string]any{"mode": "per_unit", "unit_amount_cents": "11"})
+	testutil.WaitForLockWaiter(t, context.Background(), admin, clocksLockSQL)
+
+	// The writer's next step: its plans, as lockPlansTx takes them.
+	locked := make(chan error, 1)
+	go func() {
+		_, err := w.tx.Exec(`SELECT id FROM plans WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`, "{"+plan+"}")
+		locked <- err
+	}()
+	select {
+	case err := <-locked:
+		if err != nil {
+			t.Fatalf("the subscription writer's plan lock: %v (40P01 is the deadlock)", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the subscription writer's plan lock never returned")
+	}
+	w.release()
+	if got := wait(t, "teardown", teardown); got.code >= 300 {
+		t.Fatalf("teardown: %d %s (a 500 is the deadlock in the server log)", got.code, got.raw)
+	}
+	if got := wait(t, "price write", edit); got.code != http.StatusOK {
+		t.Fatalf("price write: %d %s (a 500 is the deadlock in the server log)", got.code, got.raw)
+	}
+}
+
 // waitForAnyLockWaiter returns once a backend waits on a lock in a statement
 // matching one of patterns.
 func waitForAnyLockWaiter(t *testing.T, admin *sql.DB, patterns ...string) {

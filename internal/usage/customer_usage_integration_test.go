@@ -117,7 +117,24 @@ func (f *customerUsageFixture) seedCustomerWithSubIn(
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
+	planID, subID = f.seedSubIn(t, ctx, cust.ID, planCode, prices, currency, cycleStart, cycleEnd)
+	return cust.ID, planID, subID
+}
 
+// seedSubIn creates a plan with prices in currency and an active
+// subscription of custID on it with a current billing cycle of
+// [cycleStart, cycleEnd). The subscription, its item and its billing
+// interval are written directly.
+func (f *customerUsageFixture) seedSubIn(
+	t *testing.T,
+	ctx context.Context,
+	custID string,
+	planCode string,
+	prices []pricing.PriceInput,
+	currency string,
+	cycleStart, cycleEnd time.Time,
+) (planID, subID string) {
+	t.Helper()
 	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code:            planCode,
 		Name:            planCode,
@@ -144,7 +161,7 @@ func (f *customerUsageFixture) seedCustomerWithSubIn(
 			current_billing_period_start, current_billing_period_end, next_billing_at,
 			created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, 'active', 'anniversary', $6, $7, $7, $8, $8)
-	`, subID, f.tenantID, "code-"+externalCustomerID, planCode+"-sub", cust.ID,
+	`, subID, f.tenantID, "code-"+planCode, planCode+"-sub", custID,
 		cycleStart, cycleEnd, now)
 	if err != nil {
 		t.Fatalf("insert sub: %v", err)
@@ -166,7 +183,7 @@ func (f *customerUsageFixture) seedCustomerWithSubIn(
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit sub: %v", err)
 	}
-	return cust.ID, plan.ID, subID
+	return plan.ID, subID
 }
 
 func TestCustomerUsage_SingleMeterFlatParity(t *testing.T) {
@@ -353,5 +370,73 @@ func TestCustomerUsage_NoSubscriptionRequiresExplicitWindow(t *testing.T) {
 	}
 	if res.Period.Source != "explicit" {
 		t.Errorf("period source: got %q, want explicit", res.Period.Source)
+	}
+}
+
+// TestCustomerUsage_TwoSubscriptionsOnTheirOwnPeriods: with no window, each
+// subscription is rated over its own current period (ADR-130 §10), so the
+// response's period spans every one of them, and each meter's daily buckets
+// cover its own subscription's period: the chart and the totals read the
+// same usage.
+//
+// Mutation: report only the latest-starting subscription's period, or read
+// every meter's buckets over the response's period, and meter a's usage
+// falls outside the period with no bucket, or meter b's previous-period
+// usage shows in a bucket but in no total.
+func TestCustomerUsage_TwoSubscriptionsOnTheirOwnPeriods(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration: skipped in -short mode")
+	}
+	f := newCustomerUsageFixture(t, "Customer Usage Two Periods")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 30*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC().Truncate(time.Hour)
+	aStart, aEnd := now.Add(-10*24*time.Hour), now.Add(20*24*time.Hour)
+	bStart, bEnd := now.Add(-24*time.Hour), now.Add(29*24*time.Hour)
+	meterA := f.meter(t, ctx, "calls_a")
+	meterB := f.meter(t, ctx, "calls_b")
+	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_two", "pln_a", []pricing.PriceInput{price(meterA.ID, 1, nil)}, aStart, aEnd)
+	f.seedSubIn(t, ctx, custID, "pln_b", []pricing.PriceInput{price(meterB.ID, 1, nil)}, "USD", bStart, bEnd)
+
+	ingest := func(meterID string, qty int64, ts time.Time) {
+		t.Helper()
+		if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
+			CustomerID: custID, MeterID: meterID, Quantity: decimal.NewFromInt(qty), Timestamp: &ts,
+		}); err != nil {
+			t.Fatalf("ingest: %v", err)
+		}
+	}
+	ingest(meterA.ID, 7, aStart.Add(time.Hour)) // in A's period, before B's
+	ingest(meterB.ID, 5, aStart.Add(time.Hour)) // before B's period: billed by B's previous period
+	ingest(meterB.ID, 3, bStart.Add(time.Hour)) // in B's period
+
+	res, err := f.custUsage.Get(ctx, f.tenantID, custID, usage.CustomerUsagePeriod{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !res.Period.From.Equal(aStart) || !res.Period.To.Equal(bEnd) {
+		t.Errorf("period = [%v, %v), want [%v, %v): every subscription's current period", res.Period.From, res.Period.To, aStart, bEnd)
+	}
+	totals := map[string]decimal.Decimal{}
+	for _, m := range res.Meters {
+		totals[m.MeterID] = m.TotalQuantity
+	}
+	charted := map[string]decimal.Decimal{}
+	for _, b := range res.Buckets {
+		if b.BucketStart.Before(res.Period.From.Truncate(24*time.Hour)) || !b.BucketStart.Before(res.Period.To) {
+			t.Errorf("bucket %v outside the period", b.BucketStart)
+		}
+		for id, q := range b.PerMeter {
+			charted[id] = charted[id].Add(q)
+		}
+	}
+	for id, want := range map[string]int64{meterA.ID: 7, meterB.ID: 3} {
+		if !totals[id].Equal(decimal.NewFromInt(want)) {
+			t.Errorf("meter %s total = %s, want %d", id, totals[id], want)
+		}
+		if !charted[id].Equal(decimal.NewFromInt(want)) {
+			t.Errorf("meter %s buckets add up to %s, want %d (its total)", id, charted[id], want)
+		}
 	}
 }
