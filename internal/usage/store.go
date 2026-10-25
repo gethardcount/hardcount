@@ -12,16 +12,20 @@ import (
 
 type Store interface {
 	Ingest(ctx context.Context, tenantID string, event domain.UsageEvent) (domain.UsageEvent, error)
-	// IngestAudited runs the caller-supplied audit emission on the ingest's
-	// own transaction (ADR-090). Only BACKFILL passes an emitter — live
-	// machine ingest passes nil (see PostgresStore.IngestAudited).
+	// IngestAudited runs emit on the ingest's own transaction after the
+	// insert, only when the row was written; an emit error rolls the write
+	// back. The service reads the meter's aggregation there, and for a
+	// BACKFILL writes the audit row (ADR-090; see
+	// PostgresStore.IngestAudited).
 	IngestAudited(ctx context.Context, tenantID string, event domain.UsageEvent, emit func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error)
 	// IngestBatch writes every event in ONE transaction — all-or-nothing,
 	// so a client retry after a mid-batch abort never re-ingests a
 	// committed prefix. Idempotency replays are counted in deduped, not
-	// errors. Returns the indices of the events it inserted, the number
+	// errors. after, when not nil, runs on the transaction after the
+	// inserts with the indices inserted; an error from it rolls the batch
+	// back. Returns the indices of the events it inserted, the number
 	// deduplicated, and the error.
-	IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) ([]int, int, error)
+	IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent, after func(tx *sql.Tx, inserted []int) error) ([]int, int, error)
 	// GetByIdempotencyKey returns the event a replayed key originally
 	// wrote (errs.ErrNotFound when absent). Backs replay-as-success on
 	// the public ingest door.

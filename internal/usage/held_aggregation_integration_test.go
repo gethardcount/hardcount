@@ -286,14 +286,6 @@ func (r *racingPeriods) OpenPeriods(context.Context, string, string) ([]usage.Op
 	return []usage.OpenPeriod{r.period}, nil
 }
 
-func (r *racingPeriods) MeterBuckets(ctx context.Context, tenantID, meterID string) (usage.MeterBuckets, error) {
-	m, err := r.f.psvc.GetMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return usage.MeterBuckets{}, err
-	}
-	return r.race(m), nil
-}
-
 func (r *racingPeriods) MeterBucketsTx(ctx context.Context, tx *sql.Tx, meterID string) (usage.MeterBuckets, error) {
 	m, err := pricing.NewPostgresStore(r.f.db).GetMeterTx(ctx, tx, meterID)
 	if err != nil {

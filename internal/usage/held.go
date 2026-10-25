@@ -161,12 +161,18 @@ func (s *Service) IngestResolvingHeld(ctx context.Context, tenantID string, inpu
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	// The open periods are read BEFORE the write: see open_period.go.
-	class, err := s.classifyEvent(ctx, tenantID, prepared, periodCacheFrom(ctx))
+	// The open periods are read BEFORE the write, the meter's aggregation on
+	// the write's transaction after the insert: see open_period.go.
+	periods, err := s.openPeriodsFor(ctx, tenantID, prepared.CustomerID, periodCacheFrom(ctx))
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	event, err := s.held.IngestResolvingHeld(ctx, tenantID, prepared)
+	var class Class
+	event, err := s.held.IngestResolvingHeld(ctx, tenantID, prepared, func(tx *sql.Tx, _ domain.UsageEvent) error {
+		c, err := s.classifyWritten(ctx, tx, prepared, periods, map[string]MeterBuckets{})
+		class = c
+		return err
+	})
 	if err == nil {
 		mw.RecordUsageIngested(1)
 		markAfterClose(ctx, &event, class)

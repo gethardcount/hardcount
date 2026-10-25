@@ -1677,10 +1677,12 @@ func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, custo
 	return out, nil
 }
 
-// usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest
-// reads, before it writes an event, to tell whether the event's period was
-// already invoiced (billing_status "after_close", ADR-120). The rule itself
-// lives in usage (usage.OpenPeriodOf, usage.BucketsOf); this only reads.
+// usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest and
+// the held-usage release read to tell whether an event's period was already
+// invoiced (billing_status "after_close", ADR-120): the open periods before
+// the write, the meter's aggregation on the write's transaction after it.
+// The rule itself lives in usage (usage.OpenPeriodOf, usage.BucketsOf); this
+// only reads.
 type usageOpenPeriods struct {
 	subs       usageLiveSubscriptions
 	pricing    usageMeterReader
@@ -1692,7 +1694,6 @@ type usageLiveSubscriptions interface {
 }
 
 type usageMeterReader interface {
-	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
 	GetMeterTx(ctx context.Context, tx *sql.Tx, id string) (domain.Meter, error)
 }
 
@@ -1731,17 +1732,8 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 	return out, nil
 }
 
-// MeterBuckets reads the meter: its one aggregation decides its buckets
-// (ADR-130 §2).
-func (a usageOpenPeriods) MeterBuckets(ctx context.Context, tenantID, meterID string) (usage.MeterBuckets, error) {
-	m, err := a.pricing.GetMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return usage.MeterBuckets{}, fmt.Errorf("get meter: %w", err)
-	}
-	return usage.BucketsOf(m), nil
-}
-
-// MeterBucketsTx reads the meter on tx, the caller's open transaction.
+// MeterBucketsTx reads the meter on tx, the caller's open transaction: its
+// one aggregation decides its buckets (ADR-130 §2).
 func (a usageOpenPeriods) MeterBucketsTx(ctx context.Context, tx *sql.Tx, meterID string) (usage.MeterBuckets, error) {
 	m, err := a.pricing.GetMeterTx(ctx, tx, meterID)
 	if err != nil {
