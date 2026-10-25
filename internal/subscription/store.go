@@ -32,10 +32,17 @@ const (
 )
 
 // ErrNotPaused is returned by ClearPauseCollection when the row exists but
-// carries no pause — the clear changed nothing, so nothing that announces a
-// resume may fire. Sentinel, not a DomainError: the operator path treats it
-// as an idempotent no-op, the schedule paths skip the row.
+// carries no pause, and by ResumeLiftedPause when the row no longer holds
+// the pause the resumer listed — the clear changed nothing, so nothing that
+// announces a resume may fire. Sentinel, not a DomainError: the operator
+// path treats it as an idempotent no-op, the schedule paths skip the row.
 var ErrNotPaused = errors.New("subscription: collection is not paused")
+
+// ErrPauseLifted is returned by ClearPauseCollection, after its commit,
+// when the pause had already lifted: the store resumed it with its own
+// trigger (payment or schedule) and announced that resume. The operator
+// resumed nothing, so the operator's resume announces nothing.
+var ErrPauseLifted = errors.New("subscription: the pause had already lifted")
 
 // ErrNoScheduledCancel is returned by ClearScheduledCancellation when the row
 // exists but has no cancel scheduled: the clear changed nothing, so
@@ -193,20 +200,38 @@ type Store interface {
 	// Permitted on any non-terminal status (active, paused, draft); a paused
 	// (hard) sub can also have collection paused, and clearing one without
 	// the other is supported. Service layer enforces behavior whitelist.
-	SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error)
+	//
+	// A lifted pause still on the row (its resumes_at has passed) is
+	// resumed first, in the same transaction, with its own trigger: this
+	// method, SetDunningPause, ClearPauseCollection and ResumeLiftedPause
+	// all go through one clear (PostgresStore.clearLiftedPauseTx), which
+	// runs onResume for the "Collection resumed" audit row and queues
+	// subscription.collection_resumed.
+	SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error)
 
 	// SetDunningPause is dunning's pause final action for the unpaid invoice
 	// invoiceID (see PostgresStore.SetDunningPause). It pauses only while
 	// that invoice is still owed, and never overrides a pause in force.
-	SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error)
+	// inTx, when set, runs in the pause's transaction only when it pauses
+	// (DunningPauseWritten); its error rolls the pause back. A lifted pause
+	// is resumed first, as in SetPauseCollection.
+	SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string, inTx func(tx *sql.Tx, sub domain.Subscription) error, onResume ResumeAudit) (domain.Subscription, DunningPauseOutcome, error)
 
-	// ClearPauseCollection nulls the pause_collection_* columns as a CAS: it
-	// changes the row only if a pause is set and returns ErrNotPaused
-	// otherwise (ErrNotFound if the row does not exist). Callers that fire
-	// `subscription.collection_resumed` must fire it only on success — two
-	// leaders (a failover window, a resumed stale process) clearing the same
-	// pause used to each fire the event (HA-readiness hazard 5).
-	ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error)
+	// ClearPauseCollection is the operator's resume. It changes the row only
+	// if a pause is set and returns ErrNotPaused otherwise (ErrNotFound if
+	// the row does not exist). A lifted pause is resumed with its own
+	// trigger, as in SetPauseCollection, and the call returns ErrPauseLifted.
+	// The operator's resume is announced only on success — two clearers of
+	// the same pause used to each fire the event (HA-readiness hazard 5).
+	ClearPauseCollection(ctx context.Context, tenantID, id string, onResume ResumeAudit) (domain.Subscription, error)
+
+	// ResumeLiftedPause is the scheduled resumers' clear of the lifted pause
+	// on listed, the row as their list read it. It is a compare-and-set on
+	// that pause (PostgresStore.clearLiftedPauseTx): when another writer
+	// resumed or replaced it after the list, it returns ErrNotPaused and
+	// writes nothing. On success the audit row (onResume) and
+	// subscription.collection_resumed commit with the clear.
+	ResumeLiftedPause(ctx context.Context, tenantID string, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, error)
 
 	// SetBillingThresholds writes the (amount_gte, item_thresholds) pair onto
 	// the row in one transaction. Replaces the full item_thresholds

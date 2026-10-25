@@ -76,9 +76,11 @@ var WebhookEventExtras = map[string][]string{
 	// The charge that raised the anomaly. The invoice's
 	// stripe_payment_intent_id is not always another charge: on
 	// amount_mismatch it is this one (docs/webhooks.md, per event).
-	EventPaymentDuplicateCharge:         {"incoming_payment_intent_id", "captured_cents"},
-	EventPaymentAmountMismatch:          {"incoming_payment_intent_id", "captured_cents"},
-	EventPaymentCurrencyMismatch:        {"incoming_payment_intent_id", "captured_cents"},
+	EventPaymentDuplicateCharge: {"incoming_payment_intent_id", "captured_cents"},
+	EventPaymentAmountMismatch:  {"incoming_payment_intent_id", "captured_cents"},
+	// charge_currency: the charge's currency (upper case); the invoice
+	// carries its own.
+	EventPaymentCurrencyMismatch:        {"incoming_payment_intent_id", "captured_cents", "charge_currency"},
 	EventPaymentReceivedOnVoidedInvoice: {"incoming_payment_intent_id", "captured_cents"},
 	EventPaymentDisputeOpened:           {"dispute"},
 	EventPaymentDisputeClosed:           {"dispute"},
@@ -94,7 +96,7 @@ var WebhookEventExtras = map[string][]string{
 	EventSubscriptionTrialExtended:          {"triggered_by"},
 	EventSubscriptionCancelScheduled:        {},
 	EventSubscriptionCancelCleared:          {},
-	EventSubscriptionCollectionPaused:       {},
+	EventSubscriptionCollectionPaused:       {"triggered_by"},
 	EventSubscriptionCollectionResumed:      {"triggered_by", "resumed_at"},
 	EventSubscriptionItemAdded:              {"item_id"},
 	EventSubscriptionItemUpdated:            {"item_id"},

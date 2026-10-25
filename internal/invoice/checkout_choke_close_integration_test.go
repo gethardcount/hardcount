@@ -147,6 +147,7 @@ func TestChokePointCloses(t *testing.T) {
 				subs := subscription.NewPostgresStore(db)
 				outbox := webhook.NewOutboxStore(db)
 				store.SetOutboxEnqueuer(outbox)
+				subs.SetOutboxEnqueuer(outbox)
 				store.SetDunningPauseReleaser(subs)
 				invID := seedFinalizedInvoice(t, db, store, ctx, tenantID)
 				inv, err := store.Get(ctx, tenantID, invID)
@@ -154,7 +155,7 @@ func TestChokePointCloses(t *testing.T) {
 					t.Fatalf("get invoice: %v", err)
 				}
 				subID := inv.SubscriptionID
-				if _, outcome, err := subs.SetDunningPause(ctx, tenantID, subID, invID); err != nil || outcome != subscription.DunningPauseWritten {
+				if _, outcome, err := subs.SetDunningPause(ctx, tenantID, subID, invID, nil, nil); err != nil || outcome != subscription.DunningPauseWritten {
 					t.Fatalf("dunning pause: outcome %v, err %v", outcome, err)
 				}
 				if ex.zeroDue {
@@ -182,7 +183,6 @@ func TestChokePointCloses(t *testing.T) {
 
 				svc := subscription.NewService(subs, clock.Real())
 				svc.SetAuditLogger(audit.NewLogger(db))
-				svc.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 				if _, errs := svc.ProcessExpiredPauseCollections(ctx, 100); len(errs) > 0 {
 					t.Fatalf("resumer: %v", errs)
 				}

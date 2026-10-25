@@ -481,11 +481,31 @@ turn automatic collection back on for each draft). A void or a write-off of
 the invoice does not lift the pause; only its payment does. A canceled
 subscription keeps its pause.
 
-**Not built.** A dunning pause sends no `subscription.collection_paused`
-webhook (the operator's does). The operator's resume sends
-`subscription.collection_resumed` even when nothing was paused. The
-resumer's clear does not check that `resumes_at` is unchanged since it
-listed the row. Each waits for a reported need.
+**Built later.** A dunning pause sends `subscription.collection_paused`
+with `triggered_by: dunning`, queued in the pause's transaction (#1384,
+2026-10-25); the operator's pause carries `triggered_by: operator`. The
+operator's resume sends nothing when nothing was paused (#1377).
+
+**Built later (#1384, 2026-10-25): a lifted pause is resumed once, by
+whoever removes it.** A lifted pause is one whose `resumes_at` has passed
+but which the resumer has not cleared yet. Four writers can remove it: the
+scheduled resumer, dunning's pause, the operator's pause and the
+operator's resume call. All four clear it through one store helper
+(`clearLiftedPauseTx`). That helper writes the "Collection resumed" row
+and queues `subscription.collection_resumed` in the clear's transaction,
+with the pause's own trigger (`payment` or `schedule`) and its
+`resumes_at`. So a new pause no longer drops the resume of the pause it
+replaces, and a resume call on a lifted pause sends no `operator` resume.
+
+The resumer's clear is a compare-and-set on the pause it listed. The row
+must still hold a lifted pause with the same `resumes_at` and the same
+setter (operator or dunning). If dunning pauses again between the list and
+the clear, the clear misses: the new pause stays and nothing is sent.
+`resumes_at` changes whenever the pause does, with one exception. On a test
+clock, a payment can lift a new dunning pause at the very instant an
+operator's timed pause reached its date. The setter tells those two apart,
+and with it the trigger. The invoice id is not in the key: two dunning
+pauses lifted at the same instant resume the same way.
 
 ## Amendment 2026-10-23 — the schedule is one list of days
 

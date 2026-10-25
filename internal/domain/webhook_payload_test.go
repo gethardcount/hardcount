@@ -176,7 +176,10 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 		return InvoiceWebhookData(goldenInvoice(), nil)
 	case EventInvoicePaymentRecorded:
 		return InvoiceWebhookData(goldenInvoice(), map[string]any{"recovered_from": string(InvoiceUncollectible)})
-	case EventPaymentDuplicateCharge, EventPaymentAmountMismatch, EventPaymentCurrencyMismatch, EventPaymentReceivedOnVoidedInvoice:
+	case EventPaymentDuplicateCharge, EventPaymentAmountMismatch, EventPaymentReceivedOnVoidedInvoice:
+		return InvoiceWebhookData(goldenInvoice(), anomaly)
+	case EventPaymentCurrencyMismatch:
+		anomaly["charge_currency"] = "EUR"
 		return InvoiceWebhookData(goldenInvoice(), anomaly)
 	case EventPaymentDisputeOpened, EventPaymentDisputeClosed:
 		return InvoiceWebhookData(goldenInvoice(), map[string]any{"dispute": goldenDispute()})
@@ -185,8 +188,10 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 	case EventPaymentMethodUpdated:
 		return PaymentMethodWebhookData(goldenPaymentMethod(), map[string]any{"stripe_customer_id": "cus_golden"})
 	case EventSubscriptionCreated, EventSubscriptionActivated, EventSubscriptionCancelScheduled,
-		EventSubscriptionCancelCleared, EventSubscriptionCollectionPaused:
+		EventSubscriptionCancelCleared:
 		return SubscriptionWebhookData(goldenSubscription(), nil)
+	case EventSubscriptionCollectionPaused:
+		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"triggered_by": "operator"})
 	case EventSubscriptionCanceled:
 		return SubscriptionWebhookData(goldenSubscription(), map[string]any{"canceled_by": "schedule", "reason": "trial_end_cancel"})
 	case EventSubscriptionTrialEnded:

@@ -4295,7 +4295,15 @@ type DunningPolicyInput struct {
 	// FinalInvoiceAction What happens to the invoice when retries run out.
 	FinalInvoiceAction DunningPolicyInputFinalInvoiceAction `json:"final_invoice_action,omitempty"`
 
-	// FinalSubscriptionAction What happens to the subscription when retries run out.
+	// FinalSubscriptionAction What happens to the subscription when retries run out. `pause`
+	// pauses collection and sends `subscription.collection_paused`
+	// with `triggered_by: dunning`. It does nothing if collection is
+	// already paused, the subscription is canceled, or the invoice
+	// was paid first. `cancel` cancels the subscription and sends
+	// `subscription.canceled` with `canceled_by: dunning`. It does
+	// nothing if the subscription is already canceled. If a scheduled
+	// cancel was already due, that cancel happens instead, and its
+	// event says `canceled_by: schedule`.
 	FinalSubscriptionAction DunningPolicyInputFinalSubscriptionAction `json:"final_subscription_action,omitempty"`
 	Name                    string                                    `json:"name,omitempty"`
 
@@ -4311,7 +4319,15 @@ type DunningPolicyInput struct {
 // DunningPolicyInputFinalInvoiceAction What happens to the invoice when retries run out.
 type DunningPolicyInputFinalInvoiceAction string
 
-// DunningPolicyInputFinalSubscriptionAction What happens to the subscription when retries run out.
+// DunningPolicyInputFinalSubscriptionAction What happens to the subscription when retries run out. `pause`
+// pauses collection and sends `subscription.collection_paused`
+// with `triggered_by: dunning`. It does nothing if collection is
+// already paused, the subscription is canceled, or the invoice
+// was paid first. `cancel` cancels the subscription and sends
+// `subscription.canceled` with `canceled_by: dunning`. It does
+// nothing if the subscription is already canceled. If a scheduled
+// cancel was already due, that cancel happens instead, and its
+// event says `canceled_by: schedule`.
 type DunningPolicyInputFinalSubscriptionAction string
 
 // DunningPolicyListItem defines model for DunningPolicyListItem.

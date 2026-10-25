@@ -181,6 +181,15 @@ func TestCancelAudit_SharedFate(t *testing.T) {
 				want: "dunning",
 			},
 			{
+				// Dunning run from a request, such as a test-clock advance
+				// made with an API key: the cancel is still dunning's.
+				name: "dunning origin wins over the request's API key",
+				ctx: func(c context.Context) context.Context {
+					return WithCancelOrigin(auth.WithKeyID(c, "vlx_key_clock_advance"), "dunning")
+				},
+				want: "dunning",
+			},
+			{
 				// An unstamped background canceller is honestly "system" —
 				// never a guess at whichever background path happens to
 				// exist today.
