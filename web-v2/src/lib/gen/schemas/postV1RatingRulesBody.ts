@@ -7,19 +7,21 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { PostV1RatingRulesBodyGraduatedTiersItem } from './postV1RatingRulesBodyGraduatedTiersItem';
 import type { PostV1RatingRulesBodyMode } from './postV1RatingRulesBodyMode';
+import type { PostV1RatingRulesBodyTiersItem } from './postV1RatingRulesBodyTiersItem';
 
 export type PostV1RatingRulesBody = {
   rule_key: string;
   name: string;
+  /** `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. */
   mode: PostV1RatingRulesBodyMode;
   currency: string;
-  /** Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
-  flat_amount_cents?: string;
-  graduated_tiers?: PostV1RatingRulesBodyGraduatedTiersItem[];
+  /** Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field. */
+  unit_amount_cents?: string;
+  /** Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. */
+  tiers?: PostV1RatingRulesBodyTiersItem[];
+  /** Used when `mode` is `package`. Must be above 0. */
   package_size?: number;
-  package_amount_cents?: number;
-  /** Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`. Fixed fees (package_amount_cents) stay integer cents. */
-  overage_unit_amount_cents?: string;
+  /** Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`. */
+  package_amount_cents?: string;
 };

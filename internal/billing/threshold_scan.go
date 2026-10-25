@@ -604,7 +604,7 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 			RatingRuleVersionID: pl.RatingRuleVersionID,
 			// Copy the stamped nominal rate through from the preview line so
 			// overage usage lines show the clean configured rate like cycle
-			// usage lines (nil for non-flat / base_fee — falls back to
+			// usage lines (nil for non-per_unit / base_fee — falls back to
 			// effective). ADR-054 re-examination.
 			NominalUnitAmountDecimal: pl.NominalUnitAmountDecimal,
 			BillingPeriodStart:       ps,

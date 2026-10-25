@@ -1,5 +1,5 @@
 key: replicate_style
-version: 5.0.0
+version: 6.0.0
 name: GPU compute pricing (per-second)
 summary: |
   Ready-made pricing for reselling GPU compute. Bills each customer per
@@ -48,29 +48,29 @@ meters:
 rating_rules:
   - key: gpu_h100
     name: NVIDIA H100 per-second
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.1525'
+    unit_amount_cents: '0.1525'
   - key: gpu_a100
     name: NVIDIA A100 (80GB) per-second
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.14'
+    unit_amount_cents: '0.14'
   - key: gpu_a40
     name: NVIDIA A40 per-second
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0575'
+    unit_amount_cents: '0.0575'
   - key: gpu_t4
     name: NVIDIA T4 per-second
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0225'
+    unit_amount_cents: '0.0225'
   - key: cpu
     name: CPU-only per-second
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.01'
+    unit_amount_cents: '0.01'
 
 # sum of per-interval deltas — see description; last_during_period on
 # cumulative totals under-bills the moment two jobs share a GPU class.

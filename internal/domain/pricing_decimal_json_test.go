@@ -18,7 +18,7 @@ func TestRatingRuleVersion_FlatAmountCents_SerializesAsDecimalString(t *testing.
 	rr := RatingRuleVersion{
 		ID:              "rr_1",
 		RuleKey:         "c35_sonnet_input",
-		FlatAmountCents: decimal.RequireFromString("0.0003"), // 0.0003¢/unit = $3.00 / 1,000,000 units
+		UnitAmountCents: decimal.RequireFromString("0.0003"), // 0.0003¢/unit = $3.00 / 1,000,000 units
 	}
 	b, err := json.Marshal(rr)
 	if err != nil {
@@ -28,17 +28,17 @@ func TestRatingRuleVersion_FlatAmountCents_SerializesAsDecimalString(t *testing.
 	t.Logf("GET /v1/rating-rules/<id> JSON → %s", js)
 
 	// (1) It is a QUOTED string "0.0003" — the API contract.
-	if !strings.Contains(js, `"flat_amount_cents":"0.0003"`) {
-		t.Fatalf("flat_amount_cents not serialized as the string \"0.0003\":\n%s", js)
+	if !strings.Contains(js, `"unit_amount_cents":"0.0003"`) {
+		t.Fatalf("unit_amount_cents not serialized as the string \"0.0003\":\n%s", js)
 	}
 	// (2) It is NOT a bare JSON number (no precision loss / rounding to 0).
 	for _, bad := range []string{
-		`"flat_amount_cents":0.0003`,
-		`"flat_amount_cents":0,`,
-		`"flat_amount_cents":0}`,
+		`"unit_amount_cents":0.0003`,
+		`"unit_amount_cents":0,`,
+		`"unit_amount_cents":0}`,
 	} {
 		if strings.Contains(js, bad) {
-			t.Fatalf("flat_amount_cents serialized as a number (precision-lossy): found %q in\n%s", bad, js)
+			t.Fatalf("unit_amount_cents serialized as a number (precision-lossy): found %q in\n%s", bad, js)
 		}
 	}
 
@@ -47,13 +47,13 @@ func TestRatingRuleVersion_FlatAmountCents_SerializesAsDecimalString(t *testing.
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if !back.FlatAmountCents.Equal(decimal.RequireFromString("0.0003")) {
-		t.Fatalf("round-trip lost precision: got %s, want 0.0003", back.FlatAmountCents)
+	if !back.UnitAmountCents.Equal(decimal.RequireFromString("0.0003")) {
+		t.Fatalf("round-trip lost precision: got %s, want 0.0003", back.UnitAmountCents)
 	}
 
 	// (4) Sanity: 0.0003¢/unit × 1,000,000 units = 300¢ exactly (the line amount
 	// that checkbox 4 asserts — rate stays decimal, line rounds to whole cents).
-	line := back.FlatAmountCents.Mul(decimal.NewFromInt(1_000_000))
+	line := back.UnitAmountCents.Mul(decimal.NewFromInt(1_000_000))
 	if !line.Equal(decimal.NewFromInt(300)) {
 		t.Fatalf("0.0003¢ × 1,000,000 = %s, want 300 (¢) = $3.00", line)
 	}

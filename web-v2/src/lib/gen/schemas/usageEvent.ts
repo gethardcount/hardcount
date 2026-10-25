@@ -26,14 +26,14 @@ export interface UsageEvent {
   /** How the event arrived. `backfill` means `POST /v1/usage-events/backfill`. */
   origin?: UsageEventOrigin;
   /**
-     * What serving this event cost you at your provider, in millionths
-     * of a dollar, priced from your provider cost rates when the event
-     * arrived. Absent when no rate matched or the event has no costed
-     * dimensions.
+     * What serving this event cost you at your provider, in US cents as
+     * a decimal string (e.g. "0.45"), priced from your provider cost
+     * rates when the event arrived. Absent when no rate matched or the
+     * event has no costed dimensions.
      */
-  provider_cost_micros?: number;
+  provider_cost_cents?: string;
   /**
-     * Where `provider_cost_micros` came from: `table` (your provider
+     * Where `provider_cost_cents` came from: `table` (your provider
      * cost rates), `observed` (the cost the sender reported), or
      * `not_applicable` (the meter has no costed dimensions). Absent when
      * the cost is unknown.

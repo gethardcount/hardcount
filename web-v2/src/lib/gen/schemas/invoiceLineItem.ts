@@ -25,7 +25,7 @@ export interface InvoiceLineItem {
   description: string;
   /** The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents. */
   quantity: string;
-  /** The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced at one flat rate it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents. */
+  /** The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents. */
   unit_amount_decimal: string;
   amount_cents: number;
   /** Tax rate as a percent (18.50 = 18.50%), up to 4-decimal precision. ADR-042/043. */
@@ -45,6 +45,7 @@ export interface InvoiceLineItem {
   tax_reason?: string;
   total_amount_cents: number;
   currency: string;
+  /** On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines. */
   pricing_mode?: string;
   rating_rule_version_id?: string;
   /** @nullable */

@@ -36,13 +36,13 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 		wantCents      int64
 		// stored is the rate as Postgres must hold it, read back from the
 		// store (the rule's, or the override's when one is set).
-		stored func(flat decimal.Decimal, tiers []domain.RatingTier, overage decimal.Decimal) string
+		stored func(unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Decimal) string
 		want   string
 	}{
 		{
 			// 2.5e14 × 1e-12 = 250 cents.
-			name:      "flat, smallest rate",
-			rule:      `"mode":"flat","flat_amount_cents":"0.000000000001"`,
+			name:      "per_unit, smallest rate",
+			rule:      `"mode":"per_unit","unit_amount_cents":"0.000000000001"`,
 			qty:       []string{"150000000000000", "100000000000000"},
 			wantCents: 250,
 			stored:    func(f decimal.Decimal, _ []domain.RatingTier, _ decimal.Decimal) string { return f.String() },
@@ -51,8 +51,8 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 		{
 			// 2 × 99999999.999999999999 = 199999999.999999999998, rounds to
 			// 200000000.
-			name:      "flat, large rate with 12 places",
-			rule:      `"mode":"flat","flat_amount_cents":"99999999.999999999999"`,
+			name:      "per_unit, large rate with 12 places",
+			rule:      `"mode":"per_unit","unit_amount_cents":"99999999.999999999999"`,
 			qty:       []string{"2"},
 			wantCents: 200000000,
 			stored:    func(f decimal.Decimal, _ []domain.RatingTier, _ decimal.Decimal) string { return f.String() },
@@ -63,7 +63,7 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 			// = 2000.000000005 + 500.4999999994995 = 2500.5000000044995,
 			// rounds to 2501. With the 12th place dropped it would be 2500.
 			name:      "graduated, 12-place tiers",
-			rule:      `"mode":"graduated","graduated_tiers":[{"up_to":1000,"unit_amount_cents":"2.000000000005"},{"up_to":0,"unit_amount_cents":0.999999999999}]`,
+			rule:      `"mode":"graduated","tiers":[{"up_to":1000,"unit_amount_cents":"2.000000000005"},{"up_to":null,"unit_amount_cents":0.999999999999}]`,
 			qty:       []string{"1000", "500.5"},
 			wantCents: 2501,
 			stored: func(_ decimal.Decimal, t []domain.RatingTier, _ decimal.Decimal) string {
@@ -72,20 +72,21 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 			want: "2.000000000005",
 		},
 		{
-			// 2 packages × 500 + 50 × 0.333333333333 = 1016.66666666665,
-			// rounds to 1017.
-			name:      "package overage with 12 places",
-			rule:      `"mode":"package","package_size":100,"package_amount_cents":500,"overage_unit_amount_cents":"0.333333333333"`,
-			qty:       []string{"250"},
-			wantCents: 1017,
-			stored:    func(_ decimal.Decimal, _ []domain.RatingTier, o decimal.Decimal) string { return o.String() },
-			want:      "0.333333333333",
+			// One unit is one whole package: 0.500000000001 rounds to 1.
+			// With the 12th place dropped it would be 0.5, which rounds half
+			// to even: 0.
+			name:      "package amount with 12 places",
+			rule:      `"mode":"package","package_size":100,"package_amount_cents":"0.500000000001"`,
+			qty:       []string{"1"},
+			wantCents: 1,
+			stored:    func(_ decimal.Decimal, _ []domain.RatingTier, p decimal.Decimal) string { return p.String() },
+			want:      "0.500000000001",
 		},
 		{
 			// The override prices it: 1e12 × 0.000000000999 = 999 cents.
-			name:      "flat override, 12 places",
-			rule:      `"mode":"flat","flat_amount_cents":"5"`,
-			override:  `"mode":"flat","flat_amount_cents":"0.000000000999"`,
+			name:      "per_unit override, 12 places",
+			rule:      `"mode":"per_unit","unit_amount_cents":"5"`,
+			override:  `"mode":"per_unit","unit_amount_cents":"0.000000000999"`,
 			qty:       []string{"1000000000000"},
 			wantCents: 999,
 			stored:    func(f decimal.Decimal, _ []domain.RatingTier, _ decimal.Decimal) string { return f.String() },
@@ -120,7 +121,7 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read rule: %v", err)
 			}
-			got := tc.stored(stored.FlatAmountCents, stored.GraduatedTiers, stored.OverageUnitAmountCents)
+			got := tc.stored(stored.UnitAmountCents, stored.Tiers, stored.PackageAmountCents)
 			if tc.override != "" {
 				var o domain.CustomerPriceOverride
 				if err := json.Unmarshal(post(h.OverrideRoutes(), `{"customer_id":"`+lf.customerID+`","rating_rule_version_id":"`+v2.ID+`",`+tc.override+`}`), &o); err != nil {
@@ -131,7 +132,7 @@ func TestRequestRates_ValidEdgesBillAsBefore(t *testing.T) {
 				if err != nil || len(os) != 1 {
 					t.Fatalf("read override: %v (%d rows)", err, len(os))
 				}
-				got = tc.stored(os[0].FlatAmountCents, os[0].GraduatedTiers, os[0].OverageUnitAmountCents)
+				got = tc.stored(os[0].UnitAmountCents, os[0].Tiers, os[0].PackageAmountCents)
 			}
 			if got != tc.want {
 				t.Errorf("stored rate %s, want %s", got, tc.want)
@@ -262,7 +263,7 @@ func TestRequestRates_LargeAmountsTaxedExactly(t *testing.T) {
 			v1 := lf.seededRule(t, ctx)
 			backdateRuleVersion(t, lf.thresholdFixture, ctx, v1.ID, lf.cycleStart.Add(-3*time.Hour))
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(
-				`{"rule_key":"calls_flat","name":"Calls","currency":"USD","mode":"flat","flat_amount_cents":"`+tc.rate+`"}`)).
+				`{"rule_key":"calls_flat","name":"Calls","currency":"USD","mode":"per_unit","unit_amount_cents":"`+tc.rate+`"}`)).
 				WithContext(auth.WithTenantID(ctx, lf.tenantID))
 			rr := httptest.NewRecorder()
 			h.RatingRuleRoutes().ServeHTTP(rr, req)

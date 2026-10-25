@@ -8,8 +8,9 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type CreatePriceOverrideBodyGraduatedTiersItem = {
-  up_to?: number;
-  /** Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0). */
+export type PostV1RatingRulesBodyTiersItem = {
+  /** @nullable */
+  up_to?: number | null;
+  /** Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0). */
   unit_amount_cents?: string;
 };

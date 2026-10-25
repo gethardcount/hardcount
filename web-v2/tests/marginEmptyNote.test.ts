@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 const emptyReport = {
   revenue_cents: 0,
   revenue_currency: 'USD',
-  cost_micros: 0,
+  cost_cents: '0',
   cost_currency: 'USD',
   margin_bps: null,
   unresolved_events: 0,

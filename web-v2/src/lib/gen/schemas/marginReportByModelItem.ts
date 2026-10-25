@@ -10,7 +10,8 @@
 
 export type MarginReportByModelItem = {
   model: string;
-  cost_micros: number;
+  /** This model's stamped provider cost in US cents, as a decimal string. */
+  cost_cents: string;
   revenue_cents?: number;
   /** True only when a pricing rule pins this model — margin is never heuristically allocated. */
   attributed: boolean;

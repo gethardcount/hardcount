@@ -1,36 +1,36 @@
 == in_arrears base, sum and max meters, then the April close
 subscription status=active period=[2026-05-01T00:00:00Z, 2026-06-01T00:00:00Z)
 invoice reason=threshold status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-04-20T00:00:00Z) subtotal=100 discount=0 tax=0 total=100 due=100 credits=0 currency=USD
-  line usage "Calls (calls)" qty=100 qty_decimal=100.000000000000 unit=1 nominal=1 amount=100 tax=0 total=100 mode=flat proration= period=[2026-04-01T00:00:00Z, 2026-04-20T00:00:00Z)
+  line usage "Calls (calls)" qty=100 qty_decimal=100.000000000000 unit=1 nominal=1 amount=100 tax=0 total=100 mode=per_unit proration= period=[2026-04-01T00:00:00Z, 2026-04-20T00:00:00Z)
 invoice reason=subscription_cycle status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z) subtotal=3037 discount=0 tax=0 total=3037 due=3037 credits=0 currency=USD
   line base_fee "plan_p - base fee (qty 1)" qty=1 qty_decimal=0.000000000000 unit=3000 nominal= amount=3000 tax=0 total=3000 mode= proration= period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z)
-  line usage "Calls (calls)" qty=30 qty_decimal=30.000000000000 unit=1 nominal=1 amount=30 tax=0 total=30 mode=flat proration= period=[2026-04-20T00:00:00Z, 2026-05-01T00:00:00Z)
-  line usage "peak (peak)" qty=7 qty_decimal=7.000000000000 unit=1 nominal=1 amount=7 tax=0 total=7 mode=flat proration= period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z)
+  line usage "Calls (calls)" qty=30 qty_decimal=30.000000000000 unit=1 nominal=1 amount=30 tax=0 total=30 mode=per_unit proration= period=[2026-04-20T00:00:00Z, 2026-05-01T00:00:00Z)
+  line usage "peak (peak)" qty=7 qty_decimal=7.000000000000 unit=1 nominal=1 amount=7 tax=0 total=7 mode=per_unit proration= period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z)
 
 == in_arrears base, sum and max meters, then an immediate cancel
 subscription status=canceled period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z)
 invoice reason=threshold status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-04-20T00:00:00Z) subtotal=100 discount=0 tax=0 total=100 due=100 credits=0 currency=USD
-  line usage "Calls (calls)" qty=100 qty_decimal=100.000000000000 unit=1 nominal=1 amount=100 tax=0 total=100 mode=flat proration= period=[2026-04-01T00:00:00Z, 2026-04-20T00:00:00Z)
+  line usage "Calls (calls)" qty=100 qty_decimal=100.000000000000 unit=1 nominal=1 amount=100 tax=0 total=100 mode=per_unit proration= period=[2026-04-01T00:00:00Z, 2026-04-20T00:00:00Z)
 invoice reason=subscription_cancel status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-04-25T00:00:00Z) subtotal=2437 discount=0 tax=0 total=2437 due=2437 credits=0 currency=USD
   line base_fee "plan_p - base fee (qty 1, prorated 24/30 days)" qty=1 qty_decimal=0.000000000000 unit=2400 nominal= amount=2400 tax=0 total=2400 mode= proration= period=[2026-04-01T00:00:00Z, 2026-04-25T00:00:00Z)
-  line usage "Calls (calls) - canceled mid-period" qty=30 qty_decimal=30.000000000000 unit=1 nominal=1 amount=30 tax=0 total=30 mode=flat proration= period=[2026-04-20T00:00:00Z, 2026-04-25T00:00:00Z)
-  line usage "peak (peak) - canceled mid-period" qty=7 qty_decimal=7.000000000000 unit=1 nominal=1 amount=7 tax=0 total=7 mode=flat proration= period=[2026-04-01T00:00:00Z, 2026-04-25T00:00:00Z)
+  line usage "Calls (calls) - canceled mid-period" qty=30 qty_decimal=30.000000000000 unit=1 nominal=1 amount=30 tax=0 total=30 mode=per_unit proration= period=[2026-04-20T00:00:00Z, 2026-04-25T00:00:00Z)
+  line usage "peak (peak) - canceled mid-period" qty=7 qty_decimal=7.000000000000 unit=1 nominal=1 amount=7 tax=0 total=7 mode=per_unit proration= period=[2026-04-01T00:00:00Z, 2026-04-25T00:00:00Z)
 
 == in_advance base, then the April close
 subscription status=active period=[2026-05-01T00:00:00Z, 2026-06-01T00:00:00Z)
 invoice reason=threshold status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-04-20T12:00:00Z) subtotal=100 discount=0 tax=0 total=100 due=100 credits=0 currency=USD
-  line usage "Calls (calls)" qty=100 qty_decimal=100.000000000000 unit=1 nominal=1 amount=100 tax=0 total=100 mode=flat proration= period=[2026-04-01T00:00:00Z, 2026-04-20T12:00:00Z)
+  line usage "Calls (calls)" qty=100 qty_decimal=100.000000000000 unit=1 nominal=1 amount=100 tax=0 total=100 mode=per_unit proration= period=[2026-04-01T00:00:00Z, 2026-04-20T12:00:00Z)
 invoice reason=subscription_create status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z) subtotal=3000 discount=0 tax=0 total=3000 due=3000 credits=0 currency=USD
   line base_fee "plan_a - base fee (qty 1)" qty=1 qty_decimal=0.000000000000 unit=3000 nominal= amount=3000 tax=0 total=3000 mode= proration= period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z)
 invoice reason=subscription_cycle status=finalized payment=pending period=[2026-05-01T00:00:00Z, 2026-06-01T00:00:00Z) subtotal=3040 discount=0 tax=0 total=3040 due=3040 credits=0 currency=USD
   line base_fee "plan_a - base fee (qty 1)" qty=1 qty_decimal=0.000000000000 unit=3000 nominal= amount=3000 tax=0 total=3000 mode= proration= period=[2026-05-01T00:00:00Z, 2026-06-01T00:00:00Z)
-  line usage "Calls (calls)" qty=40 qty_decimal=40.000000000000 unit=1 nominal=1 amount=40 tax=0 total=40 mode=flat proration= period=[2026-04-20T12:00:00Z, 2026-05-01T00:00:00Z)
+  line usage "Calls (calls)" qty=40 qty_decimal=40.000000000000 unit=1 nominal=1 amount=40 tax=0 total=40 mode=per_unit proration= period=[2026-04-20T12:00:00Z, 2026-05-01T00:00:00Z)
 
 == item threshold only, then the April close
 subscription status=active period=[2026-05-01T00:00:00Z, 2026-06-01T00:00:00Z)
 invoice reason=threshold status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-04-15T12:00:00Z) subtotal=60 discount=0 tax=0 total=60 due=60 credits=0 currency=USD
-  line usage "Calls (calls)" qty=60 qty_decimal=60.000000000000 unit=1 nominal=1 amount=60 tax=0 total=60 mode=flat proration= period=[2026-04-01T00:00:00Z, 2026-04-15T12:00:00Z)
+  line usage "Calls (calls)" qty=60 qty_decimal=60.000000000000 unit=1 nominal=1 amount=60 tax=0 total=60 mode=per_unit proration= period=[2026-04-01T00:00:00Z, 2026-04-15T12:00:00Z)
 invoice reason=subscription_cycle status=finalized payment=pending period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z) subtotal=3025 discount=0 tax=0 total=3025 due=3025 credits=0 currency=USD
   line base_fee "plan_a - base fee (qty 1)" qty=1 qty_decimal=0.000000000000 unit=3000 nominal= amount=3000 tax=0 total=3000 mode= proration= period=[2026-04-01T00:00:00Z, 2026-05-01T00:00:00Z)
-  line usage "Calls (calls)" qty=25 qty_decimal=25.000000000000 unit=1 nominal=1 amount=25 tax=0 total=25 mode=flat proration= period=[2026-04-15T12:00:00Z, 2026-05-01T00:00:00Z)
+  line usage "Calls (calls)" qty=25 qty_decimal=25.000000000000 unit=1 nominal=1 amount=25 tax=0 total=25 mode=per_unit proration= period=[2026-04-15T12:00:00Z, 2026-05-01T00:00:00Z)
 

@@ -4,9 +4,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api, formatCents, formatDateTime } from '@/lib/api'
-import type { Meter, MeterPricingRule, RatingRule } from '@/lib/api'
+import type { Meter, MeterPricingRule, PriceTier, RatingRule } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
-import { money, priceRate, unitScale } from '@/lib/priceDisplay'
+import { money, priceRate, pricingModeLabel, unitScale } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
 import { deleteMatchedPriceSentence, METER_IN_USE_TITLE, meterInUseMessage } from '@/lib/pricingCopy'
 import {
@@ -116,9 +116,10 @@ export default function MeterDetailPage() {
 
   const loading = meterLoading
 
-  const graduatedTierLabel = (tier: { up_to: number }, index: number, tiers: { up_to: number }[]) => {
-    const prev = index > 0 ? tiers[index - 1].up_to : 0
-    if (tier.up_to === 0 || tier.up_to === -1) {
+  // Only the last tier is open (up_to null), so every earlier bound is a number.
+  const graduatedTierLabel = (tier: PriceTier, index: number, tiers: PriceTier[]) => {
+    const prev = index > 0 ? tiers[index - 1].up_to ?? 0 : 0
+    if (tier.up_to == null) {
       return `Beyond ${prev.toLocaleString()} units`
     }
     if (index === 0) {
@@ -259,20 +260,20 @@ export default function MeterDetailPage() {
           {ratingRule ? (
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Badge variant="info">{ratingRule.mode}</Badge>
+                <Badge variant="info">{pricingModeLabel(ratingRule.mode)}</Badge>
                 {ratingRule.currency && (
                   <span className="text-xs text-muted-foreground font-medium uppercase">{ratingRule.currency}</span>
                 )}
               </div>
 
-              {ratingRule.mode === 'flat' && (
+              {ratingRule.mode === 'per_unit' && (
                 <div>
-                  <span className="text-3xl font-semibold text-foreground">{money(ratingRule.flat_amount_cents, unitScale(meter.unit).scale, ratingRule.currency)}</span>
+                  <span className="text-3xl font-semibold text-foreground">{money(ratingRule.unit_amount_cents, unitScale(meter.unit).scale, ratingRule.currency)}</span>
                   <span className="text-sm text-muted-foreground ml-2">per {unitScale(meter.unit).per}</span>
                 </div>
               )}
 
-              {ratingRule.mode === 'graduated' && ratingRule.graduated_tiers && (
+              {ratingRule.mode === 'graduated' && ratingRule.tiers && (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -281,9 +282,9 @@ export default function MeterDetailPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {ratingRule.graduated_tiers.map((tier, i) => (
+                    {ratingRule.tiers.map((tier, i) => (
                       <TableRow key={i}>
-                        <TableCell>{graduatedTierLabel(tier, i, ratingRule.graduated_tiers!)}</TableCell>
+                        <TableCell>{graduatedTierLabel(tier, i, ratingRule.tiers!)}</TableCell>
                         <TableCell className="text-right">{money(tier.unit_amount_cents, unitScale(meter.unit).scale, ratingRule.currency)}</TableCell>
                       </TableRow>
                     ))}
@@ -295,12 +296,8 @@ export default function MeterDetailPage() {
                 <div>
                   <span className="text-3xl font-semibold text-foreground">{ratingRule.package_size.toLocaleString()}</span>
                   <span className="text-sm text-muted-foreground ml-2">{meter.unit || 'units'} per package at</span>
-                  <span className="text-lg font-semibold text-foreground ml-1">{formatCents(ratingRule.package_amount_cents, ratingRule.currency)}</span>
-                  {ratingRule.overage_unit_amount_cents && ratingRule.overage_unit_amount_cents !== '0' && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Beyond full packages: {money(ratingRule.overage_unit_amount_cents, unitScale(meter.unit).scale, ratingRule.currency)} per {unitScale(meter.unit).per}
-                    </p>
-                  )}
+                  <span className="text-lg font-semibold text-foreground ml-1">{money(ratingRule.package_amount_cents, 0, ratingRule.currency)}</span>
+                  <p className="text-sm text-muted-foreground mt-1">A part package is charged as a whole one.</p>
                 </div>
               )}
             </div>

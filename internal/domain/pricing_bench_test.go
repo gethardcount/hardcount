@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkComputeAmountCents_Flat(b *testing.B) {
-	rule := RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(500)}
+	rule := RatingRuleVersion{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(500)}
 	q := decimal.NewFromInt(1000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -18,12 +18,12 @@ func BenchmarkComputeAmountCents_Flat(b *testing.B) {
 func BenchmarkComputeAmountCents_Graduated_5Tiers(b *testing.B) {
 	rule := RatingRuleVersion{
 		Mode: PricingGraduated,
-		GraduatedTiers: []RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)},
-			{UpTo: 500, UnitAmountCents: decimal.NewFromInt(30)},
-			{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(20)},
-			{UpTo: 5000, UnitAmountCents: decimal.NewFromInt(10)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},
+		Tiers: []RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)},
+			{UpTo: new(int64(500)), UnitAmountCents: decimal.NewFromInt(30)},
+			{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(20)},
+			{UpTo: new(int64(5000)), UnitAmountCents: decimal.NewFromInt(10)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
 		},
 	}
 	q := decimal.NewFromInt(7500)
@@ -35,10 +35,9 @@ func BenchmarkComputeAmountCents_Graduated_5Tiers(b *testing.B) {
 
 func BenchmarkComputeAmountCents_Package(b *testing.B) {
 	rule := RatingRuleVersion{
-		Mode:                   PricingPackage,
-		PackageSize:            1000,
-		PackageAmountCents:     2000,
-		OverageUnitAmountCents: decimal.NewFromInt(30),
+		Mode:               PricingPackage,
+		PackageSize:        1000,
+		PackageAmountCents: decimal.NewFromInt(2000),
 	}
 	q := decimal.NewFromInt(15750)
 	b.ResetTimer()

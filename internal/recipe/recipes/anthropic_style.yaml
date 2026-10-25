@@ -1,5 +1,5 @@
 key: anthropic_style
-version: 8.0.0
+version: 9.0.0
 name: Anthropic (Claude) token pricing
 summary: |
   Ready-made pricing for reselling Claude (Anthropic) API access. Bills each
@@ -53,83 +53,83 @@ rating_rules:
   # Cache multiples as everywhere: read 0.1×, 5m write 1.25×, 1h write 2×.
   - key: opus45_input
     name: Claude Opus 4.5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0005'
+    unit_amount_cents: '0.0005'
   - key: opus45_output
     name: Claude Opus 4.5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0025'
+    unit_amount_cents: '0.0025'
   - key: opus45_cache_read
     name: Claude Opus 4.5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
   - key: opus45_cache_write_5m
     name: Claude Opus 4.5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000625'
+    unit_amount_cents: '0.000625'
   - key: opus45_cache_write_1h
     name: Claude Opus 4.5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
 
   # Claude Sonnet 4.5 — input $3.00 / output $15.00 per million (per-token).
   - key: sonnet45_input
     name: Claude Sonnet 4.5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0003'
+    unit_amount_cents: '0.0003'
   - key: sonnet45_output
     name: Claude Sonnet 4.5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: sonnet45_cache_read
     name: Claude Sonnet 4.5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00003'
+    unit_amount_cents: '0.00003'
   - key: sonnet45_cache_write_5m
     name: Claude Sonnet 4.5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000375'
+    unit_amount_cents: '0.000375'
   - key: sonnet45_cache_write_1h
     name: Claude Sonnet 4.5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0006'
+    unit_amount_cents: '0.0006'
 
   # Claude Haiku 4.5 — input $1.00 / output $5.00 per million (per-token).
   - key: haiku45_input
     name: Claude Haiku 4.5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0001'
+    unit_amount_cents: '0.0001'
   - key: haiku45_output
     name: Claude Haiku 4.5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0005'
+    unit_amount_cents: '0.0005'
   - key: haiku45_cache_read
     name: Claude Haiku 4.5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00001'
+    unit_amount_cents: '0.00001'
   - key: haiku45_cache_write_5m
     name: Claude Haiku 4.5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000125'
+    unit_amount_cents: '0.000125'
   - key: haiku45_cache_write_1h
     name: Claude Haiku 4.5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0002'
+    unit_amount_cents: '0.0002'
 
   # ---- Legacy claude-3.x families (kept: proxies mid-migration still
   # route them, and the LiteLLM mapper still families them — dropping the
@@ -138,112 +138,112 @@ rating_rules:
   # Claude 3.5 Sonnet — input $3.00 / output $15.00 per million (per-token).
   - key: c35_sonnet_input
     name: Claude 3.5 Sonnet input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0003'
+    unit_amount_cents: '0.0003'
   - key: c35_sonnet_output
     name: Claude 3.5 Sonnet output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: c35_sonnet_cache_read
     name: Claude 3.5 Sonnet cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00003'
+    unit_amount_cents: '0.00003'
   - key: c35_sonnet_cache_write_5m
     name: Claude 3.5 Sonnet cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000375'
+    unit_amount_cents: '0.000375'
   - key: c35_sonnet_cache_write_1h
     name: Claude 3.5 Sonnet cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0006'
+    unit_amount_cents: '0.0006'
 
   # Claude 3 Opus — input $15.00 / output $75.00 per million (per-token).
   - key: opus_input
     name: Claude 3 Opus input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: opus_output
     name: Claude 3 Opus output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0075'
+    unit_amount_cents: '0.0075'
   - key: opus_cache_read
     name: Claude 3 Opus cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00015'
+    unit_amount_cents: '0.00015'
   - key: opus_cache_write_5m
     name: Claude 3 Opus cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001875'
+    unit_amount_cents: '0.001875'
   - key: opus_cache_write_1h
     name: Claude 3 Opus cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.003'
+    unit_amount_cents: '0.003'
 
   # Claude 3 Sonnet — input $3.00 / output $15.00 per million (per-token).
   - key: sonnet_input
     name: Claude 3 Sonnet input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0003'
+    unit_amount_cents: '0.0003'
   - key: sonnet_output
     name: Claude 3 Sonnet output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: sonnet_cache_read
     name: Claude 3 Sonnet cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00003'
+    unit_amount_cents: '0.00003'
   - key: sonnet_cache_write_5m
     name: Claude 3 Sonnet cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000375'
+    unit_amount_cents: '0.000375'
   - key: sonnet_cache_write_1h
     name: Claude 3 Sonnet cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0006'
+    unit_amount_cents: '0.0006'
 
   # Claude 3 Haiku — input $0.25 / output $1.25 per million (per-token).
   # Decimal rates carry the exact derived cache multiples (no rounding):
   # cache_read 0.1×, cache_write_5m 1.25×, cache_write_1h 2× of input.
   - key: haiku_input
     name: Claude 3 Haiku input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000025'
+    unit_amount_cents: '0.000025'
   - key: haiku_output
     name: Claude 3 Haiku output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000125'
+    unit_amount_cents: '0.000125'
   - key: haiku_cache_read
     name: Claude 3 Haiku cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0000025'
+    unit_amount_cents: '0.0000025'
   - key: haiku_cache_write_5m
     name: Claude 3 Haiku cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00003125'
+    unit_amount_cents: '0.00003125'
   - key: haiku_cache_write_1h
     name: Claude 3 Haiku cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
 
 # Disjoint token roles → one rule per (model, token_type) at equal priority.
 
@@ -257,326 +257,326 @@ rating_rules:
   # Claude Fable 5 — input $10 / output $50 per million (current flagship; page-verified 2026-07-26).
   - key: fable5_input
     name: Claude Fable 5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
   - key: fable5_output
     name: Claude Fable 5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.005'
+    unit_amount_cents: '0.005'
   - key: fable5_cache_read
     name: Claude Fable 5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0001'
+    unit_amount_cents: '0.0001'
   - key: fable5_cache_write_5m
     name: Claude Fable 5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00125'
+    unit_amount_cents: '0.00125'
   - key: fable5_cache_write_1h
     name: Claude Fable 5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.002'
+    unit_amount_cents: '0.002'
 
   # Claude Mythos 5 — input $10 / output $50 per million (limited availability, published price; page-verified 2026-07-26).
   - key: mythos5_input
     name: Claude Mythos 5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
   - key: mythos5_output
     name: Claude Mythos 5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.005'
+    unit_amount_cents: '0.005'
   - key: mythos5_cache_read
     name: Claude Mythos 5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0001'
+    unit_amount_cents: '0.0001'
   - key: mythos5_cache_write_5m
     name: Claude Mythos 5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00125'
+    unit_amount_cents: '0.00125'
   - key: mythos5_cache_write_1h
     name: Claude Mythos 5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.002'
+    unit_amount_cents: '0.002'
 
   # Claude Opus 5 — input $5 / output $25 per million (current; page-verified 2026-07-26).
   - key: opus5_input
     name: Claude Opus 5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0005'
+    unit_amount_cents: '0.0005'
   - key: opus5_output
     name: Claude Opus 5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0025'
+    unit_amount_cents: '0.0025'
   - key: opus5_cache_read
     name: Claude Opus 5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
   - key: opus5_cache_write_5m
     name: Claude Opus 5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000625'
+    unit_amount_cents: '0.000625'
   - key: opus5_cache_write_1h
     name: Claude Opus 5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
 
   # Claude Opus 4.8 — input $5 / output $25 per million (current; page-verified 2026-07-26).
   - key: opus48_input
     name: Claude Opus 4.8 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0005'
+    unit_amount_cents: '0.0005'
   - key: opus48_output
     name: Claude Opus 4.8 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0025'
+    unit_amount_cents: '0.0025'
   - key: opus48_cache_read
     name: Claude Opus 4.8 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
   - key: opus48_cache_write_5m
     name: Claude Opus 4.8 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000625'
+    unit_amount_cents: '0.000625'
   - key: opus48_cache_write_1h
     name: Claude Opus 4.8 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
 
   # Claude Opus 4.7 — input $5 / output $25 per million (current; page-verified 2026-07-26).
   - key: opus47_input
     name: Claude Opus 4.7 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0005'
+    unit_amount_cents: '0.0005'
   - key: opus47_output
     name: Claude Opus 4.7 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0025'
+    unit_amount_cents: '0.0025'
   - key: opus47_cache_read
     name: Claude Opus 4.7 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
   - key: opus47_cache_write_5m
     name: Claude Opus 4.7 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000625'
+    unit_amount_cents: '0.000625'
   - key: opus47_cache_write_1h
     name: Claude Opus 4.7 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
 
   # Claude Opus 4.6 — input $5 / output $25 per million (current; page-verified 2026-07-26).
   - key: opus46_input
     name: Claude Opus 4.6 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0005'
+    unit_amount_cents: '0.0005'
   - key: opus46_output
     name: Claude Opus 4.6 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0025'
+    unit_amount_cents: '0.0025'
   - key: opus46_cache_read
     name: Claude Opus 4.6 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
   - key: opus46_cache_write_5m
     name: Claude Opus 4.6 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000625'
+    unit_amount_cents: '0.000625'
   - key: opus46_cache_write_1h
     name: Claude Opus 4.6 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
 
   # Claude Sonnet 5 — input $2 / output $10 per million (launch price made standard; page-checked 2026-10-22).
   - key: sonnet5_input
     name: Claude Sonnet 5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0002'
+    unit_amount_cents: '0.0002'
   - key: sonnet5_output
     name: Claude Sonnet 5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
   - key: sonnet5_cache_read
     name: Claude Sonnet 5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00002'
+    unit_amount_cents: '0.00002'
   - key: sonnet5_cache_write_5m
     name: Claude Sonnet 5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00025'
+    unit_amount_cents: '0.00025'
   - key: sonnet5_cache_write_1h
     name: Claude Sonnet 5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0004'
+    unit_amount_cents: '0.0004'
 
   # Claude Sonnet 4.6 — input $3 / output $15 per million (current; page-verified 2026-07-26).
   - key: sonnet46_input
     name: Claude Sonnet 4.6 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0003'
+    unit_amount_cents: '0.0003'
   - key: sonnet46_output
     name: Claude Sonnet 4.6 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: sonnet46_cache_read
     name: Claude Sonnet 4.6 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00003'
+    unit_amount_cents: '0.00003'
   - key: sonnet46_cache_write_5m
     name: Claude Sonnet 4.6 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000375'
+    unit_amount_cents: '0.000375'
   - key: sonnet46_cache_write_1h
     name: Claude Sonnet 4.6 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0006'
+    unit_amount_cents: '0.0006'
 
   # Claude Opus 4.1 — input $15 / output $75 per million (deprecated, price still published; page-verified 2026-07-26).
   - key: opus41_input
     name: Claude Opus 4.1 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: opus41_output
     name: Claude Opus 4.1 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0075'
+    unit_amount_cents: '0.0075'
   - key: opus41_cache_read
     name: Claude Opus 4.1 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00015'
+    unit_amount_cents: '0.00015'
   - key: opus41_cache_write_5m
     name: Claude Opus 4.1 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001875'
+    unit_amount_cents: '0.001875'
   - key: opus41_cache_write_1h
     name: Claude Opus 4.1 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.003'
+    unit_amount_cents: '0.003'
 
   # Claude Opus 4 — input $15 / output $75 per million (retired, price still published; page-verified 2026-07-26).
   - key: opus4_input
     name: Claude Opus 4 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: opus4_output
     name: Claude Opus 4 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0075'
+    unit_amount_cents: '0.0075'
   - key: opus4_cache_read
     name: Claude Opus 4 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00015'
+    unit_amount_cents: '0.00015'
   - key: opus4_cache_write_5m
     name: Claude Opus 4 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001875'
+    unit_amount_cents: '0.001875'
   - key: opus4_cache_write_1h
     name: Claude Opus 4 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.003'
+    unit_amount_cents: '0.003'
 
   # Claude Sonnet 4 — input $3 / output $15 per million (retired, price still published; page-verified 2026-07-26).
   - key: sonnet4_input
     name: Claude Sonnet 4 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0003'
+    unit_amount_cents: '0.0003'
   - key: sonnet4_output
     name: Claude Sonnet 4 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0015'
+    unit_amount_cents: '0.0015'
   - key: sonnet4_cache_read
     name: Claude Sonnet 4 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00003'
+    unit_amount_cents: '0.00003'
   - key: sonnet4_cache_write_5m
     name: Claude Sonnet 4 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000375'
+    unit_amount_cents: '0.000375'
   - key: sonnet4_cache_write_1h
     name: Claude Sonnet 4 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0006'
+    unit_amount_cents: '0.0006'
 
   # Claude Haiku 3.5 — input $0.8 / output $4 per million (retired, price still published; page-verified 2026-07-26).
   - key: haiku35_input
     name: Claude Haiku 3.5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00008'
+    unit_amount_cents: '0.00008'
   - key: haiku35_output
     name: Claude Haiku 3.5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0004'
+    unit_amount_cents: '0.0004'
   - key: haiku35_cache_read
     name: Claude Haiku 3.5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000008'
+    unit_amount_cents: '0.000008'
   - key: haiku35_cache_write_5m
     name: Claude Haiku 3.5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0001'
+    unit_amount_cents: '0.0001'
   - key: haiku35_cache_write_1h
     name: Claude Haiku 3.5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00016'
+    unit_amount_cents: '0.00016'
 
   # ---- 2026-10-22: the current lineup. Each block page-checked
   # ---- 2026-10-22. Cache writes 1.25x (5m) and 2x (1h) input. ----
@@ -584,164 +584,164 @@ rating_rules:
   # Claude Fable 5.1 — input $10 / output $50 per million; cache read 0.025x input (page-checked 2026-10-22).
   - key: fable51_input
     name: Claude Fable 5.1 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
   - key: fable51_output
     name: Claude Fable 5.1 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.005'
+    unit_amount_cents: '0.005'
   - key: fable51_cache_read
     name: Claude Fable 5.1 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000025'
+    unit_amount_cents: '0.000025'
   - key: fable51_cache_write_5m
     name: Claude Fable 5.1 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00125'
+    unit_amount_cents: '0.00125'
   - key: fable51_cache_write_1h
     name: Claude Fable 5.1 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.002'
+    unit_amount_cents: '0.002'
 
   # Claude Mythos 5.1 — input $10 / output $50 per million; cache read 0.025x input (limited availability, published price) (page-checked 2026-10-22).
   - key: mythos51_input
     name: Claude Mythos 5.1 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
   - key: mythos51_output
     name: Claude Mythos 5.1 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.005'
+    unit_amount_cents: '0.005'
   - key: mythos51_cache_read
     name: Claude Mythos 5.1 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000025'
+    unit_amount_cents: '0.000025'
   - key: mythos51_cache_write_5m
     name: Claude Mythos 5.1 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00125'
+    unit_amount_cents: '0.00125'
   - key: mythos51_cache_write_1h
     name: Claude Mythos 5.1 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.002'
+    unit_amount_cents: '0.002'
 
   # Claude Opus 5.5 — input $4 / output $20 per million; cache read 0.05x input (page-checked 2026-10-22).
   - key: opus55_input
     name: Claude Opus 5.5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0004'
+    unit_amount_cents: '0.0004'
   - key: opus55_output
     name: Claude Opus 5.5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.002'
+    unit_amount_cents: '0.002'
   - key: opus55_cache_read
     name: Claude Opus 5.5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00002'
+    unit_amount_cents: '0.00002'
   - key: opus55_cache_write_5m
     name: Claude Opus 5.5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0005'
+    unit_amount_cents: '0.0005'
   - key: opus55_cache_write_1h
     name: Claude Opus 5.5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0008'
+    unit_amount_cents: '0.0008'
 
   # Claude Sonnet 5.5 — input $2 / output $10 per million; cache read 0.05x input (page-checked 2026-10-22).
   - key: sonnet55_input
     name: Claude Sonnet 5.5 input
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0002'
+    unit_amount_cents: '0.0002'
   - key: sonnet55_output
     name: Claude Sonnet 5.5 output
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.001'
+    unit_amount_cents: '0.001'
   - key: sonnet55_cache_read
     name: Claude Sonnet 5.5 cache read
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00001'
+    unit_amount_cents: '0.00001'
   - key: sonnet55_cache_write_5m
     name: Claude Sonnet 5.5 cache write (5m)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00025'
+    unit_amount_cents: '0.00025'
   - key: sonnet55_cache_write_1h
     name: Claude Sonnet 5.5 cache write (1h)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0004'
+    unit_amount_cents: '0.0004'
 
   # Claude Haiku 5.5 — prompts up to 100,000 tokens: input $0.10 / output $0.50 per million (page-checked 2026-10-22).
   - key: haiku55_std_input
     name: Claude Haiku 5.5 input (prompts up to 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00001'
+    unit_amount_cents: '0.00001'
   - key: haiku55_std_output
     name: Claude Haiku 5.5 output (prompts up to 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
   - key: haiku55_std_cache_read
     name: Claude Haiku 5.5 cache read (prompts up to 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000001'
+    unit_amount_cents: '0.000001'
   - key: haiku55_std_cache_write_5m
     name: Claude Haiku 5.5 cache write (5m) (prompts up to 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0000125'
+    unit_amount_cents: '0.0000125'
   - key: haiku55_std_cache_write_1h
     name: Claude Haiku 5.5 cache write (1h) (prompts up to 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00002'
+    unit_amount_cents: '0.00002'
 
   # Claude Haiku 5.5 — prompts over 100,000 tokens: input $0.50 / output $2.50 per million. A prompt counts input, cache reads and cache writes; the tier applies to every token of the call (page-checked 2026-10-22).
   - key: haiku55_long_input
     name: Claude Haiku 5.5 input (prompts over 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00005'
+    unit_amount_cents: '0.00005'
   - key: haiku55_long_output
     name: Claude Haiku 5.5 output (prompts over 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.00025'
+    unit_amount_cents: '0.00025'
   - key: haiku55_long_cache_read
     name: Claude Haiku 5.5 cache read (prompts over 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.000005'
+    unit_amount_cents: '0.000005'
   - key: haiku55_long_cache_write_5m
     name: Claude Haiku 5.5 cache write (5m) (prompts over 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0000625'
+    unit_amount_cents: '0.0000625'
   - key: haiku55_long_cache_write_1h
     name: Claude Haiku 5.5 cache write (1h) (prompts over 100K tokens)
-    mode: flat
+    mode: per_unit
     currency: '{{ .currency }}'
-    flat_amount_cents: '0.0001'
+    unit_amount_cents: '0.0001'
 
 pricing_rules:
   - meter: tokens

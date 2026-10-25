@@ -53,9 +53,9 @@ func (s *PostgresStore) CreateRatingRuleTx(ctx context.Context, tx *sql.Tx, tena
 
 func (s *PostgresStore) createRatingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.RatingRuleVersion) (domain.RatingRuleVersion, error) {
 	id := postgres.NewID("vlx_rrv")
-	tiersJSON, err := json.Marshal(rule.GraduatedTiers)
+	tiersJSON, err := json.Marshal(rule.Tiers)
 	if err != nil {
-		return domain.RatingRuleVersion{}, fmt.Errorf("marshal graduated_tiers: %w", err)
+		return domain.RatingRuleVersion{}, fmt.Errorf("marshal tiers: %w", err)
 	}
 
 	// Version allocated IN SQL: MAX(version)+1 per (tenant, rule_key)
@@ -74,23 +74,23 @@ func (s *PostgresStore) createRatingRuleTx(ctx context.Context, tx *sql.Tx, tena
 	// time-anchored write does (ADR-030).
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO rating_rule_versions (id, tenant_id, rule_key, name, version, lifecycle_state, mode,
-			currency, flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, created_at)
+			currency, unit_amount_cents, tiers, package_size, package_amount_cents,
+			created_at)
 		SELECT $1, $2, $3, $4,
 			COALESCE(MAX(version), 0) + 1,
-			$5, $6, $7, $8, $9, $10, $11, $12, $13
+			$5, $6, $7, $8, $9, $10, $11, $12
 		FROM rating_rule_versions WHERE tenant_id = $2 AND rule_key = $3
 		RETURNING id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency,
-			flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, created_at
+			unit_amount_cents, tiers, package_size, package_amount_cents,
+			created_at
 	`, id, tenantID, rule.RuleKey, rule.Name, rule.LifecycleState, rule.Mode,
-		rule.Currency, rule.FlatAmountCents, tiersJSON, rule.PackageSize,
-		rule.PackageAmountCents, rule.OverageUnitAmountCents, clock.Now(ctx),
+		rule.Currency, rule.UnitAmountCents, tiersJSON, rule.PackageSize,
+		rule.PackageAmountCents, clock.Now(ctx),
 	).Scan(
 		&rule.ID, &rule.TenantID, &rule.RuleKey, &rule.Name, &rule.Version,
-		&rule.LifecycleState, &rule.Mode, &rule.Currency, &rule.FlatAmountCents,
+		&rule.LifecycleState, &rule.Mode, &rule.Currency, &rule.UnitAmountCents,
 		&tiersJSON, &rule.PackageSize, &rule.PackageAmountCents,
-		&rule.OverageUnitAmountCents, &rule.CreatedAt,
+		&rule.CreatedAt,
 	)
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
@@ -99,7 +99,7 @@ func (s *PostgresStore) createRatingRuleTx(ctx context.Context, tx *sql.Tx, tena
 		return domain.RatingRuleVersion{}, err
 	}
 
-	if err := json.Unmarshal(tiersJSON, &rule.GraduatedTiers); err != nil {
+	if err := json.Unmarshal(tiersJSON, &rule.Tiers); err != nil {
 		return domain.RatingRuleVersion{}, err
 	}
 	return rule, nil
@@ -120,8 +120,8 @@ func (s *PostgresStore) GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey 
 
 	rule, err := scanRatingRule(tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency,
-			flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, created_at
+			unit_amount_cents, tiers, package_size, package_amount_cents,
+			created_at
 		FROM rating_rule_versions
 		WHERE rule_key = $1 AND lifecycle_state = 'active' AND created_at <= $2
 		ORDER BY version DESC LIMIT 1
@@ -135,8 +135,8 @@ func (s *PostgresStore) GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey 
 	// Key born after asOf: earliest active version.
 	return scanRatingRule(tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency,
-			flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, created_at
+			unit_amount_cents, tiers, package_size, package_amount_cents,
+			created_at
 		FROM rating_rule_versions
 		WHERE rule_key = $1 AND lifecycle_state = 'active'
 		ORDER BY version ASC LIMIT 1
@@ -152,8 +152,8 @@ func (s *PostgresStore) GetRatingRule(ctx context.Context, tenantID, id string) 
 
 	return scanRatingRule(tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency,
-			flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, created_at
+			unit_amount_cents, tiers, package_size, package_amount_cents,
+			created_at
 		FROM rating_rule_versions WHERE id = $1
 	`, id))
 }
@@ -166,8 +166,8 @@ func (s *PostgresStore) ListRatingRules(ctx context.Context, filter RatingRuleFi
 	defer postgres.Rollback(tx)
 
 	query := `SELECT id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency,
-		flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-		overage_unit_amount_cents, created_at
+		unit_amount_cents, tiers, package_size, package_amount_cents,
+		created_at
 		FROM rating_rule_versions`
 	args := []any{}
 	clauses := []string{}
@@ -538,9 +538,9 @@ func scanRatingRule(row rowScanner) (domain.RatingRuleVersion, error) {
 	var r domain.RatingRuleVersion
 	var tiersJSON []byte
 	err := row.Scan(&r.ID, &r.TenantID, &r.RuleKey, &r.Name, &r.Version,
-		&r.LifecycleState, &r.Mode, &r.Currency, &r.FlatAmountCents,
+		&r.LifecycleState, &r.Mode, &r.Currency, &r.UnitAmountCents,
 		&tiersJSON, &r.PackageSize, &r.PackageAmountCents,
-		&r.OverageUnitAmountCents, &r.CreatedAt)
+		&r.CreatedAt)
 	if err == sql.ErrNoRows {
 		return domain.RatingRuleVersion{}, errs.ErrNotFound
 	}
@@ -548,11 +548,11 @@ func scanRatingRule(row rowScanner) (domain.RatingRuleVersion, error) {
 		return domain.RatingRuleVersion{}, err
 	}
 	// Fail loud on malformed tier JSON rather than silently leaving
-	// GraduatedTiers empty — an empty graduated rule would surface as
+	// Tiers empty — an empty graduated rule would surface as
 	// ErrInvalidPricingConfig only later at billing time, far from the cause.
 	if len(tiersJSON) > 0 {
-		if err := json.Unmarshal(tiersJSON, &r.GraduatedTiers); err != nil {
-			return domain.RatingRuleVersion{}, fmt.Errorf("unmarshal graduated_tiers for rule %s: %w", r.ID, err)
+		if err := json.Unmarshal(tiersJSON, &r.Tiers); err != nil {
+			return domain.RatingRuleVersion{}, fmt.Errorf("unmarshal tiers for rule %s: %w", r.ID, err)
 		}
 	}
 	return r, nil

@@ -34,10 +34,14 @@ import (
 // 5.0.0): a meter is named by `event_name`, not `key`, and a pricing rule has
 // no `aggregation_mode` (ADR-130 §2). parseRecipe refuses both old keys, so
 // a recipe at the previous version no longer parses. Prices are unchanged.
+// MAJOR bumps on 2026-10-24 again (anthropic 9.0.0, openai 8.0.0,
+// replicate 6.0.0): the price shapes take ADR-130 §3's names, mode per_unit
+// and unit_amount_cents, and parseRecipe refuses flat_amount_cents. Prices
+// are unchanged.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@8.0.0": "2870d246a3a3adcb4613f726680ea8bca5f299d2bec257d4a8966deb536e6d3b",
-	"openai_style@7.0.0":    "94889be8d143599f7d97c5c7ca898bc583a50665235e0002723f722ec5b9e098",
-	"replicate_style@5.0.0": "6911b1938cd95239fe4a208c8db30221251d7519e307b2fbda7f9d980909ae2c",
+	"anthropic_style@9.0.0": "9ee04582a095329eb8a6b476a1ba31611e7b5cf95e7c6c0699f8faca22f7d8c6",
+	"openai_style@8.0.0":    "f91cc6ba80c4f5c4ca4cb768c5ea1d5eda151f9d43be33c82774e23d46c114ca",
+	"replicate_style@6.0.0": "5b87f6fed4cdbbdba8454a96451df1c6deb0cb8b8f3369fc79e33d9fbb4d994e",
 }
 
 // TestRecipeCatalog_VersionMovesWithContent asserts every embedded recipe's

@@ -127,7 +127,7 @@ type CustomerUsageSubscription struct {
 
 // CustomerUsageMeter is one meter on the customer's plan(s) with its
 // rolled-up usage and cost over the queried window. Rules carries the
-// per-rule breakdown for multi-dim meters; for a flat single-rule meter
+// per-rule breakdown for multi-dim meters; for a single-rule meter
 // the slice is length 1 with no DimensionMatch.
 type CustomerUsageMeter struct {
 	MeterID          string              `json:"meter_id"`
@@ -151,7 +151,7 @@ type CustomerUsageRule struct {
 	Quantity            decimal.Decimal `json:"quantity"`
 	AmountCents         int64           `json:"amount_cents"`
 	// UnitAmountDecimal is the per-unit price to display (decimal cents): the
-	// configured nominal rate for flat rules, else the effective amount÷qty —
+	// configured nominal rate for per_unit rules, else the effective amount÷qty —
 	// the SAME value the invoice line shows (ADR-054, via
 	// domain.DisplayUnitAmountDecimalFor). Rendered with the decimal-aware rate
 	// formatter so a sub-cent rate never collapses to $0.00.
@@ -512,7 +512,7 @@ func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customer
 		totalQty = totalQty.Add(agg.Quantity)
 		totalCents += cents
 
-		// Same display rate the invoice line shows: nominal for flat rules,
+		// Same display rate the invoice line shows: nominal for per_unit rules,
 		// effective amount÷qty for tiered — resolved from the same
 		// override-applied ratingRule (ADR-054).
 		unitAmountDecimal := domain.DisplayUnitAmountDecimalFor(ratingRule, cents, agg.Quantity).String()

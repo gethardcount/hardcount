@@ -321,26 +321,26 @@ components:
           type: integer
         mode:
           type: string
-          enum: [flat, graduated, package]
+          enum: [per_unit, graduated, package]
+          description: >-
+            `per_unit` bills quantity × `unit_amount_cents`. `graduated`
+            bills each tier's part of the quantity at that tier's rate.
+            `package` bills ceil(quantity ÷ `package_size`) ×
+            `package_amount_cents`: a part package bills as a whole one.
         currency:
           type: string
-        flat_amount_cents:
+        unit_amount_cents:
           type: string
           description: >-
-            Per-unit rate in cents, as a decimal string (e.g. "0.0003" =
+            Price per unit in cents, as a decimal string (e.g. "0.0003" =
             $3.00 per 1,000,000 units), returned as stored. The limits on a
             new rate are on `POST /v1/rating-rules`. Invoice line amounts
             and totals still round to whole cents.
-        graduated_tiers:
+        tiers:
           type: array
+          description: Empty (`[]`) unless `mode` is `graduated`.
           items:
-            type: object
-            properties:
-              up_to:
-                type: integer
-              unit_amount_cents:
-                type: string
-                description: Per-unit rate in cents, as a decimal string (see flat_amount_cents).
+            $ref: "#/components/schemas/PriceTier"
         lifecycle_state:
           type: string
           enum: [draft, active, archived]
@@ -348,14 +348,28 @@ components:
           type: integer
           format: int64
         package_amount_cents:
-          type: integer
-          format: int64
-        overage_unit_amount_cents:
           type: string
-          description: Per-unit overage rate in cents, as a decimal string.
+          description: Price of one package in cents, as a decimal string (e.g. "0.2" = $0.002).
         created_at:
           type: string
           format: date-time
+
+    PriceTier:
+      type: object
+      required: [up_to, unit_amount_cents]
+      properties:
+        up_to:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            The tier's upper bound in whole units: the tier prices the
+            quantity above the previous tier's bound, up to this one. `null`
+            on the last tier, which has no upper bound. Only the last tier
+            is `null`, and it must be.
+        unit_amount_cents:
+          type: string
+          description: Price per unit in cents in this tier, as a decimal string.
 
     Subscription:
       type: object
@@ -513,19 +527,18 @@ components:
           type: string
           enum: [api, backfill]
           description: How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
-        provider_cost_micros:
-          type: integer
-          format: int64
+        provider_cost_cents:
+          type: string
           description: |
-            What serving this event cost you at your provider, in millionths
-            of a dollar, priced from your provider cost rates when the event
-            arrived. Absent when no rate matched or the event has no costed
-            dimensions.
+            What serving this event cost you at your provider, in US cents as
+            a decimal string (e.g. "0.45"), priced from your provider cost
+            rates when the event arrived. Absent when no rate matched or the
+            event has no costed dimensions.
         provider_cost_source:
           type: string
           enum: [table, not_applicable, observed]
           description: |
-            Where `provider_cost_micros` came from: `table` (your provider
+            Where `provider_cost_cents` came from: `table` (your provider
             cost rates), `observed` (the cost the sender reported), or
             `not_applicable` (the meter has no costed dimensions). Absent when
             the cost is unknown.
@@ -1285,7 +1298,7 @@ components:
           type: string
           description: >
             The unit price in cents at full precision, for example "0.3"
-            for $0.003. On a usage line priced at one flat rate it is that
+            for $0.003. On a usage line priced `per_unit` it is that
             rate; on any other line it is amount_cents ÷ quantity. Line
             amounts and totals stay whole cents.
         amount_cents:
@@ -1319,6 +1332,7 @@ components:
           type: string
         pricing_mode:
           type: string
+          description: "On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines."
         rating_rule_version_id:
           type: string
         billing_period_start:
@@ -1358,7 +1372,7 @@ components:
 
     ProviderCostRate:
       type: object
-      required: [id, provider, model, token_type, cost_per_token, currency]
+      required: [id, provider, model, token_type, unit_cost_cents, currency]
       properties:
         id:
           type: string
@@ -1370,13 +1384,13 @@ components:
           type: string
         token_type:
           type: string
-        cost_per_token:
+        unit_cost_cents:
           type: string
-          description: Decimal dollars per token.
+          description: US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens).
         currency:
           type: string
           enum: [USD]
-          description: Always USD. Cost and margin count every rate in dollars.
+          description: Always USD. Cost and margin count every rate in US cents.
         created_at:
           type: string
           format: date-time
@@ -1386,7 +1400,7 @@ components:
 
     MarginReport:
       type: object
-      required: [customer_id, from, to, revenue_cents, cost_micros, cost_currency, by_model, unattributed_revenue_cents, unresolved_events, costed_events, cost_rates_configured]
+      required: [customer_id, from, to, revenue_cents, cost_cents, cost_currency, by_model, unattributed_revenue_cents, unresolved_events, costed_events, cost_rates_configured]
       properties:
         customer_id:
           type: string
@@ -1403,13 +1417,12 @@ components:
         revenue_currency:
           type: string
           description: Currency of revenue_cents (the customer's price rules). Omitted when the window's revenue spans more than one currency or the customer has no priced meter.
-        cost_micros:
-          type: integer
-          format: int64
-          description: Total stamped provider cost, micro-dollars.
+        cost_cents:
+          type: string
+          description: Total stamped provider cost in US cents, as a decimal string (e.g. "275.75").
         cost_currency:
           type: string
-          description: Currency of cost_micros. Always USD.
+          description: Currency of cost_cents. Always USD.
         margin_bps:
           type: integer
           format: int64
@@ -1418,13 +1431,13 @@ components:
           type: array
           items:
             type: object
-            required: [model, cost_micros, attributed]
+            required: [model, cost_cents, attributed]
             properties:
               model:
                 type: string
-              cost_micros:
-                type: integer
-                format: int64
+              cost_cents:
+                type: string
+                description: This model's stamped provider cost in US cents, as a decimal string.
               revenue_cents:
                 type: integer
                 format: int64
@@ -1441,7 +1454,7 @@ components:
         unresolved_events:
           type: integer
           format: int64
-          description: Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `cost_per_token`, was too large to record (about $9.2 trillion or more, either sign).
+          description: Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign).
         costed_events:
           type: integer
           format: int64
@@ -1615,7 +1628,7 @@ components:
 
     RecipeRatingRule:
       type: object
-      required: [key, mode, currency, flat_amount_cents, overage_unit_amount_cents]
+      required: [key, mode, currency, unit_amount_cents, package_amount_cents]
       properties:
         key:
           type: string
@@ -1623,31 +1636,23 @@ components:
           type: string
         mode:
           type: string
-          enum: [flat, graduated, package]
+          enum: [per_unit, graduated, package]
+          description: As on RatingRule.
         currency:
           type: string
-        flat_amount_cents:
+        unit_amount_cents:
           type: string
-          description: Per-unit rate in cents, as a decimal string (see RatingRule.flat_amount_cents).
-        graduated_tiers:
+          description: Price per unit in cents, as a decimal string (see RatingRule.unit_amount_cents).
+        tiers:
           type: array
           items:
-            type: object
-            properties:
-              up_to:
-                type: integer
-              unit_amount_cents:
-                type: string
-                description: Per-unit rate in cents, as a decimal string.
+            $ref: "#/components/schemas/PriceTier"
         package_size:
           type: integer
           format: int64
         package_amount_cents:
-          type: integer
-          format: int64
-        overage_unit_amount_cents:
           type: string
-          description: Per-unit overage rate in cents, as a decimal string.
+          description: Price of one package in cents, as a decimal string.
 
     RecipePricingRule:
       type: object
@@ -3564,32 +3569,22 @@ components:
           description: The rule version named when the override was created. For reference only.
         mode:
           type: string
-          enum: [flat, graduated, package]
-        flat_amount_cents:
+          enum: [per_unit, graduated, package]
+          description: As on RatingRule.
+        unit_amount_cents:
           type: string
-          description: Per-unit rate in cents, as a decimal string.
-        graduated_tiers:
+          description: Price per unit in cents, as a decimal string.
+        tiers:
           type: array
           description: Empty (`[]`) unless `mode` is `graduated`.
           items:
-            type: object
-            properties:
-              up_to:
-                type: integer
-                format: int64
-                description: 0 on the last tier means no upper bound.
-              unit_amount_cents:
-                type: string
-                description: Per-unit rate in cents, as a decimal string.
+            $ref: "#/components/schemas/PriceTier"
         package_size:
           type: integer
           format: int64
         package_amount_cents:
-          type: integer
-          format: int64
-        overage_unit_amount_cents:
           type: string
-          description: Per-unit overage rate in cents, as a decimal string.
+          description: Price of one package in cents, as a decimal string.
         reason:
           type: string
         active:
@@ -5097,7 +5092,7 @@ components:
           format: int64
         pricing_mode:
           type: string
-          enum: [flat, graduated, package]
+          enum: [per_unit, graduated, package]
 
     InvoicePreviewTotal:
       type: object
@@ -7789,42 +7784,57 @@ paths:
                   type: string
                 mode:
                   type: string
-                  enum: [flat, graduated, package]
+                  enum: [per_unit, graduated, package]
+                  description: >-
+                    `per_unit` bills quantity × `unit_amount_cents`.
+                    `graduated` bills each tier's part of the quantity at
+                    that tier's rate. `package` bills ceil(quantity ÷
+                    `package_size`) × `package_amount_cents`: a part package
+                    bills as a whole one.
                 currency:
                   type: string
-                flat_amount_cents:
+                unit_amount_cents:
                   type: string
                   description: >-
-                    Per-unit rate in cents, as a decimal string (e.g.
-                    "0.0003" = $3.00 per 1,000,000 units). 0 or more, under 10^18, at most 12 decimal places (trailing zeros
+                    Price per unit in cents, as a decimal string (e.g.
+                    "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is
+                    `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros
                     do not count), and at most 100 characters. A JSON number
-                    is also read. The limits hold in every mode, also for a
-                    rate the mode does not use. A value outside them is
+                    is also read. The limits hold in every mode, also for an
+                    amount the mode does not use. A value outside them is
                     refused with 422 and `param` naming the field.
-                graduated_tiers:
+                tiers:
                   type: array
+                  description: >-
+                    Used when `mode` is `graduated`. Each `up_to` is a whole
+                    number above the one before. The last tier has
+                    `up_to: null` (no upper bound), and only the last.
+                    Otherwise 422 with `param` `tiers`.
                   items:
                     type: object
                     properties:
                       up_to:
                         type: integer
+                        format: int64
+                        nullable: true
                       unit_amount_cents:
                         type: string
                         description: >-
-                          Per-unit rate in cents, as a decimal string, with
-                          the limits of `flat_amount_cents`. A refusal names
-                          `graduated_tiers[i].unit_amount_cents` (i counts
+                          Price per unit in cents in this tier, as a decimal
+                          string, with the limits of `unit_amount_cents`. A
+                          refusal names `tiers[i].unit_amount_cents` (i counts
                           from 0).
                 package_size:
                   type: integer
+                  format: int64
+                  description: Used when `mode` is `package`. Must be above 0.
                 package_amount_cents:
-                  type: integer
-                overage_unit_amount_cents:
                   type: string
                   description: >-
-                    Package-mode per-unit overage rate in cents, as a decimal
-                    string, with the limits of `flat_amount_cents`. Fixed fees
-                    (package_amount_cents) stay integer cents.
+                    Price of one package in cents, as a decimal string (e.g.
+                    "0.2" with `package_size` 1000 = $0.002 per 1,000 units),
+                    with the limits of `unit_amount_cents`. Used when `mode`
+                    is `package`.
       responses:
         "201":
           description: Rating rule created
@@ -11526,7 +11536,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [provider, model, token_type, cost_per_token]
+              required: [provider, model, token_type, unit_cost_cents]
               properties:
                 provider:
                   type: string
@@ -11536,13 +11546,13 @@ paths:
                 token_type:
                   type: string
                   description: ADR-044 role — input / output / cache_read.
-                cost_per_token:
+                unit_cost_cents:
                   type: string
                   description: >-
-                    Dollars per token, as a decimal string (e.g. "0.000003").
-                    0 or more, under 10^8, at most 12 decimal places (trailing
-                    zeros do not count), and at most 100 characters. A JSON
-                    number is also read.
+                    US cents per token, as a decimal string (e.g. "0.0003" =
+                    $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at
+                    most 12 decimal places (trailing zeros do not count), and
+                    at most 100 characters. A JSON number is also read.
                 currency:
                   type: string
                   enum: [USD]
@@ -11558,7 +11568,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProviderCostRate"
         "422":
-          description: "`validation_error`: a required field is missing, `cost_per_token` is not a number or is outside its limits, or `currency` is not USD (param names the field)."
+          description: "`validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, or `currency` is not USD (param names the field)."
           content:
             application/json:
               schema:
@@ -12311,7 +12321,7 @@ paths:
         both required and may span at most 366 days. `customer_id`,
         `meter_id` and `dimensions` narrow it like the event list. Columns: id,
         customer_id, meter_id, quantity, timestamp, idempotency_key,
-        origin, dimensions_json, provider_cost_micros,
+        origin, dimensions_json, provider_cost_cents (US cents, a decimal),
         provider_cost_source.
 
         Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work
@@ -13004,48 +13014,48 @@ paths:
                   description: Any version of the rule to override.
                 mode:
                   type: string
-                  enum: [flat, graduated, package]
-                flat_amount_cents:
+                  enum: [per_unit, graduated, package]
+                  description: As on `POST /v1/rating-rules`.
+                unit_amount_cents:
                   type: string
                   description: >-
-                    Per-unit rate in cents, as a decimal string. Used when
-                    `mode` is `flat`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros
+                    Price per unit in cents, as a decimal string. Used when
+                    `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros
                     do not count), and at most 100 characters. A JSON number
-                    is also read. The limits hold in every mode, also for a
-                    rate the mode does not use. A value outside them is
+                    is also read. The limits hold in every mode, also for an
+                    amount the mode does not use. A value outside them is
                     refused with 422 and `param` naming the field.
-                graduated_tiers:
+                tiers:
                   type: array
-                  description: |
-                    Used when `mode` is `graduated`. Each `up_to` must be larger
-                    than the one before, and the last tier must have
-                    `up_to: 0` (no upper bound).
+                  description: >-
+                    Used when `mode` is `graduated`. Each `up_to` is a whole
+                    number above the one before. The last tier has
+                    `up_to: null` (no upper bound), and only the last.
+                    Otherwise 422 with `param` `tiers`.
                   items:
                     type: object
                     properties:
                       up_to:
                         type: integer
                         format: int64
+                        nullable: true
                       unit_amount_cents:
                         type: string
                         description: >-
-                          Per-unit rate in cents, as a decimal string, with
-                          the limits of `flat_amount_cents`. A refusal names
-                          `graduated_tiers[i].unit_amount_cents` (i counts
+                          Price per unit in cents in this tier, as a decimal
+                          string, with the limits of `unit_amount_cents`. A
+                          refusal names `tiers[i].unit_amount_cents` (i counts
                           from 0).
                 package_size:
                   type: integer
                   format: int64
                   description: Used when `mode` is `package`. Must be above 0.
                 package_amount_cents:
-                  type: integer
-                  format: int64
-                  description: Price of one package in cents. Used when `mode` is `package`.
-                overage_unit_amount_cents:
                   type: string
                   description: >-
-                    Package-mode per-unit overage rate in cents, as a decimal
-                    string, with the limits of `flat_amount_cents`.
+                    Price of one package in cents, as a decimal string, with
+                    the limits of `unit_amount_cents`. Used when `mode` is
+                    `package`.
                 reason:
                   type: string
       responses:

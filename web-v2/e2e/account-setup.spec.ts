@@ -17,7 +17,7 @@ interface RatingRule {
   version: number
   mode: string
   currency: string
-  flat_amount_cents: string
+  unit_amount_cents: string
 }
 interface Meter {
   id: string
@@ -38,7 +38,7 @@ interface PlanDetail extends Plan {
 interface PriceOverride {
   id: string
   rule_key: string
-  flat_amount_cents: string
+  unit_amount_cents: string
   active: boolean
 }
 interface Preview {
@@ -119,7 +119,7 @@ test('create a price, a meter that bills at it, and a plan with both; a meter wi
   // (ADR-096).
   const unpriced = await api<Meter>('POST', '/meters', { event_name: `e2e_unpriced_${id}`, name: `E2E Unpriced ${id}`, unit: 'call', aggregation: 'sum' })
 
-  // A flat price of $0.002 per unit.
+  // A per-unit price of $0.002.
   await page.goto('/pricing?tab=rules')
   await page.getByRole('button', { name: 'Add Price' }).click()
   const priceDialog = page.getByRole('dialog', { name: 'Create price' })
@@ -132,11 +132,11 @@ test('create a price, a meter that bills at it, and a plan with both; a meter wi
   expect(priceRes.status()).toBe(201)
   const rule = (await priceRes.json()) as RatingRule
   // The dialog sends the rate in cents, exactly: $0.002 is 0.2 cents.
-  expect([rule.rule_key, rule.name, rule.mode, rule.flat_amount_cents, rule.version, rule.currency]).toEqual([priceKey, priceName, 'flat', '0.2', 1, 'USD'])
+  expect([rule.rule_key, rule.name, rule.mode, rule.unit_amount_cents, rule.version, rule.currency]).toEqual([priceKey, priceName, 'per_unit', '0.2', 1, 'USD'])
   await expect(toasts(page).getByText('Price created', { exact: true })).toBeVisible()
   await page.getByLabel('Search prices').fill(priceKey)
   const priceRow = page.getByRole('row').filter({ hasText: priceKey })
-  await expect(priceRow.getByRole('cell')).toHaveText([priceName, priceKey, 'flat', 'v1', 'Not linked', /^\$0\.002 \/ unit/])
+  await expect(priceRow.getByRole('cell')).toHaveText([priceName, priceKey, 'Per unit', 'v1', 'Not linked', /^\$0\.002 \/ unit/])
 
   // A meter that bills at that price. Saving opens the meter's page.
   await page.goto('/pricing?tab=meters')
@@ -236,13 +236,63 @@ async function advancePastFirstPeriod(clock: TestClock) {
   await waitForClockReady(clock.id)
 }
 
+// The price form writes each price shape in the API's words: a graduated
+// price's last tier is open (up_to null), and a package price can be a
+// fraction of a cent.
+test('the price form saves a graduated price with an open last tier, and a package price below a cent', async ({ page }) => {
+  const id = uniq()
+  await page.goto('/pricing?tab=rules')
+
+  await page.getByRole('button', { name: 'Add Price' }).click()
+  let dialog = page.getByRole('dialog', { name: 'Create price' })
+  await dialog.getByLabel('Name', { exact: true }).fill(`E2E Tiers ${id}`)
+  await dialog.getByLabel('Key', { exact: true }).fill(`e2e_tiers_${id}`)
+  await dialog.getByRole('combobox', { name: 'Pricing model' }).click()
+  await page.getByRole('option', { name: 'Graduated tiers' }).click()
+  // The last tier has no upper limit, so its box takes no number.
+  await expect(dialog.getByLabel('Tier 1 up to')).toBeEnabled()
+  await expect(dialog.getByLabel('Tier 2 up to')).toBeDisabled()
+  await expect(dialog.getByLabel('Tier 2 up to')).toHaveAttribute('placeholder', 'No limit')
+  let creating = apiCall(page, 'POST', /\/rating-rules$/)
+  await dialog.getByRole('button', { name: 'Create price' }).click()
+  let res = await creating
+  expect(res.status()).toBe(201)
+  const tiered = (await res.json()) as RatingRule & { tiers: { up_to: number | null; unit_amount_cents: string }[] }
+  await expect(dialog).toBeHidden()
+  expect([tiered.mode, tiered.tiers]).toEqual(['graduated', [{ up_to: 100, unit_amount_cents: '10' }, { up_to: null, unit_amount_cents: '5' }]])
+  await page.getByLabel('Search prices').fill(tiered.rule_key)
+  await expect(page.getByRole('row').filter({ hasText: tiered.rule_key }).getByRole('cell')).toHaveText(
+    [tiered.name, tiered.rule_key, 'Graduated tiers', 'v1', 'Not linked', /^tiered \/ unit: up to 100 @ \$0\.10, beyond @ \$0\.05/])
+
+  await page.getByRole('button', { name: 'Add Price' }).click()
+  dialog = page.getByRole('dialog', { name: 'Create price' })
+  await dialog.getByLabel('Name', { exact: true }).fill(`E2E Package ${id}`)
+  await dialog.getByLabel('Key', { exact: true }).fill(`e2e_package_${id}`)
+  await dialog.getByRole('combobox', { name: 'Pricing model' }).click()
+  await page.getByRole('option', { name: 'Per package' }).click()
+  await expect(dialog.getByText('A part block is charged as a whole one.', { exact: false })).toBeVisible()
+  await dialog.getByLabel('Units per Package').fill('1000')
+  await dialog.getByLabel(/^Price per Package/).fill('0.002')
+  creating = apiCall(page, 'POST', /\/rating-rules$/)
+  await dialog.getByRole('button', { name: 'Create price' }).click()
+  res = await creating
+  expect(res.status()).toBe(201)
+  const pkg = (await res.json()) as RatingRule & { package_size: number; package_amount_cents: string }
+  await expect(dialog).toBeHidden()
+  // $0.002 a package is 0.2 cents, exactly.
+  expect([pkg.mode, pkg.package_size, pkg.package_amount_cents]).toEqual(['package', 1000, '0.2'])
+  await page.getByLabel('Search prices').fill(pkg.rule_key)
+  await expect(page.getByRole('row').filter({ hasText: pkg.rule_key }).getByRole('cell')).toHaveText(
+    [pkg.name, pkg.rule_key, 'Per package', 'v1', 'Not linked', /^\$0\.002 per 1,000 units/])
+})
+
 // A meter's aggregation is fixed once the meter has usage (ADR-130 §2). The
 // meter page says so before any edit, and the edit dialog then offers the
 // aggregation read-only; before the first event it can change.
 test('the meter page shows the aggregation lock before an edit: free with no usage, fixed once usage arrives', async ({ page }) => {
   const id = uniq()
   const rule = await api<RatingRule>('POST', '/rating-rules', {
-    rule_key: `e2e_lock_${id}`, name: `E2E Lock price ${id}`, mode: 'flat', currency: 'USD', flat_amount_cents: '1',
+    rule_key: `e2e_lock_${id}`, name: `E2E Lock price ${id}`, mode: 'per_unit', currency: 'USD', unit_amount_cents: '1',
   })
   const meter = await api<Meter>('POST', '/meters', {
     event_name: `e2e_lock_${id}`, name: `E2E Lock ${id}`, unit: 'call', aggregation: 'sum', rating_rule_version_id: rule.id,
@@ -272,7 +322,7 @@ test('the meter page shows the aggregation lock before an edit: free with no usa
 test('a price override for one customer: the upcoming invoice bills the negotiated rate while it lasts, and the list rate once it ends', async ({ page }) => {
   const id = uniq()
   const rule = await api<RatingRule>('POST', '/rating-rules', {
-    rule_key: `e2e_deal_${id}`, name: `E2E Deal price ${id}`, mode: 'flat', currency: 'USD', flat_amount_cents: '2',
+    rule_key: `e2e_deal_${id}`, name: `E2E Deal price ${id}`, mode: 'per_unit', currency: 'USD', unit_amount_cents: '2',
   })
   const meter = await api<Meter>('POST', '/meters', {
     event_name: `e2e_deal_${id}`, name: `E2E Deal calls ${id}`, unit: 'call', aggregation: 'sum', rating_rule_version_id: rule.id,
@@ -310,7 +360,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   const savedRes = await saving
   expect(savedRes.status()).toBe(201)
   const saved = (await savedRes.json()) as PriceOverride
-  expect([saved.rule_key, saved.flat_amount_cents, saved.active]).toEqual([rule.rule_key, '1', true])
+  expect([saved.rule_key, saved.unit_amount_cents, saved.active]).toEqual([rule.rule_key, '1', true])
   await expect(add).toBeHidden()
   const active = async () => (await api<{ data: PriceOverride[] }>('GET', `/price-overrides?customer_id=${customer.id}`)).data.filter(o => o.active)
   expect((await active()).map(o => o.id)).toEqual([saved.id])

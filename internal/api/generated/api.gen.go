@@ -517,19 +517,19 @@ func (e CustomerBillingProfileInputTaxStatus) Valid() bool {
 
 // Defines values for CustomerPriceOverrideMode.
 const (
-	CustomerPriceOverrideModeFlat      CustomerPriceOverrideMode = "flat"
 	CustomerPriceOverrideModeGraduated CustomerPriceOverrideMode = "graduated"
 	CustomerPriceOverrideModePackage   CustomerPriceOverrideMode = "package"
+	CustomerPriceOverrideModePerUnit   CustomerPriceOverrideMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the CustomerPriceOverrideMode enum.
 func (e CustomerPriceOverrideMode) Valid() bool {
 	switch e {
-	case CustomerPriceOverrideModeFlat:
-		return true
 	case CustomerPriceOverrideModeGraduated:
 		return true
 	case CustomerPriceOverrideModePackage:
+		return true
+	case CustomerPriceOverrideModePerUnit:
 		return true
 	default:
 		return false
@@ -1054,19 +1054,19 @@ func (e InvoicePreviewLineLineType) Valid() bool {
 
 // Defines values for InvoicePreviewLinePricingMode.
 const (
-	InvoicePreviewLinePricingModeFlat      InvoicePreviewLinePricingMode = "flat"
 	InvoicePreviewLinePricingModeGraduated InvoicePreviewLinePricingMode = "graduated"
 	InvoicePreviewLinePricingModePackage   InvoicePreviewLinePricingMode = "package"
+	InvoicePreviewLinePricingModePerUnit   InvoicePreviewLinePricingMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the InvoicePreviewLinePricingMode enum.
 func (e InvoicePreviewLinePricingMode) Valid() bool {
 	switch e {
-	case InvoicePreviewLinePricingModeFlat:
-		return true
 	case InvoicePreviewLinePricingModeGraduated:
 		return true
 	case InvoicePreviewLinePricingModePackage:
+		return true
+	case InvoicePreviewLinePricingModePerUnit:
 		return true
 	default:
 		return false
@@ -1336,19 +1336,19 @@ func (e RatingRuleLifecycleState) Valid() bool {
 
 // Defines values for RatingRuleMode.
 const (
-	RatingRuleModeFlat      RatingRuleMode = "flat"
 	RatingRuleModeGraduated RatingRuleMode = "graduated"
 	RatingRuleModePackage   RatingRuleMode = "package"
+	RatingRuleModePerUnit   RatingRuleMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the RatingRuleMode enum.
 func (e RatingRuleMode) Valid() bool {
 	switch e {
-	case RatingRuleModeFlat:
-		return true
 	case RatingRuleModeGraduated:
 		return true
 	case RatingRuleModePackage:
+		return true
+	case RatingRuleModePerUnit:
 		return true
 	default:
 		return false
@@ -1471,19 +1471,19 @@ func (e RecipePlanBillingInterval) Valid() bool {
 
 // Defines values for RecipeRatingRuleMode.
 const (
-	RecipeRatingRuleModeFlat      RecipeRatingRuleMode = "flat"
 	RecipeRatingRuleModeGraduated RecipeRatingRuleMode = "graduated"
 	RecipeRatingRuleModePackage   RecipeRatingRuleMode = "package"
+	RecipeRatingRuleModePerUnit   RecipeRatingRuleMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the RecipeRatingRuleMode enum.
 func (e RecipeRatingRuleMode) Valid() bool {
 	switch e {
-	case RecipeRatingRuleModeFlat:
-		return true
 	case RecipeRatingRuleModeGraduated:
 		return true
 	case RecipeRatingRuleModePackage:
+		return true
+	case RecipeRatingRuleModePerUnit:
 		return true
 	default:
 		return false
@@ -2635,19 +2635,19 @@ func (e UpdatePlanJSONBodyStatus) Valid() bool {
 
 // Defines values for CreatePriceOverrideJSONBodyMode.
 const (
-	CreatePriceOverrideJSONBodyModeFlat      CreatePriceOverrideJSONBodyMode = "flat"
 	CreatePriceOverrideJSONBodyModeGraduated CreatePriceOverrideJSONBodyMode = "graduated"
 	CreatePriceOverrideJSONBodyModePackage   CreatePriceOverrideJSONBodyMode = "package"
+	CreatePriceOverrideJSONBodyModePerUnit   CreatePriceOverrideJSONBodyMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the CreatePriceOverrideJSONBodyMode enum.
 func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
 	switch e {
-	case CreatePriceOverrideJSONBodyModeFlat:
-		return true
 	case CreatePriceOverrideJSONBodyModeGraduated:
 		return true
 	case CreatePriceOverrideJSONBodyModePackage:
+		return true
+	case CreatePriceOverrideJSONBodyModePerUnit:
 		return true
 	default:
 		return false
@@ -2725,19 +2725,19 @@ func (e GetV1RatingRulesParamsLifecycleState) Valid() bool {
 
 // Defines values for PostV1RatingRulesJSONBodyMode.
 const (
-	PostV1RatingRulesJSONBodyModeFlat      PostV1RatingRulesJSONBodyMode = "flat"
 	PostV1RatingRulesJSONBodyModeGraduated PostV1RatingRulesJSONBodyMode = "graduated"
 	PostV1RatingRulesJSONBodyModePackage   PostV1RatingRulesJSONBodyMode = "package"
+	PostV1RatingRulesJSONBodyModePerUnit   PostV1RatingRulesJSONBodyMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the PostV1RatingRulesJSONBodyMode enum.
 func (e PostV1RatingRulesJSONBodyMode) Valid() bool {
 	switch e {
-	case PostV1RatingRulesJSONBodyModeFlat:
-		return true
 	case PostV1RatingRulesJSONBodyModeGraduated:
 		return true
 	case PostV1RatingRulesJSONBodyModePackage:
+		return true
+	case PostV1RatingRulesJSONBodyModePerUnit:
 		return true
 	default:
 		return false
@@ -4096,37 +4096,32 @@ type CustomerPriceOverride struct {
 	Active     bool      `json:"active"`
 	CreatedAt  time.Time `json:"created_at"`
 	CustomerId string    `json:"customer_id"`
+	Id         string    `json:"id"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string.
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-
-	// GraduatedTiers Empty (`[]`) unless `mode` is `graduated`.
-	GraduatedTiers []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-
-		// UpTo 0 on the last tier means no upper bound.
-		UpTo int64 `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
-	Id   string                    `json:"id"`
+	// Mode As on RatingRule.
 	Mode CustomerPriceOverrideMode `json:"mode"`
 
-	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
-	PackageSize            int64  `json:"package_size,omitempty"`
+	// PackageAmountCents Price of one package in cents, as a decimal string.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+	PackageSize        int64  `json:"package_size,omitempty"`
 
 	// RatingRuleVersionId The rule version named when the override was created. For reference only.
 	RatingRuleVersionId string `json:"rating_rule_version_id"`
 	Reason              string `json:"reason,omitempty"`
 
 	// RuleKey The rating rule this override replaces the price of, across all its versions.
-	RuleKey   string    `json:"rule_key"`
-	TenantId  string    `json:"tenant_id,omitempty"`
-	UpdatedAt time.Time `json:"updated_at"`
+	RuleKey  string `json:"rule_key"`
+	TenantId string `json:"tenant_id,omitempty"`
+
+	// Tiers Empty (`[]`) unless `mode` is `graduated`.
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string.
+	UnitAmountCents string    `json:"unit_amount_cents,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
-// CustomerPriceOverrideMode defines model for CustomerPriceOverride.Mode.
+// CustomerPriceOverrideMode As on RatingRule.
 type CustomerPriceOverrideMode string
 
 // CustomerUsage defines model for CustomerUsage.
@@ -5062,7 +5057,9 @@ type InvoiceLineItem struct {
 	MeterId  string                 `json:"meter_id,omitempty"`
 
 	// MeterUnit The meter's unit ("tokens", "seconds", …), stamped on usage lines at write time so invoice surfaces can apply the display-scale convention (token rates read "$3.00 / 1M tokens"). Empty on non-usage lines and on lines written before the 0173 backfill.
-	MeterUnit   string `json:"meter_unit,omitempty"`
+	MeterUnit string `json:"meter_unit,omitempty"`
+
+	// PricingMode On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines.
 	PricingMode string `json:"pricing_mode,omitempty"`
 
 	// Quantity The line's exact quantity as a decimal string, for example "3" or "1.5". Line amounts stay whole cents.
@@ -5088,7 +5085,7 @@ type InvoiceLineItem struct {
 	TenantId         string `json:"tenant_id,omitempty"`
 	TotalAmountCents int64  `json:"total_amount_cents"`
 
-	// UnitAmountDecimal The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced at one flat rate it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents.
+	// UnitAmountDecimal The unit price in cents at full precision, for example "0.3" for $0.003. On a usage line priced `per_unit` it is that rate; on any other line it is amount_cents ÷ quantity. Line amounts and totals stay whole cents.
 	UnitAmountDecimal string `json:"unit_amount_decimal"`
 }
 
@@ -5396,8 +5393,10 @@ type LitellmSpendResult struct {
 type MarginReport struct {
 	ByModel []struct {
 		// Attributed True only when a pricing rule pins this model — margin is never heuristically allocated.
-		Attributed bool  `json:"attributed"`
-		CostMicros int64 `json:"cost_micros"`
+		Attributed bool `json:"attributed"`
+
+		// CostCents This model's stamped provider cost in US cents, as a decimal string.
+		CostCents string `json:"cost_cents"`
 
 		// MarginBps This model's (revenue − cost) / revenue in basis points, by the same formula as the report's margin_bps. Omitted whenever the report's margin_bps is omitted for currency or unresolved_events, and when the row is not attributed or has no provider cost of its own.
 		MarginBps    int64  `json:"margin_bps,omitempty"`
@@ -5405,11 +5404,11 @@ type MarginReport struct {
 		RevenueCents int64  `json:"revenue_cents,omitempty"`
 	} `json:"by_model"`
 
-	// CostCurrency Currency of cost_micros. Always USD.
-	CostCurrency string `json:"cost_currency"`
+	// CostCents Total stamped provider cost in US cents, as a decimal string (e.g. "275.75").
+	CostCents string `json:"cost_cents"`
 
-	// CostMicros Total stamped provider cost, micro-dollars.
-	CostMicros int64 `json:"cost_micros"`
+	// CostCurrency Currency of cost_cents. Always USD.
+	CostCurrency string `json:"cost_currency"`
 
 	// CostRatesConfigured Whether the tenant has any provider cost rate. False with costed_events 0 means no rates are set up.
 	CostRatesConfigured bool `json:"cost_rates_configured"`
@@ -5430,7 +5429,7 @@ type MarginReport struct {
 	To                       time.Time `json:"to"`
 	UnattributedRevenueCents int64     `json:"unattributed_revenue_cents"`
 
-	// UnresolvedEvents Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `cost_per_token`, was too large to record (about $9.2 trillion or more, either sign).
+	// UnresolvedEvents Token events with costable dims but no cost — no rate matched (add a rate to cost new events), or the cost, quantity × `unit_cost_cents`, was too large to record (about $9.2 trillion or more, either sign).
 	UnresolvedEvents int64 `json:"unresolved_events"`
 }
 
@@ -5553,23 +5552,33 @@ type PlanBillingInterval string
 // PlanStatus defines model for Plan.Status.
 type PlanStatus string
 
+// PriceTier defines model for PriceTier.
+type PriceTier struct {
+	// UnitAmountCents Price per unit in cents in this tier, as a decimal string.
+	UnitAmountCents string `json:"unit_amount_cents"`
+
+	// UpTo The tier's upper bound in whole units: the tier prices the quantity above the previous tier's bound, up to this one. `null` on the last tier, which has no upper bound. Only the last tier is `null`, and it must be.
+	UpTo int64 `json:"up_to"`
+}
+
 // ProviderCostRate defines model for ProviderCostRate.
 type ProviderCostRate struct {
-	// CostPerToken Decimal dollars per token.
-	CostPerToken string    `json:"cost_per_token"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
 
-	// Currency Always USD. Cost and margin count every rate in dollars.
+	// Currency Always USD. Cost and margin count every rate in US cents.
 	Currency  ProviderCostRateCurrency `json:"currency"`
 	Id        string                   `json:"id"`
 	Model     string                   `json:"model"`
 	Provider  string                   `json:"provider"`
 	TenantId  string                   `json:"tenant_id,omitempty"`
 	TokenType string                   `json:"token_type"`
-	UpdatedAt time.Time                `json:"updated_at,omitempty"`
+
+	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens).
+	UnitCostCents string    `json:"unit_cost_cents"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
-// ProviderCostRateCurrency Always USD. Cost and margin count every rate in dollars.
+// ProviderCostRateCurrency Always USD. Cost and margin count every rate in US cents.
 type ProviderCostRateCurrency string
 
 // PublicPaymentUpdate What the payment-update page shows before the customer adds a card.
@@ -5596,34 +5605,33 @@ type PublicPaymentUpdate struct {
 
 // RatingRule defines model for RatingRule.
 type RatingRule struct {
-	CreatedAt time.Time `json:"created_at,omitempty"`
-	Currency  string    `json:"currency,omitempty"`
-
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents.
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers  []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string (see flat_amount_cents).
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int    `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
+	CreatedAt      time.Time                `json:"created_at,omitempty"`
+	Currency       string                   `json:"currency,omitempty"`
 	Id             string                   `json:"id,omitempty"`
 	LifecycleState RatingRuleLifecycleState `json:"lifecycle_state,omitempty"`
-	Mode           RatingRuleMode           `json:"mode,omitempty"`
-	Name           string                   `json:"name,omitempty"`
 
-	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
-	PackageSize            int64  `json:"package_size,omitempty"`
-	RuleKey                string `json:"rule_key,omitempty"`
-	TenantId               string `json:"tenant_id,omitempty"`
-	Version                int    `json:"version,omitempty"`
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+	Mode RatingRuleMode `json:"mode,omitempty"`
+	Name string         `json:"name,omitempty"`
+
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" = $0.002).
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+	PackageSize        int64  `json:"package_size,omitempty"`
+	RuleKey            string `json:"rule_key,omitempty"`
+	TenantId           string `json:"tenant_id,omitempty"`
+
+	// Tiers Empty (`[]`) unless `mode` is `graduated`.
+	Tiers []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+	Version         int    `json:"version,omitempty"`
 }
 
 // RatingRuleLifecycleState defines model for RatingRule.LifecycleState.
 type RatingRuleLifecycleState string
 
-// RatingRuleMode defines model for RatingRule.Mode.
+// RatingRuleMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type RatingRuleMode string
 
 // ReadinessReport defines model for ReadinessReport.
@@ -5829,25 +5837,22 @@ type RecipePricingRule struct {
 // RecipeRatingRule defines model for RecipeRatingRule.
 type RecipeRatingRule struct {
 	Currency string `json:"currency"`
+	Key      string `json:"key"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (see RatingRule.flat_amount_cents).
-	FlatAmountCents string `json:"flat_amount_cents"`
-	GraduatedTiers  []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string.
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int    `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
-	Key  string               `json:"key"`
+	// Mode As on RatingRule.
 	Mode RecipeRatingRuleMode `json:"mode"`
 	Name string               `json:"name,omitempty"`
 
-	// OverageUnitAmountCents Per-unit overage rate in cents, as a decimal string.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents"`
-	PackageAmountCents     int64  `json:"package_amount_cents,omitempty"`
-	PackageSize            int64  `json:"package_size,omitempty"`
+	// PackageAmountCents Price of one package in cents, as a decimal string.
+	PackageAmountCents string      `json:"package_amount_cents"`
+	PackageSize        int64       `json:"package_size,omitempty"`
+	Tiers              []PriceTier `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (see RatingRule.unit_amount_cents).
+	UnitAmountCents string `json:"unit_amount_cents"`
 }
 
-// RecipeRatingRuleMode defines model for RecipeRatingRule.Mode.
+// RecipeRatingRuleMode As on RatingRule.
 type RecipeRatingRuleMode string
 
 // RecipeWebhook defines model for RecipeWebhook.
@@ -6523,13 +6528,13 @@ type UsageEvent struct {
 	// Origin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 	Origin UsageEventOrigin `json:"origin,omitempty"`
 
-	// ProviderCostMicros What serving this event cost you at your provider, in millionths
-	// of a dollar, priced from your provider cost rates when the event
-	// arrived. Absent when no rate matched or the event has no costed
-	// dimensions.
-	ProviderCostMicros int64 `json:"provider_cost_micros,omitempty"`
+	// ProviderCostCents What serving this event cost you at your provider, in US cents as
+	// a decimal string (e.g. "0.45"), priced from your provider cost
+	// rates when the event arrived. Absent when no rate matched or the
+	// event has no costed dimensions.
+	ProviderCostCents string `json:"provider_cost_cents,omitempty"`
 
-	// ProviderCostSource Where `provider_cost_micros` came from: `table` (your provider
+	// ProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
 	// cost rates), `observed` (the cost the sender reported), or
 	// `not_applicable` (the meter has no costed dimensions). Absent when
 	// the cost is unknown.
@@ -6554,7 +6559,7 @@ type UsageEventBillingStatus string
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 type UsageEventOrigin string
 
-// UsageEventProviderCostSource Where `provider_cost_micros` came from: `table` (your provider
+// UsageEventProviderCostSource Where `provider_cost_cents` came from: `table` (your provider
 // cost rates), `observed` (the cost the sender reported), or
 // `not_applicable` (the meter has no costed dimensions). Absent when
 // the cost is unknown.
@@ -7897,24 +7902,11 @@ type ListPriceOverridesParams struct {
 type CreatePriceOverrideJSONBody struct {
 	CustomerId string `json:"customer_id"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string. Used when `mode` is `flat`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field.
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-
-	// GraduatedTiers Used when `mode` is `graduated`. Each `up_to` must be larger
-	// than the one before, and the last tier must have
-	// `up_to: 0` (no upper bound).
-	GraduatedTiers []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0).
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int64  `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
+	// Mode As on `POST /v1/rating-rules`.
 	Mode CreatePriceOverrideJSONBodyMode `json:"mode"`
 
-	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-
-	// PackageAmountCents Price of one package in cents. Used when `mode` is `package`.
-	PackageAmountCents int64 `json:"package_amount_cents,omitempty"`
+	// PackageAmountCents Price of one package in cents, as a decimal string, with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
 	// PackageSize Used when `mode` is `package`. Must be above 0.
 	PackageSize int64 `json:"package_size,omitempty"`
@@ -7922,6 +7914,16 @@ type CreatePriceOverrideJSONBody struct {
 	// RatingRuleVersionId Any version of the rule to override.
 	RatingRuleVersionId string `json:"rating_rule_version_id"`
 	Reason              string `json:"reason,omitempty"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`.
+	Tiers []struct {
+		// UnitAmountCents Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+		UpTo            int64  `json:"up_to,omitempty"`
+	} `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 }
 
 // CreatePriceOverrideParams defines parameters for CreatePriceOverride.
@@ -7943,9 +7945,6 @@ type DeletePriceOverride200JSONResponseBodyActive bool
 
 // PutV1ProviderCostsJSONBody defines parameters for PutV1ProviderCosts.
 type PutV1ProviderCostsJSONBody struct {
-	// CostPerToken Dollars per token, as a decimal string (e.g. "0.000003"). 0 or more, under 10^8, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read.
-	CostPerToken string `json:"cost_per_token"`
-
 	// Currency Rates are in USD only, the currency LiteLLM reports cost
 	// in. Any other value is 422.
 	Currency PutV1ProviderCostsJSONBodyCurrency `json:"currency,omitempty"`
@@ -7956,6 +7955,9 @@ type PutV1ProviderCostsJSONBody struct {
 
 	// TokenType ADR-044 role — input / output / cache_read.
 	TokenType string `json:"token_type"`
+
+	// UnitCostCents US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). 0 or more, under 10^10, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read.
+	UnitCostCents string `json:"unit_cost_cents"`
 }
 
 // PutV1ProviderCostsParams defines parameters for PutV1ProviderCosts.
@@ -7992,21 +7994,26 @@ type GetV1RatingRulesParamsLifecycleState string
 type PostV1RatingRulesJSONBody struct {
 	Currency string `json:"currency"`
 
-	// FlatAmountCents Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for a rate the mode does not use. A value outside them is refused with 422 and `param` naming the field.
-	FlatAmountCents string `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers  []struct {
-		// UnitAmountCents Per-unit rate in cents, as a decimal string, with the limits of `flat_amount_cents`. A refusal names `graduated_tiers[i].unit_amount_cents` (i counts from 0).
-		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
-		UpTo            int    `json:"up_to,omitempty"`
-	} `json:"graduated_tiers,omitempty"`
+	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 	Mode PostV1RatingRulesJSONBodyMode `json:"mode"`
 	Name string                        `json:"name"`
 
-	// OverageUnitAmountCents Package-mode per-unit overage rate in cents, as a decimal string, with the limits of `flat_amount_cents`. Fixed fees (package_amount_cents) stay integer cents.
-	OverageUnitAmountCents string `json:"overage_unit_amount_cents,omitempty"`
-	PackageAmountCents     int    `json:"package_amount_cents,omitempty"`
-	PackageSize            int    `json:"package_size,omitempty"`
-	RuleKey                string `json:"rule_key"`
+	// PackageAmountCents Price of one package in cents, as a decimal string (e.g. "0.2" with `package_size` 1000 = $0.002 per 1,000 units), with the limits of `unit_amount_cents`. Used when `mode` is `package`.
+	PackageAmountCents string `json:"package_amount_cents,omitempty"`
+
+	// PackageSize Used when `mode` is `package`. Must be above 0.
+	PackageSize int64  `json:"package_size,omitempty"`
+	RuleKey     string `json:"rule_key"`
+
+	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`.
+	Tiers []struct {
+		// UnitAmountCents Price per unit in cents in this tier, as a decimal string, with the limits of `unit_amount_cents`. A refusal names `tiers[i].unit_amount_cents` (i counts from 0).
+		UnitAmountCents string `json:"unit_amount_cents,omitempty"`
+		UpTo            int64  `json:"up_to,omitempty"`
+	} `json:"tiers,omitempty"`
+
+	// UnitAmountCents Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. The limits hold in every mode, also for an amount the mode does not use. A value outside them is refused with 422 and `param` naming the field.
+	UnitAmountCents string `json:"unit_amount_cents,omitempty"`
 }
 
 // PostV1RatingRulesParams defines parameters for PostV1RatingRules.

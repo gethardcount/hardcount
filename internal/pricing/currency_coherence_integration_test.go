@@ -38,8 +38,8 @@ func newCoherenceFixture(t *testing.T) coherenceFixture {
 func (f coherenceFixture) usdGraph(t *testing.T, ruleKey, meterKey, planCode string) (ruleID, meterID, planID string) {
 	t.Helper()
 	rule, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: ruleKey, Name: ruleKey, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.RequireFromString("0.5"),
+		RuleKey: ruleKey, Name: ruleKey, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.RequireFromString("0.5"),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -67,8 +67,8 @@ func TestCurrencyRing_RepublishBlockedWhilePlanBound(t *testing.T) {
 
 	// EUR republish of a plan-bound key → loud refusal naming the plan.
 	_, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "api_calls", Name: "api calls v2", Mode: domain.PricingFlat,
-		Currency: "EUR", FlatAmountCents: decimal.RequireFromString("0.4"),
+		RuleKey: "api_calls", Name: "api calls v2", Mode: domain.PricingPerUnit,
+		Currency: "EUR", UnitAmountCents: decimal.RequireFromString("0.4"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "pro") {
 		t.Fatalf("want plan-naming refusal, got %v", err)
@@ -76,8 +76,8 @@ func TestCurrencyRing_RepublishBlockedWhilePlanBound(t *testing.T) {
 
 	// Same-currency republish (a plain rate change) stays legal.
 	if _, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "api_calls", Name: "api calls v2", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.RequireFromString("0.4"),
+		RuleKey: "api_calls", Name: "api calls v2", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.RequireFromString("0.4"),
 	}); err != nil {
 		t.Fatalf("same-currency republish must pass: %v", err)
 	}
@@ -94,8 +94,8 @@ func TestCurrencyRing_ArchivedPlanRepairFlow(t *testing.T) {
 		t.Fatalf("archive plan: %v", err)
 	}
 	if _, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "gpu_secs", Name: "gpu v2", Mode: domain.PricingFlat,
-		Currency: "EUR", FlatAmountCents: decimal.RequireFromString("0.3"),
+		RuleKey: "gpu_secs", Name: "gpu v2", Mode: domain.PricingPerUnit,
+		Currency: "EUR", UnitAmountCents: decimal.RequireFromString("0.3"),
 	}); err != nil {
 		t.Fatalf("republish after archive (repair flow) must pass: %v", err)
 	}
@@ -135,8 +135,8 @@ func TestCurrencyRing_BindingWritesBlocked(t *testing.T) {
 	_, meterID, _ := f.usdGraph(t, "req_usd", "requests", "req_plan")
 
 	eurRule, err := f.svc.CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "req_eur", Name: "eur rule", Mode: domain.PricingFlat,
-		Currency: "EUR", FlatAmountCents: decimal.RequireFromString("0.2"),
+		RuleKey: "req_eur", Name: "eur rule", Mode: domain.PricingPerUnit,
+		Currency: "EUR", UnitAmountCents: decimal.RequireFromString("0.2"),
 	})
 	if err != nil {
 		t.Fatalf("eur rule: %v", err)

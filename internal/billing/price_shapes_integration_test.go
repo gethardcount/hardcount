@@ -558,7 +558,7 @@ invoice subscription_cycle: subtotal=966 tax=174 total=1140
 // build's words. They are the only part of this file that changes.
 
 func shapePerUnit(key, cents string) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.RequireFromString(cents)}
+	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.RequireFromString(cents)}
 }
 
 // shapeTiers is a tier table: one tier up to each bound, then an open last
@@ -566,9 +566,9 @@ func shapePerUnit(key, cents string) pricing.CreateRatingRuleInput {
 func shapeTiers(bounds []int64, rates ...string) []domain.RatingTier {
 	tiers := make([]domain.RatingTier, 0, len(rates))
 	for i, r := range rates {
-		var upTo int64 // 0: the open last tier
+		var upTo *int64 // nil: the open last tier
 		if i < len(bounds) {
-			upTo = bounds[i]
+			upTo = new(bounds[i])
 		}
 		tiers = append(tiers, domain.RatingTier{UpTo: upTo, UnitAmountCents: decimal.RequireFromString(r)})
 	}
@@ -576,14 +576,14 @@ func shapeTiers(bounds []int64, rates ...string) []domain.RatingTier {
 }
 
 func shapeGraduated(key string, bounds []int64, rates ...string) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingGraduated, Currency: "USD", GraduatedTiers: shapeTiers(bounds, rates...)}
+	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingGraduated, Currency: "USD", Tiers: shapeTiers(bounds, rates...)}
 }
 
 func shapeWholePackage(key string, size, cents int64) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPackage, Currency: "USD", PackageSize: size, PackageAmountCents: cents}
+	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPackage, Currency: "USD", PackageSize: size, PackageAmountCents: decimal.NewFromInt(cents)}
 }
 
 func shapeGraduatedOverride(customerID, ruleID string, bounds []int64, rates ...string) pricing.CreateOverrideInput {
 	return pricing.CreateOverrideInput{CustomerID: customerID, RatingRuleVersionID: ruleID, Mode: domain.PricingGraduated,
-		GraduatedTiers: shapeTiers(bounds, rates...), Reason: "negotiated"}
+		Tiers: shapeTiers(bounds, rates...), Reason: "negotiated"}
 }

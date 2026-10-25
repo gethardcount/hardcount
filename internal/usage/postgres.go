@@ -157,7 +157,8 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	// write path; an empty rate table costs ~nothing via the unique
 	// index). Key order per ADR-079 D3: model_raw exact first (raw ids
 	// price per snapshot), then the canonical model family token. Micros
-	// = cost_per_token × quantity × 1e6, ROUND HALF UP. Source semantics:
+	// = unit_cost_cents × quantity × 1e4 (cents to micro-dollars), ROUND
+	// HALF UP. Source semantics:
 	// 'table' when a rate matched; 'not_applicable' when the event has no
 	// costable dims (non-token meters — keeps the honesty counter
 	// meaningful); NULL when costable dims exist but no rate matched, or
@@ -168,7 +169,7 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 	// margin report counts it as unresolved.
 	err = tx.QueryRowContext(ctx, `
 		WITH rate AS (
-			SELECT r.cost_per_token
+			SELECT r.unit_cost_cents
 			FROM provider_cost_rates r
 			WHERE r.tenant_id = $2
 			  AND r.provider = $6::jsonb->>'provider'
@@ -178,7 +179,7 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 			LIMIT 1
 		), stamp AS (
 			SELECT micros FROM (
-				SELECT ROUND(cost_per_token * $5 * 1000000) AS micros FROM rate
+				SELECT ROUND(unit_cost_cents * $5 * 10000) AS micros FROM rate
 			) c
 			WHERE micros BETWEEN -9223372036854775808 AND 9223372036854775807
 		)

@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter. The rest is not built yet: PR-3 to PR-8 build it before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter. PR-3 (#1381) shipped section 3, price shapes and units. The rest is not built yet: PR-4 to PR-8 build it before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -687,8 +687,9 @@ it.
   ADR-086, ADR-096, ADR-100, ADR-101, ADR-115, ADR-120, ADR-123, ADR-129.
 - PR-0b: getvelox/velox#1367, merged as `c234a364` (the lock order).
 - Migrations: PR-2 is `00208_meter_one_aggregation.sql` with its CHECK
-  validated in `00209`; one each for PR-3, PR-4 and PR-7, numbered when each
-  PR opens.
+  validated in `00209`; PR-3 is `00210_price_shapes.sql` with its CHECKs
+  validated in `00211`; one each for PR-4 and PR-7, numbered when each PR
+  opens.
 - Design of record: velox-ops `design-plan-pricing-2026-10-23.md`
   (sections 4.18 for the PR split, 2 for the panel).
 - Stripe, read 2026-10-23:

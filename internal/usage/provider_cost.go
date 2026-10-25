@@ -47,7 +47,7 @@ func (s *PostgresStore) ListProviderCostRates(ctx context.Context, tenantID stri
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, tenant_id, provider, model, token_type, cost_per_token, currency, created_at, updated_at
+		SELECT id, tenant_id, provider, model, token_type, unit_cost_cents, currency, created_at, updated_at
 		FROM provider_cost_rates
 		WHERE tenant_id = $1
 		ORDER BY provider, model, token_type
@@ -61,7 +61,7 @@ func (s *PostgresStore) ListProviderCostRates(ctx context.Context, tenantID stri
 	for rows.Next() {
 		var r domain.ProviderCostRate
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.Provider, &r.Model, &r.TokenType,
-			&r.CostPerToken, &r.Currency, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			&r.UnitCostCents, &r.Currency, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -114,16 +114,16 @@ func (s *PostgresStore) UpsertProviderCostRateAudited(
 	defer postgres.Rollback(tx)
 
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO provider_cost_rates (tenant_id, provider, model, token_type, cost_per_token, currency)
+		INSERT INTO provider_cost_rates (tenant_id, provider, model, token_type, unit_cost_cents, currency)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (tenant_id, livemode, provider, model, token_type)
-		DO UPDATE SET cost_per_token = EXCLUDED.cost_per_token,
+		DO UPDATE SET unit_cost_cents = EXCLUDED.unit_cost_cents,
 		              currency = EXCLUDED.currency,
 		              updated_at = now()
-		RETURNING id, tenant_id, provider, model, token_type, cost_per_token, currency, created_at, updated_at
-	`, tenantID, r.Provider, r.Model, r.TokenType, r.CostPerToken, r.Currency,
+		RETURNING id, tenant_id, provider, model, token_type, unit_cost_cents, currency, created_at, updated_at
+	`, tenantID, r.Provider, r.Model, r.TokenType, r.UnitCostCents, r.Currency,
 	).Scan(&r.ID, &r.TenantID, &r.Provider, &r.Model, &r.TokenType,
-		&r.CostPerToken, &r.Currency, &r.CreatedAt, &r.UpdatedAt)
+		&r.UnitCostCents, &r.Currency, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return domain.ProviderCostRate{}, err
 	}
@@ -168,9 +168,9 @@ func (s *PostgresStore) DeleteProviderCostRateAudited(
 	err = tx.QueryRowContext(ctx, `
 		DELETE FROM provider_cost_rates
 		WHERE tenant_id = $1 AND id = $2
-		RETURNING id, tenant_id, provider, model, token_type, cost_per_token, currency, created_at, updated_at
+		RETURNING id, tenant_id, provider, model, token_type, unit_cost_cents, currency, created_at, updated_at
 	`, tenantID, id).Scan(&deleted.ID, &deleted.TenantID, &deleted.Provider, &deleted.Model,
-		&deleted.TokenType, &deleted.CostPerToken, &deleted.Currency, &deleted.CreatedAt, &deleted.UpdatedAt)
+		&deleted.TokenType, &deleted.UnitCostCents, &deleted.Currency, &deleted.CreatedAt, &deleted.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errs.ErrNotFound
 	}
@@ -251,16 +251,20 @@ func (s *PostgresStore) CustomerProviderCost(ctx context.Context, tenantID, cust
 // Attributed=false and only cost renders — never a heuristic allocation
 // (ADR-079 D6).
 type MarginModelRow struct {
-	Model        string `json:"model"`
-	CostMicros   int64  `json:"cost_micros"`
-	RevenueCents int64  `json:"revenue_cents,omitempty"`
-	Attributed   bool   `json:"attributed"`
+	Model string `json:"model"`
+	// CostCents is the stamped provider cost in cents, exactly the stored
+	// micro-dollars ÷ 10^4 (ADR-130 §3).
+	CostCents    decimal.Decimal `json:"cost_cents"`
+	RevenueCents int64           `json:"revenue_cents,omitempty"`
+	Attributed   bool            `json:"attributed"`
 	// MarginBps is this model's margin, by the same formula as the
 	// report's headline (marginBps). Omitted whenever the headline is
 	// (currency, unresolved cost) and also when the row has no attributed
 	// revenue or no stamped cost of its own: either way it is a margin
 	// nobody measured.
 	MarginBps *int64 `json:"margin_bps,omitempty"`
+
+	costMicros int64
 }
 
 // marginBps is (revenue − cost) / revenue in basis points, rounded half
@@ -291,10 +295,11 @@ type MarginReport struct {
 	// currency). Empty when the window's revenue spans more than one
 	// currency, or when the customer has no priced meter.
 	RevenueCurrency string `json:"revenue_currency,omitempty"`
-	CostMicros      int64  `json:"cost_micros"`
-	// CostCurrency is the currency of CostMicros. Always USD: the stamp
-	// treats every rate as dollars (provider_cost_micros is micro-dollars)
-	// and LiteLLM reports its cost in dollars.
+	// CostCents is the window's stamped provider cost in cents, exactly the
+	// stored micro-dollars ÷ 10^4 (ADR-130 §3).
+	CostCents decimal.Decimal `json:"cost_cents"`
+	// CostCurrency is the currency of CostCents. Always USD: provider cost
+	// rates are USD only, and LiteLLM reports its cost in dollars.
 	CostCurrency string `json:"cost_currency"`
 	// MarginBps = (revenue − cost) / revenue in basis points; omitted
 	// when revenue is 0, when revenue is not in CostCurrency (a margin
@@ -315,6 +320,8 @@ type MarginReport struct {
 	ByModel                  []MarginModelRow `json:"by_model"`
 	UnattributedRevenueCents int64            `json:"unattributed_revenue_cents"`
 	UnresolvedEvents         int64            `json:"unresolved_events"`
+
+	costMicros int64
 }
 
 // MarginAssembler joins stamped COGS with rated usage revenue.
@@ -395,9 +402,9 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 
 	seen := map[string]bool{}
 	for _, c := range byModel {
-		rep.CostMicros += c.CostMicros
+		rep.costMicros += c.CostMicros
 		rep.CostedEvents += c.Events
-		row := MarginModelRow{Model: c.Model, CostMicros: c.CostMicros}
+		row := MarginModelRow{Model: c.Model, CostCents: domain.MicrosToCents(c.CostMicros), costMicros: c.CostMicros}
 		if rev, ok := revenueByModel[c.Model]; ok {
 			row.RevenueCents, row.Attributed = rev, true
 			if measurable {
@@ -410,7 +417,7 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 	// Models with attributed revenue but no stamped cost still render.
 	for model, rev := range revenueByModel {
 		if !seen[model] {
-			rep.ByModel = append(rep.ByModel, MarginModelRow{Model: model, RevenueCents: rev, Attributed: true})
+			rep.ByModel = append(rep.ByModel, MarginModelRow{Model: model, CostCents: decimal.Zero, RevenueCents: rev, Attributed: true})
 		}
 	}
 
@@ -420,15 +427,16 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		if a.RevenueCents != b.RevenueCents {
 			return a.RevenueCents > b.RevenueCents
 		}
-		if a.CostMicros != b.CostMicros {
-			return a.CostMicros > b.CostMicros
+		if a.costMicros != b.costMicros {
+			return a.costMicros > b.costMicros
 		}
 		return a.Model < b.Model
 	})
 
 	if measurable && rep.CostedEvents > 0 {
-		rep.MarginBps = marginBps(rep.RevenueCents, rep.CostMicros)
+		rep.MarginBps = marginBps(rep.RevenueCents, rep.costMicros)
 	}
+	rep.CostCents = domain.MicrosToCents(rep.costMicros)
 	return rep, nil
 }
 
@@ -476,33 +484,33 @@ func (h *ProviderCostHandler) list(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]any{"data": rates})
 }
 
-// providerCostRequest is the PUT /v1/provider-costs body. cost_per_token is
+// providerCostRequest is the PUT /v1/provider-costs body. unit_cost_cents is
 // kept raw so every bad value is a 422 naming it (domain.ParseDecimal), not a
 // 400 for the whole body.
 type providerCostRequest struct {
-	Provider     string          `json:"provider"`
-	Model        string          `json:"model"`
-	TokenType    string          `json:"token_type"`
-	CostPerToken json.RawMessage `json:"cost_per_token"`
-	Currency     string          `json:"currency"`
+	Provider      string          `json:"provider"`
+	Model         string          `json:"model"`
+	TokenType     string          `json:"token_type"`
+	UnitCostCents json.RawMessage `json:"unit_cost_cents"`
+	Currency      string          `json:"currency"`
 }
 
-// parseCostPerToken reads cost_per_token: required, 0 or more, inside
-// domain.ProviderCostLimits (the column is NUMERIC(20,12), which rounded a
-// 13th decimal place away and refused 10^8 or more with an error).
-func parseCostPerToken(raw json.RawMessage) (decimal.Decimal, error) {
-	cost, ok, err := domain.ParseDecimal("cost_per_token", raw)
+// parseUnitCostCents reads unit_cost_cents, cents per token: required, 0 or
+// more, inside domain.ProviderCostLimits (the column is NUMERIC(22,12), which
+// would round a 13th decimal place away and refuses 10^10 or more).
+func parseUnitCostCents(raw json.RawMessage) (decimal.Decimal, error) {
+	cost, ok, err := domain.ParseDecimal("unit_cost_cents", raw)
 	if err != nil {
 		return decimal.Decimal{}, err
 	}
 	if !ok {
-		return decimal.Decimal{}, errs.Required("cost_per_token")
+		return decimal.Decimal{}, errs.Required("unit_cost_cents")
 	}
-	if cost, err = domain.CheckDecimal("cost_per_token", cost, domain.ProviderCostLimits); err != nil {
+	if cost, err = domain.CheckDecimal("unit_cost_cents", cost, domain.ProviderCostLimits); err != nil {
 		return decimal.Decimal{}, err
 	}
 	if cost.IsNegative() {
-		return decimal.Decimal{}, errs.Invalid("cost_per_token", "must be zero or positive")
+		return decimal.Decimal{}, errs.Invalid("unit_cost_cents", "must be zero or positive")
 	}
 	return cost, nil
 }
@@ -524,15 +532,15 @@ func (h *ProviderCostHandler) upsert(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, errs.Required("provider, model, token_type"), "provider_cost_rate")
 		return
 	}
-	cost, err := parseCostPerToken(req.CostPerToken)
+	cost, err := parseUnitCostCents(req.UnitCostCents)
 	if err != nil {
 		respond.FromError(w, r, err, "provider_cost_rate")
 		return
 	}
-	in.CostPerToken = cost
-	// Rates are dollars only. The cost stamp, the margin report and LiteLLM's
-	// own cost all count in USD, so a rate in another currency was stored and
-	// then read as dollars, putting margin off by the exchange rate.
+	in.UnitCostCents = cost
+	// Rates are US cents only. The cost stamp, the margin report and
+	// LiteLLM's own cost all count in USD, so a rate in another currency was
+	// stored and then read as USD, putting margin off by the exchange rate.
 	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
 	if in.Currency == "" {
 		in.Currency = "USD"
@@ -566,11 +574,11 @@ func (h *ProviderCostHandler) upsertEmission(ctx context.Context) func(tx *sql.T
 			ResourceID:    out.ID,
 			ResourceLabel: providerCostLabel(out),
 			Metadata: map[string]any{
-				"provider":       out.Provider,
-				"model":          out.Model,
-				"token_type":     out.TokenType,
-				"cost_per_token": out.CostPerToken.String(),
-				"currency":       out.Currency,
+				"provider":        out.Provider,
+				"model":           out.Model,
+				"token_type":      out.TokenType,
+				"unit_cost_cents": out.UnitCostCents.String(),
+				"currency":        out.Currency,
 			},
 		})
 	}
@@ -600,11 +608,11 @@ func (h *ProviderCostHandler) deleteEmission(ctx context.Context) func(tx *sql.T
 			ResourceID:    deleted.ID,
 			ResourceLabel: providerCostLabel(deleted),
 			Metadata: map[string]any{
-				"provider":       deleted.Provider,
-				"model":          deleted.Model,
-				"token_type":     deleted.TokenType,
-				"cost_per_token": deleted.CostPerToken.String(),
-				"currency":       deleted.Currency,
+				"provider":        deleted.Provider,
+				"model":           deleted.Model,
+				"token_type":      deleted.TokenType,
+				"unit_cost_cents": deleted.UnitCostCents.String(),
+				"currency":        deleted.Currency,
 			},
 		})
 	}

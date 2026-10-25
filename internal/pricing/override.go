@@ -31,7 +31,7 @@ func (s *PostgresStore) CreateOverride(ctx context.Context, tenantID string, o d
 	// clock-pinned customers stamp sim-time. Fallback to wall-clock
 	// otherwise.
 	now := clock.Now(ctx)
-	tiersJSON, _ := json.Marshal(o.GraduatedTiers)
+	tiersJSON, _ := json.Marshal(o.Tiers)
 
 	// Append-only effectivity rows (ADR-070): re-issuing a key closes
 	// the prior row's window (deactivated_at) and inserts a fresh one —
@@ -52,19 +52,19 @@ func (s *PostgresStore) CreateOverride(ctx context.Context, tenantID string, o d
 
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO customer_price_overrides (id, tenant_id, customer_id, rule_key, rating_rule_version_id,
-			mode, flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, reason, active, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)
+			mode, unit_amount_cents, tiers, package_size, package_amount_cents,
+			reason, active, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
 		RETURNING id, tenant_id, customer_id, rule_key, rating_rule_version_id, mode,
-			flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, COALESCE(reason,''), active, created_at, updated_at
+			unit_amount_cents, tiers, package_size, package_amount_cents,
+			COALESCE(reason,''), active, created_at, updated_at
 	`, id, tenantID, o.CustomerID, o.RuleKey, o.RatingRuleVersionID,
-		o.Mode, o.FlatAmountCents, tiersJSON, o.PackageSize,
-		o.PackageAmountCents, o.OverageUnitAmountCents,
+		o.Mode, o.UnitAmountCents, tiersJSON, o.PackageSize,
+		o.PackageAmountCents,
 		postgres.NullableString(o.Reason), true, now,
 	).Scan(&o.ID, &o.TenantID, &o.CustomerID, &o.RuleKey, &o.RatingRuleVersionID, &o.Mode,
-		&o.FlatAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
-		&o.OverageUnitAmountCents, &o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt)
+		&o.UnitAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
+		&o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt)
 
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
@@ -79,8 +79,8 @@ func (s *PostgresStore) CreateOverride(ctx context.Context, tenantID string, o d
 		return domain.CustomerPriceOverride{}, err
 	}
 	if len(tiersJSON) > 0 {
-		if err := json.Unmarshal(tiersJSON, &o.GraduatedTiers); err != nil {
-			return domain.CustomerPriceOverride{}, fmt.Errorf("unmarshal graduated_tiers: %w", err)
+		if err := json.Unmarshal(tiersJSON, &o.Tiers); err != nil {
+			return domain.CustomerPriceOverride{}, fmt.Errorf("unmarshal tiers: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -117,16 +117,16 @@ func (s *PostgresStore) GetOverrideByKeyAsOf(ctx context.Context, tenantID, cust
 	// of any earlier window).
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, customer_id, rule_key, rating_rule_version_id, mode,
-			flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-			overage_unit_amount_cents, COALESCE(reason,''), active, created_at, updated_at
+			unit_amount_cents, tiers, package_size, package_amount_cents,
+			COALESCE(reason,''), active, created_at, updated_at
 		FROM customer_price_overrides
 		WHERE customer_id = $1 AND rule_key = $2
 		  AND created_at <= $3
 		  AND (deactivated_at IS NULL OR deactivated_at > $3)
 		ORDER BY active DESC, created_at DESC LIMIT 1
 	`, customerID, ruleKey, asOf).Scan(&o.ID, &o.TenantID, &o.CustomerID, &o.RuleKey, &o.RatingRuleVersionID,
-		&o.Mode, &o.FlatAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
-		&o.OverageUnitAmountCents, &o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt)
+		&o.Mode, &o.UnitAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
+		&o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt)
 
 	if err == sql.ErrNoRows {
 		return domain.CustomerPriceOverride{}, errs.ErrNotFound
@@ -135,8 +135,8 @@ func (s *PostgresStore) GetOverrideByKeyAsOf(ctx context.Context, tenantID, cust
 		return domain.CustomerPriceOverride{}, err
 	}
 	if len(tiersJSON) > 0 {
-		if err := json.Unmarshal(tiersJSON, &o.GraduatedTiers); err != nil {
-			return domain.CustomerPriceOverride{}, fmt.Errorf("unmarshal graduated_tiers: %w", err)
+		if err := json.Unmarshal(tiersJSON, &o.Tiers); err != nil {
+			return domain.CustomerPriceOverride{}, fmt.Errorf("unmarshal tiers: %w", err)
 		}
 	}
 	return o, nil
@@ -202,8 +202,8 @@ func (s *PostgresStore) ListOverrides(ctx context.Context, tenantID, customerID 
 	defer postgres.Rollback(tx)
 
 	query := `SELECT id, tenant_id, customer_id, rule_key, rating_rule_version_id, mode,
-		flat_amount_cents, graduated_tiers, package_size, package_amount_cents,
-		overage_unit_amount_cents, COALESCE(reason,''), active, created_at, updated_at
+		unit_amount_cents, tiers, package_size, package_amount_cents,
+		COALESCE(reason,''), active, created_at, updated_at
 		FROM customer_price_overrides WHERE active = true`
 
 	args := []any{}
@@ -224,13 +224,13 @@ func (s *PostgresStore) ListOverrides(ctx context.Context, tenantID, customerID 
 		var o domain.CustomerPriceOverride
 		var tiersJSON []byte
 		if err := rows.Scan(&o.ID, &o.TenantID, &o.CustomerID, &o.RuleKey, &o.RatingRuleVersionID,
-			&o.Mode, &o.FlatAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
-			&o.OverageUnitAmountCents, &o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt); err != nil {
+			&o.Mode, &o.UnitAmountCents, &tiersJSON, &o.PackageSize, &o.PackageAmountCents,
+			&o.Reason, &o.Active, &o.CreatedAt, &o.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if len(tiersJSON) > 0 {
-			if err := json.Unmarshal(tiersJSON, &o.GraduatedTiers); err != nil {
-				return nil, fmt.Errorf("unmarshal graduated_tiers: %w", err)
+			if err := json.Unmarshal(tiersJSON, &o.Tiers); err != nil {
+				return nil, fmt.Errorf("unmarshal tiers: %w", err)
 			}
 		}
 		overrides = append(overrides, o)
@@ -246,14 +246,13 @@ type CreateOverrideInput struct {
 	// resolved to the rule's rule_key at this boundary — the key is the
 	// override's identity (ADR-070), so the override survives version
 	// publishes regardless of which version the caller referenced.
-	RatingRuleVersionID    string              `json:"rating_rule_version_id"`
-	Mode                   domain.PricingMode  `json:"mode"`
-	FlatAmountCents        decimal.Decimal     `json:"flat_amount_cents"`
-	GraduatedTiers         []domain.RatingTier `json:"graduated_tiers"`
-	PackageSize            int64               `json:"package_size"`
-	PackageAmountCents     int64               `json:"package_amount_cents"`
-	OverageUnitAmountCents decimal.Decimal     `json:"overage_unit_amount_cents"`
-	Reason                 string              `json:"reason,omitempty"`
+	RatingRuleVersionID string              `json:"rating_rule_version_id"`
+	Mode                domain.PricingMode  `json:"mode"`
+	UnitAmountCents     decimal.Decimal     `json:"unit_amount_cents"`
+	Tiers               []domain.RatingTier `json:"tiers"`
+	PackageSize         int64               `json:"package_size"`
+	PackageAmountCents  decimal.Decimal     `json:"package_amount_cents"`
+	Reason              string              `json:"reason,omitempty"`
 }
 
 func (s *Service) CreateOverride(ctx context.Context, tenantID string, input CreateOverrideInput) (domain.CustomerPriceOverride, error) {
@@ -292,26 +291,25 @@ func (s *Service) CreateOverride(ctx context.Context, tenantID string, input Cre
 	// qty=1 compute probe never reached tier 2+, so a non-monotonic or
 	// bounded-final tier table was accepted here and then hard-failed
 	// billOnePeriod at cycle close.
-	if input.FlatAmountCents, input.GraduatedTiers, input.OverageUnitAmountCents, err = checkRates(
-		input.FlatAmountCents, input.GraduatedTiers, input.OverageUnitAmountCents); err != nil {
+	if input.UnitAmountCents, input.Tiers, input.PackageAmountCents, err = checkRates(
+		input.UnitAmountCents, input.Tiers, input.PackageAmountCents); err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
-	if err := validatePricingShape(input.Mode, input.GraduatedTiers, input.PackageSize, input.PackageAmountCents); err != nil {
+	if err := validatePricingShape(input.Mode, input.Tiers, input.PackageSize); err != nil {
 		return domain.CustomerPriceOverride{}, err
 	}
 	// Compute probe against the PATCHED rule — validates the override
 	// exactly as the rating paths will apply it.
 	o := domain.CustomerPriceOverride{
-		CustomerID:             input.CustomerID,
-		RuleKey:                rule.RuleKey,
-		RatingRuleVersionID:    input.RatingRuleVersionID,
-		Mode:                   input.Mode,
-		FlatAmountCents:        input.FlatAmountCents,
-		GraduatedTiers:         input.GraduatedTiers,
-		PackageSize:            input.PackageSize,
-		PackageAmountCents:     input.PackageAmountCents,
-		OverageUnitAmountCents: input.OverageUnitAmountCents,
-		Reason:                 strings.TrimSpace(input.Reason),
+		CustomerID:          input.CustomerID,
+		RuleKey:             rule.RuleKey,
+		RatingRuleVersionID: input.RatingRuleVersionID,
+		Mode:                input.Mode,
+		UnitAmountCents:     input.UnitAmountCents,
+		Tiers:               input.Tiers,
+		PackageSize:         input.PackageSize,
+		PackageAmountCents:  input.PackageAmountCents,
+		Reason:              strings.TrimSpace(input.Reason),
 	}
 	if _, err := domain.ComputeAmountCents(o.ApplyTo(rule), decimal.NewFromInt(1)); err != nil {
 		return domain.CustomerPriceOverride{}, errs.Invalid("pricing", fmt.Sprintf("invalid pricing configuration: %v", err))

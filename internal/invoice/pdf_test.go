@@ -87,7 +87,7 @@ func TestRenderPDF(t *testing.T) {
 			AmountCents:      2500,
 			TotalAmountCents: 2500,
 			Currency:         "USD",
-			PricingMode:      "flat",
+			PricingMode:      "per_unit",
 		},
 	}
 

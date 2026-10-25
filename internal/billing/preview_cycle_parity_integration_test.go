@@ -108,8 +108,8 @@ func previewParityScenarios() []previewParityScenario {
 			build: func(t *testing.T, f *parityFixture) domain.Subscription {
 				rule, err := f.pricing.CreateRatingRule(f.ctx, f.tenantID, domain.RatingRuleVersion{
 					RuleKey: "pp_calls", Name: "calls", Version: 1,
-					LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-					Currency: "USD", FlatAmountCents: decimal.NewFromInt(10),
+					LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
+					Currency: "USD", UnitAmountCents: decimal.NewFromInt(10),
 				})
 				if err != nil {
 					t.Fatalf("create rule: %v", err)

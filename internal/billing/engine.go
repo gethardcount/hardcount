@@ -2745,7 +2745,7 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 }
 
 // nominalRate returns the actually-billed CONFIGURED per-unit rate (decimal
-// cents) for a FLAT-mode usage line, so the invoice shows the clean rate-card
+// cents) for a per_unit usage line, so the invoice shows the clean rate-card
 // figure ($0.000003) instead of the effective amount÷quantity rate, which the
 // line's cent-rounding turns into a repeating, slightly-inflated decimal
 // ($0.00000333333333) (ADR-054 re-examination). rule is the OVERRIDE-APPLIED

@@ -56,7 +56,8 @@ Words used in the Velox docs and dashboard. For the big picture, read
   the highest-priority rule claims each event, so nothing counts twice.
   [More](ai-pricing.md#how-velox-picks-the-price-for-an-event)
 - **rating rule**: A price formula that turns a usage quantity into money:
-  a flat rate per unit, graduated tiers, or fixed-size packages. It is
+  a price per unit (`per_unit`), graduated tiers (`graduated`), or
+  fixed-size packages (`package`; a part package bills as a whole one). It is
   identified by its `rule_key` and has versions. Billing uses the version
   that was active when the period opened, so a new version takes effect
   next period. [More](adr/070-price-change-semantics.md)

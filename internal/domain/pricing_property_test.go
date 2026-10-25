@@ -10,7 +10,7 @@ import (
 // Property tests for usage pricing.
 //
 // ComputeAmountCents is the function that turns metered quantity into money.
-// It has three modes (flat, graduated tiers, package+overage), and the
+// It has three modes (per_unit, graduated tiers, package), and the
 // graduated path walks tier boundaries — historically the single most
 // bug-prone shape in any billing engine, because the errors hide exactly at
 // the boundary and nowhere else. An example test picks boundaries someone
@@ -21,39 +21,28 @@ import (
 // skips a unit, and a total that is not the sum of its tiers.
 //
 // Seeded generator over math/rand/v2 rather than a new dependency: the inputs
-// need structural constraints (ascending tier ceilings, catch-all last) that
+// need structural constraints (ascending tier ceilings, an open last tier) that
 // are clearer built directly, and a fixed seed makes failures reproducible.
 
 const pricingIters = 5000
 
 func pricingRand() *rand.Rand { return rand.New(rand.NewPCG(0xB111, 0x1237)) }
 
-// genLadder builds a structurally VALID graduated ladder: strictly ascending
-// ceilings, optionally ending in a catch-all (UpTo==0) which must be last.
+// genLadder builds a structurally VALID graduated ladder: zero to four
+// bounded tiers with strictly ascending ceilings, then the open last tier
+// (UpTo nil), which every ladder ends with.
 func genLadder(r *rand.Rand) []RatingTier {
-	n := r.IntN(4) + 1
+	n := r.IntN(5)
 	tiers := make([]RatingTier, 0, n+1)
 	upto := int64(0)
 	for i := 0; i < n; i++ {
 		upto += int64(r.IntN(500) + 1)
 		tiers = append(tiers, RatingTier{
-			UpTo:            upto,
+			UpTo:            new(upto),
 			UnitAmountCents: decimal.NewFromInt(int64(r.IntN(500))),
 		})
 	}
-	if r.IntN(2) == 0 {
-		tiers = append(tiers, RatingTier{UpTo: 0, UnitAmountCents: decimal.NewFromInt(int64(r.IntN(500)))})
-	}
-	return tiers
-}
-
-func ladderCapacity(tiers []RatingTier) int64 {
-	for _, t := range tiers {
-		if t.UpTo == 0 {
-			return -1 // unbounded
-		}
-	}
-	return tiers[len(tiers)-1].UpTo
+	return append(tiers, RatingTier{UpTo: nil, UnitAmountCents: decimal.NewFromInt(int64(r.IntN(500)))})
 }
 
 // TestProperty_Pricing_MonotonicInQuantity is the property a customer would
@@ -64,18 +53,10 @@ func TestProperty_Pricing_MonotonicInQuantity(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
 		tiers := genLadder(r)
-		rule := RatingRuleVersion{Mode: PricingGraduated, GraduatedTiers: tiers}
+		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
 
-		cap := ladderCapacity(tiers)
-		limit := int64(2000)
-		if cap > 0 {
-			limit = cap // a bounded ladder errors above its top tier
-		}
-		if limit < 2 {
-			continue
-		}
-		q1 := int64(r.IntN(int(limit)) + 1)
-		q2 := int64(r.IntN(int(limit)) + 1)
+		q1 := int64(r.IntN(2000) + 1)
+		q2 := int64(r.IntN(2000) + 1)
 		if q1 > q2 {
 			q1, q2 = q2, q1
 		}
@@ -83,7 +64,7 @@ func TestProperty_Pricing_MonotonicInQuantity(t *testing.T) {
 		a1, err1 := ComputeAmountCents(rule, decimal.NewFromInt(q1))
 		a2, err2 := ComputeAmountCents(rule, decimal.NewFromInt(q2))
 		if err1 != nil || err2 != nil {
-			continue // invalid config for this draw; validity is tested separately
+			t.Fatalf("a valid ladder failed to rate: %v, %v\ntiers=%+v", err1, err2, tiers)
 		}
 		if a1 > a2 {
 			t.Fatalf("using more cost less: q=%d -> %dc but q=%d -> %dc\ntiers=%+v", q1, a1, q2, a2, tiers)
@@ -99,19 +80,18 @@ func TestProperty_Pricing_ZeroQuantityIsFree(t *testing.T) {
 		var rule RatingRuleVersion
 		switch r.IntN(3) {
 		case 0:
-			rule = RatingRuleVersion{Mode: PricingFlat, FlatAmountCents: decimal.NewFromInt(int64(r.IntN(10000)))}
+			rule = RatingRuleVersion{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(int64(r.IntN(10000)))}
 		case 1:
-			rule = RatingRuleVersion{Mode: PricingGraduated, GraduatedTiers: genLadder(r)}
+			rule = RatingRuleVersion{Mode: PricingGraduated, Tiers: genLadder(r)}
 		default:
 			rule = RatingRuleVersion{
 				Mode: PricingPackage, PackageSize: int64(r.IntN(100) + 1),
-				PackageAmountCents:     int64(r.IntN(10000)),
-				OverageUnitAmountCents: decimal.NewFromInt(int64(r.IntN(500))),
+				PackageAmountCents: decimal.NewFromInt(int64(r.IntN(10000))),
 			}
 		}
 		got, err := ComputeAmountCents(rule, decimal.Zero)
 		if err != nil {
-			continue
+			t.Fatalf("a valid rule failed to rate 0: %v rule=%+v", err, rule)
 		}
 		if got != 0 {
 			t.Fatalf("zero quantity charged %dc: mode=%s rule=%+v", got, rule.Mode, rule)
@@ -125,13 +105,8 @@ func TestProperty_Pricing_NeverNegative(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
 		tiers := genLadder(r)
-		rule := RatingRuleVersion{Mode: PricingGraduated, GraduatedTiers: tiers}
-		cap := ladderCapacity(tiers)
-		limit := int64(2000)
-		if cap > 0 {
-			limit = cap
-		}
-		q := int64(r.IntN(int(limit)) + 1)
+		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
+		q := int64(r.IntN(2000) + 1)
 		got, err := ComputeAmountCents(rule, decimal.NewFromInt(q))
 		if err != nil {
 			continue
@@ -155,13 +130,8 @@ func TestProperty_Pricing_GraduatedIsSumOfItsTiers(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
 		tiers := genLadder(r)
-		rule := RatingRuleVersion{Mode: PricingGraduated, GraduatedTiers: tiers}
-		cap := ladderCapacity(tiers)
-		limit := int64(2000)
-		if cap > 0 {
-			limit = cap
-		}
-		q := int64(r.IntN(int(limit)) + 1)
+		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
+		q := int64(r.IntN(2000) + 1)
 
 		got, err := ComputeAmountCents(rule, decimal.NewFromInt(q))
 		if err != nil {
@@ -175,22 +145,18 @@ func TestProperty_Pricing_GraduatedIsSumOfItsTiers(t *testing.T) {
 				break
 			}
 			rate := tier.UnitAmountCents.IntPart()
-			if tier.UpTo == 0 { // catch-all
+			if tier.UpTo == nil { // the open last tier
 				want += remaining * rate
-				remaining = 0
 				break
 			}
-			capacity := tier.UpTo - lastUpper
+			capacity := *tier.UpTo - lastUpper
 			take := remaining
 			if take > capacity {
 				take = capacity
 			}
 			want += take * rate
 			remaining -= take
-			lastUpper = tier.UpTo
-		}
-		if remaining > 0 {
-			continue // above ladder capacity; implementation errors, reference cannot
+			lastUpper = *tier.UpTo
 		}
 		if got != want {
 			t.Fatalf("graduated total disagrees with an independent tier walk: q=%d got=%dc want=%dc\ntiers=%+v",
@@ -199,29 +165,32 @@ func TestProperty_Pricing_GraduatedIsSumOfItsTiers(t *testing.T) {
 	}
 }
 
-// TestProperty_Pricing_PackageChargesWholePackagesPlusOverage checks the
-// package model against its definition: floor(q/size) packages at the package
-// price, plus the remainder at the overage rate.
-func TestProperty_Pricing_PackageChargesWholePackagesPlusOverage(t *testing.T) {
+// TestProperty_Pricing_PackageChargesWholePackages checks the package model
+// against its definition (ADR-130 §3): ceil(q/size) packages at the package
+// price, so a part package bills as a whole one. Ceil makes the price never
+// go down as usage grows, which the threshold ladder relies on.
+func TestProperty_Pricing_PackageChargesWholePackages(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < pricingIters; i++ {
 		size := int64(r.IntN(100) + 1)
 		pkgCents := int64(r.IntN(10000))
-		overage := int64(r.IntN(500))
 		rule := RatingRuleVersion{
 			Mode: PricingPackage, PackageSize: size,
-			PackageAmountCents:     pkgCents,
-			OverageUnitAmountCents: decimal.NewFromInt(overage),
+			PackageAmountCents: decimal.NewFromInt(pkgCents),
 		}
 		q := int64(r.IntN(5000))
 		got, err := ComputeAmountCents(rule, decimal.NewFromInt(q))
 		if err != nil {
-			continue
+			t.Fatalf("q=%d size=%d: %v", q, size, err)
 		}
-		want := (q/size)*pkgCents + (q%size)*overage
+		want := (q + size - 1) / size * pkgCents
 		if got != want {
-			t.Fatalf("package pricing disagrees with definition: q=%d size=%d pkg=%dc overage=%dc got=%dc want=%dc",
-				q, size, pkgCents, overage, got, want)
+			t.Fatalf("package pricing disagrees with definition: q=%d size=%d pkg=%dc got=%dc want=%dc",
+				q, size, pkgCents, got, want)
+		}
+		more, err := ComputeAmountCents(rule, decimal.NewFromInt(q+int64(r.IntN(50))))
+		if err != nil || more < got {
+			t.Fatalf("using more cost less: q=%d -> %dc, more -> %dc (%v)", q, got, more, err)
 		}
 	}
 }
@@ -231,7 +200,7 @@ func TestProperty_Pricing_PackageChargesWholePackagesPlusOverage(t *testing.T) {
 func TestProperty_Pricing_RejectsNegativeQuantity(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < 500; i++ {
-		rule := RatingRuleVersion{Mode: PricingGraduated, GraduatedTiers: genLadder(r)}
+		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: genLadder(r)}
 		q := decimal.NewFromInt(-int64(r.IntN(1000) + 1))
 		if _, err := ComputeAmountCents(rule, q); err == nil {
 			t.Fatalf("negative quantity %s was accepted", q)
@@ -239,19 +208,36 @@ func TestProperty_Pricing_RejectsNegativeQuantity(t *testing.T) {
 	}
 }
 
-// TestProperty_Pricing_RejectsCatchAllBeforeEnd guards the config validation
-// the implementation calls out explicitly: a catch-all tier consumes all
-// remaining quantity, so anything after it is dead config that would price
-// overflow at the wrong rate.
-func TestProperty_Pricing_RejectsCatchAllBeforeEnd(t *testing.T) {
+// TestProperty_Pricing_RejectsOpenTierBeforeEnd: an open tier
+// (`up_to: null`) prices all remaining quantity, so a tier after it is dead
+// config that would never price anything. Only the last tier is open.
+func TestProperty_Pricing_RejectsOpenTierBeforeEnd(t *testing.T) {
 	r := pricingRand()
 	for i := 0; i < 500; i++ {
 		tiers := genLadder(r)
-		// Splice a catch-all into a non-final position.
-		bad := append([]RatingTier{{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)}}, tiers...)
-		rule := RatingRuleVersion{Mode: PricingGraduated, GraduatedTiers: bad}
+		bad := append([]RatingTier{{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)}}, tiers...)
+		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: bad}
 		if _, err := ComputeAmountCents(rule, decimal.NewFromInt(int64(r.IntN(100)+1))); err == nil {
-			t.Fatalf("catch-all tier before the end was accepted: %+v", bad)
+			t.Fatalf("an open tier before the end was accepted: %+v", bad)
+		}
+	}
+}
+
+// TestProperty_Pricing_RejectsBoundedLastTier: the last tier must be open. A
+// bounded one leaves the usage above it with no price, so even a quantity
+// inside the ladder is refused: the table itself is invalid.
+func TestProperty_Pricing_RejectsBoundedLastTier(t *testing.T) {
+	r := pricingRand()
+	for i := 0; i < 500; i++ {
+		tiers := genLadder(r)
+		last := int64(1)
+		if len(tiers) > 1 {
+			last = *tiers[len(tiers)-2].UpTo + 1
+		}
+		tiers[len(tiers)-1].UpTo = new(last + int64(r.IntN(100)))
+		rule := RatingRuleVersion{Mode: PricingGraduated, Tiers: tiers}
+		if _, err := ComputeAmountCents(rule, decimal.NewFromInt(1)); err == nil {
+			t.Fatalf("a bounded last tier was accepted: %+v", tiers)
 		}
 	}
 }

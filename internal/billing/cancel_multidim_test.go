@@ -56,9 +56,9 @@ func TestBillFinalOnImmediateCancel_MultiDimMeterBilled(t *testing.T) {
 		rules: map[string]domain.RatingRuleVersion{
 			// Per-token decimal rates (ADR-045): $3.00/M and $15.00/M.
 			"rrv_in": {ID: "rrv_in", RuleKey: "tok_in", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0.0003")},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0003")},
 			"rrv_out": {ID: "rrv_out", RuleKey: "tok_out", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.RequireFromString("0.0015")},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0015")},
 		},
 		meterPricingRules: map[string][]domain.MeterPricingRule{
 			"mtr_tokens": {
@@ -156,7 +156,7 @@ func TestBillFinalOnImmediateCancel_SingleRuleMeterStillBilled(t *testing.T) {
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
 		},
 		// No meterPricingRules → single-rule path.
 	}
@@ -216,7 +216,7 @@ func TestBillFinalOnImmediateCancel_HonorsDueOnReceipt(t *testing.T) {
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
 		},
 	}
 	usage := &mockUsage{totals: map[string]int64{"mtr_api": 500}}

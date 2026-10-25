@@ -49,7 +49,8 @@ type rawMeter struct {
 }
 
 type rawRatingTier struct {
-	UpTo int64 `yaml:"up_to"`
+	// UpTo is null (or absent) on the open last tier.
+	UpTo *int64 `yaml:"up_to"`
 	// Per-unit rate, read as a string so fractional sub-cent rates
 	// (e.g. 0.0003 = $3.00/1M tokens) parse losslessly into decimal.Decimal.
 	UnitAmountCents string `yaml:"unit_amount_cents"`
@@ -60,13 +61,12 @@ type rawRatingRule struct {
 	Name     string `yaml:"name"`
 	Mode     string `yaml:"mode"`
 	Currency string `yaml:"currency"`
-	// FlatAmountCents / OverageUnitAmountCents are per-unit rates read as
+	// UnitAmountCents and PackageAmountCents are amounts in cents read as
 	// strings (see rawRatingTier) and converted to decimal in parseRecipe.
-	FlatAmountCents        string          `yaml:"flat_amount_cents"`
-	GraduatedTiers         []rawRatingTier `yaml:"graduated_tiers"`
-	PackageSize            int64           `yaml:"package_size"`
-	PackageAmountCents     int64           `yaml:"package_amount_cents"`
-	OverageUnitAmountCents string          `yaml:"overage_unit_amount_cents"`
+	UnitAmountCents    string          `yaml:"unit_amount_cents"`
+	Tiers              []rawRatingTier `yaml:"tiers"`
+	PackageSize        int64           `yaml:"package_size"`
+	PackageAmountCents string          `yaml:"package_amount_cents"`
 }
 
 // rawPricingRule has no aggregation of its own: every rule of a meter bills
@@ -115,7 +115,7 @@ type rawWebhook struct {
 // through URLs (`/v1/recipes/{key}`) without escaping.
 var recipeKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// parseRate converts a recipe's string-form per-unit rate into a decimal.
+// parseRate converts a recipe's string-form amount in cents into a decimal.
 // Empty is treated as zero (a mode that doesn't use the field). A malformed
 // value, or one outside the limits a rate sent to POST /v1/rating-rules takes
 // (domain.CheckRate), fails recipe load loudly rather than silently pricing
@@ -220,31 +220,40 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 		ratingRuleKeys[r.Key] = struct{}{}
 		mode := domain.PricingMode(r.Mode)
 		switch mode {
-		case domain.PricingFlat, domain.PricingGraduated, domain.PricingPackage:
+		case domain.PricingPerUnit, domain.PricingGraduated, domain.PricingPackage:
 		default:
 			return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q invalid mode %q", raw.Key, r.Key, r.Mode)
 		}
-		flat, err := parseRate(raw.Key, r.Key, "flat_amount_cents", r.FlatAmountCents)
+		unit, err := parseRate(raw.Key, r.Key, "unit_amount_cents", r.UnitAmountCents)
 		if err != nil {
 			return domain.Recipe{}, err
 		}
-		overage, err := parseRate(raw.Key, r.Key, "overage_unit_amount_cents", r.OverageUnitAmountCents)
+		pkg, err := parseRate(raw.Key, r.Key, "package_amount_cents", r.PackageAmountCents)
 		if err != nil {
 			return domain.Recipe{}, err
 		}
 		dr := domain.RecipeRatingRule{
 			Key: r.Key, Name: r.Name, Mode: mode, Currency: r.Currency,
-			FlatAmountCents:        flat,
-			PackageSize:            r.PackageSize,
-			PackageAmountCents:     r.PackageAmountCents,
-			OverageUnitAmountCents: overage,
+			UnitAmountCents:    unit,
+			PackageSize:        r.PackageSize,
+			PackageAmountCents: pkg,
 		}
-		for _, t := range r.GraduatedTiers {
-			ua, err := parseRate(raw.Key, r.Key, "graduated_tiers.unit_amount_cents", t.UnitAmountCents)
+		for _, t := range r.Tiers {
+			ua, err := parseRate(raw.Key, r.Key, "tiers.unit_amount_cents", t.UnitAmountCents)
 			if err != nil {
 				return domain.Recipe{}, err
 			}
-			dr.GraduatedTiers = append(dr.GraduatedTiers, domain.RatingTier{UpTo: t.UpTo, UnitAmountCents: ua})
+			dr.Tiers = append(dr.Tiers, domain.RatingTier{UpTo: t.UpTo, UnitAmountCents: ua})
+		}
+		switch mode {
+		case domain.PricingGraduated:
+			if err := domain.CheckTiers(dr.Tiers); err != nil {
+				return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q tiers: %w", raw.Key, r.Key, err)
+			}
+		case domain.PricingPackage:
+			if dr.PackageSize <= 0 {
+				return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q package_size must be greater than 0", raw.Key, r.Key)
+			}
 		}
 		out.RatingRules = append(out.RatingRules, dr)
 	}

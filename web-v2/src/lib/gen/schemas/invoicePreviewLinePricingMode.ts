@@ -12,7 +12,7 @@ export type InvoicePreviewLinePricingMode = typeof InvoicePreviewLinePricingMode
 
 
 export const InvoicePreviewLinePricingMode = {
-  flat: 'flat',
+  per_unit: 'per_unit',
   graduated: 'graduated',
   package: 'package',
 } as const;

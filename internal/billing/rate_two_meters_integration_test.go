@@ -27,12 +27,12 @@ func TestTwoGraduatedMeters_EachContinuesItsOwnTiersAcrossFire_RealStore(t *test
 	ctx := lf.ctx
 	calls := lf.meterID
 	publishCallsRule(t, lf, gradRule("calls_flat", []domain.RatingTier{
-		{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(10)},
-		{UpTo: 0, UnitAmountCents: decimal.NewFromInt(2)},
+		{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+		{UpTo: nil, UnitAmountCents: decimal.NewFromInt(2)},
 	}))
 	tokensRule := createRule(t, lf, gradRule("tokens_grad", []domain.RatingTier{
-		{UpTo: 500, UnitAmountCents: decimal.NewFromInt(4)},
-		{UpTo: 0, UnitAmountCents: decimal.NewFromInt(1)},
+		{UpTo: new(int64(500)), UnitAmountCents: decimal.NewFromInt(4)},
+		{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
 	}))
 	tokens, err := lf.pricingSvc.CreateMeter(ctx, lf.tenantID, pricing.CreateMeterInput{
 		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: tokensRule.ID,

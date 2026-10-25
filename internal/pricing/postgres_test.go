@@ -22,8 +22,8 @@ func TestPostgresStore_RatingRules(t *testing.T) {
 	// Create flat rule
 	rule, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
 		RuleKey: "api_calls", Name: "API Calls", Version: 1,
-		LifecycleState: domain.RatingRuleDraft, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(500),
+		LifecycleState: domain.RatingRuleDraft, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(500),
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -37,8 +37,8 @@ func TestPostgresStore_RatingRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if !got.FlatAmountCents.Equal(decimal.NewFromInt(500)) {
-		t.Errorf("flat_amount: got %s", got.FlatAmountCents)
+	if !got.UnitAmountCents.Equal(decimal.NewFromInt(500)) {
+		t.Errorf("flat_amount: got %s", got.UnitAmountCents)
 	}
 
 	// Create graduated rule with tiers
@@ -46,9 +46,9 @@ func TestPostgresStore_RatingRules(t *testing.T) {
 		RuleKey: "storage", Name: "Storage", Version: 1,
 		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingGraduated,
 		Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(10)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},
+		Tiers: []domain.RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(10)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
 		},
 	})
 	if err != nil {
@@ -57,11 +57,14 @@ func TestPostgresStore_RatingRules(t *testing.T) {
 
 	// Verify tiers persisted
 	gotGrad, _ := store.GetRatingRule(ctx, tenantID, grad.ID)
-	if len(gotGrad.GraduatedTiers) != 2 {
-		t.Fatalf("tiers: got %d, want 2", len(gotGrad.GraduatedTiers))
+	if len(gotGrad.Tiers) != 2 {
+		t.Fatalf("tiers: got %d, want 2", len(gotGrad.Tiers))
 	}
-	if gotGrad.GraduatedTiers[0].UpTo != 100 {
-		t.Errorf("tier[0].up_to: got %d", gotGrad.GraduatedTiers[0].UpTo)
+	if up := gotGrad.Tiers[0].UpTo; up == nil || *up != 100 {
+		t.Errorf("tier[0].up_to: got %v, want 100", up)
+	}
+	if up := gotGrad.Tiers[1].UpTo; up != nil {
+		t.Errorf("tier[1].up_to: got %d, want null (the open last tier)", *up)
 	}
 
 	// List
@@ -78,8 +81,8 @@ func TestPostgresStore_RatingRules(t *testing.T) {
 	// next version — a publish, never a unique violation.
 	dup, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
 		RuleKey: "api_calls", Name: "Dup", Version: 1,
-		LifecycleState: domain.RatingRuleDraft, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(10),
+		LifecycleState: domain.RatingRuleDraft, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(10),
 	})
 	if err != nil {
 		t.Fatalf("re-create existing key: %v", err)
@@ -192,16 +195,16 @@ func TestPostgresStore_MeterPricingRules(t *testing.T) {
 	// Seed: one meter, two rating rules.
 	rrv1, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
 		RuleKey: "tokens_default", Name: "Tokens default", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
+		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
 	})
 	if err != nil {
 		t.Fatalf("seed rrv1: %v", err)
 	}
 	rrv2, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
 		RuleKey: "tokens_cached", Name: "Tokens cached", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("seed rrv2: %v", err)
@@ -300,8 +303,8 @@ func TestPostgresStore_MeterPricingRules_RLS(t *testing.T) {
 	// Seed minimal data in tenant A.
 	rrvA, _ := store.CreateRatingRule(ctx, tenantA, domain.RatingRuleVersion{
 		RuleKey: "a_rule", Name: "A", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
+		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
 	})
 	meterA, _ := store.CreateMeter(ctx, tenantA, domain.Meter{
 		EventName: "tokens", Name: "Tokens", Unit: "tokens",

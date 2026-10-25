@@ -113,7 +113,7 @@ func recipeListPrices(t *testing.T) map[string]map[string]decimal.Decimal {
 	var doc struct {
 		RatingRules []struct {
 			Key             string `yaml:"key"`
-			FlatAmountCents string `yaml:"flat_amount_cents"`
+			UnitAmountCents string `yaml:"unit_amount_cents"`
 		} `yaml:"rating_rules"`
 		PricingRules []struct {
 			RatingRule     string            `yaml:"rating_rule"`
@@ -125,7 +125,7 @@ func recipeListPrices(t *testing.T) map[string]map[string]decimal.Decimal {
 	}
 	cents := map[string]decimal.Decimal{}
 	for _, r := range doc.RatingRules {
-		cents[r.Key] = decimal.RequireFromString(r.FlatAmountCents)
+		cents[r.Key] = decimal.RequireFromString(r.UnitAmountCents)
 	}
 	out := map[string]map[string]decimal.Decimal{}
 	for _, r := range doc.PricingRules {
