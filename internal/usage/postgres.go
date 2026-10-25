@@ -33,8 +33,10 @@ func (s *PostgresStore) Ingest(ctx context.Context, tenantID string, event domai
 // after the insert, only when the row was written. An emit error rolls the
 // write back.
 //
-// The service reads the meter's aggregation there at every door
-// (open_period.go). Only BACKFILL also writes an audit row there (ADR-090):
+// The single and backfill doors read the meter's aggregation there
+// (open_period.go). Batch reads it in IngestBatch's hook, and the LiteLLM
+// doors in IngestResolvingHeld's and IngestCallResolvingHeld's. Only
+// BACKFILL also writes an audit row there (ADR-090):
 // live ingest (POST /v1/usage-events, /batch, the LiteLLM spend callback) is
 // machine metering at up to ~1000/s, usage_events IS the record, and a row
 // per event would double the write volume of the hottest path for no

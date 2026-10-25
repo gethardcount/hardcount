@@ -262,8 +262,9 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 	if err == nil {
 		// Count only rows that actually landed. An idempotency-replay errors
 		// out of store.Ingest (no new row), so it isn't counted — the metric
-		// is true ingest throughput, not request volume. Every path funnels
-		// here (live POST, batch, backfill, LiteLLM).
+		// is true ingest throughput, not request volume. Single and backfill
+		// count here; batch and the LiteLLM doors count their own written
+		// rows.
 		mw.RecordUsageIngested(1)
 		markAfterClose(ctx, &event, class)
 	}
