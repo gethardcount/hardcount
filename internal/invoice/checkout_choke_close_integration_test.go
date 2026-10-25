@@ -154,7 +154,7 @@ func TestChokePointCloses(t *testing.T) {
 					t.Fatalf("get invoice: %v", err)
 				}
 				subID := inv.SubscriptionID
-				if _, outcome, err := subs.SetDunningPause(ctx, tenantID, subID, invID); err != nil || outcome != subscription.DunningPauseWritten {
+				if _, outcome, err := subs.SetDunningPause(ctx, tenantID, subID, invID, nil); err != nil || outcome != subscription.DunningPauseWritten {
 					t.Fatalf("dunning pause: outcome %v, err %v", outcome, err)
 				}
 				if ex.zeroDue {

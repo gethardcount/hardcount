@@ -2793,11 +2793,15 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 // invoice invoiceID. applied reports whether collection is paused when it
 // returns: true when this call paused it, and when a pause was already in
 // force (the operator's, which it leaves as it is, this run's earlier
-// attempt, or another invoice's dunning pause). It is false when the invoice was paid before the pause could
-// land; nothing is paused then. The "Collection paused" row and the
-// subscription.collection_paused event (triggered_by dunning, queued in the
-// pause's transaction) come only when this call paused collection, so a
-// re-attempted exhaustion writes no second row and sends no second event.
+// attempt, or another invoice's dunning pause). It is false when the invoice
+// was paid before the pause could land; nothing is paused then.
+//
+// The "Collection paused" audit row and the subscription.collection_paused
+// event (triggered_by dunning) are written in the pause's transaction, and
+// only when this call paused collection. A re-attempted exhaustion that
+// finds the pause in force writes neither again. One that finds no pause,
+// because the operator resumed collection after the first attempt, pauses
+// again and writes both again.
 //
 // The pause lifts when invoiceID is paid (ADR-036 amendment 2026-10-22,
 // PostgresStore.ReleaseDunningPauseTx). Dunning never resumes collection
@@ -2812,26 +2816,32 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 	if _, err := s.closeEndedPeriodFirstWithin(ctx, tenantID, id, s.invoiceGrace); err != nil {
 		return false, err
 	}
-	sub, outcome, err := s.store.SetDunningPause(ctx, tenantID, id, invoiceID)
+	var auditTx func(tx *sql.Tx, sub domain.Subscription) error
+	if s.audit != nil {
+		auditTx = func(tx *sql.Tx, sub domain.Subscription) error {
+			if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+				Action:        domain.AuditActionUpdate,
+				ResourceType:  "subscription",
+				ResourceID:    sub.ID,
+				ResourceLabel: sub.Code,
+				Metadata: map[string]any{
+					"action":       domain.SubAuditCollectionPaused,
+					"customer_id":  sub.CustomerID,
+					"behavior":     string(domain.PauseCollectionKeepAsDraft),
+					"triggered_by": "dunning",
+					"invoice_id":   invoiceID,
+				},
+			}); err != nil {
+				return fmt.Errorf("audit emission: %w", err)
+			}
+			return nil
+		}
+	}
+	_, outcome, err := s.store.SetDunningPause(ctx, tenantID, id, invoiceID, auditTx)
 	if err != nil {
 		return false, err
 	}
-	switch outcome {
-	case DunningPauseInvoiceSettled:
-		return false, nil
-	case DunningPauseAlreadyHeld:
-		return true, nil
-	}
-	if s.audit != nil {
-		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
-			"action":       domain.SubAuditCollectionPaused,
-			"customer_id":  sub.CustomerID,
-			"behavior":     string(domain.PauseCollectionKeepAsDraft),
-			"triggered_by": "dunning",
-			"invoice_id":   invoiceID,
-		})
-	}
-	return true, nil
+	return outcome != DunningPauseInvoiceSettled, nil
 }
 
 // ResumeCollection clears any active collection-pause. Idempotent — a row

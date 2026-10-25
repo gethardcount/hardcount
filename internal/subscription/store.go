@@ -198,7 +198,9 @@ type Store interface {
 	// SetDunningPause is dunning's pause final action for the unpaid invoice
 	// invoiceID (see PostgresStore.SetDunningPause). It pauses only while
 	// that invoice is still owed, and never overrides a pause in force.
-	SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error)
+	// inTx, when set, runs in the pause's transaction only when it pauses
+	// (DunningPauseWritten); its error rolls the pause back.
+	SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string, inTx func(tx *sql.Tx, sub domain.Subscription) error) (domain.Subscription, DunningPauseOutcome, error)
 
 	// ClearPauseCollection nulls the pause_collection_* columns as a CAS: it
 	// changes the row only if a pause is set and returns ErrNotPaused

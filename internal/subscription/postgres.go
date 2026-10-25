@@ -919,9 +919,10 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 // has passed but which the resumer has not cleared yet is not in force, and
 // is replaced. errs.InvalidState covers a canceled subscription.
 //
-// When it pauses, it queues subscription.collection_paused (triggered_by
-// dunning) in the same transaction.
-func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error) {
+// When it pauses, it runs inTx (the service's "Collection paused" audit
+// row) and queues subscription.collection_paused (triggered_by dunning), all
+// in the same transaction.
+func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string, inTx func(tx *sql.Tx, sub domain.Subscription) error) (domain.Subscription, DunningPauseOutcome, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, 0, err
@@ -976,9 +977,15 @@ func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, in
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
 		return domain.Subscription{}, 0, err
 	}
-	// Queued with the pause, so it is sent exactly when the pause commits.
-	// A re-attempted exhaustion finds the pause in force above and queues
-	// nothing, so a post-commit send that a crash dropped would never come.
+	// The audit row and the event are written with the pause, so they exist
+	// exactly when the pause commits. A re-attempted exhaustion finds the
+	// pause in force above and writes nothing, so a post-commit write that
+	// failed or a crash dropped would never come.
+	if inTx != nil {
+		if err := inTx(tx, sub); err != nil {
+			return domain.Subscription{}, 0, err
+		}
+	}
 	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
 		"triggered_by": "dunning",
 	}); err != nil {

@@ -354,7 +354,7 @@ func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, 
 
 // SetDunningPause mirrors the real store's write rule (the invoice gate is
 // the real store's alone: memStore has no invoices).
-func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ string) (domain.Subscription, DunningPauseOutcome, error) {
+func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ string, inTx func(tx *sql.Tx, sub domain.Subscription) error) (domain.Subscription, DunningPauseOutcome, error) {
 	s, ok := m.subs[subID]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, 0, errs.ErrNotFound
@@ -367,9 +367,15 @@ func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ strin
 	}
 	s.PauseCollection = &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, SetBy: domain.PauseSetByDunning}
 	s.UpdatedAt = clock.Now(ctx)
+	out := s
+	out.Items = m.hydrateItems(subID)
+	if inTx != nil {
+		if err := inTx(nil, out); err != nil {
+			return domain.Subscription{}, 0, err
+		}
+	}
 	m.subs[subID] = s
-	s.Items = m.hydrateItems(subID)
-	return s, DunningPauseWritten, nil
+	return out, DunningPauseWritten, nil
 }
 
 func (m *memStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
