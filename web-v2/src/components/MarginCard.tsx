@@ -23,7 +23,7 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // Margin (ADR-079): rated usage revenue vs stamped provider COGS over an
 // operator-picked window. Operator-only surface — COGS never renders on
 // customer-facing pages. Attribution is honest by design: per-model margin
-// shows only where pricing rules pin the model; everything else appears as
+// shows only where the price that billed the usage names the model; everything else appears as
 // "not model-attributed" rather than being split by heuristic.
 //
 // The card opens on the customer's current billing period, with the last

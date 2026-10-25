@@ -190,7 +190,7 @@ export default function InvoiceDetailPage() {
   const lineItems: LineItem[] = invoiceData?.line_items ?? []
 
   // Lines sharing a meter mean the drill-down cannot be exact: the filter
-  // scopes to customer + meter + period, so when several pricing rules rate
+  // scopes to customer + meter + period, so when several prices rate
   // the same meter (the multi-dimensional case — input vs output tokens) every
   // one of those lines resolves to the same event set. Counting them lets the
   // link say which it is instead of hedging on every invoice.
@@ -207,9 +207,9 @@ export default function InvoiceDetailPage() {
   // Only usage lines qualify: meter_id is stamped by the billing engine on
   // those alone, and a base fee or tax line has no events behind it to show.
   //
-  // Scope is meter + customer + period rather than the line's pricing rule,
-  // because the rule's dimension_match is not stamped on the line today. That
-  // makes the link exact for single-rule meters and a superset otherwise.
+  // Scope is meter + customer + period, not the labels of the line's price
+  // (its dimension_match). That makes the link exact for a meter with one
+  // price and a superset otherwise.
   const usageEventsHref = (item: LineItem): string | null => {
     if (item.line_type !== 'usage' || !item.meter_id || !invoice) return null
     const startISO = item.billing_period_start || invoice.billing_period_start

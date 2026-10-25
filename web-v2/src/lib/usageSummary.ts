@@ -22,8 +22,6 @@ export function meterValueCaption(aggregation: string, customers: number): strin
       return `Latest reading${customers > 1 ? ' per customer' : ''}${across}`
     case 'sum':
       return 'Sum of reported values'
-    case 'mixed':
-      return "Sum of reported values. This meter is billed in parts, one per pricing rule, that each take their own peak or latest reading, so the billed amount may differ."
     default:
       return 'Sum of reported values (aggregation unknown)'
   }
@@ -31,7 +29,6 @@ export function meterValueCaption(aggregation: string, customers: number): strin
 
 // meterModeBadge is the short aggregation label beside the meter name.
 export function meterModeBadge(aggregation: string): string {
-  if (aggregation === 'mixed') return 'Mixed'
   return aggregation ? meterAggregationLabel(aggregation) : 'Sum'
 }
 
