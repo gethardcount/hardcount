@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/pricing"
 )
 
 // openPeriodsSubs answers one active subscription with two items, one of
@@ -55,9 +56,13 @@ func (p countingPricing) meterAt(planID string, at time.Time) string {
 	}
 }
 
-func (p countingPricing) PlanPricesAt(_ context.Context, _, planID string, at time.Time, _ string) ([]domain.PlanPrice, error) {
+func (p countingPricing) MetersPricedAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]string, error) {
 	*p.reads++
-	return []domain.PlanPrice{{ID: "vlx_prc_" + planID, PlanID: planID, MeterID: p.meterAt(planID, at)}}, nil
+	out := make([][]string, len(pins))
+	for i, pin := range pins {
+		out[i] = []string{p.meterAt(pin.PlanID, pin.At)}
+	}
+	return out, nil
 }
 
 // Ingest reads a customer's open periods on every event. The meters each

@@ -4185,7 +4185,8 @@ type CustomerUsage struct {
 	// (`current_billing_cycle`), each subscription is rated over its
 	// own current billing period, and the period runs from the
 	// earliest start to the latest end of those periods. A meter's
-	// totals and daily `buckets` cover its own subscription's period.
+	// totals and daily `buckets` cover its own subscription's whole
+	// period, including usage a threshold invoice already billed.
 	Period struct {
 		From   time.Time                 `json:"from"`
 		Source CustomerUsagePeriodSource `json:"source"`

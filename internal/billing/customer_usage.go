@@ -14,16 +14,17 @@ import (
 // subscription's usage through the rater (ADR-130 §10), so the customer page
 // prices usage the way the invoice does.
 
-// RateCurrentPeriod rates the subscription's current period exactly as its
-// close would bill it now: its plan windows, usage floors, threshold
-// watermark and tier ladder (rateCurrentPeriod, the live balance's read). A
-// trialing subscription whose period closes without an invoice has no usage
-// to bill.
+// RateCurrentPeriod rates the subscription's whole current period as its
+// close would bill it if no threshold invoice had billed part of it: its
+// plan windows, usage floors and tier ladder (rateCurrentPeriod). Usage a
+// threshold invoice already billed is counted: this is the period's usage,
+// not what is left to bill (the live balance's unbilled usage). A trialing
+// subscription whose period closes without an invoice has no usage to bill.
 func (e *Engine) RateCurrentPeriod(ctx context.Context, sub domain.Subscription) (domain.RatedSubscription, error) {
 	if sub.Status == domain.SubscriptionTrialing && !trialPeriodBilled(sub) {
 		return domain.RatedSubscription{}, nil
 	}
-	cp, err := e.rateCurrentPeriod(ctx, sub)
+	cp, err := e.rateCurrentPeriod(ctx, sub, wholePeriod)
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}

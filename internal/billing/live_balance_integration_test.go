@@ -719,16 +719,20 @@ func TestLiveBalance_DashboardAggregatesOncePerMeter(t *testing.T) {
 		t.Errorf("usage aggregations: %d reached the database and %d were reused; want 1 and 1 (one meter, two readers)", memo.Queries(), memo.Hits())
 	}
 
-	// After a threshold invoice both read only the window since the
-	// invoice: the page's usage is the current period as its close would
-	// bill it now (ADR-130 §10), the same rating as the live figure.
+	// After a threshold invoice the live figure reads only the window since
+	// the invoice, a different (and much shorter) scan than the page's: the
+	// page still shows the whole period's usage (ADR-130 §10).
 	lf.fire(t, 2000)
 	ctx, memo = usage.WithAggregationMemo(lf.ctx)
-	if _, err := lf.dashboard.GetByToken(ctx, lf.token); err != nil {
+	got, err = lf.dashboard.GetByToken(ctx, lf.token)
+	if err != nil {
 		t.Fatalf("dashboard after fire: %v", err)
 	}
-	if memo.Queries() != 1 || memo.Hits() != 1 {
-		t.Errorf("after a threshold invoice: %d aggregations reached the database and %d were reused; want 1 and 1", memo.Queries(), memo.Hits())
+	if proj := got.(usage.CostDashboardProjection); proj.ProjectedTotalCents != 2500 {
+		t.Errorf("projected after a threshold invoice = %d, want 2500: the whole period", proj.ProjectedTotalCents)
+	}
+	if memo.Queries() != 2 || memo.Hits() != 0 {
+		t.Errorf("after a threshold invoice: %d aggregations reached the database and %d were reused; want 2 and 0", memo.Queries(), memo.Hits())
 	}
 }
 

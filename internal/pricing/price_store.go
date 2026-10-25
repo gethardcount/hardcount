@@ -42,14 +42,21 @@ import (
 
 // versionInForce is the price version in force for a reader: at $2 in the
 // time domain of clock $3 (” is wall time), from the version list of p.
-const versionInForce = `
+var versionInForce = versionInForceAt("$2", "$3::text")
+
+// versionInForceAt is versionInForce with the instant and the clock given as
+// SQL expressions.
+func versionInForceAt(at, clockID string) string {
+	validFrom := `(CASE WHEN ` + clockID + ` = '' THEN v.valid_from ELSE COALESCE(c.valid_from, '-infinity') END)`
+	return `
 	SELECT v.id, v.removed, v.mode, v.unit_amount_cents, v.tiers, v.package_size, v.package_amount_cents, v.created_at
 	FROM plan_price_versions v
-	LEFT JOIN plan_price_version_clocks c ON c.version_id = v.id AND c.test_clock_id = $3::text
+	LEFT JOIN plan_price_version_clocks c ON c.version_id = v.id AND c.test_clock_id = ` + clockID + `
 	WHERE v.price_id = p.id
-	  AND (CASE WHEN $3::text = '' THEN v.valid_from ELSE COALESCE(c.valid_from, '-infinity') END) <= $2
-	ORDER BY (CASE WHEN $3::text = '' THEN v.valid_from ELSE COALESCE(c.valid_from, '-infinity') END) DESC, v.valid_from DESC
+	  AND ` + validFrom + ` <= ` + at + `
+	ORDER BY ` + validFrom + ` DESC, v.valid_from DESC
 	LIMIT 1`
+}
 
 // latestVersion is a price's latest version: its content from now on.
 const latestVersion = `
@@ -156,6 +163,59 @@ func (s *PostgresStore) PlanPricesAt(ctx context.Context, tenantID, planID strin
 	}
 	domain.ClaimOrder(out)
 	return out, nil
+}
+
+// PlanPin is one read of a plan's prices: at At in the time domain of
+// ClockID ("" is wall time).
+type PlanPin struct {
+	PlanID  string
+	At      time.Time
+	ClockID string
+}
+
+// MetersPricedAt returns, for each pin, the meters its plan prices then (the
+// meters of PlanPricesAt), in one transaction and one statement. Ingest reads
+// every open period's pins on each event.
+func (s *PostgresStore) MetersPricedAt(ctx context.Context, tenantID string, pins []PlanPin) ([][]string, error) {
+	out := make([][]string, len(pins))
+	if len(pins) == 0 {
+		return out, nil
+	}
+	planIDs := make([]string, len(pins))
+	ats := make([]string, len(pins))
+	clockIDs := make([]string, len(pins))
+	for i, p := range pins {
+		planIDs[i] = p.PlanID
+		// Microseconds, truncated: what a timestamptz parameter carries.
+		ats[i] = p.At.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
+		clockIDs[i] = p.ClockID
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT r.ord, p.meter_id
+		FROM unnest($1::text[], $2::text[]::timestamptz[], $3::text[]) WITH ORDINALITY AS r(plan_id, at, clock_id, ord)
+		JOIN plan_prices p ON p.plan_id = r.plan_id
+		CROSS JOIN LATERAL (`+versionInForceAt("r.at", "r.clock_id")+`) v
+		WHERE NOT v.removed
+		ORDER BY r.ord, p.meter_id`,
+		postgres.StringArray(planIDs), postgres.StringArray(ats), postgres.StringArray(clockIDs))
+	if err != nil {
+		return nil, fmt.Errorf("read the meters of plans: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var ord int
+		var meterID string
+		if err := rows.Scan(&ord, &meterID); err != nil {
+			return nil, err
+		}
+		out[ord-1] = append(out[ord-1], meterID)
+	}
+	return out, rows.Err()
 }
 
 // ListPrices returns the prices of the plans taking part from now on.

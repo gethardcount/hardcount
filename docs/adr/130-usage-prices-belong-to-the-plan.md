@@ -224,7 +224,7 @@ names it.
 
 | What | Never-used plan | Used plan |
 |---|---|---|
-| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period (Risks). |
+| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period, and one that moves to the plan mid-period gets it from its next period (Risks). |
 | Base fee, if PR-7 ships | Applies at once. | Applies from each subscriber's next period. |
 | Base fee, if PR-7 is cut | Editable. | Refused while a live subscription uses the plan, as today (ADR-034). |
 | `base_bill_timing` | Editable, but not to `in_advance` at a base of 0 (section 14). | Locked. |
@@ -420,8 +420,10 @@ lock with the rule tables.
 ### 10. Customer usage, the cost dashboard and margin (PR-4)
 
 - **Current period: exact.** Each subscription is priced by the close's
-  own rater over its windows, floors, threshold watermark and ladder. The
-  customer page then matches the invoice and the live balance. With two
+  own rater over its windows, floors and ladder, for the whole period: usage
+  a threshold invoice already billed is counted, as the period's daily
+  chart counts it. The live balance's unbilled usage is the part the close
+  will still bill (amended 2026-10-25, second review of #1386). With two
   subscriptions on different billing days, the response's period runs
   from the earliest start to the latest end of their periods, and each
   meter's daily chart is read over its own subscription's period
@@ -674,8 +676,12 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   8).
 - **Price add against a concurrent subscription create is check-then-act.**
   A price for a meter new to a used plan runs the overlap check for every
-  customer on the plan (409 `meter_overlap`). A subscription created on
-  another plan at the same moment is not ordered with it. The same class
+  customer on the plan (409 `meter_overlap`). A writer that puts a plan on
+  an item checks again on its own transaction, after it holds the plan
+  `FOR KEY SHARE`, so a price and an item on the same plan are ordered by
+  the plan lock, used or never-used (amended 2026-10-25, second review of
+  #1386). A subscription created on another plan at the same moment is
+  not ordered with it. The same class
   as two concurrent subscription creates today; it joins ADR-100's
   deferred locks. Trigger: the first account with several operators.
 - **A new subscriber later on the day of an edit** pays the old price for
@@ -686,6 +692,17 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   first period at the subscription's start instead was dropped in the
   panel (a second pin rule); it is an open owner decision from the review
   of #1386.
+- **A subscriber who moves to a plan mid-period** (an immediate swap, or an
+  added item) is priced, for the rest of that period, by the plan's prices
+  at the subscriber's period start, because every window of a period uses
+  the period's pin (section 4 step 3). A rate edited earlier in the period
+  bills at the old rate, a price removed earlier still bills, and a meter
+  the plan first priced earlier in the period bills nothing that period,
+  with no unpriced warning or counter: the plan did not price the meter at
+  the pin. The pricing guide, the API reference and the plan page say so.
+  Pinning each window at its own start would fix this and the same-day
+  case together; it is part of the same open owner decision (second review
+  of #1386).
   (A spend threshold with `reset_billing_cycle=true` used to start a period
   at the invoice's own instant. *Removed 2026-10-23 in its own PR (#1371): a
   threshold invoice no longer starts a period, so PR-4 carries no reset

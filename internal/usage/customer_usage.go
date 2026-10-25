@@ -36,8 +36,9 @@ type PricingReader interface {
 // §10). Implemented by *billing.Engine, wired in router.go: the rater lives
 // in billing, so the customer page prices usage the way the invoice does.
 type UsageRater interface {
-	// RateCurrentPeriod is the subscription's current period exactly as its
-	// close would bill it now.
+	// RateCurrentPeriod is the subscription's whole current period as its
+	// close would bill it with no threshold invoice: usage a threshold
+	// invoice already billed is counted.
 	RateCurrentPeriod(ctx context.Context, sub domain.Subscription) (domain.RatedSubscription, error)
 	// RateWindow is an estimate over [from, to), priced at the
 	// subscription's current-period pin.
@@ -190,9 +191,10 @@ type CustomerUsageBucket struct {
 //  3. Period resolution (current cycle from primary sub, or explicit
 //     ?from=&to= validated for partial bounds, ordering, 1-year cap).
 //  4. Each subscription through billing's rater: with no window, its own
-//     current period exactly as its close would bill it now (windows,
-//     floors, threshold watermark, ladder); with an explicit window, an
-//     estimate at its current-period prices.
+//     whole current period as its close would bill it with no threshold
+//     invoice (windows, floors, ladder), so usage a threshold invoice already
+//     billed is counted; with an explicit window, an estimate at its
+//     current-period prices.
 //  5. With no window, the period becomes the earliest start to the latest
 //     end of the rated subscriptions' current periods, and each meter's
 //     daily buckets are read over its own subscription's period, so the

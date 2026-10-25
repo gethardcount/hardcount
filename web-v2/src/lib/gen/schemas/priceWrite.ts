@@ -21,6 +21,10 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * midnight of its first day. So one that starts later on the day of
  * the write gets it from its second period: its first period still
  * bills a price removed that day and does not bill one added that day.
+ * A subscription that moves to the plan mid-period (an immediate plan
+ * change or an added item) gets it from its next period too: the rest
+ * of its current period is priced by the plan's prices at that
+ * period's start.
  */
 export type PriceWrite = PlanPrice & {
   effective: PriceWriteEffective;

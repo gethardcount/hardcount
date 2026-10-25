@@ -199,7 +199,7 @@ func trialPeriodBilled(sub domain.Subscription) bool {
 // It also returns the currency of the subscription's first item's plan, the
 // input Engine.invoiceCurrency takes to name the close invoice's currency.
 func (e *Engine) unbilledUsageCents(ctx context.Context, sub domain.Subscription) (int64, string, error) {
-	cp, err := e.rateCurrentPeriod(ctx, sub)
+	cp, err := e.rateCurrentPeriod(ctx, sub, afterThresholdInvoice)
 	if err != nil {
 		return 0, "", err
 	}
@@ -222,8 +222,22 @@ type currentPeriod struct {
 	planCurrency string
 }
 
+// periodPart is how much of the current period rateCurrentPeriod rates.
+type periodPart int
+
+const (
+	// afterThresholdInvoice is what the close will still bill: the live
+	// balance's unbilled usage.
+	afterThresholdInvoice periodPart = iota
+	// wholePeriod is the period's usage as if no threshold invoice had
+	// billed part of it: customer usage and the cost dashboard.
+	wholePeriod
+)
+
 // rateCurrentPeriod rates the usage of this subscription's current period
-// the way buildLineItems will:
+// the way buildLineItems will (part afterThresholdInvoice), or the whole
+// period as one close with no threshold invoice would bill it (part
+// wholePeriod):
 //
 //   - Each meter is counted over the windows a plan pricing it was on the
 //     subscription (meterUsageIntervals, the close's own builder), each by
@@ -233,8 +247,9 @@ type currentPeriod struct {
 //     the trial end or another subscription's coverage end of the meter that
 //     day (usageFloors).
 //   - No threshold invoice this period: every bucket over those windows.
-//   - A threshold invoice exists: it billed usage up to its
-//     billing_period_end, and credit already paid for it. Additive buckets
+//   - A threshold invoice exists (read only for afterThresholdInvoice): it
+//     billed usage up to its billing_period_end, and credit already paid
+//     for it. Additive buckets
 //     (sum, count) count only from that instant on, priced continuing the
 //     tiers the invoice reached. Non-additive buckets (max, last) that the
 //     invoice left off still count over the UNCLAMPED windows, because the
@@ -244,15 +259,18 @@ type currentPeriod struct {
 // same as the close. Two live subscriptions on one meter would each bill the
 // same events, which is why the subscription service refuses that setup
 // (rejectMeterOverlap).
-func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription) (currentPeriod, error) {
+func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription, part periodPart) (currentPeriod, error) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return currentPeriod{}, nil
 	}
 	periodStart, periodEnd := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
 
-	wm, err := e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd)
-	if err != nil {
-		return currentPeriod{}, err
+	var wm thresholdWatermark
+	if part == afterThresholdInvoice {
+		var err error
+		if wm, err = e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd); err != nil {
+			return currentPeriod{}, err
+		}
 	}
 	plans, err := e.itemPlans(ctx, sub)
 	if err != nil {

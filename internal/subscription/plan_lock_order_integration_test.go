@@ -582,7 +582,17 @@ func TestPlanLockOrder_SinglePlanWritersLockFirst(t *testing.T) {
 	for i, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			_, lo, hi := r.meterPlans(t, "lockone-"+string(rune('a'+i)))
-			sub := r.sub(t, "one-"+string(rune('a'+i)), domain.SubscriptionActive, lo)
+			on := lo
+			if c.name == "item add" {
+				// An added item on hi beside one on lo would bill the meter
+				// twice, which the store refuses.
+				on = createPlanPricing(t, r.db, r.ctx, r.tenantID, domain.Plan{
+					Code: "lockone-none", Name: "lockone-none", Currency: "USD",
+					BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
+					BaseAmountCents: 1000, Status: domain.PlanActive,
+				})
+			}
+			sub := r.sub(t, "one-"+string(rune('a'+i)), domain.SubscriptionActive, on)
 
 			hold, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
 			if err != nil {

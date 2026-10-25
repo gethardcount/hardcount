@@ -208,6 +208,13 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		inserted = append(inserted, stored)
 	}
 	sub.Items = inserted
+	items := make([]itemPlan, 0, len(inserted))
+	for _, it := range inserted {
+		items = append(items, itemPlan{itemID: it.ID, planID: it.PlanID})
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, items); err != nil {
+		return domain.Subscription{}, err
+	}
 
 	// ADR-101: a start-now create IS the items' billable open — one interval
 	// per item at the (already day-snapped) period start, same tx. Draft and
@@ -2211,6 +2218,64 @@ func lockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
 	return nil
 }
 
+// itemPlan is an item and the plan a write just put on it (its plan, or
+// its pending plan).
+type itemPlan struct{ itemID, planID string }
+
+// refuseMeterOverlapTx is the double-billing guard (Service.rejectMeterOverlap)
+// again, on the write's transaction, after the write. Each item's new plan
+// must price no meter that another live item of the customer prices, its
+// own subscription's other items included.
+//
+// The service checks before the transaction, on the plans' meters as they
+// were then. A price for a new meter can commit in between: on a plan no one
+// has used it runs no overlap check, and on a used plan its check cannot see
+// an item that is not written yet. A price write holds its plan FOR UPDATE,
+// and the writer holds the plan FOR KEY SHARE (lockPlansTx) before this
+// check. So a price that committed first is read here, and one that comes
+// later waits for this transaction, then sees the item and refuses the
+// meter (pricing's 409 meter_overlap).
+func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, items []itemPlan) error {
+	itemIDs := make([]string, 0, len(items))
+	planIDs := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.planID != "" {
+			itemIDs = append(itemIDs, it.itemID)
+			planIDs = append(planIDs, it.planID)
+		}
+	}
+	if len(itemIDs) == 0 {
+		return nil
+	}
+	var meterID, code string
+	var sameSub bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT pp.meter_id, s2.code, s2.id = own.id
+		FROM unnest($1::text[], $2::text[]) AS n(item_id, plan_id)
+		JOIN subscription_items ni ON ni.id = n.item_id
+		JOIN subscriptions own ON own.id = ni.subscription_id
+		JOIN plan_prices pp ON pp.plan_id = n.plan_id
+		JOIN subscriptions s2 ON s2.customer_id = own.customer_id AND s2.status IN ('draft', 'trialing', 'active')
+		JOIN subscription_items b ON b.subscription_id = s2.id AND b.deleted_at IS NULL AND b.id <> n.item_id
+		JOIN plan_prices pb ON pb.meter_id = pp.meter_id AND (pb.plan_id = b.plan_id OR pb.plan_id = b.pending_plan_id)
+		ORDER BY pp.meter_id, s2.code
+		LIMIT 1`, postgres.StringArray(itemIDs), postgres.StringArray(planIDs)).Scan(&meterID, &code, &sameSub)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check meter overlap: %w", err)
+	}
+	if sameSub {
+		return errs.InvalidState(fmt.Sprintf(
+			"this subscription already has an item billing meter %s — usage would be invoiced twice; remove or swap the existing item instead",
+			meterID))
+	}
+	return errs.InvalidState(fmt.Sprintf(
+		"subscription %q already bills meter %s for this customer — usage would be invoiced twice; cancel that subscription first, or price both plans as items on one subscription",
+		code, meterID))
+}
+
 // itemPlanIDs is the plan of each item.
 func itemPlanIDs(items []domain.SubscriptionItem) []string {
 	ids := make([]string, 0, len(items))
@@ -2323,6 +2388,9 @@ func (s *PostgresStore) addItemInTx(ctx context.Context, tx *sql.Tx, tenantID st
 			return domain.SubscriptionItem{}, errs.AlreadyExists("plan_id",
 				fmt.Sprintf("subscription already has an item for plan %q", item.PlanID))
 		}
+		return domain.SubscriptionItem{}, err
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: stored.PlanID}}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	// ADR-101: same-tx interval open (with the day-grade 'add' clamp).
@@ -2450,6 +2518,9 @@ func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sq
 		}
 		return domain.SubscriptionItem{}, err
 	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: newPlanID}}); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	// ADR-101: the plan swap moves at its effective instant, same tx.
 	if err := intervalTransition(ctx, tx, stored.ID, stored.SubscriptionID, changedAt, newPlanID, nil, "plan"); err != nil {
 		return domain.SubscriptionItem{}, err
@@ -2503,6 +2574,9 @@ func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, 
 		return domain.SubscriptionItem{}, errs.ErrNotFound
 	}
 	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: pendingPlanID}}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	return stored, nil

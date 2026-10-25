@@ -33,6 +33,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	}
 	planM := plan("cov-m", "mtr_m")
 	planN := plan("cov-n", "mtr_n")
+	planO := plan("cov-o", "mtr_o")
 	planNone := plan("cov-none")
 	store := NewPostgresStore(db)
 	day := func(n int) time.Time { return ivPS.Add(time.Duration(n) * 24 * time.Hour) }
@@ -85,7 +86,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	// anything); another customer's cancel; a cancel past the period end
 	// (sealed AT the period end, the window's bound); a zero-width row (an
 	// item added on day 10 under a cancel backdated to day 8).
-	ivActiveSub(t, store, ctx, tenantID, cust, "cov-open", items(planN))
+	ivActiveSub(t, store, ctx, tenantID, cust, "cov-open", items(planO))
 	draft, err := store.Create(ctx, tenantID, domain.Subscription{
 		Code: "cov-draft", DisplayName: "cov-draft", CustomerID: cust,
 		Status: domain.SubscriptionDraft, BillingTime: domain.BillingTimeCalendar, Items: items(planM),

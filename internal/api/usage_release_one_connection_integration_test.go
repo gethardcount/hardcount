@@ -38,8 +38,14 @@ type releasePricing struct {
 	meterID string
 }
 
-func (p releasePricing) PlanPricesAt(context.Context, string, string, time.Time, string) ([]domain.PlanPrice, error) {
-	return []domain.PlanPrice{{ID: "vlx_prc_release", PlanID: "pln_release", MeterID: p.meterID}}, nil
+func (p releasePricing) MetersPricedAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]string, error) {
+	out := make([][]string, len(pins))
+	for i, pin := range pins {
+		if pin.PlanID == "pln_release" {
+			out[i] = []string{p.meterID}
+		}
+	}
+	return out, nil
 }
 
 // releaseThresholds answers a paid threshold invoice that billed through at.

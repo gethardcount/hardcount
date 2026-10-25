@@ -120,12 +120,10 @@ type CostDashboardProjection struct {
 // is the figure a "live balance" widget wants: the balance minus
 // UnbilledUsageCents, never below zero.
 //
-// UnbilledUsageCents is NOT projected_total_cents. The projection is this
-// period's usage over one window; unbilled usage leaves out what a threshold
-// invoice already billed and what a trial will never bill, and counts each
-// subscription over its own period. Subtracting the projection was wrong in
-// exactly those cases (issue #1019), so the three live fields come from
-// CostDashboardLiveBalance and the block adds up on its own:
+// UnbilledUsageCents is NOT projected_total_cents. The projection is the
+// current period's whole usage; unbilled usage leaves out what a threshold
+// invoice already billed. So the three live fields come from
+// CostDashboardLiveBalance (issue #1019) and the block adds up on its own:
 // estimated = max(balance - unbilled, 0).
 type CostDashboardCredits struct {
 	Currency                  string `json:"currency"`

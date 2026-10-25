@@ -661,10 +661,10 @@ export interface paths {
                             }[];
                             /**
                              * Format: int64
-                             * @description Projected METERED cost for the current period, in cents. Recurring base fees are not included — an in_advance base is already invoiced at period open.
+                             * @description The metered cost of the current billing period so far, in cents, including usage a threshold invoice already billed. Recurring base fees are not included — an in_advance base is already invoiced at period open.
                              */
                             projected_total_cents?: number;
-                            /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` can differ from `projected_total_cents`: it leaves out usage a threshold invoice already billed and usage sent before a trial's first paid period, and counts each subscription over its own period. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
+                            /** @description The customer's credit position, one entry per currency, ordered by currency. `balance_cents` is the ledger balance in that currency, less any grant past its expiry date that is not yet written off: credit is drawn down when an invoice is issued, so it does not move with usage. `unbilled_usage_cents` is the usage no invoice has billed yet that will be invoiced in that currency, and `estimated_remaining_cents` is the balance minus that, never below zero. These three are the same figures `GET /v1/credits/balance/{customer_id}/live` returns. `unbilled_usage_cents` differs from `projected_total_cents` after a threshold invoice: it leaves out the usage that invoice billed. It is an estimate: tax, base fees billed at period end and unpaid invoices are not subtracted. */
                             credits?: {
                                 currency?: string;
                                 /** Format: int64 */
@@ -7019,6 +7019,10 @@ export interface components {
          *     midnight of its first day. So one that starts later on the day of
          *     the write gets it from its second period: its first period still
          *     bills a price removed that day and does not bill one added that day.
+         *     A subscription that moves to the plan mid-period (an immediate plan
+         *     change or an added item) gets it from its next period too: the rest
+         *     of its current period is priced by the plan's prices at that
+         *     period's start.
          */
         PriceWrite: components["schemas"]["PlanPrice"] & {
             /** @enum {string} */
@@ -8198,7 +8202,8 @@ export interface components {
              *     (`current_billing_cycle`), each subscription is rated over its
              *     own current billing period, and the period runs from the
              *     earliest start to the latest end of those periods. A meter's
-             *     totals and daily `buckets` cover its own subscription's period.
+             *     totals and daily `buckets` cover its own subscription's whole
+             *     period, including usage a threshold invoice already billed.
              */
             period: {
                 /** Format: date-time */

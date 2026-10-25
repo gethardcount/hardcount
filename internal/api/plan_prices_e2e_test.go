@@ -612,8 +612,9 @@ func TestE2E_PlanPrices_NewSubscriberOnTheDayOfAChange(t *testing.T) {
 // period the plan's current prices apply. The docs say so
 // (docs/ai-pricing.md, the API reference, the plan page).
 //
-// Mutation: price the swapped-in window at the swap instead of the period
-// start, and the first period bills the edited rate and the tokens.
+// Mutation: price the period at an instant after the changes instead of
+// its start, and the period of the swap bills the edited rate and the
+// tokens.
 func TestE2E_PlanPrices_SwapOntoAPlanAfterAChange(t *testing.T) {
 	r := newPPRig(t, "swap after change")
 	calls := r.meter("calls", "sum")
