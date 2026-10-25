@@ -210,8 +210,13 @@ func TestProperty_Pricing_PackageCountsAnyPart(t *testing.T) {
 			PackageAmountCents: decimal.NewFromInt(pkgCents),
 		}
 		k := int64(r.IntN(1000))
-		// A part from 10^-12 up to just under one package.
-		part := tiny.Mul(decimal.NewFromInt(r.Int64N(1_000_000) + 1))
+		// A part from 10^-12 up to just under one package; half the time
+		// the smallest one, 10^-12.
+		n := int64(1)
+		if r.IntN(2) == 0 {
+			n = r.Int64N(1_000_000) + 1
+		}
+		part := tiny.Mul(decimal.NewFromInt(n))
 		if lim := decimal.NewFromInt(size); part.GreaterThanOrEqual(lim) {
 			part = lim.Sub(tiny)
 		}

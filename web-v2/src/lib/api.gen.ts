@@ -5153,7 +5153,7 @@ export interface paths {
                         "application/json": components["schemas"]["ProviderCostRate"];
                     };
                 };
-                /** @description `validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, or `currency` is not USD (param names the field). */
+                /** @description `validation_error`: a required field is missing, `unit_cost_cents` is not a number or is outside its limits, `currency` is not USD, or the body has an unknown field such as `cost_per_token` (`param` names the field; the body must use only the fields listed here). */
                 422: {
                     headers: {
                         [name: string]: unknown;

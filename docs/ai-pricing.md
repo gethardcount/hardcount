@@ -523,7 +523,6 @@ the customer.
    LiteLLM's cost instead of yours
    ([when](integrations/litellm.md#things-to-know)).
 
-   ```bash
    A cost is `unit_cost_cents`, US cents per token, like every `*_cents`
    field: `0.00012` cents per token is $1.20 per million tokens.
 

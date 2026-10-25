@@ -30,6 +30,10 @@ first. Every shipped change, with its date, is in the
   not count. A meter's `key` is now
   `event_name`, the name usage events send it by
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §2).
+- **Done:** a price is `per_unit`, `graduated` or `package`, and a package
+  price bills a part package as a whole one. Every `*_cents` field is in
+  the currency's smallest unit, provider costs included
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §3).
 - **Done:** eight API operations that another operation already did are
   removed. The [CHANGELOG](../CHANGELOG.md) names the replacement for each.
 - **Done:** a dunning policy's schedule is one list of days, `retry_days`:

@@ -338,7 +338,12 @@ func ComputeAmountCents(rule RatingRuleVersion, quantity decimal.Decimal) (int64
 			return 0, ErrInvalidPricingConfig
 		}
 		// A part package bills as a whole one: ceil(quantity / size).
-		packages := quantity.Div(decimal.NewFromInt(rule.PackageSize)).Ceil()
+		// QuoRem counts the whole packages exactly; Div would round the
+		// quotient to 16 places first and could drop a small part.
+		packages, part := quantity.QuoRem(decimal.NewFromInt(rule.PackageSize), 0)
+		if part.IsPositive() {
+			packages = packages.Add(decimal.NewFromInt(1))
+		}
 		return decimalToCents(packages.Mul(rule.PackageAmountCents))
 
 	default:
