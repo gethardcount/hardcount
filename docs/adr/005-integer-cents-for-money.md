@@ -1,7 +1,7 @@
 # ADR-005: Integer Cents for Money
 
 **Date:** 2026-04-15
-**Status:** Accepted (amended 2026-06-01 — partially superseded by ADR-045 for per-unit RATE fields; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) §3, built in #1381: a package's price is a decimal too)
+**Status:** Accepted, amended twice. ADR-045 made per-unit rates decimal (2026-06-01). [ADR-130](130-usage-prices-belong-to-the-plan.md) §3 made a package's price decimal too (built in #1381).
 
 ## Status
 Accepted
