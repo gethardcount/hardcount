@@ -19,38 +19,37 @@ import (
 //   - Quantity is a decimal string on the wire (NUMERIC(38,12) precision
 //     preserved end-to-end — fractional AI-usage primitives like GPU-hours
 //     and cached-token ratios round-trip without precision loss).
-//   - Multi-rule meters emit one line per (meter, rule) pair with
-//     DimensionMatch echoed from the meter pricing rule (the canonical
-//     pricing identity). Single-rule meters keep the one-line-per-meter
-//     shape with no DimensionMatch.
+//   - A meter emits one line per (window, price), with the price's id and
+//     DimensionMatch (the events it takes). A catch-all price's line has no
+//     DimensionMatch.
 //
 // See docs/dev/design/create-preview.md.
 type PreviewLine struct {
-	LineType            string          `json:"line_type"`
-	Description         string          `json:"description"`
-	MeterID             string          `json:"meter_id,omitempty"`
-	MeterUnit           string          `json:"meter_unit,omitempty"`
-	RatingRuleVersionID string          `json:"rating_rule_version_id,omitempty"`
-	RuleKey             string          `json:"rule_key,omitempty"`
-	DimensionMatch      map[string]any  `json:"dimension_match,omitempty"`
-	Currency            string          `json:"currency"`
-	Quantity            decimal.Decimal `json:"quantity"`
-	UnitAmountCents     int64           `json:"unit_amount_cents"`
-	AmountCents         int64           `json:"amount_cents"`
-	PricingMode         string          `json:"pricing_mode,omitempty"`
+	LineType        string            `json:"line_type"`
+	Description     string            `json:"description"`
+	MeterID         string            `json:"meter_id,omitempty"`
+	MeterUnit       string            `json:"meter_unit,omitempty"`
+	PriceID         string            `json:"price_id,omitempty"`
+	DimensionMatch  map[string]string `json:"dimension_match,omitempty"`
+	Currency        string            `json:"currency"`
+	Quantity        decimal.Decimal   `json:"quantity"`
+	UnitAmountCents int64             `json:"unit_amount_cents"`
+	AmountCents     int64             `json:"amount_cents"`
+	PricingMode     string            `json:"pricing_mode,omitempty"`
 	// Aggregation is the line's meter's aggregation (sum, count, max,
 	// last), which every price of the meter bills under (ADR-130 §2).
 	// Internal-only (json:"-"): the threshold scan classifies non-additive
 	// buckets with it (ADR-066 §4); the public create_preview wire is
 	// unchanged.
 	Aggregation string `json:"-"`
-	// PlanID + BaseBillTiming identify the base_fee line's plan, internal-
-	// only (json:"-"): the threshold fire consumes them to skip prepaid
-	// in_advance bases and prorate reset-mode bases PER LINE — replacing a
-	// positional parallel-array contract that silently mis-attributed
-	// plans if the emission order ever changed (2026-07-10 design review).
+	// PlanID is the line's plan, internal-only (json:"-"): a base_fee line's,
+	// or the plan whose prices priced a usage line's window. BaseBillTiming
+	// is a base_fee line's timing.
 	PlanID         string            `json:"-"`
 	BaseBillTiming domain.BillTiming `json:"-"`
+	// windowStart and windowEnd are a usage line's window: the threshold
+	// fire stamps them on its invoice line.
+	windowStart, windowEnd time.Time
 	// NominalUnitAmountDecimal carries the per_unit configured rate
 	// (decimal cents) from the OVERRIDE-APPLIED rule, internal-only (json:"-")
 	// so an overage invoice line built from this preview shows the clean
@@ -136,13 +135,8 @@ func (e *Engine) previewWithWindow(ctx context.Context, sub domain.Subscription,
 // for [periodStart, periodEnd] (previewCycle); asClose=false is the flat
 // window estimate (previewWithWindow).
 func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, periodStart, periodEnd time.Time, asClose bool) (PreviewResult, error) {
-	if tapped(ctx) {
-		return rateTap.previewWindow(ctx, e, sub, periodStart, periodEnd, asClose)
-	}
 	plans := make(map[string]domain.Plan, len(sub.Items))
 	planNames := make([]string, 0, len(sub.Items))
-	var allMeterIDs []string
-	seenMeter := make(map[string]struct{})
 	for _, it := range sub.Items {
 		if _, ok := plans[it.PlanID]; ok {
 			continue
@@ -153,13 +147,6 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		}
 		plans[it.PlanID] = pl
 		planNames = append(planNames, pl.Name)
-		for _, mid := range pl.MeterIDs {
-			if _, ok := seenMeter[mid]; ok {
-				continue
-			}
-			seenMeter[mid] = struct{}{}
-			allMeterIDs = append(allMeterIDs, mid)
-		}
 	}
 
 	// ADR-031: when ANY item is in_advance, the cycle invoice's
@@ -193,7 +180,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	}
 
 	if asClose {
-		return e.previewAsClose(ctx, sub, plans, allMeterIDs, periodStart, periodEnd, result)
+		return e.previewAsClose(ctx, sub, plans, periodStart, periodEnd, result)
 	}
 
 	// Base-fee lines from each subscription item's plan. Quantity here is
@@ -225,54 +212,61 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		})
 	}
 
-	// Usage lines per (meter, rule), priced by the one rater (rate.go). The
-	// priority+claim LATERAL JOIN inside AggregateClaims is the
-	// canonical pricing identity — the cycle scan calls the same path, so a
-	// multi-dim tenant's preview matches what its actual invoice will be.
+	// Usage lines per (window, price), priced by the one rater (rate.go):
+	// each stretch of the window a plan was on the subscription, by that
+	// plan's prices (ADR-130 §9). The prices are pinned at the start of the
+	// subscription's current period, in its time domain: an estimate over
+	// an explicit window is priced at today's prices, not at each past
+	// period's own (ADR-130 §10).
 	//
-	// A rating ERROR aborts the whole preview (ADR-070,
-	// no-silent-fallbacks). Only a meter with no rule binding at all and a
-	// net-negative bucket (usage corrections) are soft cases, surfaced as
-	// warnings by the rater. A missing pinned rule, a rating
-	// failure and store or resolution errors all reach this err, and a
-	// partial preview built from those is a lie — worse, the threshold
-	// scan PERSISTS these lines as a fire invoice, and a silently
-	// dropped meter's pre-fire usage would then be billed by nobody:
-	// the cycle close clamps every meter's window to the fire
-	// watermark, deferral only exists for non-additive buckets. The
-	// pre-ADR-070 warning-degradation here defeated the rater's own
-	// fail-loud contract for exactly the money path it matters on.
-	//
-	// Each meter's window opens at its usage floor (trial end, another
+	// A rating ERROR aborts the whole preview (no-silent-fallbacks). Only
+	// usage no price takes and a net-negative bucket (usage corrections) are
+	// soft cases, surfaced as warnings by the rater. A partial preview built
+	// from a failed read is a lie.
+	pinStart := periodStart
+	if sub.CurrentBillingPeriodStart != nil {
+		pinStart = *sub.CurrentBillingPeriodStart
+	}
+	segsByItem, err := e.windowSegments(ctx, sub, periodStart, periodEnd)
+	if err != nil {
+		return PreviewResult{}, fmt.Errorf("preview: resolve segments: %w", err)
+	}
+	if err := e.hydrateSegmentPlans(ctx, sub, segsByItem, plans); err != nil {
+		return PreviewResult{}, err
+	}
+	src := e.prices()
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pinFor(sub, pinStart))
+	if err != nil {
+		return PreviewResult{}, err
+	}
+	// Each window opens at its meter's usage floor (trial end, another
 	// subscription's coverage end; usageFloors), the same start the closers
-	// use, while rules stay pinned at the period start (ADR-070). The window
-	// is flat, one start per meter: a meter that left this subscription,
-	// covered another one and came back opens after that other coverage, so
-	// the stretch before it left is not rated here (an accepted residual
-	// edge, ADR-012 amendment 2026-10-22).
+	// use.
 	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
 	if err != nil {
 		return PreviewResult{}, err
 	}
 	result.floors = floors
-	windows := make([]rateWindow, 0, len(allMeterIDs))
-	for _, meterID := range allMeterIDs {
-		from := floors.start(meterID, periodStart, periodEnd)
-		if !from.Before(periodEnd) {
-			continue
+	clamped, _ := meterUsageIntervals(sub, segsByItem, planMeters, periodStart, periodEnd, nil, floors)
+	var windows []rateWindow
+	for _, k := range sortedPlanMeters(clamped) {
+		for _, iv := range mergeUsageIntervals(clamped[k]) {
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
 		}
-		windows = append(windows, rateWindow{meterID: meterID, iv: usageInterval{start: from, end: periodEnd}, pass: passEvery})
 	}
-	// No ladder: each bucket is priced on its own. The threshold evaluation
-	// runs only while the period has no threshold invoice (the fire-once
-	// probe), and the explicit-window estimate continues none.
-	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, windows, periodStart, nil)
+	// No ladder: each window is priced on its own.
+	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, pinStart, nil, plans)
 	if err != nil {
 		return PreviewResult{}, err
 	}
 	result.Lines = append(result.Lines, usageLines...)
 	result.Warnings = append(result.Warnings, warnings...)
 	result.leftOut = append(result.leftOut, leftOut...)
+	if sub.CurrentBillingPeriodStart != nil && sub.CurrentBillingPeriodEnd != nil &&
+		(periodStart.Before(*sub.CurrentBillingPeriodStart) || periodEnd.After(*sub.CurrentBillingPeriodEnd)) {
+		result.Warnings = append(result.Warnings,
+			"Estimate at the current period's prices: usage outside the current billing period is priced as if it were billed now.")
+	}
 
 	// Estimate-scope warning (ADR-045): create_preview is a full-period
 	// estimate that does NOT replicate the cycle's mid-period segment
@@ -307,7 +301,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		}
 		if midLifeChange {
 			result.Warnings = append(result.Warnings,
-				"Estimate excludes mid-period proration; the plan, quantity, or item set changed during this period, so the actual invoice may rate base fees and usage per segment.")
+				"Estimate shows each base fee for the whole window; the plan, quantity, or item set changed during it, so the actual invoice may prorate base fees per segment.")
 		}
 	}
 
@@ -323,7 +317,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 // (meterUsageIntervals) with buildLineItems. What it does not replicate is
 // named in a warning: the deferred max/last buckets after a threshold fire
 // (watermark warning).
-func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, plans map[string]domain.Plan, meterOrder []string, periodStart, periodEnd time.Time, result PreviewResult) (PreviewResult, error) {
+func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, plans map[string]domain.Plan, periodStart, periodEnd time.Time, result PreviewResult) (PreviewResult, error) {
 	loc, err := e.tenantLocation(ctx, sub.TenantID)
 	if err != nil {
 		return PreviewResult{}, err
@@ -338,8 +332,10 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 		result.Totals = computePreviewTotals(result.Lines)
 		return result, nil
 	}
+	src := e.prices()
+	pin := pinFor(sub, periodStart)
 	if sub.Status == domain.SubscriptionTrialing {
-		if res, ok, err := e.previewTrialEnd(ctx, sub, plans, meterOrder, periodStart, periodEnd, loc, result); ok || err != nil {
+		if res, ok, err := e.previewTrialEnd(ctx, sub, src, plans, periodStart, periodEnd, loc, result); ok || err != nil {
 			return res, err
 		}
 	}
@@ -358,20 +354,16 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	}
 	// Plans referenced only by a segment (a removed item, a pre-swap plan)
 	// bill their segment too — same hydration as buildLineItems.
-	for _, segs := range segsByItem {
-		for _, seg := range segs {
-			if seg.planID == "" {
-				continue
-			}
-			if _, ok := plans[seg.planID]; ok {
-				continue
-			}
-			pl, err := e.pricing.GetPlan(ctx, sub.TenantID, seg.planID)
-			if err != nil {
-				return PreviewResult{}, fmt.Errorf("get segment plan %s: %w", seg.planID, err)
-			}
-			plans[seg.planID] = pl
-			result.PlanName += ", " + pl.Name
+	known := make(map[string]bool, len(plans))
+	for id := range plans {
+		known[id] = true
+	}
+	if err := e.hydrateSegmentPlans(ctx, sub, segsByItem, plans); err != nil {
+		return PreviewResult{}, err
+	}
+	for _, id := range slices.Sorted(maps.Keys(plans)) {
+		if !known[id] {
+			result.PlanName += ", " + plans[id].Name
 		}
 	}
 
@@ -391,38 +383,26 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 		})
 	}
 
-	// Usage: each meter over the windows a plan carrying it was on the
+	// Usage: each (plan, meter) over the windows the plan was on the
 	// subscription, from its usage floor, clamped to the threshold watermark
-	// — the close's meterUsageIntervals. Meters only a segment plan carries come after the
-	// current plans' meters, by plan id, so the line order is the same on every
-	// call.
-	order := append([]string(nil), meterOrder...)
-	seen := make(map[string]struct{}, len(order))
-	for _, mid := range order {
-		seen[mid] = struct{}{}
-	}
-	for _, planID := range slices.Sorted(maps.Keys(plans)) {
-		pl := plans[planID]
-		for _, mid := range pl.MeterIDs {
-			if _, ok := seen[mid]; !ok {
-				seen[mid] = struct{}{}
-				order = append(order, mid)
-			}
-		}
+	// — the close's meterUsageIntervals, priced at the period start.
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pin)
+	if err != nil {
+		return PreviewResult{}, err
 	}
 	floors, err := e.loadUsageFloors(ctx, sub, periodStart, periodEnd)
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, plans, periodStart, periodEnd, wm.billedThrough, floors)
+	meterIntervals, _ := meterUsageIntervals(sub, segsByItem, planMeters, periodStart, periodEnd, wm.billedThrough, floors)
 	var windows []rateWindow
-	for _, meterID := range order {
-		for _, iv := range mergeUsageIntervals(meterIntervals[meterID]) {
-			windows = append(windows, rateWindow{meterID: meterID, iv: iv, pass: passEvery})
+	for _, k := range sortedPlanMeters(meterIntervals) {
+		for _, iv := range mergeUsageIntervals(meterIntervals[k]) {
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
 		}
 	}
 	// The tier ladder continues from a threshold fire, as in the close.
-	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, windows, periodStart, newUsageLadder(wm))
+	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, periodStart, newUsageLadder(wm), plans)
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -466,7 +446,7 @@ func trialConversionSegments(sub domain.Subscription, periodStart, periodEnd tim
 // lines come from onCreateBaseLines, the math that invoice uses. ok=false
 // when no item is in_advance: the first invoice is then the first period's
 // close, which previewAsClose composes from trialConversionSegments.
-func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, plans map[string]domain.Plan, meterIDs []string, periodStart, periodEnd time.Time, loc *time.Location, result PreviewResult) (PreviewResult, bool, error) {
+func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, src PriceSource, plans map[string]domain.Plan, periodStart, periodEnd time.Time, loc *time.Location, result PreviewResult) (PreviewResult, bool, error) {
 	// Every item shares one bill timing (rejectMixedItemIntervals on every
 	// item write; a live plan's timing is immutable), so either all items
 	// are in_advance or none is.
@@ -498,9 +478,16 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, p
 	// The trial-end invoice covers the first paid period itself, not the
 	// one after it (the in_advance header shift does not apply).
 	result.BillingPeriodStart, result.BillingPeriodEnd = periodStart, periodEnd
-	if len(meterIDs) > 0 {
-		result.Warnings = append(result.Warnings,
-			"This is the invoice issued when the trial ends. Usage for this period is on the invoice at the end of the period.")
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pinFor(sub, periodStart))
+	if err != nil {
+		return PreviewResult{}, true, err
+	}
+	for _, meters := range planMeters {
+		if len(meters) > 0 {
+			result.Warnings = append(result.Warnings,
+				"This is the invoice issued when the trial ends. Usage for this period is on the invoice at the end of the period.")
+			break
+		}
 	}
 	result.Totals = computePreviewTotals(result.Lines)
 	return result, true, nil

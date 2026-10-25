@@ -8,7 +8,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// nominalRate stamps the configured flat rate on flat-mode usage lines and
+// nominalRate stamps the configured rate on per_unit usage lines and
 // refuses to fabricate a single rate for graduated/package modes (which have
 // none — the effective blended rate is the only honest figure there). The
 // UnitAmountCents on the non-flat cases is set deliberately: the mode gate,
@@ -16,17 +16,17 @@ import (
 func TestNominalRate(t *testing.T) {
 	flat := decimal.RequireFromString("0.0003")
 	cases := []struct {
-		name string
-		rule domain.RatingRuleVersion
-		want string // "" = expect nil
+		name  string
+		price domain.PlanPrice
+		want  string // "" = expect nil
 	}{
-		{"flat mode returns the configured rate", domain.RatingRuleVersion{Mode: domain.PricingPerUnit, UnitAmountCents: flat}, "0.0003"},
-		{"graduated mode returns nil (no single rate)", domain.RatingRuleVersion{Mode: domain.PricingGraduated, UnitAmountCents: flat}, ""},
-		{"package mode returns nil (no single rate)", domain.RatingRuleVersion{Mode: domain.PricingPackage, UnitAmountCents: flat}, ""},
+		{"per_unit returns the configured rate", domain.PlanPrice{PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: flat}}, "0.0003"},
+		{"graduated mode returns nil (no single rate)", domain.PlanPrice{PriceShape: domain.PriceShape{Mode: domain.PricingGraduated, UnitAmountCents: flat}}, ""},
+		{"package mode returns nil (no single rate)", domain.PlanPrice{PriceShape: domain.PriceShape{Mode: domain.PricingPackage, UnitAmountCents: flat}}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := nominalRate(tc.rule)
+			got := nominalRate(tc.price)
 			if tc.want == "" {
 				if got != nil {
 					t.Fatalf("nominalRate: got %s, want nil", got.String())

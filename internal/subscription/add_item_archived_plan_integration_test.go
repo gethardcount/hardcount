@@ -61,8 +61,10 @@ func TestAddItem_ArchivedPlan_RefusedOnBothPaths(t *testing.T) {
 	archPlan := newPlan("arch-retired", 3000)
 	okPlan := newPlan("arch-ok", 2000)
 	// Archive the way an operator does: an active plan set to archived.
-	archPlan.Status = domain.PlanArchived
-	if _, err := ps.UpdatePlan(ctx, tenantID, archPlan); err != nil {
+	if _, err := ps.UpdatePlan(ctx, tenantID, archPlan.ID, func(p domain.Plan, _ bool) (domain.Plan, error) {
+		p.Status = domain.PlanArchived
+		return p, nil
+	}); err != nil {
 		t.Fatalf("archive plan: %v", err)
 	}
 	if got, err := ps.GetPlan(ctx, tenantID, archPlan.ID); err != nil || got.Status != domain.PlanArchived {

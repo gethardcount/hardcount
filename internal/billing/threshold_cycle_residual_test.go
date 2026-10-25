@@ -51,13 +51,11 @@ func residualHarness(thresholds *domain.BillingThresholds) (*mockSubs, *mockUsag
 		plans: map[string]domain.Plan{"pln_1": {
 			ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
-			MeterIDs: []string{"mtr_api"},
 		}},
-		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
-		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingPerUnit,
-			UnitAmountCents: decimal.NewFromInt(100),
-		}},
+		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"}},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
+		},
 	}
 	invoices := &mockInvoices{}
 	clk := clock.NewFake(time.Date(2026, 5, 1, 0, 0, 1, 0, time.UTC))
@@ -83,7 +81,7 @@ func seedThresholdInvoiceLines(inv *mockInvoices, status domain.InvoiceStatus, w
 	subtotal := int64(70000)
 	inv.lineItems = append(inv.lineItems, domain.InvoiceLineItem{
 		ID: "li_thr_usage", InvoiceID: "inv_thr", TenantID: "t1", LineType: domain.LineTypeUsage,
-		MeterID: "mtr_api", RatingRuleVersionID: "rrv_api", Description: "API Calls",
+		MeterID: "mtr_api", PriceID: "prc_api", Description: "API Calls",
 		Quantity: 700, QuantityDecimal: decimal.NewFromInt(700), UnitAmountCents: 100,
 		AmountCents: 70000, TotalAmountCents: 70000, Currency: "USD",
 		BillingPeriodStart: &start, BillingPeriodEnd: &end,

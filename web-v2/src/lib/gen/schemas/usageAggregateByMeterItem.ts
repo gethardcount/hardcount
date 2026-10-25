@@ -15,12 +15,8 @@ export type UsageAggregateByMeterItem = {
   total: string;
   /**
      * The meter's aggregation (`sum`, `count`, `max`, `last`),
-     * which every pricing rule of the meter bills under. `mixed`
-     * when a `max` or `last` meter is billed in more than one
-     * part (several rules, or a rule plus the events no rule
-     * claims), since peaks of the parts added up are not one
-     * peak: `value` is then the plain sum, which billing does not
-     * use. Empty when unknown.
+     * which every price of the meter bills under. Empty when
+     * unknown.
      */
   aggregation: string;
   /**

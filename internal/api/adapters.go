@@ -1690,11 +1690,12 @@ type usageOpenPeriods struct {
 }
 
 type usageLiveSubscriptions interface {
-	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, map[string][]string, error)
+	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error)
 }
 
 type usageMeterReader interface {
 	GetMeterTx(ctx context.Context, tx *sql.Tx, id string) (domain.Meter, error)
+	PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error)
 }
 
 type usageThresholdReader interface {
@@ -1702,31 +1703,67 @@ type usageThresholdReader interface {
 }
 
 // OpenPeriods reads every active and trialing subscription of the customer
-// with the meters of its plans, current and pending (one transaction), and
-// the threshold watermarks of each one's current period. The watermarks
-// are read whether or not the subscription still has thresholds: the close
-// keys them on the period's threshold invoices, not on the setting. A
-// deleted plan prices nothing.
+// (one transaction), the meters each one's plans price at its period start
+// and, for the plans that continue, at its period end (the next period's
+// pin), in its own time domain (ADR-130 §4), and the threshold watermarks
+// of its current period. The watermarks are read whether or not the
+// subscription still has thresholds: the close keys them on the period's
+// threshold invoices, not on the setting.
 func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
-	subs, planMeters, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
+	subs, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list live subscriptions: %w", err)
 	}
-	plans := make(map[string]domain.Plan, len(planMeters))
-	for id, meters := range planMeters {
-		plans[id] = domain.Plan{ID: id, MeterIDs: meters}
-	}
 	out := make([]usage.OpenPeriod, 0, len(subs))
 	for _, sub := range subs {
+		if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
+			continue
+		}
+		start, end := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
 		var wm usage.ThresholdWatermark
-		if sub.CurrentBillingPeriodStart != nil && sub.CurrentBillingPeriodEnd != nil {
-			wm.BilledThrough, wm.PaidThrough, err = a.thresholds.ThresholdWatermarks(ctx, tenantID, sub.ID, *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd)
-			if err != nil {
-				return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
+		wm.BilledThrough, wm.PaidThrough, err = a.thresholds.ThresholdWatermarks(ctx, tenantID, sub.ID, start, end)
+		if err != nil {
+			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
+		}
+		atStart, atEnd := map[string][]string{}, map[string][]string{}
+		for _, it := range sub.Items {
+			for _, read := range []struct {
+				planID string
+				at     time.Time
+				into   map[string][]string
+			}{{it.PlanID, start, atStart}, {it.PlanID, end, atEnd}, {it.PendingPlanID, end, atEnd}} {
+				if read.planID == "" {
+					continue
+				}
+				if _, done := read.into[read.planID]; done {
+					continue
+				}
+				meters, err := a.planMetersAt(ctx, tenantID, read.planID, read.at, sub.TestClockID)
+				if err != nil {
+					return nil, err
+				}
+				read.into[read.planID] = meters
 			}
 		}
-		if p, ok := usage.OpenPeriodOf(sub, plans, wm); ok {
+		if p, ok := usage.OpenPeriodOf(sub, atStart, atEnd, wm); ok {
 			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// planMetersAt is the meters the plan prices at `at` in clockID's time.
+func (a usageOpenPeriods) planMetersAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]string, error) {
+	prices, err := a.pricing.PlanPricesAt(ctx, tenantID, planID, at, clockID)
+	if err != nil {
+		return nil, fmt.Errorf("prices of plan %s: %w", planID, err)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, p := range prices {
+		if !seen[p.MeterID] {
+			seen[p.MeterID] = true
+			out = append(out, p.MeterID)
 		}
 	}
 	return out, nil

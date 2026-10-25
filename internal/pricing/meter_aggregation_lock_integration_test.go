@@ -85,7 +85,7 @@ func TestMeterAggregation_FixedOnceTheMeterHasEvents(t *testing.T) {
 	f := newMeterEditFixture(t)
 
 	t.Run("an event of the meter: refused, and the aggregation is unchanged", func(t *testing.T) {
-		m := f.meter(t, "agg_events", "")
+		m := f.meter(t, "agg_events")
 		f.event(t, m.ID)
 		_, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")})
 		wantHasUsage(t, "aggregation change with an event", err)
@@ -97,7 +97,7 @@ func TestMeterAggregation_FixedOnceTheMeterHasEvents(t *testing.T) {
 	// Mutation-verify: count held rows in meterHasUsageSQL again → refused,
 	// and this fails.
 	t.Run("held rows for the meter's event name do not count", func(t *testing.T) {
-		m := f.meter(t, "agg_held", "")
+		m := f.meter(t, "agg_held")
 		f.held(t, "agg_held", "held")
 		got, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("last")})
 		if err != nil {
@@ -109,7 +109,7 @@ func TestMeterAggregation_FixedOnceTheMeterHasEvents(t *testing.T) {
 	})
 
 	t.Run("released or discarded held rows do not count", func(t *testing.T) {
-		m := f.meter(t, "agg_held_done", "")
+		m := f.meter(t, "agg_held_done")
 		f.held(t, "agg_held_done", "released")
 		f.held(t, "agg_held_done", "discarded")
 		if _, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("count")}); err != nil {
@@ -118,16 +118,16 @@ func TestMeterAggregation_FixedOnceTheMeterHasEvents(t *testing.T) {
 	})
 
 	t.Run("another meter's events do not count", func(t *testing.T) {
-		other := f.meter(t, "agg_other", "")
+		other := f.meter(t, "agg_other")
 		f.event(t, other.ID)
-		m := f.meter(t, "agg_quiet", "")
+		m := f.meter(t, "agg_quiet")
 		if _, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")}); err != nil {
 			t.Fatalf("aggregation change on a meter with no events: %v", err)
 		}
 	})
 
 	t.Run("with events, a rename, a unit change and the same aggregation pass", func(t *testing.T) {
-		m := f.meter(t, "agg_rename", "")
+		m := f.meter(t, "agg_rename")
 		f.event(t, m.ID)
 		got, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{
 			Name: ptr("Renamed"), Unit: ptr("requests"), Aggregation: ptr("sum"),
@@ -147,8 +147,7 @@ func TestMeterAggregation_ChangesBeforeAnyEvent(t *testing.T) {
 	f := newMeterEditFixture(t)
 	for _, status := range []string{"draft", "trialing", "active"} {
 		t.Run("a "+status+" subscription uses the meter", func(t *testing.T) {
-			price := f.rule(t, "agg_before_price_"+status, 1)
-			m := f.meter(t, "agg_before_"+status, price.ID)
+			m := f.meter(t, "agg_before_"+status)
 			p := f.plan(t, "agg_before_plan_"+status, m.ID)
 			f.sub(t, p.ID, status)
 			got, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")})
@@ -175,7 +174,7 @@ func TestMeterAggregation_PatchAgainstTheFirstIngest(t *testing.T) {
 	f := newMeterEditFixture(t)
 
 	t.Run("the ingest writes first: the PATCH waits, then refuses", func(t *testing.T) {
-		m := f.meter(t, "agg_race_ingest", "")
+		m := f.meter(t, "agg_race_ingest")
 		ingestTx := f.begin(t)
 		defer postgres.Rollback(ingestTx)
 		cq, cargs, eq, eargs := f.eventSQL(m.ID)
@@ -211,7 +210,7 @@ func TestMeterAggregation_PatchAgainstTheFirstIngest(t *testing.T) {
 	})
 
 	t.Run("the PATCH commits first: the event counts under the new aggregation", func(t *testing.T) {
-		m := f.meter(t, "agg_race_patch", "")
+		m := f.meter(t, "agg_race_patch")
 		if _, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")}); err != nil {
 			t.Fatalf("PATCH before any event: %v", err)
 		}
@@ -241,7 +240,7 @@ func TestMeterAggregation_HTTP(t *testing.T) {
 		return rec.Code, out
 	}
 
-	m := f.meter(t, "agg_http", "")
+	m := f.meter(t, "agg_http")
 	if code, body := do(http.MethodGet, "/v1/meters/"+m.ID, ""); code != http.StatusOK || body["has_usage"] != false {
 		t.Fatalf("GET before any event: %d %v, want 200 with has_usage false", code, body)
 	}

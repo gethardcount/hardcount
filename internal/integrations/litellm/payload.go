@@ -305,7 +305,7 @@ func (u *Usage) cachedReadTokens() int64 {
 // CostBreakdown is LiteLLM's per-component cost split (cents NOT
 // supported upstream — dollars-as-float, per their wire). Velox
 // stores the value verbatim on the usage event metadata; billing
-// math runs through the operator's configured rating rules, not
+// math runs through the operator's plan prices, not
 // these floats.
 type CostBreakdown struct {
 	// InputCost is the cost of the whole prompt: fresh input, cache reads

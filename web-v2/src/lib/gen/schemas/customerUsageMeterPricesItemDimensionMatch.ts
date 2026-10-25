@@ -7,8 +7,8 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { MeterPricingRule } from './meterPricingRule';
 
-export type ListAllMeterPricingRules200 = {
-  data: MeterPricingRule[];
-};
+/**
+ * The labels the price takes. Absent for a price that takes every event.
+ */
+export type CustomerUsageMeterPricesItemDimensionMatch = {[key: string]: string};

@@ -143,16 +143,14 @@ func cancelFixture(settings SettingsReader) (*Engine, domain.Subscription, *mock
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_api": {ID: "pln_api", Name: "API", Currency: "USD",
-				BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
-				MeterIDs: []string{"mtr_api"}},
+				BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
 			"mtr_api": {ID: "mtr_api", EventName: "api", Name: "API Calls",
-				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+				Unit: "calls", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_api": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)})},
 		},
 	}
 	invoices := &mockInvoices{}

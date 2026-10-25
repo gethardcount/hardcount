@@ -3,7 +3,6 @@ package subscription
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
@@ -26,19 +24,23 @@ import (
 // Quantity change and item removal, which take no explicit lock, are raced
 // over HTTP in internal/api (item_change_plan_lock_order_e2e_test.go).
 //
-// The meter-in-use guard (D05) locks the meter, then every plan that lists it
-// FOR UPDATE in ascending id. A subscription writer's foreign-key checks take
-// FOR KEY SHARE on each plan it references, in the order its statements reach
-// them. An immediate swap A→B reaches B first (the item's new plan_id), then A
-// (the from_plan_id of the change row the item trigger writes). With
-// id(A) < id(B), the guard holds A and waits for B while the swap holds B and
-// waits for A, and Postgres aborts one of them with a deadlock error (40P01).
+// A writer of plan content that takes several plans takes them FOR UPDATE in
+// ascending id, in one statement (ADR-130 §8 step 2). D05's meter edit was
+// such a writer until ADR-130 deleted it; here a test transaction plays it
+// (planWriter), so the rule stays tested for the next one. A subscription
+// writer's foreign-key checks take FOR KEY SHARE on each plan it references,
+// in the order its statements reach them. An immediate swap A→B reaches B
+// first (the item's new plan_id), then A (the from_plan_id of the change row
+// the item trigger writes). With id(A) < id(B), the plan writer holds A and
+// waits for B while the swap holds B and waits for A, and Postgres aborts
+// one of them with a deadlock error (40P01) unless the swap took both plans
+// first, in ascending id.
 //
 // The race is made deterministic with a plan edit (UPDATE plans, FOR NO KEY
-// UPDATE) held open on B. It stops the guard after it has locked A and before
-// it locks B, the window a real swap lands in. It does not stop the writer's
-// FOR KEY SHARE on B, which that lock mode does not conflict with. When both
-// wait, the plan edit rolls back.
+// UPDATE) held open on B. It stops the plan writer after it has locked A and
+// before it locks B, the window a real swap lands in. It does not stop the
+// subscription writer's FOR KEY SHARE on B, which that lock mode does not
+// conflict with. When both wait, the plan edit rolls back.
 
 // lockOrderPS and lockOrderPE bound every fixture subscription's period.
 var (
@@ -76,51 +78,39 @@ func newLockOrderRig(t *testing.T) *lockOrderRig {
 	}
 }
 
-// defaultPrice creates a rating rule to be a meter's default price, so that
-// clearing it is an edit the D05 guard checks (d05Edit).
-func (r *lockOrderRig) defaultPrice(t *testing.T, key string) string {
-	t.Helper()
-	rule, err := r.pricing.CreateRatingRule(r.ctx, r.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key + "_default", Name: key, Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
+// planWriter is a writer of plan content that takes the plans that price
+// meterID FOR UPDATE, in ascending id, in one statement, then commits.
+func (r *lockOrderRig) planWriter(meterID string) error {
+	tx, err := r.admin.BeginTx(r.ctx, nil)
 	if err != nil {
-		t.Fatalf("create default price %s: %v", key, err)
+		return err
 	}
-	return rule.ID
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(r.ctx, `
+		SELECT 1 FROM plans WHERE id IN (SELECT plan_id FROM plan_prices WHERE meter_id = $1)
+		ORDER BY id FOR UPDATE /* plan writer */`, meterID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// d05Edit clears the meter's default price: an edit that reprices the open
-// period, so the D05 guard locks the meter, then every plan that lists it,
-// and counts their subscriptions. (Changing the aggregation was such an edit
-// until ADR-130 §2 gave it its own rule, which locks only the meter.)
-func (r *lockOrderRig) d05Edit(meterID string) error {
-	none := ""
-	_, err := r.pricing.UpdateMeter(r.ctx, r.tenantID, meterID, pricing.UpdateMeterInput{RatingRuleVersionID: &none})
-	return err
-}
-
-// meterPlans creates a meter and two monthly plans that both list it. lo is
+// meterPlans creates a meter and two monthly plans that both price it. lo is
 // the plan with the lower id in the database's order, hi the other.
 func (r *lockOrderRig) meterPlans(t *testing.T, key string) (meterID string, lo, hi domain.Plan) {
 	t.Helper()
 	m, err := r.pricing.CreateMeter(r.ctx, r.tenantID, pricing.CreateMeterInput{
-		EventName: key, Name: key, Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: r.defaultPrice(t, key),
+		EventName: key, Name: key, Unit: "tokens", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter %s: %v", key, err)
 	}
-	ps := pricing.NewPostgresStore(r.db)
 	var plans []domain.Plan
 	for _, code := range []string{key + "-one", key + "-two"} {
-		p, err := ps.CreatePlan(r.ctx, r.tenantID, domain.Plan{
+		plans = append(plans, createPlanPricing(t, r.db, r.ctx, r.tenantID, domain.Plan{
 			Code: code, Name: code, Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseBillTiming: domain.BillInArrears,
-			BaseAmountCents: 1000, Status: domain.PlanActive, MeterIDs: []string{m.ID},
-		})
-		if err != nil {
-			t.Fatalf("create plan %s: %v", code, err)
-		}
-		plans = append(plans, p)
+			BaseAmountCents: 1000, Status: domain.PlanActive,
+		}, m.ID))
 	}
 	var first string
 	if err := r.admin.QueryRowContext(r.ctx,
@@ -219,8 +209,8 @@ func waitBlockedByN(t *testing.T, ctx context.Context, admin *sql.DB, blockerLik
 	}
 }
 
-// d05Statement is text from CountSubsUsingMeterTx's plan lock.
-const d05Statement = "meter_ids @>"
+// planWriterStatement is text from planWriter's plan lock.
+const planWriterStatement = "/* plan writer */"
 
 // lockOrderWriter is one subscription writer under test. setup builds its
 // fixture on a fresh meter and returns the write, which must reference both
@@ -280,7 +270,7 @@ var lockOrderWriters = []lockOrderWriter{
 // twoMeterWriters reference two plans in a fixture the API accepts: their
 // plans bill different meters. Velox refuses one subscription whose plans
 // both bill one meter (rejectMeterOverlap), so these writers cannot deadlock
-// with one meter edit alone. They can with two:
+// with one plan writer alone. They can with two:
 // TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits. lo and hi are the plans
 // the writer references; it reaches hi first when nothing orders its plan
 // locks.
@@ -324,10 +314,10 @@ var twoMeterWriters = []lockOrderWriter{
 	}},
 }
 
-// TestPlanLockOrder_NoDeadlockWithMeterEdit is C10: each writer that
-// references two plans, racing the D05 guard on a meter both plans list,
-// finishes without a deadlock, and so does the guard.
-func TestPlanLockOrder_NoDeadlockWithMeterEdit(t *testing.T) {
+// TestPlanLockOrder_NoDeadlockWithAPlanWriter is C10: each subscription
+// writer that references two plans, racing a plan writer on both plans,
+// finishes without a deadlock, and so does the plan writer.
+func TestPlanLockOrder_NoDeadlockWithAPlanWriter(t *testing.T) {
 	r := newLockOrderRig(t)
 	for i, w := range lockOrderWriters {
 		t.Run(w.name, func(t *testing.T) {
@@ -338,14 +328,14 @@ func TestPlanLockOrder_NoDeadlockWithMeterEdit(t *testing.T) {
 			defer postgres.Rollback(hold)
 
 			editDone := make(chan error, 1)
-			go func() { editDone <- r.d05Edit(meterID) }()
-			// The guard has locked lo and waits for hi.
-			testutil.WaitForLockWaiter(t, r.ctx, r.admin, d05Statement)
+			go func() { editDone <- r.planWriter(meterID) }()
+			// The plan writer has locked lo and waits for hi.
+			testutil.WaitForLockWaiter(t, r.ctx, r.admin, planWriterStatement)
 
 			writeDone := make(chan error, 1)
 			go func() { writeDone <- write(r.ctx) }()
-			// The writer waits for lo, which the guard holds.
-			waitBlockedBy(t, r.ctx, r.admin, d05Statement)
+			// The subscription writer waits for lo, which the plan writer holds.
+			waitBlockedBy(t, r.ctx, r.admin, planWriterStatement)
 
 			if err := hold.Rollback(); err != nil {
 				t.Fatalf("release the plan edit: %v", err)
@@ -357,17 +347,17 @@ func TestPlanLockOrder_NoDeadlockWithMeterEdit(t *testing.T) {
 				case editErr = <-editDone:
 				case writeErr = <-writeDone:
 				case <-time.After(20 * time.Second):
-					t.Fatal("the meter edit or the writer never finished")
+					t.Fatal("the plan writer or the subscription writer never finished")
 				}
 			}
 			if postgres.IsDeadlock(editErr) || postgres.IsDeadlock(writeErr) {
-				t.Fatalf("deadlock (40P01): meter edit err=%v, writer err=%v", editErr, writeErr)
+				t.Fatalf("deadlock (40P01): plan writer err=%v, subscription writer err=%v", editErr, writeErr)
 			}
 			if writeErr != nil {
-				t.Fatalf("writer: %v", writeErr)
+				t.Fatalf("subscription writer: %v", writeErr)
 			}
-			if editErr != nil && errs.Code(editErr) != errs.CodeMeterInUse {
-				t.Fatalf("meter edit: want success or meter_in_use, got %v", editErr)
+			if editErr != nil {
+				t.Fatalf("plan writer: %v", editErr)
 			}
 		})
 	}
@@ -381,7 +371,7 @@ func (r *lockOrderRig) twoMeterPlans(t *testing.T, key string) (m1, m2 string, p
 	var meters []string
 	for _, k := range []string{key + "-m1", key + "-m2"} {
 		m, err := r.pricing.CreateMeter(r.ctx, r.tenantID, pricing.CreateMeterInput{
-			EventName: k, Name: k, Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: r.defaultPrice(t, k),
+			EventName: k, Name: k, Unit: "tokens", Aggregation: "sum",
 		})
 		if err != nil {
 			t.Fatalf("create meter %s: %v", k, err)
@@ -420,31 +410,35 @@ func (r *lockOrderRig) twoMeterPlans(t *testing.T, key string) (m1, m2 string, p
 		t.Fatalf("order plans: %d plans, err %v", len(ordered), err)
 	}
 	for i, ms := range [][]string{{meters[0]}, {meters[0], meters[1]}, {meters[1]}} {
-		raw, _ := json.Marshal(ms)
-		if _, err := r.admin.ExecContext(r.ctx, `UPDATE plans SET meter_ids = $2::jsonb WHERE id = $1`, ordered[i].ID, string(raw)); err != nil {
-			t.Fatalf("set meters of %s: %v", ordered[i].Code, err)
+		for _, m := range ms {
+			if _, err := ps.WritePrice(r.ctx, r.tenantID, ordered[i].ID, pricing.PriceChange{
+				Op: pricing.PriceAdd, MeterID: m, Shape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)},
+			}, nil); err != nil {
+				t.Fatalf("price %s on %s: %v", m, ordered[i].Code, err)
+			}
 		}
 	}
 	return meters[0], meters[1], ordered[0], ordered[1], ordered[2]
 }
 
-// TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits is C10 for the writers
+// TestPlanLockOrder_NoDeadlockAcrossTwoPlanWriters is C10 for the writers
 // whose two plans the API lets onto one subscription only when they bill
 // different meters: create, draft activation, trial conversion and early
 // trial end. Plans p < mid < q; p bills m1, mid bills m1 and m2, q bills m2.
 // The writer references p and q, and reaches q first when nothing orders its
 // plan locks. Three transactions can then wait on each other:
 //
-//   - the edit of m2 holds mid and waits for q;
-//   - the edit of m1 holds p and waits for mid;
-//   - the writer holds q and waits for p.
+//   - the writer of m2's plans holds mid and waits for q;
+//   - the writer of m1's plans holds p and waits for mid;
+//   - the subscription writer holds q and waits for p.
 //
-// A plan edit held open on q stops the m2 edit after mid, as in
-// TestPlanLockOrder_NoDeadlockWithMeterEdit.
-func TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits(t *testing.T) {
+// A plan edit held open on q stops the m2 writer after mid, as in
+// TestPlanLockOrder_NoDeadlockWithAPlanWriter.
+func TestPlanLockOrder_NoDeadlockAcrossTwoPlanWriters(t *testing.T) {
 	r := newLockOrderRig(t)
 	svc := NewService(r.store, nil)
 	svc.SetPlanReader(r.pricing)
+	svc.SetPlanMeterReader(r.pricing)
 	for i, w := range twoMeterWriters {
 		t.Run(w.name, func(t *testing.T) {
 			m1, m2, p, _, q := r.twoMeterPlans(t, "lockord2-"+string(rune('a'+i)))
@@ -457,20 +451,21 @@ func TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits(t *testing.T) {
 			hold := r.holdPlan(t, q.ID)
 			defer postgres.Rollback(hold)
 
-			edit := func(meterID string, done chan<- error) { done <- r.d05Edit(meterID) }
-			// The m2 edit holds mid and waits for q.
+			edit := func(meterID string, done chan<- error) { done <- r.planWriter(meterID) }
+			// The m2 writer holds mid and waits for q.
 			edit2Done := make(chan error, 1)
 			go edit(m2, edit2Done)
-			testutil.WaitForLockWaiters(t, r.ctx, r.admin, d05Statement, 1)
-			// The m1 edit holds p and waits for mid.
+			testutil.WaitForLockWaiters(t, r.ctx, r.admin, planWriterStatement, 1)
+			// The m1 writer holds p and waits for mid.
 			edit1Done := make(chan error, 1)
 			go edit(m1, edit1Done)
-			testutil.WaitForLockWaiters(t, r.ctx, r.admin, d05Statement, 2)
+			testutil.WaitForLockWaiters(t, r.ctx, r.admin, planWriterStatement, 2)
 
 			writeDone := make(chan error, 1)
 			go func() { writeDone <- write(r.ctx) }()
-			// The m1 edit waits on the m2 edit; the writer waits for p.
-			waitBlockedByN(t, r.ctx, r.admin, d05Statement, 2)
+			// The m1 writer waits on the m2 writer; the subscription writer
+			// waits for p.
+			waitBlockedByN(t, r.ctx, r.admin, planWriterStatement, 2)
 
 			if err := hold.Rollback(); err != nil {
 				t.Fatalf("release the plan edit: %v", err)
@@ -483,18 +478,18 @@ func TestPlanLockOrder_NoDeadlockAcrossTwoMeterEdits(t *testing.T) {
 				case edit2Err = <-edit2Done:
 				case writeErr = <-writeDone:
 				case <-time.After(20 * time.Second):
-					t.Fatal("a meter edit or the writer never finished")
+					t.Fatal("a plan writer or the subscription writer never finished")
 				}
 			}
 			if postgres.IsDeadlock(edit1Err) || postgres.IsDeadlock(edit2Err) || postgres.IsDeadlock(writeErr) {
-				t.Fatalf("deadlock (40P01): m1 edit err=%v, m2 edit err=%v, writer err=%v", edit1Err, edit2Err, writeErr)
+				t.Fatalf("deadlock (40P01): m1 writer err=%v, m2 writer err=%v, subscription writer err=%v", edit1Err, edit2Err, writeErr)
 			}
 			if writeErr != nil {
-				t.Fatalf("writer: %v", writeErr)
+				t.Fatalf("subscription writer: %v", writeErr)
 			}
 			for _, err := range []error{edit1Err, edit2Err} {
-				if err != nil && errs.Code(err) != errs.CodeMeterInUse {
-					t.Fatalf("meter edit: want success or meter_in_use, got %v", err)
+				if err != nil {
+					t.Fatalf("plan writer: %v", err)
 				}
 			}
 		})
@@ -563,9 +558,9 @@ func TestPlanLockOrder_LockStatementIsAscending(t *testing.T) {
 }
 
 // TestPlanLockOrder_SinglePlanWritersLockFirst covers the writers that
-// reference one plan. One lock alone cannot deadlock against the guard, so
-// the test pins where it is taken: with the plan held FOR UPDATE, as the
-// guard holds it, the writer waits in its plan-lock statement, before any
+// reference one plan. One lock alone cannot deadlock against a plan writer,
+// so the test pins where it is taken: with the plan held FOR UPDATE, as a
+// plan writer holds it, the writer waits in its plan-lock statement, before any
 // write that references the plan.
 func TestPlanLockOrder_SinglePlanWritersLockFirst(t *testing.T) {
 	r := newLockOrderRig(t)

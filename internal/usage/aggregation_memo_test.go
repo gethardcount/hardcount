@@ -15,13 +15,13 @@ func TestAggregationMemo_SameAggregationRunsOnce(t *testing.T) {
 	_, memo := WithAggregationMemo(context.Background())
 	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	to := from.AddDate(0, 1, 0)
-	claims := []domain.UsageClaim{{RuleID: "r1", RatingRuleVersionID: "v1", Match: map[string]any{"model": "a"}}}
+	claims := []domain.UsageClaim{{PriceID: "p1", Match: map[string]string{"model": "a"}}}
 	key := aggregationMemoKeyFor("ten", "cus", "mtr", domain.AggregationSum, claims, from, to)
 
 	runs := 0
-	query := func() ([]domain.RuleAggregation, error) {
+	query := func() ([]domain.ClaimedUsage, error) {
 		runs++
-		return []domain.RuleAggregation{{RuleID: "r1", Quantity: decimal.NewFromInt(7)}}, nil
+		return []domain.ClaimedUsage{{PriceID: "p1", Quantity: decimal.NewFromInt(7)}}, nil
 	}
 	first, err := memo.through(key, query)
 	if err != nil {
@@ -65,11 +65,11 @@ func TestAggregationMemo_ErrorsAreNotRemembered(t *testing.T) {
 	_, memo := WithAggregationMemo(context.Background())
 	boom := errors.New("connection reset")
 	fail := true
-	query := func() ([]domain.RuleAggregation, error) {
+	query := func() ([]domain.ClaimedUsage, error) {
 		if fail {
 			return nil, boom
 		}
-		return []domain.RuleAggregation{}, nil
+		return []domain.ClaimedUsage{}, nil
 	}
 	if _, err := memo.through("k", query); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the query error", err)

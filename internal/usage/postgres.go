@@ -658,9 +658,9 @@ func (s *PostgresStore) AggregateForBillingPeriod(ctx context.Context, tenantID,
 // one quantity per claim, under the meter's aggregation (ADR-130 §2). Each
 // event belongs to the first claim in the list whose match its dimensions
 // contain (JSONB containment, `properties @> match`), so no event is counted
-// twice; an event no claim takes is the unclaimed bucket (RuleID ""). The
-// caller lists the claims in rank order (domain.ClaimsOfRules), so the
-// claim is the caller's and every caller claims the same way.
+// twice; an event no claim takes is the unclaimed bucket (PriceID ""). The
+// caller lists the claims in claim order (domain.ClaimOrder: the most labels
+// first), so the claim is the caller's and every caller claims the same way.
 //
 // The aggregation is the meter's, one of sum, count, max and last. last is
 // the latest event by (timestamp DESC, id DESC), the order every read of a
@@ -675,12 +675,12 @@ func (s *PostgresStore) AggregateClaims(
 	tenantID, customerID, meterID, aggregation string,
 	claims []domain.UsageClaim,
 	from, to time.Time,
-) ([]domain.RuleAggregation, error) {
+) ([]domain.ClaimedUsage, error) {
 	// A request that carries a memo (the public cost dashboard) runs each
 	// distinct aggregation once; see AggregationMemo. Every other caller,
 	// including every billing writer, has no memo and always reads the table.
 	if memo, ok := ctx.Value(aggregationMemoKey{}).(*AggregationMemo); ok {
-		return memo.through(aggregationMemoKeyFor(tenantID, customerID, meterID, aggregation, claims, from, to), func() ([]domain.RuleAggregation, error) {
+		return memo.through(aggregationMemoKeyFor(tenantID, customerID, meterID, aggregation, claims, from, to), func() ([]domain.ClaimedUsage, error) {
 			return s.aggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 		})
 	}
@@ -701,7 +701,7 @@ func (s *PostgresStore) aggregateClaims(
 	tenantID, customerID, meterID, aggregation string,
 	claims []domain.UsageClaim,
 	from, to time.Time,
-) ([]domain.RuleAggregation, error) {
+) ([]domain.ClaimedUsage, error) {
 	agg, ok := claimAggregate[aggregation]
 	if !ok {
 		return nil, fmt.Errorf("aggregate claims: meter %s has aggregation %q, not one of sum, count, max, last", meterID, aggregation)
@@ -721,22 +721,21 @@ func (s *PostgresStore) aggregateClaims(
 	defer postgres.Rollback(tx)
 
 	// The claims arrive as one jsonb array; WITH ORDINALITY keeps the
-	// caller's order as the claim rank. tenant_id is in the WHERE clause
+	// caller's order as the claim rank. The buckets come back in that order,
+	// the unclaimed one last, so a line order is the same on every read. tenant_id is in the WHERE clause
 	// for the index (see AggregateForBillingPeriodByAgg).
 	rows, err := tx.QueryContext(ctx, `
 		WITH claims AS (
-			SELECT c->>'rule_id'                AS rule_id,
-			       c->>'rating_rule_version_id' AS rating_rule_version_id,
-			       c->'match'                   AS match,
+			SELECT c->>'price_id' AS price_id,
+			       c->'match'     AS match,
 			       ord
 			FROM jsonb_array_elements($6::jsonb) WITH ORDINALITY AS t(c, ord)
 		),
 		claimed AS (
-			SELECT e.id, e.quantity, e.timestamp,
-			       c.rule_id, c.rating_rule_version_id
+			SELECT e.id, e.quantity, e.timestamp, c.price_id, c.ord
 			FROM usage_events e
 			LEFT JOIN LATERAL (
-				SELECT rule_id, rating_rule_version_id
+				SELECT price_id, ord
 				FROM claims
 				WHERE e.properties @> claims.match
 				ORDER BY ord
@@ -748,19 +747,20 @@ func (s *PostgresStore) aggregateClaims(
 			  AND e.timestamp  >= $4
 			  AND e.timestamp  <  $5
 		)
-		SELECT COALESCE(rule_id, ''), COALESCE(rating_rule_version_id, ''), `+agg+`
+		SELECT COALESCE(price_id, ''), `+agg+`
 		FROM claimed
-		GROUP BY rule_id, rating_rule_version_id
+		GROUP BY price_id
+		ORDER BY MIN(ord) NULLS LAST
 	`, tenantID, meterID, customerID, from, to, string(claimsJSON))
 	if err != nil {
 		return nil, fmt.Errorf("aggregate claims: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []domain.RuleAggregation
+	var out []domain.ClaimedUsage
 	for rows.Next() {
-		var r domain.RuleAggregation
-		if err := rows.Scan(&r.RuleID, &r.RatingRuleVersionID, &r.Quantity); err != nil {
+		var r domain.ClaimedUsage
+		if err := rows.Scan(&r.PriceID, &r.Quantity); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

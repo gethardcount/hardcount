@@ -16,8 +16,8 @@ export interface RecipePlan {
   currency: string;
   billing_interval: RecipePlanBillingInterval;
   base_amount_cents: number;
-  /** Optional; empty defaults to in_arrears at plan creation (ADR-031). */
+  /** Optional when the base fee is 0; the plan is then in_arrears (ADR-031). */
   base_bill_timing?: RecipePlanBaseBillTiming;
-  /** The recipe meters the plan bills. */
+  /** The recipe meters the plan prices. */
   event_names: string[];
 }

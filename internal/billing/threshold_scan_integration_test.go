@@ -52,12 +52,13 @@ type thresholdFixture struct {
 	subID      string
 	itemID     string
 	meterID    string
+	priceID    string
 	cycleStart time.Time
 	cycleEnd   time.Time
 }
 
-// newThresholdFixture sets up a tenant with a single-meter, single-rule plan
-// (1 cent / call flat rate, no base fee) and an active sub mid-cycle. Tests
+// newThresholdFixture sets up a tenant with a single-meter plan priced by
+// one catch-all price (1 cent / call, no base fee) and an active sub mid-cycle. Tests
 // can configure thresholds on the seeded sub via subSvc.SetBillingThresholds.
 func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 	t.Helper()
@@ -103,26 +104,19 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 		t.Fatalf("create customer: %v", err)
 	}
 
-	rrv, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls Flat",
-		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv: %v", err)
-	}
-
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		EventName: "calls", Name: "Calls", Unit: "calls",
-		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
 
-	plan, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
+	// One catch-all price, 1c a call. The plan is new, so the price is in
+	// force from the beginning of time (ADR-130 §5).
+	plan, prices, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
 		Code: "pln_thresh", Name: "Threshold Plan",
 		Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 0, MeterIDs: []string{meter.ID},
+		Prices: []pricing.PriceInput{{MeterID: meter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -188,6 +182,7 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 		subID:      subID,
 		itemID:     itemID,
 		meterID:    meter.ID,
+		priceID:    prices[0].ID,
 		cycleStart: cycleStart,
 		cycleEnd:   cycleEnd,
 	}
@@ -666,10 +661,10 @@ func TestThresholdScan_BoundaryDefersToCycle(t *testing.T) {
 // pages deterministically.
 func (f *thresholdFixture) seedThresholdFleet(t *testing.T, ctx context.Context, n int) []string {
 	t.Helper()
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_fleet_base", Name: "Fleet Base Plan",
 		Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 4900, MeterIDs: []string{f.meterID},
+		BaseAmountCents: 4900, BaseBillTiming: domain.BillInArrears, Prices: []pricing.PriceInput{{MeterID: f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create fleet plan: %v", err)
@@ -1012,24 +1007,17 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 	defer cancel()
 
 	// A max-aggregated meter alongside the fixture's sum meter, on one plan.
-	rrvMax, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "gpu_peak", Name: "GPU Peak",
-		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
-	})
-	if err != nil {
-		t.Fatalf("create max rrv: %v", err)
-	}
 	maxMeter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: "gpu", Name: "GPU Concurrency", Unit: "gpus",
-		Aggregation: "max", RatingRuleVersionID: rrvMax.ID,
+		Aggregation: "max",
 	})
 	if err != nil {
 		t.Fatalf("create max meter: %v", err)
 	}
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_mixed", Name: "Mixed Plan",
 		Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 0, MeterIDs: []string{f.meterID, maxMeter.ID},
+		BaseAmountCents: 0, Prices: []pricing.PriceInput{{MeterID: f.meterID, PriceShape: perUnitShape("1")}, {MeterID: maxMeter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)}}},
 	})
 	if err != nil {
 		t.Fatalf("create mixed plan: %v", err)
@@ -1207,24 +1195,17 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 	defer cancel()
 
 	// Max meter + base-fee plan alongside the fixture's sum meter.
-	rrvMax, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "gpu_peak_c", Name: "GPU Peak C",
-		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
-	})
-	if err != nil {
-		t.Fatalf("create max rrv: %v", err)
-	}
 	maxMeter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: "gpu_c", Name: "GPU C", Unit: "gpus",
-		Aggregation: "max", RatingRuleVersionID: rrvMax.ID,
+		Aggregation: "max",
 	})
 	if err != nil {
 		t.Fatalf("create max meter: %v", err)
 	}
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_cancel_mixed", Name: "Cancel Mixed Plan",
 		Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 3000, MeterIDs: []string{f.meterID, maxMeter.ID},
+		BaseAmountCents: 3000, BaseBillTiming: domain.BillInArrears, Prices: []pricing.PriceInput{{MeterID: f.meterID, PriceShape: perUnitShape("1")}, {MeterID: maxMeter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)}}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

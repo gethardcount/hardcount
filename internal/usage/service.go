@@ -547,7 +547,7 @@ func (s *Service) AggregateClaims(
 	tenantID, customerID, meterID, aggregation string,
 	claims []domain.UsageClaim,
 	from, to time.Time,
-) ([]domain.RuleAggregation, error) {
+) ([]domain.ClaimedUsage, error) {
 	if !domain.ValidAggregation(aggregation) {
 		return nil, errs.Invalid("aggregation", fmt.Sprintf("must be one of sum, count, max, last; got %q", aggregation))
 	}

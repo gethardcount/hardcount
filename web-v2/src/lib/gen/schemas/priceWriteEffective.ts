@@ -8,4 +8,10 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type CustomerUsageMeterRulesItemDimensionMatch = { [key: string]: unknown };
+export type PriceWriteEffective = typeof PriceWriteEffective[keyof typeof PriceWriteEffective];
+
+
+export const PriceWriteEffective = {
+  now: 'now',
+  next_period: 'next_period',
+} as const;

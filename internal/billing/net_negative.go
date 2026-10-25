@@ -36,7 +36,7 @@ import (
 // usage usually means an earlier invoice billed the usage it corrects, so
 // that invoice may need a credit note.
 //
-// Granularity: one usage bucket (a meter, or one pricing rule of a meter)
+// Granularity: one usage bucket (the usage one price of a meter took)
 // over one billing window, the unit each path prices. A meter whose buckets
 // or windows have different signs bills its positive ones in full. The
 // window is not always the billing period: after a threshold invoice the

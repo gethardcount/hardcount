@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -50,33 +51,121 @@ func (t RatingTiers) MarshalJSON() ([]byte, error) {
 	return json.Marshal([]RatingTier(t))
 }
 
-type RatingRuleLifecycle string
-
-const (
-	RatingRuleDraft    RatingRuleLifecycle = "draft"
-	RatingRuleActive   RatingRuleLifecycle = "active"
-	RatingRuleArchived RatingRuleLifecycle = "archived"
-)
-
-type RatingRuleVersion struct {
-	ID             string              `json:"id"`
-	TenantID       string              `json:"tenant_id,omitempty"`
-	RuleKey        string              `json:"rule_key"`
-	Name           string              `json:"name"`
-	Version        int                 `json:"version"`
-	LifecycleState RatingRuleLifecycle `json:"lifecycle_state,omitempty"`
-	Mode           PricingMode         `json:"mode"`
-	Currency       string              `json:"currency"`
-	// UnitAmountCents (per_unit) and PackageAmountCents (package) are in the
-	// currency's minor unit and carry decimals (RateLimits on write), so a
-	// sub-cent price bills exactly: $0.002 per 1,000 tokens is a package of
-	// 1000 at "0.2" (Stripe's unit_amount_decimal model). PackageSize is a
-	// whole number of meter units.
+// PriceShape is how a price bills a quantity: its mode and the mode's
+// fields (ADR-130 §3). A plan price, a price version and a customer's
+// override each carry one. Every amount is in the currency's minor unit and
+// carries decimals (RateLimits on write), so a sub-cent price bills exactly:
+// $0.002 per 1,000 tokens is a package of 1000 at "0.2" (Stripe's
+// unit_amount_decimal model). PackageSize is a whole number of meter units.
+type PriceShape struct {
+	Mode               PricingMode     `json:"mode"`
 	UnitAmountCents    decimal.Decimal `json:"unit_amount_cents"`
 	Tiers              RatingTiers     `json:"tiers"`
 	PackageSize        int64           `json:"package_size"`
 	PackageAmountCents decimal.Decimal `json:"package_amount_cents"`
-	CreatedAt          time.Time       `json:"created_at"`
+}
+
+// PlanPrice is one usage price of a plan (ADR-130 §1): a meter, the events it
+// takes (DimensionMatch) and its content. Its id is stable across content
+// edits; the plan, meter and match are its identity and never change. The
+// content is the price's version in force at one instant: the instant a
+// reader asked for, or from now on for the API.
+type PlanPrice struct {
+	ID       string `json:"id"`
+	TenantID string `json:"tenant_id,omitempty"`
+	PlanID   string `json:"plan_id"`
+	MeterID  string `json:"meter_id"`
+	// DimensionMatch is the labels an event must carry for the price to
+	// take it. {} takes every event of the meter. Values are strings.
+	DimensionMatch map[string]string `json:"dimension_match"`
+	PriceShape
+	CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt is when the content in force was written.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Specificity is the number of labels the price names. Of the prices whose
+// match an event's labels contain, the one with the most labels takes it.
+func (p PlanPrice) Specificity() int { return len(p.DimensionMatch) }
+
+// The limits of a dimension_match (ADR-130 §1), checked at the one store
+// writer and by the plan_prices CHECK.
+const (
+	MaxDimensionKeys      = 16
+	MaxDimensionKeyLength = 100
+)
+
+// PricesTie reports whether two prices of one plan and meter could both take
+// one event with the same number of labels: the same number of keys, and no
+// key they share has different values. Such a pair has no winner, so the
+// second one written is refused (409 price_conflict). Identical matches tie
+// too; the writer reports those as price_exists.
+func PricesTie(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		if bv, ok := b[k]; ok && bv != av {
+			return false
+		}
+	}
+	return true
+}
+
+// SameMatch reports whether two matches name the same labels with the same
+// values: the same price identity.
+func SameMatch(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		if bv, ok := b[k]; !ok || bv != av {
+			return false
+		}
+	}
+	return true
+}
+
+// ClaimOrder sorts prices the way an event finds its price: the most labels
+// first. Ties are refused when a price is written, so the order between two
+// prices of equal specificity never decides an event; it is the order they
+// were added in (then the id), so an invoice lists their lines the same way
+// on every read.
+func ClaimOrder(prices []PlanPrice) {
+	sort.SliceStable(prices, func(i, j int) bool {
+		if a, b := prices[i].Specificity(), prices[j].Specificity(); a != b {
+			return a > b
+		}
+		if !prices[i].CreatedAt.Equal(prices[j].CreatedAt) {
+			return prices[i].CreatedAt.Before(prices[j].CreatedAt)
+		}
+		return prices[i].ID < prices[j].ID
+	})
+}
+
+// CustomerPriceOverride is a customer's negotiated price for one plan price
+// (ADR-130 §6). It replaces the price's shape for that customer while it is
+// in force: [CreatedAt, DeactivatedAt), stamped in the customer's own time
+// (wall time, or its test clock's).
+type CustomerPriceOverride struct {
+	ID         string `json:"id"`
+	TenantID   string `json:"tenant_id,omitempty"`
+	CustomerID string `json:"customer_id"`
+	PriceID    string `json:"price_id"`
+	PriceShape
+	Reason        string     `json:"reason,omitempty"`
+	Active        bool       `json:"active"`
+	CreatedAt     time.Time  `json:"created_at"`
+	DeactivatedAt *time.Time `json:"deactivated_at,omitempty"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+// ApplyTo is the price with the override's shape. The price's id, plan,
+// meter and match stay: an override changes the rate, not which events the
+// price takes.
+func (o CustomerPriceOverride) ApplyTo(p PlanPrice) PlanPrice {
+	p.PriceShape = o.PriceShape
+	return p
 }
 
 type Meter struct {
@@ -89,11 +178,10 @@ type Meter struct {
 	// quantity, one of the Aggregation* values. Every price of the meter
 	// bills under it. It cannot change once the meter has events (ADR-130
 	// §2).
-	Unit                string    `json:"unit"`
-	Aggregation         string    `json:"aggregation"`
-	RatingRuleVersionID string    `json:"rating_rule_version_id"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	Unit        string    `json:"unit"`
+	Aggregation string    `json:"aggregation"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // The meter aggregations (ADR-130 §2). A meter has one, and every price of
@@ -183,76 +271,46 @@ type Plan struct {
 	Status          PlanStatus      `json:"status"`
 	BaseAmountCents int64           `json:"base_amount_cents"`
 	// BaseBillTiming controls whether the base fee is billed at the
-	// start of the period (in_advance) or the end (in_arrears). Default
-	// is in_arrears for backward compatibility with every existing
-	// Velox tenant. See ADR-031.
+	// start of the period (in_advance) or the end (in_arrears). It is
+	// required when the base fee is above 0, and in_arrears when it is 0
+	// (ADR-130 §14, ADR-031).
 	BaseBillTiming BillTiming `json:"base_bill_timing"`
 	// TaxCode optionally overrides the tenant's default_product_tax_code for
 	// this plan. Only consulted by the stripe_tax provider. Empty falls
 	// back to tenant_settings.default_product_tax_code.
 	TaxCode   string    `json:"tax_code,omitempty"`
-	MeterIDs  []string  `json:"meter_ids"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// MeterPricingRule binds a rating rule version to a subset of a meter's
-// events via a JSONB dimension match. At billing time, rules are walked
-// in priority-DESC order and each event is claimed by the highest-
-// priority matching rule (no double-count). The default rule for a
-// meter has dimension_match='{}' which matches every event; priority=0
-// keeps it last so specific rules win.
-//
-// See docs/dev/design/multi-dim-meters.md for the resolution algorithm.
-type MeterPricingRule struct {
-	ID                  string         `json:"id"`
-	TenantID            string         `json:"tenant_id,omitempty"`
-	MeterID             string         `json:"meter_id"`
-	RatingRuleVersionID string         `json:"rating_rule_version_id"`
-	DimensionMatch      map[string]any `json:"dimension_match"`
-	Priority            int            `json:"priority"`
-	CreatedAt           time.Time      `json:"created_at"`
-	UpdatedAt           time.Time      `json:"updated_at"`
-}
-
-// RuleAggregation is one row of the priority+claim resolution result: events
-// in a billing period that were claimed by a single pricing rule, rolled up
-// under the meter's aggregation into a final billable quantity.
-//
-// RuleID == "" indicates the unclaimed bucket — events that matched no rule.
-// The caller falls back to meters.rating_rule_version_id, preserving
-// back-compat for tenants without any rules.
-type RuleAggregation struct {
-	RuleID              string          `json:"rule_id,omitempty"`
-	RatingRuleVersionID string          `json:"rating_rule_version_id,omitempty"`
-	Quantity            decimal.Decimal `json:"quantity"`
-}
-
 // UsageClaim is one price's claim on a meter's events, for the usage
 // aggregation (usage.Store.AggregateClaims). An event belongs to the first
-// claim in the list whose Match its dimensions contain; an event no claim
-// takes is the unclaimed bucket. Today a claim is a pricing rule, listed in
-// the order the rules rank (priority, then age, then id: ClaimsOfRules);
-// ADR-130 PR-4 makes it a plan price.
+// claim in the list whose Match its labels contain, so the list is in claim
+// order (ClaimOrder); an event no claim takes is the unclaimed bucket.
 type UsageClaim struct {
-	RuleID              string         `json:"rule_id"`
-	RatingRuleVersionID string         `json:"rating_rule_version_id"`
-	Match               map[string]any `json:"match"`
+	PriceID string            `json:"price_id"`
+	Match   map[string]string `json:"match"`
 }
 
-// ClaimsOfRules is a meter's pricing rules as claims, in the order given.
-// The pricing store lists a meter's rules in rank order (priority DESC,
-// created_at ASC, id ASC), which is the claim order.
-func ClaimsOfRules(rules []MeterPricingRule) []UsageClaim {
-	out := make([]UsageClaim, 0, len(rules))
-	for _, r := range rules {
-		match := r.DimensionMatch
+// ClaimsOf is prices as claims, in the order given.
+func ClaimsOf(prices []PlanPrice) []UsageClaim {
+	out := make([]UsageClaim, 0, len(prices))
+	for _, p := range prices {
+		match := p.DimensionMatch
 		if match == nil {
-			match = map[string]any{}
+			match = map[string]string{}
 		}
-		out = append(out, UsageClaim{RuleID: r.ID, RatingRuleVersionID: r.RatingRuleVersionID, Match: match})
+		out = append(out, UsageClaim{PriceID: p.ID, Match: match})
 	}
 	return out
+}
+
+// ClaimedUsage is one bucket of a meter's usage over a window: the events a
+// price claimed, rolled up under the meter's aggregation. PriceID "" is the
+// unclaimed bucket, the events no price took.
+type ClaimedUsage struct {
+	PriceID  string          `json:"price_id,omitempty"`
+	Quantity decimal.Decimal `json:"quantity"`
 }
 
 var ErrInvalidPricingConfig = errors.New("invalid pricing config")
@@ -267,12 +325,12 @@ var ErrAmountOverflow = errors.New("amount overflow: exceeds int64 range")
 var maxInt64Decimal = decimal.NewFromInt(math.MaxInt64)
 
 // NominalUnitAmountDecimal is the configured per-unit rate to DISPLAY for a
-// rule, in DECIMAL CENTS: the unit rate for per_unit rules, nil for graduated /
-// package rules (which have no single unit rate — callers fall back to the
+// price, in DECIMAL CENTS: the unit rate for per_unit, nil for graduated and
+// package (which have no single unit rate — callers fall back to the
 // effective amount÷quantity). This is the SINGLE source the invoice line stamp
-// (billing.nominalRate) and the usage / cost-dashboard rule rows both use, so
+// (billing.nominalRate) and the usage / cost-dashboard price rows both use, so
 // every surface renders the same unit price (ADR-054).
-func NominalUnitAmountDecimal(rule RatingRuleVersion) *decimal.Decimal {
+func NominalUnitAmountDecimal(rule PriceShape) *decimal.Decimal {
 	if rule.Mode != PricingPerUnit {
 		return nil
 	}
@@ -280,7 +338,7 @@ func NominalUnitAmountDecimal(rule RatingRuleVersion) *decimal.Decimal {
 	return &r
 }
 
-// ComputeAmountCents prices a decimal quantity through the given rating rule
+// ComputeAmountCents prices a decimal quantity through the given price shape
 // and returns the result rounded to whole cents. Quantity is decimal so that
 // fractional usage primitives (GPU-hours, cached-token ratios) round-trip
 // without precision loss. Tier boundaries (`up_to`, `package_size`) stay
@@ -291,7 +349,7 @@ func NominalUnitAmountDecimal(rule RatingRuleVersion) *decimal.Decimal {
 // Rounding: half-to-even (banker's rounding) at the cent boundary. This is
 // the same convention used elsewhere in the engine (money.RoundHalfToEven)
 // and the IEEE 754 default — minimizes systematic bias on bulk invoices.
-func ComputeAmountCents(rule RatingRuleVersion, quantity decimal.Decimal) (int64, error) {
+func ComputeAmountCents(rule PriceShape, quantity decimal.Decimal) (int64, error) {
 	if quantity.IsNegative() {
 		return 0, ErrInvalidPricingConfig
 	}
@@ -457,4 +515,30 @@ func decimalToCents(d decimal.Decimal) (int64, error) {
 		return 0, ErrAmountOverflow
 	}
 	return rounded.IntPart(), nil
+}
+
+// RatedUsage is one bucket of a subscription's usage as billing prices it:
+// the usage of one meter over one stretch of a period that one price of the
+// subscription's plan took, or that no price took (PriceID "").
+type RatedUsage struct {
+	PlanID         string
+	MeterID        string
+	PriceID        string
+	DimensionMatch map[string]string
+	Quantity       decimal.Decimal
+	AmountCents    int64
+	// UnitAmountDecimal is the per-unit price to show (decimal cents): the
+	// same value the invoice line shows (ADR-054). Zero on a row no price
+	// took.
+	UnitAmountDecimal decimal.Decimal
+	// BelowZero marks a bucket below zero after corrections: it bills 0.
+	BelowZero bool
+}
+
+// RatedSubscription is a subscription's usage rated over a window: each
+// bucket, and every meter its plans price over the window, with usage or
+// not.
+type RatedSubscription struct {
+	Usage    []RatedUsage
+	MeterIDs []string
 }

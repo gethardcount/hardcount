@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-// A rule or override with no tiers reads tiers as [], not null
+// A price or override with no tiers reads tiers as [], not null
 // (D-14): strict clients type the field as an array.
 func TestGraduatedTiers_EmptyMarshalsAsArray(t *testing.T) {
 	for name, v := range map[string]any{
-		"rating rule version": RatingRuleVersion{Mode: PricingPerUnit},
-		"price override":      CustomerPriceOverride{Mode: PricingPerUnit},
+		"plan price":     PlanPrice{PriceShape: PriceShape{Mode: PricingPerUnit}},
+		"price override": CustomerPriceOverride{PriceShape: PriceShape{Mode: PricingPerUnit}},
 	} {
 		raw, err := json.Marshal(v)
 		if err != nil {

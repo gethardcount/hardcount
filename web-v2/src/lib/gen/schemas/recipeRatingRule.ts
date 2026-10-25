@@ -10,13 +10,16 @@
 import type { PriceTier } from './priceTier';
 import type { RecipeRatingRuleMode } from './recipeRatingRuleMode';
 
+/**
+ * A rate in the recipe's YAML. An install puts it on the plan as the price of each pricing rule that names it.
+ */
 export interface RecipeRatingRule {
   key: string;
   name?: string;
-  /** As on RatingRule. */
+  /** As on PriceShape. */
   mode: RecipeRatingRuleMode;
   currency: string;
-  /** Price per unit in cents, as a decimal string (see RatingRule.unit_amount_cents). */
+  /** Price per unit in cents, as a decimal string (see PriceShape.unit_amount_cents). */
   unit_amount_cents: string;
   tiers?: PriceTier[];
   package_size?: number;

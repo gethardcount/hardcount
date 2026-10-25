@@ -7,16 +7,15 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
 // TestMargin_AttributionHonesty pins ADR-079 D6: per-model margin renders
-// ONLY where a pricing rule pins `model` in dimension_match; revenue from
-// rules without a model pin lands in the explicit unattributed bucket —
-// never allocated by heuristic. The headline (customer-level revenue vs
+// ONLY where the winning price's dimension_match names a `model` (ADR-130
+// §10); revenue from prices without a model label lands in the explicit
+// unattributed bucket — never allocated by heuristic. The headline (customer-level revenue vs
 // cost) is always computed.
 func TestMargin_AttributionHonesty(t *testing.T) {
 	if testing.Short() {
@@ -29,43 +28,22 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	// Rule A pins model → its revenue is per-model attributable.
-	rrvModel, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "sonnet_tokens", Name: "Sonnet", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(3),
-	})
-	if err != nil {
-		t.Fatalf("create rrv model: %v", err)
-	}
-	// Rule B is a flat catch-all (no model pin) → unattributed bucket.
-	rrvFlat, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "flat_tokens", Name: "Flat", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv flat: %v", err)
-	}
-	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		EventName: "tokens", Name: "Tokens", Unit: "tokens",
-		Aggregation: "sum", RatingRuleVersionID: rrvFlat.ID,
-	})
-	if err != nil {
-		t.Fatalf("create meter: %v", err)
-	}
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: meter.ID, RatingRuleVersionID: rrvModel.ID,
-		DimensionMatch: map[string]any{"model": "claude-3.5-sonnet"}, Priority: 10,
-	}); err != nil {
-		t.Fatalf("upsert model rule: %v", err)
-	}
-
-	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_margin", "pln_margin", meter.ID, cycleStart, cycleEnd)
+	// The model price names a model → its revenue is per-model
+	// attributable. The catch-all names none → unattributed bucket.
+	meter := f.meter(t, ctx, "tokens")
+	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_margin", "pln_margin", []pricing.PriceInput{
+		price(meter.ID, 3, map[string]string{"model": "claude-3.5-sonnet"}),
+		price(meter.ID, 1, nil),
+	}, cycleStart, cycleEnd)
 
 	usageStore := usage.NewPostgresStore(f.db)
 	// COGS rate: $0.000004/token for the sonnet family.
 	seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.0004")
 
-	// 1000 sonnet tokens (rule A: 1000 × 3c = $30 revenue; cost 1000 ×
-	// 4e-6 = 4000 micros) + 500 un-pinned tokens (rule B default: 500 ×
-	// 1c = $5, unattributed; no costable dims → not_applicable).
+	// 1000 sonnet tokens (the model price: 1000 × 3c = $30 revenue; cost
+	// 1000 × 4e-6 = 4000 micros) + 500 tokens no model price takes (the
+	// catch-all: 500 × 1c = $5, unattributed; no costable dims →
+	// not_applicable).
 	ts := cycleStart.Add(time.Hour)
 	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
 		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(1000),
@@ -115,7 +93,7 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 		t.Errorf("sonnet margin_bps = %v, want 9999", sonnet.MarginBps)
 	}
 	if rep.UnattributedRevenueCents == 0 {
-		t.Error("unattributed revenue = 0, want >0 (the flat-rule revenue must NOT be allocated per model)")
+		t.Error("unattributed revenue = 0, want >0 (the catch-all price's revenue must NOT be allocated per model)")
 	}
 	if rep.MarginBps == nil {
 		t.Fatal("margin_bps missing with revenue > 0")
@@ -161,7 +139,7 @@ func TestMargin_AttributionHonesty(t *testing.T) {
 }
 
 // TestMargin_CurrencyIsNamedAndNeverMixed: the report names the currency of
-// its revenue (the customer's price rules) and of its cost (always USD), and
+// its revenue (the customer's plan) and of its cost (always USD), and
 // gives no margin when they differ. Before, a EUR customer's €30 of usage
 // against $0.004 of provider cost read as "$30.00" and a 99.9% margin.
 // Mutation-verify: drop the RevenueCurrency == CostCurrency check → red.
@@ -183,20 +161,8 @@ func TestMargin_CurrencyIsNamedAndNeverMixed(t *testing.T) {
 	} {
 		t.Run(tc.currency, func(t *testing.T) {
 			f := newCustomerUsageFixture(t, "Margin currency "+tc.currency)
-			rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-				RuleKey: "tokens_flat", Name: "Tokens", Mode: domain.PricingPerUnit,
-				Currency: tc.currency, UnitAmountCents: decimal.NewFromInt(3),
-			})
-			if err != nil {
-				t.Fatalf("rule: %v", err)
-			}
-			meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-				EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
-			})
-			if err != nil {
-				t.Fatalf("meter: %v", err)
-			}
-			custID, _, _ := f.seedCustomerWithSubIn(t, ctx, "cus_cur", "pln_cur", meter.ID, tc.currency, cycleStart, cycleEnd)
+			meter := f.meter(t, ctx, "tokens")
+			custID, _, _ := f.seedCustomerWithSubIn(t, ctx, "cus_cur", "pln_cur", []pricing.PriceInput{price(meter.ID, 3, nil)}, tc.currency, cycleStart, cycleEnd)
 			seedRate(t, f.db, ctx, f.tenantID, "anthropic", "claude-3.5-sonnet", "input", "0.0004")
 			ts := cycleStart.Add(time.Hour)
 			if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
@@ -240,19 +206,8 @@ func TestMargin_NoProviderCostMeansNoMargin(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "api_calls", Name: "API calls", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(2),
-	})
-	if err != nil {
-		t.Fatalf("rule: %v", err)
-	}
-	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		EventName: "api_calls", Name: "API calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
-	})
-	if err != nil {
-		t.Fatalf("meter: %v", err)
-	}
-	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_nocost", "pln_nocost", meter.ID, cycleStart, cycleEnd)
+	meter := f.meter(t, ctx, "api_calls")
+	custID, _, _ := f.seedCustomerWithSub(t, ctx, "cus_nocost", "pln_nocost", []pricing.PriceInput{price(meter.ID, 2, nil)}, cycleStart, cycleEnd)
 	ts := cycleStart.Add(time.Hour)
 	if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
 		CustomerID: custID, MeterID: meter.ID, Quantity: decimal.NewFromInt(100), Timestamp: &ts,

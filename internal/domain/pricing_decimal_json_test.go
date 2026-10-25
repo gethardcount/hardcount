@@ -8,24 +8,23 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TestRatingRuleVersion_FlatAmountCents_SerializesAsDecimalString is FLOW B2b
-// checkbox 3 (ADR-045): GET /v1/rating-rules/<id> must serialize the per-unit
+// TestPlanPrice_UnitAmountCents_SerializesAsDecimalString is FLOW B2b
+// checkbox 3 (ADR-045): GET /v1/plans/{id}/prices must serialize the per-unit
 // rate as a JSON STRING ("0.0003"), not a number. A JSON number is a float64 and
 // would drift / round a sub-cent rate toward 0; the string preserves arbitrary
 // precision (Stripe's unit_amount_decimal shape). It must also round-trip back
 // to the exact decimal.
-func TestRatingRuleVersion_FlatAmountCents_SerializesAsDecimalString(t *testing.T) {
-	rr := RatingRuleVersion{
-		ID:              "rr_1",
-		RuleKey:         "c35_sonnet_input",
-		UnitAmountCents: decimal.RequireFromString("0.0003"), // 0.0003¢/unit = $3.00 / 1,000,000 units
+func TestPlanPrice_UnitAmountCents_SerializesAsDecimalString(t *testing.T) {
+	rr := PlanPrice{
+		ID:         "vlx_prc_1",
+		PriceShape: PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0003")}, // 0.0003¢/unit = $3.00 / 1,000,000 units
 	}
 	b, err := json.Marshal(rr)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	js := string(b)
-	t.Logf("GET /v1/rating-rules/<id> JSON → %s", js)
+	t.Logf("GET /v1/plans/{id}/prices JSON → %s", js)
 
 	// (1) It is a QUOTED string "0.0003" — the API contract.
 	if !strings.Contains(js, `"unit_amount_cents":"0.0003"`) {
@@ -43,7 +42,7 @@ func TestRatingRuleVersion_FlatAmountCents_SerializesAsDecimalString(t *testing.
 	}
 
 	// (3) Round-trips back to the EXACT decimal — no float drift.
-	var back RatingRuleVersion
+	var back PlanPrice
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

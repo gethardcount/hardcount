@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
@@ -124,22 +123,20 @@ func timeLiveRead(t *testing.T, events int) {
 			label, dashTimes[0].Round(time.Millisecond), runs-1, minOf(dashTimes[1:]), medianOf(dashTimes[1:]), maxOf(dashTimes[1:]), queries, hits)
 	}
 
-	measure(fmt.Sprintf("%d events, no pricing rules", events))
+	measure(fmt.Sprintf("%d events, one catch-all price", events))
 
-	for _, m := range []map[string]any{
+	// Four more prices on the plan's meter, backdated so the open period
+	// prices with them: the meter is then read per price (AggregateClaims).
+	for _, m := range []map[string]string{
 		{"model": "gpt-4o", "token_type": "input"},
 		{"model": "gpt-4o", "token_type": "output"},
 		{"model": "claude-sonnet", "token_type": "input"},
 		{"model": "claude-sonnet", "token_type": "output"},
 	} {
-		rule := lf.seededRule(t, lf.ctx)
-		if _, err := lf.pricingSvc.UpsertMeterPricingRule(lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-			MeterID: lf.meterID, RatingRuleVersionID: rule.ID, DimensionMatch: m,
-		}); err != nil {
-			t.Fatalf("pricing rule %v: %v", m, err)
-		}
+		p := addPrice(t, lf.db, lf.ctx, lf.tenantID, lf.planID, priceOn{meterID: lf.meterID, match: m, shape: perUnitShape("1")})
+		backdatePriceVersions(t, lf.db, lf.ctx, p.ID, lf.cycleStart.Add(-time.Hour))
 	}
-	measure(fmt.Sprintf("%d events, 4 pricing rules", events))
+	measure(fmt.Sprintf("%d events, 5 prices", events))
 }
 
 func sortedCopy(d []time.Duration) []time.Duration {

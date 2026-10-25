@@ -10,7 +10,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
-	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
@@ -27,14 +26,10 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	otherCust := ivCustomer(t, db, ctx, tenantID, "cus_cov_other")
 	plan := func(code string, meters ...string) string {
 		t.Helper()
-		p, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
+		return createPlanPricing(t, db, ctx, tenantID, domain.Plan{
 			Code: code, Name: code, Currency: "USD", BillingInterval: domain.BillingMonthly,
-			BaseBillTiming: domain.BillInArrears, Status: domain.PlanActive, MeterIDs: meters,
-		})
-		if err != nil {
-			t.Fatalf("create plan %s: %v", code, err)
-		}
-		return p.ID
+			BaseBillTiming: domain.BillInArrears, Status: domain.PlanActive,
+		}, meters...).ID
 	}
 	planM := plan("cov-m", "mtr_m")
 	planN := plan("cov-n", "mtr_n")

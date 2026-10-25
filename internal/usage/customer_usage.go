@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,39 +26,37 @@ type SubscriptionLister interface {
 	List(ctx context.Context, filter subscription.ListFilter) ([]domain.Subscription, int, error)
 }
 
-// PricingReader resolves plan / meter / rating-rule references when
-// assembling the response. Mirrors the surface pricing.Service exposes —
-// listed here so the customer-usage code owns no cross-domain state.
+// PricingReader reads the plans and meters the response names.
 type PricingReader interface {
 	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
 	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
-	GetRatingRule(ctx context.Context, tenantID, id string) (domain.RatingRuleVersion, error)
-	// GetRuleByKeyAsOf + GetOverrideByKeyAsOf: the ADR-070 resolution
-	// pair. The customer-usage view must price with the SAME rule the
-	// cycle close will bill — version and override in force at the
-	// period open — or the running-spend number is wrong for exactly
-	// the negotiated-rate customers the spend-cap wedge targets.
-	GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error)
-	GetOverrideByKeyAsOf(ctx context.Context, tenantID, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error)
-	ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error)
+}
+
+// UsageRater prices a subscription's usage the way billing does (ADR-130
+// §10). Implemented by *billing.Engine, wired in router.go: the rater lives
+// in billing, so the customer page prices usage the way the invoice does.
+type UsageRater interface {
+	// RateCurrentPeriod is the subscription's current period exactly as its
+	// close would bill it now.
+	RateCurrentPeriod(ctx context.Context, sub domain.Subscription) (domain.RatedSubscription, error)
+	// RateWindow is an estimate over [from, to), priced at the
+	// subscription's current-period pin.
+	RateWindow(ctx context.Context, sub domain.Subscription, from, to time.Time) (domain.RatedSubscription, error)
 }
 
 // CustomerUsageService composes the per-domain reads behind GET
-// /v1/customers/{id}/usage. See docs/dev/design/customer-usage.md.
-//
-// The hard work — dimension-match-aware aggregation in
-// usage.AggregateClaims — already exists. This service is a
-// composition: customer existence, subscription set, period resolution,
-// per-meter rating, totals roll-up, warnings collection.
+// /v1/customers/{id}/usage: customer existence, subscription set, period
+// resolution, the rater's buckets, totals and warnings.
 type CustomerUsageService struct {
 	usage         *Service
 	customers     CustomerLookup
 	subscriptions SubscriptionLister
 	pricing       PricingReader
+	rater         UsageRater
 }
 
-// NewCustomerUsageService wires the read-side composition. All four
-// collaborators are required.
+// NewCustomerUsageService wires the read-side composition. Every
+// collaborator is required, the rater through SetRater.
 func NewCustomerUsageService(
 	usageSvc *Service,
 	customers CustomerLookup,
@@ -73,6 +70,10 @@ func NewCustomerUsageService(
 		pricing:       pricing,
 	}
 }
+
+// SetRater wires the billing rater. The engine is built after this service,
+// so it is set after construction.
+func (s *CustomerUsageService) SetRater(r UsageRater) { s.rater = r }
 
 // CustomerUsagePeriod is the input window. Both From and To zero → default
 // to the customer's current billing cycle. Partial bounds (one zero, one
@@ -97,9 +98,9 @@ type CustomerUsageResult struct {
 	// days zero-filled so chart consumers don't have to gap-fill. Each
 	// bucket carries per-meter quantities — the frontend stacks them or
 	// flattens depending on the meter cardinality. Bucket quantities are raw
-	// SUM(quantity) per meter and include usage no pricing rule matched, so
-	// they need not add up to Meters[] totals: those use each meter's
-	// aggregation (max, last, …) and leave the unmatched row out.
+	// SUM(quantity) per meter and include usage no price matched, so they
+	// need not add up to Meters[] totals: those use each meter's
+	// aggregation (max, last, …) and leave the no_price row out.
 	Buckets []CustomerUsageBucket `json:"buckets"`
 }
 
@@ -125,47 +126,41 @@ type CustomerUsageSubscription struct {
 	CurrentPeriodEnd   time.Time `json:"current_period_end"`
 }
 
-// CustomerUsageMeter is one meter on the customer's plan(s) with its
-// rolled-up usage and cost over the queried window. Rules carries the
-// per-rule breakdown for multi-dim meters; for a single-rule meter
-// the slice is length 1 with no DimensionMatch.
+// CustomerUsageMeter is one meter the customer's plans price, with its
+// rolled-up usage and cost over the queried window. Prices carries one row
+// per price that took usage, with its plan: two plans can price one meter
+// differently (ADR-130 §10).
 type CustomerUsageMeter struct {
-	MeterID          string              `json:"meter_id"`
-	EventName        string              `json:"event_name"`
-	MeterName        string              `json:"meter_name"`
-	Unit             string              `json:"unit"`
-	Currency         string              `json:"currency"`
-	TotalQuantity    decimal.Decimal     `json:"total_quantity"`
-	TotalAmountCents int64               `json:"total_amount_cents"`
-	Rules            []CustomerUsageRule `json:"rules"`
+	MeterID          string               `json:"meter_id"`
+	EventName        string               `json:"event_name"`
+	MeterName        string               `json:"meter_name"`
+	Unit             string               `json:"unit"`
+	Currency         string               `json:"currency"`
+	TotalQuantity    decimal.Decimal      `json:"total_quantity"`
+	TotalAmountCents int64                `json:"total_amount_cents"`
+	Prices           []CustomerUsagePrice `json:"prices"`
 }
 
-// CustomerUsageRule is one row of the priority+claim resolution: events
-// claimed by a single pricing rule, rolled up into a quantity and rated
-// through pricing.ComputeAmountCents. DimensionMatch echoes the meter
-// pricing rule's match expression (the canonical pricing identity).
-type CustomerUsageRule struct {
-	RatingRuleVersionID string          `json:"rating_rule_version_id"`
-	RuleKey             string          `json:"rule_key"`
-	DimensionMatch      map[string]any  `json:"dimension_match,omitempty"`
-	Quantity            decimal.Decimal `json:"quantity"`
-	AmountCents         int64           `json:"amount_cents"`
+// CustomerUsagePrice is the usage one plan price took over the window, and
+// what it bills. DimensionMatch is the events the price takes; a catch-all
+// price has none.
+type CustomerUsagePrice struct {
+	PriceID        string            `json:"price_id,omitempty"`
+	PlanID         string            `json:"plan_id"`
+	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
+	Quantity       decimal.Decimal   `json:"quantity"`
+	AmountCents    int64             `json:"amount_cents"`
 	// UnitAmountDecimal is the per-unit price to display (decimal cents): the
-	// configured nominal rate for per_unit rules, else the effective amount÷qty —
-	// the SAME value the invoice line shows (ADR-054, via
-	// domain.DisplayUnitAmountDecimalFor). Rendered with the decimal-aware rate
-	// formatter so a sub-cent rate never collapses to $0.00.
+	// configured rate for per_unit, else the effective amount÷qty — the SAME
+	// value the invoice line shows (ADR-054, via
+	// domain.DisplayUnitAmountDecimalFor).
 	UnitAmountDecimal *string `json:"unit_amount_decimal,omitempty"`
-	// Unmatched marks the bucket of events that matched NO pricing rule
-	// on a meter with no default binding — usage the engine bills
-	// NOTHING for (same resolution order as the cycle). Surfaced as a
-	// first-class row so a mislabeled dimension value (the most likely
-	// integration error on a matrix-priced meter) is visible to the
-	// operator instead of leaking revenue behind a server-log WARN.
-	// Excluded from the meter's totals (they mirror the invoice) and
-	// filtered out of the public cost-dashboard projection —
-	// pricing-config problems are operator information.
-	Unmatched bool `json:"unmatched,omitempty"`
+	// NoPrice marks the usage no price of the plan took: billing bills
+	// nothing for it. Surfaced as a row so a mislabeled dimension value (the
+	// most likely integration error on a matrix-priced meter) is visible to
+	// the operator. Excluded from the meter's totals (they mirror the
+	// invoice) and from the public cost dashboard.
+	NoPrice bool `json:"no_price,omitempty"`
 }
 
 // CustomerUsageTotal is one currency's roll-up across all meters. We
@@ -187,21 +182,24 @@ type CustomerUsageBucket struct {
 	PerMeter    map[string]decimal.Decimal `json:"per_meter"`
 }
 
-// Get composes the customer-usage view. Order:
+// Get composes the customer-usage view (ADR-130 §10). Order:
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
 //  2. Active+trialing subscriptions for the customer.
 //  3. Period resolution (current cycle from primary sub, or explicit
 //     ?from=&to= validated for partial bounds, ordering, 1-year cap).
-//  4. Walk the meter union across subscribed plans, calling
-//     usage.AggregateClaims per meter then ComputeAmountCents per
-//     rule. Same code path the cycle scan uses → dashboard math == invoice
-//     math.
+//  4. Each subscription through billing's rater: with no window, its own
+//     current period exactly as its close would bill it now (windows,
+//     floors, threshold watermark, ladder); with an explicit window, an
+//     estimate at its current-period prices.
 //  5. Per-currency totals roll-up, warnings collection, subscription
 //     summary.
 func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID string, period CustomerUsagePeriod) (CustomerUsageResult, error) {
 	customerID = strings.TrimSpace(customerID)
 	if customerID == "" {
 		return CustomerUsageResult{}, errs.Required("customer_id")
+	}
+	if s.rater == nil {
+		return CustomerUsageResult{}, fmt.Errorf("customer usage: rater not wired")
 	}
 
 	if _, err := s.customers.Get(ctx, tenantID, customerID); err != nil {
@@ -224,36 +222,59 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 		return CustomerUsageResult{}, err
 	}
 
-	meterIDs, plansByID, err := s.collectMeters(ctx, tenantID, activeSubs)
+	plansByID, err := s.readPlans(ctx, tenantID, activeSubs)
 	if err != nil {
 		return CustomerUsageResult{}, err
 	}
 
-	var warnings []string
-	meters := make([]CustomerUsageMeter, 0, len(meterIDs))
-	for _, meterID := range meterIDs {
-		m, w, err := s.rateMeter(ctx, tenantID, customerID, meterID, from, to)
-		if err != nil {
-			return CustomerUsageResult{}, err
+	var (
+		warnings []string
+		rows     []domain.RatedUsage
+		meterIDs []string
+		seen     = map[string]bool{}
+	)
+	for _, sub := range activeSubs {
+		var rated domain.RatedSubscription
+		if source == "explicit" {
+			rated, err = s.rater.RateWindow(ctx, sub, from, to)
+		} else {
+			rated, err = s.rater.RateCurrentPeriod(ctx, sub)
 		}
-		warnings = append(warnings, w...)
-		meters = append(meters, m)
+		if err != nil {
+			return CustomerUsageResult{}, fmt.Errorf("rate subscription %s: %w", sub.ID, err)
+		}
+		rows = append(rows, rated.Usage...)
+		for _, id := range rated.MeterIDs {
+			if !seen[id] {
+				seen[id] = true
+				meterIDs = append(meterIDs, id)
+			}
+		}
 	}
+	if source == "explicit" && len(activeSubs) > 0 {
+		warnings = append(warnings, "Estimate: usage over a chosen window is priced at each subscription's current-period prices.")
+	}
+
+	meters, w, err := s.composeMeters(ctx, tenantID, meterIDs, rows, plansByID)
+	if err != nil {
+		return CustomerUsageResult{}, err
+	}
+	warnings = append(warnings, w...)
 
 	subSummaries := buildSubscriptionSummaries(activeSubs, plansByID)
 	totals := computeTotals(meters)
 
-	// Daily time series for the chart. Cheap relative to the per-meter
-	// rate calls we already did — single SQL pass with date_trunc + sum.
-	// On store error we degrade to an empty buckets slice rather than
-	// failing the whole response: the chart vanishes, the rest stays.
+	// Daily time series for the chart. Cheap relative to the rating reads —
+	// single SQL pass with date_trunc + sum. On store error we degrade to an
+	// empty buckets slice rather than failing the whole response: the chart
+	// vanishes, the rest stays.
 	buckets := []CustomerUsageBucket{}
 	if len(meterIDs) > 0 {
-		rows, err := s.usage.AggregateDailyBuckets(ctx, tenantID, customerID, meterIDs, from, to)
+		dailyRows, err := s.usage.AggregateDailyBuckets(ctx, tenantID, customerID, meterIDs, from, to)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("daily bucket aggregation failed: %v", err))
 		} else {
-			buckets = composeDailyBuckets(rows, from, to)
+			buckets = composeDailyBuckets(dailyRows, from, to)
 		}
 	}
 
@@ -369,167 +390,111 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now f
 	return *primary.CurrentBillingPeriodStart, *primary.CurrentBillingPeriodEnd, "current_billing_cycle", nil
 }
 
-// collectMeters walks each active subscription's items, fetches each
-// distinct plan once (cached), and returns the union of the plans'
-// meter IDs in deterministic insertion order so the response is stable
-// across calls.
-func (s *CustomerUsageService) collectMeters(ctx context.Context, tenantID string, subs []domain.Subscription) ([]string, map[string]domain.Plan, error) {
+// readPlans reads each distinct plan of the subscriptions' items once.
+func (s *CustomerUsageService) readPlans(ctx context.Context, tenantID string, subs []domain.Subscription) (map[string]domain.Plan, error) {
 	plans := map[string]domain.Plan{}
-	seen := map[string]struct{}{}
-	var meterIDs []string
-
 	for _, sub := range subs {
 		for _, item := range sub.Items {
-			if _, ok := plans[item.PlanID]; !ok {
-				plan, err := s.pricing.GetPlan(ctx, tenantID, item.PlanID)
-				if err != nil {
-					return nil, nil, fmt.Errorf("get plan %q: %w", item.PlanID, err)
-				}
-				plans[plan.ID] = plan
+			if _, ok := plans[item.PlanID]; ok {
+				continue
 			}
-			for _, meterID := range plans[item.PlanID].MeterIDs {
-				if _, ok := seen[meterID]; ok {
-					continue
-				}
-				seen[meterID] = struct{}{}
-				meterIDs = append(meterIDs, meterID)
+			plan, err := s.pricing.GetPlan(ctx, tenantID, item.PlanID)
+			if err != nil {
+				return nil, fmt.Errorf("get plan %q: %w", item.PlanID, err)
 			}
+			plans[plan.ID] = plan
 		}
 	}
-	return meterIDs, plans, nil
+	return plans, nil
 }
 
-// rateMeter aggregates one meter's events for the customer over [from, to)
-// and rates each per-rule bucket through the pricing engine. The meter's
-// reported currency is the first rating rule's currency; mismatches across
-// rules surface as warnings (don't fail the request — better to render
-// imperfect numbers than nothing while the operator fixes config).
-func (s *CustomerUsageService) rateMeter(ctx context.Context, tenantID, customerID, meterID string, from, to time.Time) (CustomerUsageMeter, []string, error) {
+// composeMeters groups the rated rows by meter, in meterIDs order, one row
+// per (plan, price) with the windows of a price added together. A bucket
+// below zero counts as 0, as on the invoice, with a warning; usage no price
+// took is a no_price row outside the totals, with a warning.
+func (s *CustomerUsageService) composeMeters(ctx context.Context, tenantID string, meterIDs []string, rows []domain.RatedUsage, plans map[string]domain.Plan) ([]CustomerUsageMeter, []string, error) {
 	var warnings []string
-
-	meter, err := s.pricing.GetMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return CustomerUsageMeter{}, nil, fmt.Errorf("get meter %q: %w", meterID, err)
+	byMeter := map[string][]domain.RatedUsage{}
+	for _, r := range rows {
+		byMeter[r.MeterID] = append(byMeter[r.MeterID], r)
 	}
-
-	rules, err := s.pricing.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
-	if err != nil {
-		return CustomerUsageMeter{}, nil, err
-	}
-	aggs, err := s.usage.AggregateClaims(ctx, tenantID, customerID, meterID, meter.Aggregation, domain.ClaimsOfRules(rules), from, to)
-	if err != nil {
-		return CustomerUsageMeter{}, nil, err
-	}
-	rulesByID := make(map[string]domain.MeterPricingRule, len(rules))
-	for _, rule := range rules {
-		rulesByID[rule.ID] = rule
-	}
-
-	out := CustomerUsageMeter{
-		MeterID:   meter.ID,
-		EventName: meter.EventName,
-		MeterName: meter.Name,
-		Unit:      meter.Unit,
-		Rules:     []CustomerUsageRule{},
-	}
-
-	totalQty := decimal.Zero
-	var totalCents int64
-
-	for _, agg := range aggs {
-		// A bucket below zero after corrections bills 0 on the invoice
-		// (#1193), so it counts as 0 here, with a warning. Pricing it would
-		// fail: the rater refuses a negative quantity.
-		if agg.Quantity.IsNegative() {
-			warnings = append(warnings, fmt.Sprintf("meter %q: usage below zero (%s) after corrections — counted as 0, as on the invoice", meter.EventName, agg.Quantity.String()))
-			continue
+	out := make([]CustomerUsageMeter, 0, len(meterIDs))
+	for _, meterID := range meterIDs {
+		meter, err := s.pricing.GetMeter(ctx, tenantID, meterID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("get meter %q: %w", meterID, err)
 		}
-		ratingRuleID := agg.RatingRuleVersionID
-		if ratingRuleID == "" {
-			ratingRuleID = meter.RatingRuleVersionID
+		m := CustomerUsageMeter{
+			MeterID:   meter.ID,
+			EventName: meter.EventName,
+			MeterName: meter.Name,
+			Unit:      meter.Unit,
+			Prices:    []CustomerUsagePrice{},
 		}
-		if ratingRuleID == "" {
-			// The unclaimed bucket: events matching no pricing rule on a
-			// meter with no default binding. The engine bills nothing for
-			// these (loud WARN at cycle close) — emit a first-class
-			// unmatched row so the operator SEES the unbilled volume where
-			// they investigate usage, instead of a dropped warning string.
-			// Deliberately outside totals: totals mirror the invoice.
-			if !agg.Quantity.IsZero() {
-				out.Rules = append(out.Rules, CustomerUsageRule{
-					Unmatched: true,
-					Quantity:  agg.Quantity,
+		type key struct{ plan, price string }
+		index := map[key]int{}
+		for _, r := range byMeter[meterID] {
+			if r.BelowZero {
+				warnings = append(warnings, fmt.Sprintf("meter %q: usage below zero (%s) after corrections — counted as 0, as on the invoice", meter.EventName, r.Quantity.String()))
+				continue
+			}
+			if m.Currency == "" {
+				m.Currency = plans[r.PlanID].Currency
+			}
+			k := key{plan: r.PlanID, price: r.PriceID}
+			i, ok := index[k]
+			if !ok {
+				i = len(m.Prices)
+				index[k] = i
+				m.Prices = append(m.Prices, CustomerUsagePrice{
+					PriceID: r.PriceID, PlanID: r.PlanID, DimensionMatch: r.DimensionMatch, NoPrice: r.PriceID == "",
 				})
-				warnings = append(warnings, fmt.Sprintf("meter %q has usage matching no pricing rule — not billed (see the unmatched row)", meter.EventName))
 			}
+			p := &m.Prices[i]
+			p.Quantity = p.Quantity.Add(r.Quantity)
+			p.AmountCents += r.AmountCents
+			if r.PriceID == "" {
+				continue
+			}
+			m.TotalQuantity = m.TotalQuantity.Add(r.Quantity)
+			m.TotalAmountCents += r.AmountCents
+		}
+		for i := range m.Prices {
+			p := &m.Prices[i]
+			if p.NoPrice {
+				warnings = append(warnings, fmt.Sprintf("meter %q has usage that matches no price of plan %q — not billed (see the no_price row)", meter.EventName, plans[p.PlanID].Name))
+				continue
+			}
+			unit := unitAmountOf(byMeter[meterID], p.PlanID, p.PriceID, p.AmountCents, p.Quantity)
+			p.UnitAmountDecimal = &unit
+		}
+		out = append(out, m)
+	}
+	return out, warnings, nil
+}
+
+// unitAmountOf is the display rate of one price row: the rate the rater
+// stamped when every window of it agrees (a per_unit price's configured
+// rate), else the effective amount over the quantity.
+func unitAmountOf(rows []domain.RatedUsage, planID, priceID string, amount int64, qty decimal.Decimal) string {
+	var rate *decimal.Decimal
+	for _, r := range rows {
+		if r.PlanID != planID || r.PriceID != priceID || r.BelowZero {
 			continue
 		}
-
-		// ADR-070 resolution — mirrors billing's rulePrices.Price so
-		// this view matches the invoice: the pinned binding supplies the
-		// rule_key; the version in force at the period open prices the
-		// window; the customer's override in force at the same instant
-		// patches on top. ErrNotFound on the override = list price; any
-		// other failure is loud (a silently-list-priced negotiated
-		// customer is the audit finding this closes).
-		linked, err := s.pricing.GetRatingRule(ctx, tenantID, ratingRuleID)
-		if err != nil {
-			return CustomerUsageMeter{}, nil, fmt.Errorf("get rating rule %q: %w", ratingRuleID, err)
+		if rate == nil {
+			v := r.UnitAmountDecimal
+			rate = &v
+			continue
 		}
-		ratingRule, err := s.pricing.GetRuleByKeyAsOf(ctx, tenantID, linked.RuleKey, from)
-		if err != nil {
-			if !errors.Is(err, errs.ErrNotFound) {
-				return CustomerUsageMeter{}, nil, fmt.Errorf("resolve rule %q as of period open: %w", linked.RuleKey, err)
-			}
-			// Key has no active versions (all archived) but the binding
-			// still points at one — same fallback the engine applies.
-			ratingRule = linked
+		if !rate.Equal(r.UnitAmountDecimal) {
+			return domain.EffectiveUnitAmountDecimalFor(amount, qty).String()
 		}
-		if override, oerr := s.pricing.GetOverrideByKeyAsOf(ctx, tenantID, customerID, ratingRule.RuleKey, from); oerr == nil {
-			ratingRule = override.ApplyTo(ratingRule)
-		} else if !errors.Is(oerr, errs.ErrNotFound) {
-			return CustomerUsageMeter{}, nil, fmt.Errorf("resolve override for rule %q: %w", ratingRule.RuleKey, oerr)
-		}
-
-		cents, err := domain.ComputeAmountCents(ratingRule, agg.Quantity)
-		if err != nil {
-			return CustomerUsageMeter{}, nil, fmt.Errorf("rate meter %q rule %q: %w", meter.EventName, ratingRuleID, err)
-		}
-
-		if out.Currency == "" {
-			out.Currency = ratingRule.Currency
-		} else if out.Currency != ratingRule.Currency {
-			warnings = append(warnings, fmt.Sprintf("meter %q has rating rules with mismatched currencies (%s vs %s)", meter.EventName, out.Currency, ratingRule.Currency))
-		}
-
-		var dimMatch map[string]any
-		if agg.RuleID != "" {
-			if rule, ok := rulesByID[agg.RuleID]; ok && len(rule.DimensionMatch) > 0 {
-				dimMatch = rule.DimensionMatch
-			}
-		}
-
-		totalQty = totalQty.Add(agg.Quantity)
-		totalCents += cents
-
-		// Same display rate the invoice line shows: nominal for per_unit rules,
-		// effective amount÷qty for tiered — resolved from the same
-		// override-applied ratingRule (ADR-054).
-		unitAmountDecimal := domain.DisplayUnitAmountDecimalFor(ratingRule, cents, agg.Quantity).String()
-
-		out.Rules = append(out.Rules, CustomerUsageRule{
-			RatingRuleVersionID: ratingRule.ID,
-			RuleKey:             ratingRule.RuleKey,
-			DimensionMatch:      dimMatch,
-			Quantity:            agg.Quantity,
-			AmountCents:         cents,
-			UnitAmountDecimal:   &unitAmountDecimal,
-		})
 	}
-
-	out.TotalQuantity = totalQty
-	out.TotalAmountCents = totalCents
-	return out, warnings, nil
+	if rate == nil {
+		return domain.EffectiveUnitAmountDecimalFor(amount, qty).String()
+	}
+	return rate.String()
 }
 
 // filterActiveSubs returns only active and trialing subs. Paused / canceled
@@ -577,7 +542,7 @@ func buildSubscriptionSummaries(subs []domain.Subscription, plansByID map[string
 	return out
 }
 
-// computeTotals groups each meter's amount by its rating-rule currency
+// computeTotals groups each meter's amount by its currency, the plan's,
 // and emits one bucket per distinct currency. Order is insertion-stable
 // (first currency seen wins position 0) so the response is deterministic
 // across calls.

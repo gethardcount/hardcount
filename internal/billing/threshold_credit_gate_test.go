@@ -39,13 +39,11 @@ func TestThresholdScan_CreditApplyFailure_FlagsAndSkipsCharge(t *testing.T) {
 		plans: map[string]domain.Plan{"pln_1": {
 			ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
-			MeterIDs: []string{"mtr_api"},
 		}},
-		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
-		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingPerUnit,
-			UnitAmountCents: decimal.NewFromInt(100),
-		}},
+		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"}},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
+		},
 	}
 	invoices := &mockInvoices{}
 	applier := &fakeCreditApplier{inv: invoices, err: errors.New("db blip during credit apply")}
@@ -106,13 +104,11 @@ func TestThresholdScan_CreditsApplied_ChargesRemainder(t *testing.T) {
 		plans: map[string]domain.Plan{"pln_1": {
 			ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 			BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900,
-			MeterIDs: []string{"mtr_api"},
 		}},
-		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
-		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingPerUnit,
-			UnitAmountCents: decimal.NewFromInt(100),
-		}},
+		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"}},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
+		},
 	}
 	invoices := &mockInvoices{}
 	applier := &fakeCreditApplier{inv: invoices, applyCents: 4900}

@@ -101,20 +101,12 @@ func (a *pricingStoreAdapter) GetMeter(ctx context.Context, tenantID, id string)
 	return a.store.GetMeter(ctx, tenantID, id)
 }
 
-func (a *pricingStoreAdapter) GetRatingRule(ctx context.Context, tenantID, id string) (domain.RatingRuleVersion, error) {
-	return a.store.GetRatingRule(ctx, tenantID, id)
+func (a *pricingStoreAdapter) PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error) {
+	return a.store.PlanPricesAt(ctx, tenantID, planID, at, clockID)
 }
 
-func (a *pricingStoreAdapter) GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
-	return a.store.GetRuleByKeyAsOf(ctx, tenantID, ruleKey, asOf)
-}
-
-func (a *pricingStoreAdapter) GetOverrideByKeyAsOf(ctx context.Context, tenantID, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error) {
-	return a.store.GetOverrideByKeyAsOf(ctx, tenantID, customerID, ruleKey, asOf)
-}
-
-func (a *pricingStoreAdapter) ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error) {
-	return a.store.ListMeterPricingRulesByMeter(ctx, tenantID, meterID)
+func (a *pricingStoreAdapter) GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error) {
+	return a.store.GetOverrideAt(ctx, tenantID, customerID, priceID, at)
 }
 
 // usageStoreAdapter wraps usage.PostgresStore to implement billing.UsageAggregator
@@ -126,7 +118,7 @@ func (a *usageStoreAdapter) AggregateForBillingPeriodByAgg(ctx context.Context, 
 	return a.store.AggregateForBillingPeriodByAgg(ctx, tenantID, customerID, meters, from, to)
 }
 
-func (a *usageStoreAdapter) AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.RuleAggregation, error) {
+func (a *usageStoreAdapter) AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.ClaimedUsage, error) {
 	return a.store.AggregateClaims(ctx, tenantID, customerID, meterID, aggregation, claims, from, to)
 }
 
@@ -216,7 +208,7 @@ func (a *invoiceStoreAdapter) GetInvoiceForPeriod(ctx context.Context, tenantID,
 }
 
 // TestFullBillingCycle_E2E tests the complete flow against real Postgres:
-// tenant → customer → meter → rating rule → plan → subscription → usage → billing engine → invoice
+// tenant → customer → meter → plan with prices → subscription → usage → billing engine → invoice
 func TestFullBillingCycle_E2E(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling, leader.RoleDunning)
@@ -239,56 +231,33 @@ func TestFullBillingCycle_E2E(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 
-	// 3. Create rating rules
-	apiRule, err := pricingStore.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "api_calls", Name: "API Calls Pricing", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingGraduated,
-		Currency: "USD",
-		Tiers: []domain.RatingTier{
-			{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)}, // $0.10 per call up to 1000
-			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},               // $0.05 per call after 1000
-		},
-	})
-	if err != nil {
-		t.Fatalf("create api rule: %v", err)
-	}
-
-	storageRule, err := pricingStore.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "storage_gb", Name: "Storage Pricing", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(2500), // $25 flat
-	})
-	if err != nil {
-		t.Fatalf("create storage rule: %v", err)
-	}
-
-	// 4. Create meters
+	// 3. Create meters
 	apiMeter, err := pricingStore.CreateMeter(ctx, tenantID, domain.Meter{
-		EventName: "api_calls", Name: "API Calls", Unit: "calls",
-		Aggregation: "sum", RatingRuleVersionID: apiRule.ID,
+		EventName: "api_calls", Name: "API Calls", Unit: "calls", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create api meter: %v", err)
 	}
-
 	storageMeter, err := pricingStore.CreateMeter(ctx, tenantID, domain.Meter{
-		EventName: "storage_gb", Name: "Storage", Unit: "GB",
-		Aggregation: "sum", RatingRuleVersionID: storageRule.ID,
+		EventName: "storage_gb", Name: "Storage", Unit: "GB", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create storage meter: %v", err)
 	}
 
-	// 5. Create plan
-	plan, err := pricingStore.CreatePlan(ctx, tenantID, domain.Plan{
+	// 4. Create the plan with its prices: API calls graduated, $0.10 per
+	// call up to 1000 then $0.05; storage $25 per GB.
+	plan, _ := createPlanWithPrices(t, db, ctx, tenantID, domain.Plan{
 		Code: "pro", Name: "Pro Plan", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
-		BaseAmountCents: 4900, // $49 base
-		MeterIDs:        []string{apiMeter.ID, storageMeter.ID},
-	})
-	if err != nil {
-		t.Fatalf("create plan: %v", err)
-	}
+		BaseAmountCents: 4900, BaseBillTiming: domain.BillInArrears, // $49 base
+	},
+		priceOn{meterID: apiMeter.ID, shape: domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+			{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
+		}}},
+		catchAll(storageMeter.ID, "2500"),
+	)
 
 	// 6. Create subscription with billing period set
 	periodStart := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)

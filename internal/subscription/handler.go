@@ -33,6 +33,13 @@ type PlanReader interface {
 	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
 }
 
+// PlanMeterReader reads a plan's meters: every meter the plan has ever had a
+// price for, the conservative set the overlap guard compares (ADR-130).
+// Implemented by *pricing.PostgresStore, wired in router.go.
+type PlanMeterReader interface {
+	PlanMeterIDs(ctx context.Context, tenantID, planID string) ([]string, error)
+}
+
 // ProrationInvoiceCreator creates finalized proration invoices and supports
 // idempotent retry via a source-of-truth lookup.
 //

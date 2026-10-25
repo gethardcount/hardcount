@@ -7,12 +7,8 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { PlanPrice } from './planPrice';
 
-export type RatingRuleLifecycleState = typeof RatingRuleLifecycleState[keyof typeof RatingRuleLifecycleState];
-
-
-export const RatingRuleLifecycleState = {
-  draft: 'draft',
-  active: 'active',
-  archived: 'archived',
-} as const;
+export type ListPlanPrices200 = {
+  data: PlanPrice[];
+};

@@ -247,7 +247,8 @@ func (s *PostgresStore) CustomerProviderCost(ctx context.Context, tenantID, cust
 
 // MarginModelRow is one per-model line of the margin report. RevenueCents
 // and MarginBps are set ONLY when the model's revenue is honestly
-// attributable (a pricing rule pins `model` in dimension_match); otherwise
+// attributable (the winning price names `model` in its dimension_match);
+// otherwise
 // Attributed=false and only cost renders — never a heuristic allocation
 // (ADR-079 D6).
 type MarginModelRow struct {
@@ -357,8 +358,9 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 		return MarginReport{}, fmt.Errorf("provider cost rates: %w", err)
 	}
 
-	// Revenue: rated usage for the same window, attributed per model ONLY
-	// where the rule's dimension_match pins model.
+	// Revenue: rated usage for the same window (an estimate at each
+	// subscription's current-period prices, ADR-130 §10), attributed per
+	// model ONLY where the winning price's dimension_match names a model.
 	usage, err := a.usageSvc.Get(ctx, tenantID, customerID, CustomerUsagePeriod{From: from, To: to})
 	if err != nil {
 		return MarginReport{}, fmt.Errorf("rate usage window: %w", err)
@@ -374,9 +376,11 @@ func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, 
 				earned[m.Currency] = true
 			}
 		}
-		for _, r := range m.Rules {
-			model, ok := r.DimensionMatch["model"].(string)
-			if ok && model != "" {
+		for _, r := range m.Prices {
+			if r.NoPrice {
+				continue
+			}
+			if model := r.DimensionMatch["model"]; model != "" {
 				revenueByModel[model] += r.AmountCents
 			} else {
 				rep.UnattributedRevenueCents += r.AmountCents

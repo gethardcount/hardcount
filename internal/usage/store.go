@@ -40,8 +40,8 @@ type Store interface {
 	// aggregation: sum, count, max or last (the latest event by timestamp,
 	// then id). Each event belongs to the first claim, in the order given,
 	// whose match its dimensions contain; an event no claim takes is
-	// returned as the unclaimed entry (RuleID "").
-	AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.RuleAggregation, error)
+	// returned as the unclaimed entry (PriceID "").
+	AggregateClaims(ctx context.Context, tenantID, customerID, meterID, aggregation string, claims []domain.UsageClaim, from, to time.Time) ([]domain.ClaimedUsage, error)
 
 	// AggregateDailyBuckets returns events bucketed to UTC-day granularity
 	// over [from, to) for the given customer × meter set. One row per
@@ -158,41 +158,13 @@ type DailyValue struct {
 	sum, count, sumOfCustomerMax, sumOfCustomerLast decimal.Decimal
 }
 
-// AggregationMixed is the by_meter aggregation of a max or last meter that
-// billing aggregates in more than one bucket. Its value is the plain sum of
-// reported quantities, which billing does not use.
-const AggregationMixed = "mixed"
-
 // BillingModes is, for each meter, the aggregation billing uses for its
-// events: the meter's own, which every pricing rule of the meter bills under
+// events: the meter's own, which every price of the meter bills under
 // (ADR-130 §2). An empty or unknown aggregation reads as sum.
-//
-// Billing aggregates each bucket on its own — one per pricing rule, plus the
-// events no rule claims when no rule claims everything (AggregateClaims) —
-// and adds the buckets up. A sum or a count adds up the same either way, but
-// a peak or a latest reading does not: two rules' peaks added together are
-// not the peak of all the events. So a max or last meter with more than one
-// bucket is AggregationMixed.
-func BillingModes(meters []domain.Meter, rules []domain.MeterPricingRule) map[string]string {
-	ruleCount := map[string]int{}
-	catchAll := map[string]bool{}
-	for _, r := range rules {
-		ruleCount[r.MeterID]++
-		if len(r.DimensionMatch) == 0 {
-			catchAll[r.MeterID] = true
-		}
-	}
+func BillingModes(meters []domain.Meter) map[string]string {
 	out := make(map[string]string, len(meters))
 	for _, m := range meters {
-		mode := meterMode(m.Aggregation)
-		buckets := ruleCount[m.ID]
-		if !catchAll[m.ID] {
-			buckets++
-		}
-		if buckets > 1 && !domain.AdditiveAggregation(mode) {
-			mode = AggregationMixed
-		}
-		out[m.ID] = mode
+		out[m.ID] = meterMode(m.Aggregation)
 	}
 	return out
 }
@@ -206,7 +178,7 @@ func meterMode(agg string) string {
 }
 
 // pick returns the candidate that matches an aggregation mode. An unknown
-// or empty mode, or AggregationMixed, falls back to the plain sum.
+// or empty mode falls back to the plain sum.
 func pick(mode string, sum, count, sumMax, sumLast decimal.Decimal) decimal.Decimal {
 	switch mode {
 	case "count":

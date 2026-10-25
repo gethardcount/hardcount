@@ -10,9 +10,9 @@ import (
 
 // TestUpdatePlan_OmittedDescriptionAndTaxCodeAreKept: PATCH /v1/plans/{id}
 // leaves description and tax_code alone when the body omits them. The
-// dashboard's meter attach sends only meter_ids, and its edit dialog never
-// sends either field, so a write-on-omit cleared a tax code set through the
-// API and the base fee fell back to the tenant default tax code. Sending
+// dashboard's edit dialog never sends either field, so a write-on-omit
+// cleared a tax code set through the API and the base fee fell back to the
+// tenant default tax code. Sending
 // the key still writes it, and an empty string still clears it.
 func TestUpdatePlan_OmittedDescriptionAndTaxCodeAreKept(t *testing.T) {
 	const (
@@ -20,39 +20,38 @@ func TestUpdatePlan_OmittedDescriptionAndTaxCodeAreKept(t *testing.T) {
 		taxCode = "txcd_10103001"
 	)
 
-	seed := func(t *testing.T) (*Service, domain.Plan, string) {
+	seed := func(t *testing.T) (*Service, domain.Plan) {
 		t.Helper()
 		svc := NewService(newMemStore())
-		meterID, _ := seedMeterAndRule(t, svc, "tnt_test")
-		p, err := svc.CreatePlan(context.Background(), "tnt_test", CreatePlanInput{
+		p, _, err := svc.CreatePlan(context.Background(), "tnt_test", CreatePlanInput{
 			Code: "pro", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
-			BaseAmountCents: 2900, Description: desc, TaxCode: taxCode,
+			BaseAmountCents: 2900, BaseBillTiming: domain.BillInArrears, Description: desc, TaxCode: taxCode,
 		})
 		if err != nil {
 			t.Fatalf("seed plan: %v", err)
 		}
-		return svc, p, meterID
+		return svc, p
 	}
 
 	cases := []struct {
 		name     string
-		body     func(meterID string) string
+		body     string
 		wantDesc string
 		wantTax  string
 	}{
-		{"attach a meter (dashboard)", func(m string) string { return `{"meter_ids":["` + m + `"]}` }, desc, taxCode},
-		{"rename only", func(string) string { return `{"name":"Pro 2"}` }, desc, taxCode},
-		{"archive only", func(string) string { return `{"status":"archived"}` }, desc, taxCode},
-		{"empty body", func(string) string { return `{}` }, desc, taxCode},
-		{"explicit null keeps", func(string) string { return `{"description":null,"tax_code":null}` }, desc, taxCode},
-		{"set both", func(string) string { return `{"description":"New text","tax_code":"txcd_10000000"}` }, "New text", "txcd_10000000"},
-		{"empty strings clear", func(string) string { return `{"description":"","tax_code":""}` }, "", ""},
-		{"whitespace is trimmed", func(string) string { return `{"description":"  Spaced  ","tax_code":"  txcd_10000000 "}` }, "Spaced", "txcd_10000000"},
+		{"rename only", `{"name":"Pro 2"}`, desc, taxCode},
+		{"archive only", `{"status":"archived"}`, desc, taxCode},
+		{"base fee only", `{"base_amount_cents":3900}`, desc, taxCode},
+		{"empty body", `{}`, desc, taxCode},
+		{"explicit null keeps", `{"description":null,"tax_code":null}`, desc, taxCode},
+		{"set both", `{"description":"New text","tax_code":"txcd_10000000"}`, "New text", "txcd_10000000"},
+		{"empty strings clear", `{"description":"","tax_code":""}`, "", ""},
+		{"whitespace is trimmed", `{"description":"  Spaced  ","tax_code":"  txcd_10000000 "}`, "Spaced", "txcd_10000000"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc, p, meterID := seed(t)
-			rr := doJSON(t, NewHandler(svc).updatePlan, http.MethodPatch, "/", tc.body(meterID), map[string]string{"id": p.ID})
+			svc, p := seed(t)
+			rr := doJSON(t, NewHandler(svc).updatePlan, http.MethodPatch, "/", tc.body, map[string]string{"id": p.ID})
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 			}
@@ -74,7 +73,7 @@ func TestUpdatePlan_OmittedDescriptionAndTaxCodeAreKept(t *testing.T) {
 // and a refused PATCH writes nothing.
 func TestUpdatePlan_InvalidTaxCodeRefused(t *testing.T) {
 	svc := NewService(newMemStore())
-	p, err := svc.CreatePlan(context.Background(), "tnt_test", CreatePlanInput{
+	p, _, err := svc.CreatePlan(context.Background(), "tnt_test", CreatePlanInput{
 		Code: "pro", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
 		TaxCode: "txcd_10103001",
 	})

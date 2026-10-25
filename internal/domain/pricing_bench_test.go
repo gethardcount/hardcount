@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkComputeAmountCents_Flat(b *testing.B) {
-	rule := RatingRuleVersion{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(500)}
+	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(500)}
 	q := decimal.NewFromInt(1000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -16,7 +16,7 @@ func BenchmarkComputeAmountCents_Flat(b *testing.B) {
 }
 
 func BenchmarkComputeAmountCents_Graduated_5Tiers(b *testing.B) {
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode: PricingGraduated,
 		Tiers: []RatingTier{
 			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)},
@@ -34,7 +34,7 @@ func BenchmarkComputeAmountCents_Graduated_5Tiers(b *testing.B) {
 }
 
 func BenchmarkComputeAmountCents_Package(b *testing.B) {
-	rule := RatingRuleVersion{
+	rule := PriceShape{
 		Mode:               PricingPackage,
 		PackageSize:        1000,
 		PackageAmountCents: decimal.NewFromInt(2000),

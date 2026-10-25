@@ -119,21 +119,19 @@ func TestRunCycle_MeterReadBlipFailsTheClose(t *testing.T) {
 	}
 }
 
-// A threshold fire's lines come from the preview path. A meter whose pinned
-// rating rule is missing used to be skipped with a warning, so the fire
-// invoice under-billed while the cycle close failed loudly on the same rule.
-// Now the evaluation fails like the close does.
-func TestEvaluateThresholds_MissingRuleFails(t *testing.T) {
+// A threshold fire's lines come from the rater. A meter whose price could
+// not be read used to be skipped with a warning, so the fire invoice
+// under-billed while the cycle close failed loudly on the same read. Now the
+// evaluation fails like the close does.
+func TestEvaluateThresholds_PriceReadFails(t *testing.T) {
 	thresholds := &domain.BillingThresholds{AmountGTE: 100}
 	engine, _, _ := setupThresholdEngine(thresholds, 1500)
 	mp := engine.pricing.(*mockPricing)
-	for id := range mp.rules {
-		delete(mp.rules, id) // every pinned rule is now missing
-	}
+	mp.pricesErr = errors.New("db down")
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
 	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err == nil {
-		t.Fatal("evaluateThresholds with a missing pinned rule must fail, not drop the line")
+		t.Fatal("evaluateThresholds with a failed price read must fail, not drop the line")
 	}
 }
 

@@ -288,6 +288,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// monthly math and a yearly + trial sub gets a 1-month first
 	// cycle instead of a full year.
 	subSvc.SetPlanReader(pricingStore)
+	subSvc.SetPlanMeterReader(pricingStore)
 	creditStore := credit.NewPostgresStore(db)
 	creditSvc := credit.NewService(creditStore)
 	creditSvc.SetCustomerReader(customerStore)
@@ -846,6 +847,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// period close does. The secret-key read and the public cost dashboard
 	// both serve that one function, so they cannot disagree.
 	engine.SetLiveBalanceReaders(creditSvc, subStore)
+	// Customer usage, the public cost dashboard and the margin report price
+	// usage through the engine's rater (ADR-130 §10).
+	customerUsageSvc.SetRater(engine)
 	creditSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetLiveBalanceReader(engine)
 	// Plumb effective-now resolution into dunning so every per-invoice
@@ -1767,16 +1771,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// Chargebee, Lago, Orb expose the same shape.
 		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers/{customer_id}/payment-methods", paymentMethodsH.OperatorRoutes())
 		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/meters", pricingH.MeterRoutes())
-		// Meter-scoped pricing rule subtree. Mounted as a sibling of
-		// /meters so reads (PermPricingRead) and writes (PermPricingWrite)
-		// can carry independent guards without nesting permission middleware.
-		r.Mount("/meters/{meter_id}/pricing-rules", pricingH.MeterPricingRuleRoutes(
-			auth.Require(auth.PermPricingRead),
-			auth.Require(auth.PermPricingWrite),
-		))
-		r.With(auth.Require(auth.PermPricingRead)).Mount("/meter-pricing-rules", pricingH.AllMeterPricingRuleRoutes())
+		// A plan and its prices (/v1/plans/{id}/prices) are one subtree.
 		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/plans", pricingH.PlanRoutes())
-		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/rating-rules", pricingH.RatingRuleRoutes())
 		r.With(auth.Require(auth.PermPricingWrite)).Mount("/recipes", recipeH.Routes())
 		r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", subH.Routes())
 		// Backfill is mounted ahead of the /usage-events subtree so chi picks

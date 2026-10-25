@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -11,9 +12,9 @@ import (
 )
 
 // windowUsage reads one invoice's usage, each window once: one read covers
-// every meter of the invoice for a window, and a pricing-rule meter's
-// buckets are read once per window. The cycle close and the cancel's final
-// invoice bill their usage lines from it.
+// every meter of the invoice for a window, and a meter priced by several
+// prices has its buckets read once per window and price set. The cycle close
+// and the cancel's final invoice bill their usage lines from it.
 //
 // meters is every meter the invoice bills, read once for the close. The
 // totals are read under these meters' aggregations, and the closers' rater
@@ -27,7 +28,7 @@ type windowUsage struct {
 	meters    map[string]domain.Meter
 	meterAggs map[string]string                     // meters → aggregation
 	totals    map[string]map[string]decimal.Decimal // window → meter → total
-	buckets   map[string][]domain.RuleAggregation   // meter|window → pricing-rule buckets
+	buckets   map[string][]domain.ClaimedUsage      // meter|window|claims → price buckets
 }
 
 func newWindowUsage(e *Engine, sub domain.Subscription, meters map[string]domain.Meter) *windowUsage {
@@ -36,7 +37,7 @@ func newWindowUsage(e *Engine, sub domain.Subscription, meters map[string]domain
 		aggs[id] = m.Aggregation
 	}
 	return &windowUsage{e: e, sub: sub, meters: meters, meterAggs: aggs,
-		totals: map[string]map[string]decimal.Decimal{}, buckets: map[string][]domain.RuleAggregation{}}
+		totals: map[string]map[string]decimal.Decimal{}, buckets: map[string][]domain.ClaimedUsage{}}
 }
 
 func windowKey(iv usageInterval) string {
@@ -59,40 +60,24 @@ func (w *windowUsage) meterTotal(ctx context.Context, meterID string, iv usageIn
 	return t[meterID], nil
 }
 
-// ruleBuckets is the meter's pricing-rule buckets over iv, under the meter's
-// aggregation.
-func (w *windowUsage) ruleBuckets(ctx context.Context, meterID string, meter domain.Meter, rules []domain.MeterPricingRule, iv usageInterval) ([]domain.RuleAggregation, error) {
-	k := meterID + "|" + windowKey(iv)
+// claimBuckets is the meter's buckets over iv, one per price, under the
+// meter's aggregation.
+func (w *windowUsage) claimBuckets(ctx context.Context, meterID string, meter domain.Meter, prices []domain.PlanPrice, iv usageInterval) ([]domain.ClaimedUsage, error) {
+	claims := domain.ClaimsOf(prices)
+	ids := make([]string, 0, len(claims))
+	for _, c := range claims {
+		ids = append(ids, c.PriceID)
+	}
+	k := meterID + "|" + windowKey(iv) + "|" + strings.Join(ids, ",")
 	if b, ok := w.buckets[k]; ok {
 		return b, nil
 	}
-	b, err := w.e.usage.AggregateClaims(ctx, w.sub.TenantID, w.sub.CustomerID, meterID, meter.Aggregation, domain.ClaimsOfRules(rules), iv.start, iv.end)
+	b, err := w.e.usage.AggregateClaims(ctx, w.sub.TenantID, w.sub.CustomerID, meterID, meter.Aggregation, claims, iv.start, iv.end)
 	if err != nil {
-		return nil, fmt.Errorf("aggregate by pricing rules for meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
+		return nil, fmt.Errorf("aggregate by price for meter %s [%v, %v): %w", meterID, iv.start, iv.end, err)
 	}
 	w.buckets[k] = b
 	return b, nil
-}
-
-// planMeters returns every meter on plans, read once. Usage is
-// customer+meter scoped, so a meter on two plans appears once. An unreadable
-// meter is an error (retried per ADR-119): defaulting its aggregation to
-// "sum" billed a max or last meter as its total.
-func (e *Engine) planMeters(ctx context.Context, tenantID string, plans map[string]domain.Plan) (map[string]domain.Meter, error) {
-	meters := make(map[string]domain.Meter)
-	for _, pl := range plans {
-		for _, meterID := range pl.MeterIDs {
-			if _, ok := meters[meterID]; ok {
-				continue
-			}
-			m, err := e.pricing.GetMeter(ctx, tenantID, meterID)
-			if err != nil {
-				return nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
-			}
-			meters[meterID] = m
-		}
-	}
-	return meters, nil
 }
 
 // closeMeters is the closers' PriceSource: prices and rules as the engine
@@ -102,9 +87,10 @@ type closeMeters struct {
 	meters map[string]domain.Meter
 }
 
-// Meter is the meter as the close read it. Every meter a closer rates is on
-// one of the plans the close read its meters from (meterUsageIntervals), so
-// a meter that is not there is a bug, not a read to make now.
+// Meter is the meter as the close read it. Every meter a closer rates is
+// priced by one of the plans the close read its meters from
+// (meterUsageIntervals), so a meter that is not there is a bug, not a read to
+// make now.
 func (c closeMeters) Meter(_ context.Context, _, meterID string) (domain.Meter, error) {
 	m, ok := c.meters[meterID]
 	if !ok {

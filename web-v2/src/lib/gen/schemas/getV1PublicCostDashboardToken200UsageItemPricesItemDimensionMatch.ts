@@ -9,8 +9,6 @@
  */
 
 /**
- * Event dimensions this rule claims, for example
- * `{"model": "gpt-4o", "token_type": "input"}`. Values must be
- * strings, numbers or booleans. Omitted or `{}` matches every event.
+ * The labels the price takes. Absent for a price that takes every event.
  */
-export type UpsertMeterPricingRuleBodyDimensionMatch = { [key: string]: unknown };
+export type GetV1PublicCostDashboardToken200UsageItemPricesItemDimensionMatch = {[key: string]: string};

@@ -449,10 +449,10 @@ func newSwapRig(t *testing.T, r *s1Rig) *swapRig {
 	if err != nil {
 		t.Fatalf("get plan: %v", err)
 	}
-	newPlan, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	newPlan, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_thresh_yearly", Name: "Threshold Plan Yearly",
 		Currency: "USD", BillingInterval: domain.BillingYearly,
-		BaseAmountCents: 0, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 0, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create yearly plan: %v", err)
@@ -490,16 +490,16 @@ func (s *swapRig) swap(t *testing.T, r *s1Rig, at time.Time) error {
 // plan is the monthly one the sub now runs on.
 func newInAdvanceSwapRig(t *testing.T, r *s1Rig) (*swapRig, domain.Plan) {
 	t.Helper()
-	advMonthly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	advMonthly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_m", Name: "Adv Monthly", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create in_advance monthly: %v", err)
 	}
-	advYearly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	advYearly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_y", Name: "Adv Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
-		BaseAmountCents: 10000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 10000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create in_advance yearly: %v", err)
@@ -961,16 +961,16 @@ func TestPlanSwap_vs_Close_SwapFirst_InAdvanceCalendar_StartOnly(t *testing.T) {
 	feb1 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	r.close = p1.Add(time.Nanosecond)
 
-	yearly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	yearly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_yearly", Name: "Adv Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
-		BaseAmountCents: 12000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 12000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create yearly: %v", err)
 	}
-	monthly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	monthly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_adv_monthly", Name: "Adv Monthly", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 1000, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create monthly: %v", err)

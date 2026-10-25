@@ -111,27 +111,22 @@ func count(out map[string]any, field string) int {
 	return int(n)
 }
 
-// newMeter creates a meter priced at 1c per unit with aggregation agg.
+// newMeter creates a meter with aggregation agg; planWith prices it at 1c
+// per unit.
 func (r *lagRig) newMeter(key, agg string) string {
 	r.t.Helper()
-	rule := r.must(http.MethodPost, "/v1/rating-rules", lagP0, map[string]any{
-		"rule_key": key, "name": key, "mode": "per_unit", "currency": "USD", "unit_amount_cents": 1,
-	}, http.StatusCreated)
 	m := r.must(http.MethodPost, "/v1/meters", lagP0, map[string]any{
-		"event_name": key, "name": key, "unit": key, "aggregation": agg, "rating_rule_version_id": rule["id"],
+		"event_name": key, "name": key, "unit": key, "aggregation": agg,
 	}, http.StatusCreated)
 	return m["id"].(string)
 }
 
-// planWith creates a monthly in-arrears plan carrying meters.
+// planWith creates a monthly in-arrears plan pricing meters at 1c per unit.
 func (r *lagRig) planWith(code string, base int64, meters ...string) string {
 	r.t.Helper()
-	if meters == nil {
-		meters = []string{}
-	}
 	p := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 		"code": code, "name": code, "currency": "USD", "billing_interval": "monthly",
-		"base_amount_cents": base, "base_bill_timing": "in_arrears", "meter_ids": meters,
+		"base_amount_cents": base, "base_bill_timing": "in_arrears", "prices": centPrices(meters),
 	}, http.StatusCreated)
 	return p["id"].(string)
 }

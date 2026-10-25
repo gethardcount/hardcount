@@ -7,8 +7,5 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { MeterPricingRule } from './meterPricingRule';
 
-export type ListMeterPricingRules200 = {
-  data: MeterPricingRule[];
-};
+export type RecipePriceDimensionMatch = {[key: string]: string};

@@ -72,7 +72,7 @@ func CheckDecimal(field string, d decimal.Decimal, lim DecimalLimits) (decimal.D
 	return d, nil
 }
 
-// CheckRate checks a price amount in cents (a rating rule's or a price
+// CheckRate checks a price amount in cents (a plan price's or a price
 // override's unit_amount_cents, tier unit_amount_cents and
 // package_amount_cents): inside RateLimits and 0 or more. A negative
 // rate is a discount misspelled; credits are the discount primitive

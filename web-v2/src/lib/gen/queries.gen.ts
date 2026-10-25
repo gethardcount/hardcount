@@ -88,7 +88,6 @@ import type {
   GetCustomerUsageParams,
   GetEmailSettings200,
   GetHealth200,
-  GetPlan200,
   GetSubscriptionTimeline200,
   GetV1AuthInviteToken200,
   GetV1CreditsBalanceCustomerId200,
@@ -102,8 +101,6 @@ import type {
   GetV1Plans200,
   GetV1ProviderCosts200,
   GetV1PublicCostDashboardToken200,
-  GetV1RatingRules200,
-  GetV1RatingRulesParams,
   GetV1Subscriptions200,
   GetV1SubscriptionsParams,
   GetV1TestClocks200,
@@ -127,7 +124,6 @@ import type {
   InvoicePaymentTimeline,
   InvoicePreview,
   InvoiceWithLineItems,
-  ListAllMeterPricingRules200,
   ListApiKeys200,
   ListAuditLog200,
   ListAuditLogParams,
@@ -143,7 +139,7 @@ import type {
   ListDunningRunsParams,
   ListHeldUsage200,
   ListMembers200,
-  ListMeterPricingRules200,
+  ListPlanPrices200,
   ListPriceOverrides200,
   ListPriceOverridesParams,
   ListRecipeInstances200,
@@ -158,12 +154,11 @@ import type {
   MarginReport,
   MemberInvitation,
   Meter,
-  MeterPricingRule,
   PatchV1MetersIdBody,
   PatchV1WebhookEndpointsEndpointsIdBody,
   PauseSubscriptionCollectionBody,
   PaymentMethod,
-  Plan,
+  PlanDetail,
   PostV1AuthAcceptInvite200,
   PostV1AuthAcceptInviteBody,
   PostV1AuthLogin200,
@@ -185,7 +180,6 @@ import type {
   PostV1InvoicesIdSendBody,
   PostV1MetersBody,
   PostV1PlansBody,
-  PostV1RatingRulesBody,
   PostV1SubscriptionsBody,
   PostV1SubscriptionsIdRetryBilling200,
   PostV1TestClocksBody,
@@ -195,10 +189,12 @@ import type {
   PostV1UsageEventsBody,
   PostV1WebhookEndpointsEndpointsBody,
   PreviewRecipeBody,
+  PriceInput,
+  PriceShape,
+  PriceWrite,
   ProviderCostRate,
   PublicPaymentUpdate,
   PutV1ProviderCostsBody,
-  RatingRule,
   ReadinessReport,
   ReceivePostmarkWebhook200,
   ReceivePostmarkWebhook401,
@@ -233,7 +229,6 @@ import type {
   UpdateCustomerBody,
   UpdatePlanBody,
   UpdateSubscriptionItemBody,
-  UpsertMeterPricingRuleBody,
   UsageAggregate,
   UsageEvent,
   WebhookDeliveryReplayResult,
@@ -2747,28 +2742,17 @@ export const getPatchV1MetersIdUrl = (id: string,) => {
 }
 
 /**
- * Fields omitted are left unchanged. `rating_rule_version_id` sets
- * the meter's DEFAULT rating rule — the rate applied to usage no
- * dimension pricing rule claims (the remedy for silently-unbilled
- * unmatched usage); pass an empty string to clear it. The rule must
- * exist on the tenant.
+ * Fields omitted are left unchanged. A meter only counts: its prices
+ * are on the plans (`/v1/plans/{id}/prices`).
  *
  * `aggregation` can change until the meter has a usage event, then
  * it is fixed: a change is refused with 409 `meter_has_usage`. Usage
  * events are counted under the aggregation the meter has; to count
  * differently, make a new meter with another event name. Held usage
  * for its `event_name` does not fix it: it is counted under the
- * meter's aggregation once released.
- *
- * While a draft, trialing or active subscription uses the meter,
- * pointing the default at another rating rule, or clearing it, is
- * refused with 409 `meter_in_use`: the change would reprice the
- * billing period already open. A first default, or another version of
- * the same rating rule, is allowed. To change a rate, publish a new
- * version of the rating rule; it applies from each subscription's next
- * period (on a test clock, it can apply to the current simulated
- * period). `name` and `unit` can always change.
- * @summary Update meter (incl. the default rating-rule binding)
+ * meter's aggregation once released. `name` and `unit` can always
+ * change, at once.
+ * @summary Update meter
  */
 export const patchV1MetersId = async (id: string,
     patchV1MetersIdBody: PatchV1MetersIdBody, options?: RequestInit): Promise<Meter> => {
@@ -2818,7 +2802,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PatchV1MetersIdMutationError = void | Error
 
     /**
- * @summary Update meter (incl. the default rating-rule binding)
+ * @summary Update meter
  */
 export const usePatchV1MetersId = <TError = void | Error,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof patchV1MetersId>>, TError,{id: string;data: PatchV1MetersIdBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
@@ -2920,490 +2904,6 @@ export function useGetMeter<TData = Awaited<ReturnType<typeof getMeter>>, TError
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getGetMeterQueryOptions(id,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getListMeterPricingRulesUrl = (meterId: string,) => {
-
-
-
-
-  return `/v1/meters/${meterId}/pricing-rules`
-}
-
-/**
- * Every pricing rule on the meter, highest priority first, then oldest
- * first. At billing time each usage event is billed by the first rule
- * in this order whose `dimension_match` it matches.
- * @summary List a meter's pricing rules
- */
-export const listMeterPricingRules = async (meterId: string, options?: RequestInit): Promise<ListMeterPricingRules200> => {
-
-  return orvalClient<ListMeterPricingRules200>(getListMeterPricingRulesUrl(meterId),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getListMeterPricingRulesQueryKey = (meterId: string,) => {
-    return [
-    `/v1/meters/${meterId}/pricing-rules`
-    ] as const;
-    }
-
-
-export const getListMeterPricingRulesQueryOptions = <TData = Awaited<ReturnType<typeof listMeterPricingRules>>, TError = Error>(meterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeterPricingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getListMeterPricingRulesQueryKey(meterId);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listMeterPricingRules>>> = () => listMeterPricingRules(meterId, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: meterId !== null && meterId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listMeterPricingRules>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type ListMeterPricingRulesQueryResult = NonNullable<Awaited<ReturnType<typeof listMeterPricingRules>>>
-export type ListMeterPricingRulesQueryError = Error
-
-
-export function useListMeterPricingRules<TData = Awaited<ReturnType<typeof listMeterPricingRules>>, TError = Error>(
- meterId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeterPricingRules>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listMeterPricingRules>>,
-          TError,
-          Awaited<ReturnType<typeof listMeterPricingRules>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListMeterPricingRules<TData = Awaited<ReturnType<typeof listMeterPricingRules>>, TError = Error>(
- meterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeterPricingRules>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listMeterPricingRules>>,
-          TError,
-          Awaited<ReturnType<typeof listMeterPricingRules>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListMeterPricingRules<TData = Awaited<ReturnType<typeof listMeterPricingRules>>, TError = Error>(
- meterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeterPricingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List a meter's pricing rules
- */
-
-export function useListMeterPricingRules<TData = Awaited<ReturnType<typeof listMeterPricingRules>>, TError = Error>(
- meterId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listMeterPricingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getListMeterPricingRulesQueryOptions(meterId,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getUpsertMeterPricingRuleUrl = (meterId: string,) => {
-
-
-
-
-  return `/v1/meters/${meterId}/pricing-rules`
-}
-
-/**
- * Binds a rating rule to the part of the meter's usage whose dimensions
- * match `dimension_match`. The rule is identified by the meter and
- * `rating_rule_version_id`: posting the same pair again updates
- * `dimension_match` and `priority` on the existing rule and keeps its
- * id. Both cases return 201. The meter id in the path is used; a
- * `meter_id` in the body is ignored. A rule has no aggregation of its
- * own: it bills its events under the meter's `aggregation`.
- *
- * While a draft, trialing or active subscription uses the meter, the
- * change must not reprice the billing period already open, or it is
- * refused with 409 `meter_in_use`. Updating a rule is refused, unless
- * nothing changes. A new rule is allowed only when the meter has no
- * default rating rule and every rule that could match the same events
- * has a higher priority: then it prices only usage no rule prices
- * now. To change a rate, publish a new version of the rating rule; it
- * applies from each subscription's next period (on a test clock, it
- * can apply to the current simulated period).
- * @summary Create or update a meter pricing rule
- */
-export const upsertMeterPricingRule = async (meterId: string,
-    upsertMeterPricingRuleBody: UpsertMeterPricingRuleBody, options?: RequestInit): Promise<MeterPricingRule> => {
-
-  return orvalClient<MeterPricingRule>(getUpsertMeterPricingRuleUrl(meterId),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(upsertMeterPricingRuleBody)
-  }
-);}
-
-
-
-
-
-export const getUpsertMeterPricingRuleMutationOptions = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertMeterPricingRule>>, TError,{meterId: string;data: UpsertMeterPricingRuleBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof upsertMeterPricingRule>>, TError,{meterId: string;data: UpsertMeterPricingRuleBody}, TContext> => {
-
-const mutationKey = ['upsertMeterPricingRule'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof upsertMeterPricingRule>>, {meterId: string;data: UpsertMeterPricingRuleBody}> = (props) => {
-          const {meterId,data} = props ?? {};
-
-          return  upsertMeterPricingRule(meterId,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type UpsertMeterPricingRuleMutationResult = NonNullable<Awaited<ReturnType<typeof upsertMeterPricingRule>>>
-    export type UpsertMeterPricingRuleMutationBody = UpsertMeterPricingRuleBody
-    export type UpsertMeterPricingRuleMutationError = Error
-
-    /**
- * @summary Create or update a meter pricing rule
- */
-export const useUpsertMeterPricingRule = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertMeterPricingRule>>, TError,{meterId: string;data: UpsertMeterPricingRuleBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof upsertMeterPricingRule>>,
-        TError,
-        {meterId: string;data: UpsertMeterPricingRuleBody},
-        TContext
-      > => {
-      return useMutation(getUpsertMeterPricingRuleMutationOptions(options), queryClient);
-    }
-
-export const getGetMeterPricingRuleUrl = (meterId: string,
-    id: string,) => {
-
-
-
-
-  return `/v1/meters/${meterId}/pricing-rules/${id}`
-}
-
-/**
- * The rule is looked up by `id` alone; `meter_id` is not checked against it.
- * @summary Get a meter pricing rule
- */
-export const getMeterPricingRule = async (meterId: string,
-    id: string, options?: RequestInit): Promise<MeterPricingRule> => {
-
-  return orvalClient<MeterPricingRule>(getGetMeterPricingRuleUrl(meterId,id),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetMeterPricingRuleQueryKey = (meterId: string,
-    id: string,) => {
-    return [
-    `/v1/meters/${meterId}/pricing-rules/${id}`
-    ] as const;
-    }
-
-
-export const getGetMeterPricingRuleQueryOptions = <TData = Awaited<ReturnType<typeof getMeterPricingRule>>, TError = Error>(meterId: string,
-    id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeterPricingRule>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetMeterPricingRuleQueryKey(meterId,id);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMeterPricingRule>>> = () => getMeterPricingRule(meterId,id, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: meterId !== null && meterId !== undefined && id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMeterPricingRule>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type GetMeterPricingRuleQueryResult = NonNullable<Awaited<ReturnType<typeof getMeterPricingRule>>>
-export type GetMeterPricingRuleQueryError = Error
-
-
-export function useGetMeterPricingRule<TData = Awaited<ReturnType<typeof getMeterPricingRule>>, TError = Error>(
- meterId: string,
-    id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeterPricingRule>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getMeterPricingRule>>,
-          TError,
-          Awaited<ReturnType<typeof getMeterPricingRule>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetMeterPricingRule<TData = Awaited<ReturnType<typeof getMeterPricingRule>>, TError = Error>(
- meterId: string,
-    id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeterPricingRule>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getMeterPricingRule>>,
-          TError,
-          Awaited<ReturnType<typeof getMeterPricingRule>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetMeterPricingRule<TData = Awaited<ReturnType<typeof getMeterPricingRule>>, TError = Error>(
- meterId: string,
-    id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeterPricingRule>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Get a meter pricing rule
- */
-
-export function useGetMeterPricingRule<TData = Awaited<ReturnType<typeof getMeterPricingRule>>, TError = Error>(
- meterId: string,
-    id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getMeterPricingRule>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getGetMeterPricingRuleQueryOptions(meterId,id,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getDeleteMeterPricingRuleUrl = (meterId: string,
-    id: string,) => {
-
-
-
-
-  return `/v1/meters/${meterId}/pricing-rules/${id}`
-}
-
-/**
- * Removes the rule. Usage already invoiced is not changed; the next
- * invoices bill the meter's usage without this rule. The rule is
- * looked up by `id` alone; `meter_id` is not checked against it.
- * Refused with 409 `meter_in_use` while a draft, trialing or active
- * subscription uses the meter: the rule's usage would move to another
- * price, or to none, in the billing period already open.
- * @summary Delete a meter pricing rule
- */
-export const deleteMeterPricingRule = async (meterId: string,
-    id: string, options?: RequestInit): Promise<void> => {
-
-  return orvalClient<void>(getDeleteMeterPricingRuleUrl(meterId,id),
-  {
-    ...options,
-    method: 'DELETE'
-
-
-  }
-);}
-
-
-
-
-
-export const getDeleteMeterPricingRuleMutationOptions = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMeterPricingRule>>, TError,{meterId: string;id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteMeterPricingRule>>, TError,{meterId: string;id: string}, TContext> => {
-
-const mutationKey = ['deleteMeterPricingRule'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteMeterPricingRule>>, {meterId: string;id: string}> = (props) => {
-          const {meterId,id} = props ?? {};
-
-          return  deleteMeterPricingRule(meterId,id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DeleteMeterPricingRuleMutationResult = NonNullable<Awaited<ReturnType<typeof deleteMeterPricingRule>>>
-
-    export type DeleteMeterPricingRuleMutationError = Error
-
-    /**
- * @summary Delete a meter pricing rule
- */
-export const useDeleteMeterPricingRule = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteMeterPricingRule>>, TError,{meterId: string;id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof deleteMeterPricingRule>>,
-        TError,
-        {meterId: string;id: string},
-        TContext
-      > => {
-      return useMutation(getDeleteMeterPricingRuleMutationOptions(options), queryClient);
-    }
-
-export const getListAllMeterPricingRulesUrl = () => {
-
-
-
-
-  return `/v1/meter-pricing-rules`
-}
-
-/**
- * Every pricing rule on every meter in this tenant and mode, highest priority first.
- * @summary List all meter pricing rules
- */
-export const listAllMeterPricingRules = async ( options?: RequestInit): Promise<ListAllMeterPricingRules200> => {
-
-  return orvalClient<ListAllMeterPricingRules200>(getListAllMeterPricingRulesUrl(),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getListAllMeterPricingRulesQueryKey = () => {
-    return [
-    `/v1/meter-pricing-rules`
-    ] as const;
-    }
-
-
-export const getListAllMeterPricingRulesQueryOptions = <TData = Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getListAllMeterPricingRulesQueryKey();
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAllMeterPricingRules>>> = () => listAllMeterPricingRules(requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type ListAllMeterPricingRulesQueryResult = NonNullable<Awaited<ReturnType<typeof listAllMeterPricingRules>>>
-export type ListAllMeterPricingRulesQueryError = unknown
-
-
-export function useListAllMeterPricingRules<TData = Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listAllMeterPricingRules>>,
-          TError,
-          Awaited<ReturnType<typeof listAllMeterPricingRules>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListAllMeterPricingRules<TData = Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listAllMeterPricingRules>>,
-          TError,
-          Awaited<ReturnType<typeof listAllMeterPricingRules>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListAllMeterPricingRules<TData = Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List all meter pricing rules
- */
-
-export function useListAllMeterPricingRules<TData = Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAllMeterPricingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getListAllMeterPricingRulesQueryOptions(options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -5303,9 +4803,9 @@ export const getPostV1PlansUrl = () => {
 /**
  * @summary Create plan
  */
-export const postV1Plans = async (postV1PlansBody: PostV1PlansBody, options?: RequestInit): Promise<Plan> => {
+export const postV1Plans = async (postV1PlansBody: PostV1PlansBody, options?: RequestInit): Promise<PlanDetail> => {
 
-  return orvalClient<Plan>(getPostV1PlansUrl(),
+  return orvalClient<PlanDetail>(getPostV1PlansUrl(),
   {
     ...options,
     method: 'POST',
@@ -5475,9 +4975,9 @@ export const getGetPlanUrl = (id: string,) => {
 /**
  * @summary Get plan
  */
-export const getPlan = async (id: string, options?: RequestInit): Promise<GetPlan200> => {
+export const getPlan = async (id: string, options?: RequestInit): Promise<PlanDetail> => {
 
-  return orvalClient<GetPlan200>(getGetPlanUrl(id),
+  return orvalClient<PlanDetail>(getGetPlanUrl(id),
   {
     ...options,
     method: 'GET'
@@ -5576,20 +5076,21 @@ export const getUpdatePlanUrl = (id: string,) => {
 /**
  * A field left out keeps its current value. To clear `description`
  * or `tax_code`, send an empty string. `code`, `currency` and
- * `billing_interval` cannot be changed and are ignored.
+ * `billing_interval` cannot be changed and are ignored. The plan's
+ * usage prices change through `/v1/plans/{id}/prices`.
  *
- * `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
- * subscriptions are billed. Changing any of them is refused while a
- * subscription that is not canceled uses the plan
- * (`live_subscription_count` on Get plan): create a new plan instead. `base_amount_cents` can only be set to a value above 0.
- * Every meter in `meter_ids` must have a price (a default rating rule
- * or a pricing rule) in the plan's currency.
+ * `base_amount_cents` cannot change while a subscription that is not
+ * canceled uses the plan (`live_subscription_count` on Get plan):
+ * create a new plan instead. It can be set to 0. `base_bill_timing`
+ * cannot change once a subscription has used the plan (`used`). A
+ * plan with no base fee must be `in_arrears`. `name`, `description`,
+ * `tax_code` and `status` change at once.
  * @summary Update plan
  */
 export const updatePlan = async (id: string,
-    updatePlanBody: UpdatePlanBody, options?: RequestInit): Promise<Plan> => {
+    updatePlanBody: UpdatePlanBody, options?: RequestInit): Promise<PlanDetail> => {
 
-  return orvalClient<Plan>(getUpdatePlanUrl(id),
+  return orvalClient<PlanDetail>(getUpdatePlanUrl(id),
   {
     ...options,
     method: 'PATCH',
@@ -5647,25 +5148,26 @@ export const useUpdatePlan = <TError = Error,
       return useMutation(getUpdatePlanMutationOptions(options), queryClient);
     }
 
-export const getPostV1RatingRulesUrl = () => {
+export const getListPlanPricesUrl = (id: string,) => {
 
 
 
 
-  return `/v1/rating-rules`
+  return `/v1/plans/${id}/prices`
 }
 
 /**
- * @summary Create rating rule
+ * The plan's usage prices from now on, in the order they were added.
+ * @summary List a plan's prices
  */
-export const postV1RatingRules = async (postV1RatingRulesBody: PostV1RatingRulesBody, options?: RequestInit): Promise<RatingRule> => {
+export const listPlanPrices = async (id: string, options?: RequestInit): Promise<ListPlanPrices200> => {
 
-  return orvalClient<RatingRule>(getPostV1RatingRulesUrl(),
+  return orvalClient<ListPlanPrices200>(getListPlanPricesUrl(id),
   {
     ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(postV1RatingRulesBody)
+    method: 'GET'
+
+
   }
 );}
 
@@ -5673,11 +5175,121 @@ export const postV1RatingRules = async (postV1RatingRulesBody: PostV1RatingRules
 
 
 
-export const getPostV1RatingRulesMutationOptions = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1RatingRules>>, TError,{data: PostV1RatingRulesBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof postV1RatingRules>>, TError,{data: PostV1RatingRulesBody}, TContext> => {
+export const getListPlanPricesQueryKey = (id: string,) => {
+    return [
+    `/v1/plans/${id}/prices`
+    ] as const;
+    }
 
-const mutationKey = ['postV1RatingRules'];
+
+export const getListPlanPricesQueryOptions = <TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPlanPricesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPlanPrices>>> = () => listPlanPrices(id, requestOptions);
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListPlanPricesQueryResult = NonNullable<Awaited<ReturnType<typeof listPlanPrices>>>
+export type ListPlanPricesQueryError = Error
+
+
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPlanPrices>>,
+          TError,
+          Awaited<ReturnType<typeof listPlanPrices>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPlanPrices>>,
+          TError,
+          Awaited<ReturnType<typeof listPlanPrices>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List a plan's prices
+ */
+
+export function useListPlanPrices<TData = Awaited<ReturnType<typeof listPlanPrices>>, TError = Error>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listPlanPrices>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListPlanPricesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAddPlanPriceUrl = (id: string,) => {
+
+
+
+
+  return `/v1/plans/${id}/prices`
+}
+
+/**
+ * On a plan no subscription has used, the price applies at once
+ * (`effective: now`). On a used plan it applies from each
+ * subscriber's next billing period (`effective: next_period`); until
+ * then the plan's other prices bill the meter's usage as before.
+ *
+ * A price that names a removed price's meter and `dimension_match`
+ * adds that price back under its id. Its old customer overrides do
+ * not come back.
+ * @summary Add a price to a plan
+ */
+export const addPlanPrice = async (id: string,
+    priceInput: PriceInput, options?: RequestInit): Promise<PriceWrite> => {
+
+  return orvalClient<PriceWrite>(getAddPlanPriceUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(priceInput)
+  }
+);}
+
+
+
+
+
+export const getAddPlanPriceMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext> => {
+
+const mutationKey = ['addPlanPrice'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -5687,10 +5299,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof postV1RatingRules>>, {data: PostV1RatingRulesBody}> = (props) => {
-          const {data} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addPlanPrice>>, {id: string;data: PriceInput}> = (props) => {
+          const {id,data} = props ?? {};
 
-          return  postV1RatingRules(data,requestOptions)
+          return  addPlanPrice(id,data,requestOptions)
         }
 
 
@@ -5700,48 +5312,129 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type PostV1RatingRulesMutationResult = NonNullable<Awaited<ReturnType<typeof postV1RatingRules>>>
-    export type PostV1RatingRulesMutationBody = PostV1RatingRulesBody
-    export type PostV1RatingRulesMutationError = Error
+    export type AddPlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof addPlanPrice>>>
+    export type AddPlanPriceMutationBody = PriceInput
+    export type AddPlanPriceMutationError = Error
 
     /**
- * @summary Create rating rule
+ * @summary Add a price to a plan
  */
-export const usePostV1RatingRules = <TError = Error,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof postV1RatingRules>>, TError,{data: PostV1RatingRulesBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
+export const useAddPlanPrice = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof postV1RatingRules>>,
+        Awaited<ReturnType<typeof addPlanPrice>>,
         TError,
-        {data: PostV1RatingRulesBody},
+        {id: string;data: PriceInput},
         TContext
       > => {
-      return useMutation(getPostV1RatingRulesMutationOptions(options), queryClient);
+      return useMutation(getAddPlanPriceMutationOptions(options), queryClient);
     }
 
-export const getGetV1RatingRulesUrl = (params?: GetV1RatingRulesParams,) => {
-  const normalizedParams = new URLSearchParams();
+export const getUpdatePlanPriceUrl = (id: string,
+    priceId: string,) => {
 
-  Object.entries(params || {}).forEach(([key, value]) => {
 
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
 
-  const stringifiedParams = normalizedParams.toString();
 
-  return stringifiedParams.length > 0 ? `/v1/rating-rules?${stringifiedParams}` : `/v1/rating-rules`
+  return `/v1/plans/${id}/prices/${priceId}`
 }
 
 /**
- * @summary List rating rules
+ * Changes the price's shape. Its meter and `dimension_match` are its
+ * identity and cannot change: add a price for other events instead.
+ * On a plan no subscription has used, the change applies at once; on
+ * a used plan, from each subscriber's next billing period. The current
+ * period keeps the price it started with. Customer overrides of the
+ * price keep applying.
+ * @summary Change a price's rate
  */
-export const getV1RatingRules = async (params?: GetV1RatingRulesParams, options?: RequestInit): Promise<GetV1RatingRules200> => {
+export const updatePlanPrice = async (id: string,
+    priceId: string,
+    priceShape: PriceShape, options?: RequestInit): Promise<PriceWrite> => {
 
-  return orvalClient<GetV1RatingRules200>(getGetV1RatingRulesUrl(params),
+  return orvalClient<PriceWrite>(getUpdatePlanPriceUrl(id,priceId),
   {
     ...options,
-    method: 'GET'
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(priceShape)
+  }
+);}
+
+
+
+
+
+export const getUpdatePlanPriceMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext> => {
+
+const mutationKey = ['updatePlanPrice'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updatePlanPrice>>, {id: string;priceId: string;data: PriceShape}> = (props) => {
+          const {id,priceId,data} = props ?? {};
+
+          return  updatePlanPrice(id,priceId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdatePlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof updatePlanPrice>>>
+    export type UpdatePlanPriceMutationBody = PriceShape
+    export type UpdatePlanPriceMutationError = Error
+
+    /**
+ * @summary Change a price's rate
+ */
+export const useUpdatePlanPrice = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updatePlanPrice>>,
+        TError,
+        {id: string;priceId: string;data: PriceShape},
+        TContext
+      > => {
+      return useMutation(getUpdatePlanPriceMutationOptions(options), queryClient);
+    }
+
+export const getRemovePlanPriceUrl = (id: string,
+    priceId: string,) => {
+
+
+
+
+  return `/v1/plans/${id}/prices/${priceId}`
+}
+
+/**
+ * On a plan no subscription has used, the price is gone at once. On a
+ * used plan it takes no part from each subscriber's next billing
+ * period; the current period keeps it. The removal ends every customer
+ * override of the price, each when the removal takes effect for its
+ * customer, and the answer names them (`ended_overrides`). Adding the
+ * price back later keeps its id but not the overrides.
+ * @summary Remove a price from a plan
+ */
+export const removePlanPrice = async (id: string,
+    priceId: string, options?: RequestInit): Promise<PriceWrite> => {
+
+  return orvalClient<PriceWrite>(getRemovePlanPriceUrl(id,priceId),
+  {
+    ...options,
+    method: 'DELETE'
 
 
   }
@@ -5751,182 +5444,50 @@ export const getV1RatingRules = async (params?: GetV1RatingRulesParams, options?
 
 
 
-export const getGetV1RatingRulesQueryKey = (params?: GetV1RatingRulesParams,) => {
-    return [
-    `/v1/rating-rules`, ...(params ? [params] : [])
-    ] as const;
+export const getRemovePlanPriceMutationOptions = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext> => {
+
+const mutationKey = ['removePlanPrice'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removePlanPrice>>, {id: string;priceId: string}> = (props) => {
+          const {id,priceId} = props ?? {};
+
+          return  removePlanPrice(id,priceId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemovePlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof removePlanPrice>>>
+
+    export type RemovePlanPriceMutationError = Error
+
+    /**
+ * @summary Remove a price from a plan
+ */
+export const useRemovePlanPrice = <TError = Error,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof removePlanPrice>>,
+        TError,
+        {id: string;priceId: string},
+        TContext
+      > => {
+      return useMutation(getRemovePlanPriceMutationOptions(options), queryClient);
     }
-
-
-export const getGetV1RatingRulesQueryOptions = <TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetV1RatingRulesQueryKey(params);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getV1RatingRules>>> = () => getV1RatingRules(params, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type GetV1RatingRulesQueryResult = NonNullable<Awaited<ReturnType<typeof getV1RatingRules>>>
-export type GetV1RatingRulesQueryError = unknown
-
-
-export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
- params: undefined |  GetV1RatingRulesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getV1RatingRules>>,
-          TError,
-          Awaited<ReturnType<typeof getV1RatingRules>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
- params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getV1RatingRules>>,
-          TError,
-          Awaited<ReturnType<typeof getV1RatingRules>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
- params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List rating rules
- */
-
-export function useGetV1RatingRules<TData = Awaited<ReturnType<typeof getV1RatingRules>>, TError = unknown>(
- params?: GetV1RatingRulesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getV1RatingRules>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getGetV1RatingRulesQueryOptions(params,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
-
-export const getGetRatingRuleUrl = (id: string,) => {
-
-
-
-
-  return `/v1/rating-rules/${id}`
-}
-
-/**
- * Returns one rating rule version by its id.
- * @summary Get rating rule
- */
-export const getRatingRule = async (id: string, options?: RequestInit): Promise<RatingRule> => {
-
-  return orvalClient<RatingRule>(getGetRatingRuleUrl(id),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetRatingRuleQueryKey = (id: string,) => {
-    return [
-    `/v1/rating-rules/${id}`
-    ] as const;
-    }
-
-
-export const getGetRatingRuleQueryOptions = <TData = Awaited<ReturnType<typeof getRatingRule>>, TError = Error>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRatingRule>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetRatingRuleQueryKey(id);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRatingRule>>> = () => getRatingRule(id, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRatingRule>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type GetRatingRuleQueryResult = NonNullable<Awaited<ReturnType<typeof getRatingRule>>>
-export type GetRatingRuleQueryError = Error
-
-
-export function useGetRatingRule<TData = Awaited<ReturnType<typeof getRatingRule>>, TError = Error>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRatingRule>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getRatingRule>>,
-          TError,
-          Awaited<ReturnType<typeof getRatingRule>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetRatingRule<TData = Awaited<ReturnType<typeof getRatingRule>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRatingRule>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getRatingRule>>,
-          TError,
-          Awaited<ReturnType<typeof getRatingRule>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useGetRatingRule<TData = Awaited<ReturnType<typeof getRatingRule>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRatingRule>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Get rating rule
- */
-
-export function useGetRatingRule<TData = Awaited<ReturnType<typeof getRatingRule>>, TError = Error>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getRatingRule>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getGetRatingRuleQueryOptions(id,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
 
 export const getPostV1SubscriptionsUrl = () => {
 
@@ -11990,9 +11551,9 @@ export const getGetV1CustomersIdMarginUrl = (id: string,
 /**
  * Rated usage revenue vs stamped provider COGS for a window (ADR-079).
  * A usage unit-economics view — base fees, credits, and taxes are not
- * included. Per-model margin renders only where pricing rules pin the
- * model; other revenue is reported unattributed, never allocated by
- * heuristic.
+ * included. Per-model margin renders only where the price that billed
+ * the usage names the model; other revenue is reported unattributed,
+ * never allocated by heuristic.
  *
  * The window is `[from, to)`: `from` inclusive, `to` exclusive. A
  * missing bound defaults to the last 30 days ending at the customer's
@@ -13502,10 +13063,11 @@ export const getInstantiateRecipeUrl = (key: string,) => {
 }
 
 /**
- * Applies the recipe for the tenant under one transaction: rating
- * rules and meters are adopted-or-created, pricing rules bound, a
- * fresh born-unique plan generated, optional dunning policy and
- * (inactive) webhook endpoint created, then the install badge written.
+ * Applies the recipe for the tenant under one transaction: meters are
+ * adopted-or-created, a fresh born-unique plan is generated with the
+ * recipe's prices, optional dunning policy and (inactive) webhook
+ * endpoint created, then the install badge written. Adopting a meter
+ * other plans price changes none of their prices.
  * Idempotent per (tenant, livemode): re-posting an installed recipe
  * returns the EXISTING instance — 201 both times, never a 409, never
  * a duplicate plan (ADR-085; badge livemode-scoped per m0157).
@@ -15551,13 +15113,15 @@ export const getCreatePriceOverrideUrl = () => {
 }
 
 /**
- * Gives one customer its own price for one rating rule. The override
- * is keyed by the rule's `rule_key`, so it keeps applying after a new
- * version of the rule is published. If the customer already has an
- * active override for that rule, it is closed and replaced by this one.
- * A new or replaced price applies from the customer's next billing
- * period; the current period keeps the price it opened with. The
- * override's currency is the rule's currency.
+ * Gives one customer its own rate for one plan price. The override is
+ * keyed by the price, so it keeps applying when the price's rate
+ * changes; removing the price ends it. If the customer already has an
+ * active override for that price, it is closed and replaced by this
+ * one. A new or replaced rate applies from the customer's next
+ * billing period, in the customer's time (its test clock's, if it has
+ * one); the current period keeps the rate it started with. The
+ * override takes the plan's currency. A plan swap does not carry it:
+ * the new plan's price is another price.
  * @summary Create a customer price override
  */
 export const createPriceOverride = async (createPriceOverrideBody: CreatePriceOverrideBody, options?: RequestInit): Promise<CustomerPriceOverride> => {
@@ -15740,8 +15304,8 @@ export const getDeletePriceOverrideUrl = (id: string,) => {
 
 /**
  * Marks the override inactive. The row is kept. The customer goes back
- * to the rule's normal price from the next billing period; the current
- * period keeps the price it opened with.
+ * to the price's rate from its next billing period, in the customer's
+ * time; the current period keeps the rate it started with.
  * @summary End a customer price override
  */
 export const deletePriceOverride = async (id: string, options?: RequestInit): Promise<DeletePriceOverride200> => {

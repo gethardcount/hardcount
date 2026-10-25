@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -75,8 +73,8 @@ func countRows(t *testing.T, db *postgres.DB, tenantID, table string) int {
 }
 
 // TestService_Instantiate_BuildsFullGraph mirrors the design-doc acceptance
-// test: anthropic_style produces 1 meter, 9 rating rules, 9 pricing rules,
-// 1 plan, 1 dunning policy, 1 webhook endpoint. Counts come from direct
+// test: anthropic_style produces 1 meter, 1 plan with its prices, 1 dunning
+// policy, 1 webhook endpoint. Counts come from direct
 // SQL so there's no test-side double-counting via the same Store path the
 // production code wrote through.
 func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
@@ -103,11 +101,9 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	// 7 from the v2/v3 catalog, 12 added by the 2026-07-26 refresh, and 6
 	// added on 2026-10-22 (Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, and
 	// Haiku 5.5's two prompt tiers).
-	if got, want := len(inst.CreatedObjects.RatingRuleIDs), 125; got != want {
-		t.Errorf("CreatedObjects.RatingRuleIDs: got %d, want %d", got, want)
-	}
-	if got, want := len(inst.CreatedObjects.PricingRuleIDs), 125; got != want {
-		t.Errorf("CreatedObjects.PricingRuleIDs: got %d, want %d", got, want)
+	// The recipe's pricing rules are the plan's prices (ADR-130 §15).
+	if got, want := len(inst.CreatedObjects.PriceIDs), 125; got != want {
+		t.Errorf("CreatedObjects.PriceIDs: got %d, want %d", got, want)
 	}
 	if got, want := len(inst.CreatedObjects.PlanIDs), 1; got != want {
 		t.Errorf("CreatedObjects.PlanIDs: got %d, want %d", got, want)
@@ -123,11 +119,11 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	if n := countRows(t, f.db, tenantID, "meters"); n != 1 {
 		t.Errorf("meters row count: got %d, want 1", n)
 	}
-	if n := countRows(t, f.db, tenantID, "rating_rule_versions"); n != 125 {
-		t.Errorf("rating_rule_versions row count: got %d, want 125", n)
+	if n := countRows(t, f.db, tenantID, "plan_prices"); n != 125 {
+		t.Errorf("plan_prices row count: got %d, want 125", n)
 	}
-	if n := countRows(t, f.db, tenantID, "meter_pricing_rules"); n != 125 {
-		t.Errorf("meter_pricing_rules row count: got %d, want 125", n)
+	if n := countRows(t, f.db, tenantID, "plan_price_versions"); n != 125 {
+		t.Errorf("plan_price_versions row count: got %d, want 125 (one each: the plan is new)", n)
 	}
 	if n := countRows(t, f.db, tenantID, "plans"); n != 1 {
 		t.Errorf("plans row count: got %d, want 1", n)
@@ -143,36 +139,25 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	}
 }
 
-// failingPricingWriter wraps the real pricing writer and fails on the
-// nth call to UpsertMeterPricingRuleTx. Used to inject a mid-graph failure
-// so the rollback path is exercised against real DB rows.
+// failingPricingWriter wraps the real pricing writer and fails right after
+// the plan and its prices are written on the install's transaction. Used to
+// inject a mid-graph failure so the rollback path is exercised against real
+// DB rows.
 type failingPricingWriter struct {
-	inner    PricingWriter
-	failAt   int
-	pricingN int
+	inner PricingWriter
 }
 
-func (f *failingPricingWriter) CreateRatingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.RatingRuleVersion) (domain.RatingRuleVersion, error) {
-	return f.inner.CreateRatingRuleTx(ctx, tx, tenantID, rule)
-}
 func (f *failingPricingWriter) CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error) {
 	return f.inner.CreateMeterTx(ctx, tx, tenantID, m)
 }
-func (f *failingPricingWriter) CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan) (domain.Plan, error) {
-	return f.inner.CreatePlanTx(ctx, tx, tenantID, p)
+func (f *failingPricingWriter) GetMeterByEventNameTx(ctx context.Context, tx *sql.Tx, eventName string) (domain.Meter, error) {
+	return f.inner.GetMeterByEventNameTx(ctx, tx, eventName)
 }
-func (f *failingPricingWriter) UpsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error) {
-	f.pricingN++
-	if f.pricingN == f.failAt {
-		return domain.MeterPricingRule{}, errors.New("synthetic failure at pricing rule N")
+func (f *failingPricingWriter) CreatePlanWithPricesTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan, prices []domain.PlanPrice) (domain.Plan, []domain.PlanPrice, error) {
+	if _, _, err := f.inner.CreatePlanWithPricesTx(ctx, tx, tenantID, p, prices); err != nil {
+		return domain.Plan{}, nil, err
 	}
-	return f.inner.UpsertMeterPricingRuleTx(ctx, tx, tenantID, rule)
-}
-func (f *failingPricingWriter) GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
-	return f.inner.GetRuleByKeyAsOf(ctx, tenantID, ruleKey, asOf)
-}
-func (f *failingPricingWriter) GetMeterByEventName(ctx context.Context, tenantID, key string) (domain.Meter, error) {
-	return f.inner.GetMeterByEventName(ctx, tenantID, key)
+	return domain.Plan{}, nil, errors.New("synthetic failure after the plan and its prices")
 }
 func (f *failingPricingWriter) ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error) {
 	return f.inner.ListPlans(ctx, tenantID)
@@ -180,14 +165,14 @@ func (f *failingPricingWriter) ListPlans(ctx context.Context, tenantID string) (
 
 // TestService_Instantiate_AtomicityRollback fails partway through the
 // graph build and verifies zero rows survive — the contract is "fully
-// installed or not installed at all", with no orphan meters or rating
-// rules to clean up by hand.
+// installed or not installed at all", with no orphan meters or prices to
+// clean up by hand.
 func TestService_Instantiate_AtomicityRollback(t *testing.T) {
 	f := newRecipeFixture(t)
 	tenantID := testutil.CreateTestTenant(t, f.db, "atomicity rollback")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	failing := &failingPricingWriter{inner: f.pricingSvc, failAt: 5}
+	failing := &failingPricingWriter{inner: f.pricingSvc}
 	registry, err := Load()
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
@@ -200,8 +185,8 @@ func TestService_Instantiate_AtomicityRollback(t *testing.T) {
 	}
 
 	for _, tbl := range []string{
-		"meters", "rating_rule_versions", "meter_pricing_rules",
-		"plans", "dunning_policies", "webhook_endpoints", "recipe_instances",
+		"meters", "plans", "plan_prices", "plan_price_versions",
+		"dunning_policies", "webhook_endpoints", "recipe_instances",
 	} {
 		if n := countRows(t, f.db, tenantID, tbl); n != 0 {
 			t.Errorf("%s after rollback: got %d, want 0", tbl, n)
@@ -239,8 +224,8 @@ func TestService_Instantiate_RLSIsolation(t *testing.T) {
 }
 
 // TestService_Instantiate_PreviewParity verifies Preview and Instantiate
-// render the same logical graph (same counts, same rule keys, same plan
-// code). IDs naturally differ — Preview has none.
+// render the same logical graph (same counts, same plan code). IDs naturally
+// differ — Preview has none.
 func TestService_Instantiate_PreviewParity(t *testing.T) {
 	f := newRecipeFixture(t)
 	tenantID := testutil.CreateTestTenant(t, f.db, "preview parity")
@@ -257,11 +242,8 @@ func TestService_Instantiate_PreviewParity(t *testing.T) {
 		t.Fatalf("Instantiate: %v", err)
 	}
 
-	if got, want := len(inst.CreatedObjects.RatingRuleIDs), len(previewed.Objects.RatingRules); got != want {
-		t.Errorf("rating-rule count drift: instantiate=%d, preview=%d", got, want)
-	}
-	if got, want := len(inst.CreatedObjects.PricingRuleIDs), len(previewed.Objects.PricingRules); got != want {
-		t.Errorf("pricing-rule count drift: instantiate=%d, preview=%d", got, want)
+	if got, want := len(inst.CreatedObjects.PriceIDs), len(previewed.Objects.Prices); got != want || got == 0 {
+		t.Errorf("price count drift: instantiate=%d, preview=%d", got, want)
 	}
 	plans, err := f.pricingSvc.ListPlans(ctx, tenantID)
 	if err != nil {
@@ -293,7 +275,7 @@ func TestService_Instantiate_Idempotent(t *testing.T) {
 	}
 	plansAfterFirst := countRows(t, f.db, tenantID, "plans")
 	metersAfterFirst := countRows(t, f.db, tenantID, "meters")
-	rulesAfterFirst := countRows(t, f.db, tenantID, "rating_rule_versions")
+	pricesAfterFirst := countRows(t, f.db, tenantID, "plan_prices")
 
 	second, err := f.svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{})
 	if err != nil {
@@ -313,8 +295,8 @@ func TestService_Instantiate_Idempotent(t *testing.T) {
 	if n := countRows(t, f.db, tenantID, "meters"); n != metersAfterFirst {
 		t.Errorf("meters after re-apply: got %d, want %d", n, metersAfterFirst)
 	}
-	if n := countRows(t, f.db, tenantID, "rating_rule_versions"); n != rulesAfterFirst {
-		t.Errorf("rating_rule_versions after re-apply: got %d, want %d", n, rulesAfterFirst)
+	if n := countRows(t, f.db, tenantID, "plan_prices"); n != pricesAfterFirst {
+		t.Errorf("plan_prices after re-apply: got %d, want %d", n, pricesAfterFirst)
 	}
 }
 
@@ -331,7 +313,7 @@ func TestService_Instantiate_GeneratesFreshPlanOnCollision(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, f.db, "born-unique plan")
 
 	// Operator already has a foreign plan under the recipe's default plan_code.
-	pre, err := f.pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
+	pre, _, err := f.pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
 		Code: "ai_api_pro", Name: "Operator Pro", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, BaseAmountCents: 9900,
 		BaseBillTiming: domain.BillInAdvance,
@@ -361,8 +343,8 @@ func TestService_Instantiate_GeneratesFreshPlanOnCollision(t *testing.T) {
 	if recipePlan.Code != "ai_api_pro_2" {
 		t.Errorf("generated plan code: got %q, want ai_api_pro_2 (uniquified, incumbent never renamed)", recipePlan.Code)
 	}
-	if len(recipePlan.MeterIDs) == 0 {
-		t.Error("generated plan must be wired to the tokens meter — else usage silently bills $0")
+	if meters, err := f.pricingSvc.PlanMeterIDs(ctx, tenantID, recipePlan.ID); err != nil || len(meters) == 0 {
+		t.Errorf("generated plan must price the tokens meter — else usage silently bills $0 (meters %v, %v)", meters, err)
 	}
 
 	// The operator's plan is untouched.
@@ -380,7 +362,7 @@ func TestService_Instantiate_GeneratesFreshPlanOnCollision(t *testing.T) {
 // the recipe's sum) is refused — adopting it would silently mis-roll-up usage.
 // The whole tx rolls back; the operator's meter is untouched and nothing the
 // recipe would create persists. Mutation-verify: drop meterConformanceDiff and
-// this fails — the recipe wires its rules onto the mis-aggregating meter.
+// this fails — the recipe prices the mis-aggregating meter.
 func TestService_Instantiate_RefusesDivergentMeter(t *testing.T) {
 	f := newRecipeFixture(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -401,7 +383,7 @@ func TestService_Instantiate_RefusesDivergentMeter(t *testing.T) {
 
 	// Mutation-verify: the entire tx rolled back — nothing the recipe would
 	// have created persisted.
-	for _, tbl := range []string{"recipe_instances", "rating_rule_versions", "plans", "meter_pricing_rules", "dunning_policies", "webhook_endpoints"} {
+	for _, tbl := range []string{"recipe_instances", "plans", "plan_prices", "dunning_policies", "webhook_endpoints"} {
 		if n := countRows(t, f.db, tenantID, tbl); n != 0 {
 			t.Errorf("%s after refusal: got %d, want 0 (tx must roll back)", tbl, n)
 		}
@@ -455,7 +437,7 @@ func TestService_Instantiate_LivemodePartitioned(t *testing.T) {
 	if liveInst.ID == testInst.ID {
 		t.Fatalf("live-mode apply no-op'd against the test-mode badge (returned instance %s) — the livemode-blind bug is back", testInst.ID)
 	}
-	for _, tbl := range []string{"recipe_instances", "plans", "meters", "rating_rule_versions"} {
+	for _, tbl := range []string{"recipe_instances", "plans", "meters", "plan_prices"} {
 		if n := countRowsMode(t, f.db, tenantID, tbl, true); n == 0 {
 			t.Errorf("%s: live mode has 0 rows after live apply — install landed in the wrong mode", tbl)
 		}
@@ -484,132 +466,69 @@ func TestService_Instantiate_LivemodePartitioned(t *testing.T) {
 	}
 }
 
-// TestService_Instantiate_RefusesDivergentRatingRule is the rule-side twin of
-// the divergent-meter refusal (2026-07-26 recipe e2e review). Adoption binds
-// the plan to the existing rule's CURRENT version — so if its money fields
-// diverge from what the recipe declares, the preview would show one price and
-// the install would bill another. That divergent adoption must refuse loud.
-func TestService_Instantiate_RefusesDivergentRatingRule(t *testing.T) {
+// TestService_Instantiate_AdoptsAMeterOtherPlansPrice: a meter only counts
+// and its prices are on the plans (ADR-130 §1, §15), so an install that
+// adopts a meter another plan prices puts its own prices on its own new plan
+// and changes nothing on the other plan. The install's currency is the new
+// plan's; the other plan's currency does not matter, because a price takes
+// its plan's currency. (Before ADR-130 the recipe added rules to the shared
+// meter, which repriced every plan that billed it, so installs were refused
+// on a meter in use or in another currency.)
+func TestService_Instantiate_AdoptsAMeterOtherPlansPrice(t *testing.T) {
 	f := newRecipeFixture(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, f.db, "divergent rule refuse")
+	tenantID := testutil.CreateTestTenant(t, f.db, "adopt a meter in use")
 
-	// Operator already has an opus45_input price — at double the recipe's
-	// declared per-token rate.
-	if _, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "opus45_input", Name: "Opus input (negotiated)",
-		Mode: domain.PricingPerUnit, Currency: "USD",
-		UnitAmountCents: decimal.RequireFromString("0.001"),
-	}); err != nil {
-		t.Fatalf("pre-create rule: %v", err)
-	}
-
-	_, err := f.svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{})
-	if !errors.Is(err, errs.ErrAlreadyExists) {
-		t.Fatalf("expected refusal (ErrAlreadyExists) adopting a divergent-rate rule, got %v", err)
-	}
-
-	// Mutation-verify: nothing the recipe would have created persisted, and
-	// the operator's rule is still the only version of its key.
-	for _, tbl := range []string{"recipe_instances", "meters", "plans", "meter_pricing_rules", "dunning_policies", "webhook_endpoints"} {
-		if n := countRows(t, f.db, tenantID, tbl); n != 0 {
-			t.Errorf("%s after refusal: got %d, want 0 (tx must roll back)", tbl, n)
-		}
-	}
-	if n := countRows(t, f.db, tenantID, "rating_rule_versions"); n != 1 {
-		t.Errorf("rating_rule_versions after refusal: got %d, want 1 (operator's rule only)", n)
-	}
-}
-
-// TestService_Instantiate_AdoptsMatchingRatingRule proves the gate does not
-// over-refuse: a pre-existing rule whose money fields exactly match the
-// recipe's declaration is ADOPTED (no republish, no second version) and the
-// install completes.
-func TestService_Instantiate_AdoptsMatchingRatingRule(t *testing.T) {
-	f := newRecipeFixture(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, f.db, "matching rule adopt")
-
-	pre, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "opus45_input", Name: "Opus input (pre-created)",
-		Mode: domain.PricingPerUnit, Currency: "USD",
-		UnitAmountCents: decimal.RequireFromString("0.0005"),
-	})
-	if err != nil {
-		t.Fatalf("pre-create rule: %v", err)
-	}
-
-	inst, err := f.svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{})
-	if err != nil {
-		t.Fatalf("Instantiate with matching pre-existing rule: %v", err)
-	}
-	adopted := false
-	for _, id := range inst.CreatedObjects.RatingRuleIDs {
-		if id == pre.ID {
-			adopted = true
-		}
-	}
-	if !adopted {
-		t.Errorf("pre-existing matching rule %s was not adopted into created_objects", pre.ID)
-	}
-	// Adoption never republishes: the key still has exactly one version.
-	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	var versions int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT count(*) FROM rating_rule_versions WHERE rule_key = 'opus45_input'`,
-	).Scan(&versions); err != nil {
-		t.Fatalf("count versions: %v", err)
-	}
-	if versions != 1 {
-		t.Errorf("opus45_input has %d versions after adoption, want 1 (never republished)", versions)
-	}
-}
-
-func (f *failingPricingWriter) AdoptedMeterCurrencyConflict(ctx context.Context, tenantID, meterID, wantCurrency string) (string, error) {
-	return f.inner.AdoptedMeterCurrencyConflict(ctx, tenantID, meterID, wantCurrency)
-}
-
-// TestService_Instantiate_RefusesCrossCurrencyMeterAdoption closes the
-// second-recipe hole from the ADR-100 design panel: two recipes' rule KEYS
-// are disjoint, so same-key conformance never fires — but stacking an EUR
-// install's rules onto a meter whose existing rules bill USD would mix
-// denominations on one meter. The adopted-meter currency probe refuses.
-func TestService_Instantiate_RefusesCrossCurrencyMeterAdoption(t *testing.T) {
-	f := newRecipeFixture(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, f.db, "cross-currency adoption")
-
-	// Operator already bills the shared `tokens` meter in USD via a custom
-	// key (disjoint from every recipe key).
-	rule, err := f.pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "custom_tokens_usd", Name: "custom", Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.RequireFromString("0.0004"),
-	})
-	if err != nil {
-		t.Fatalf("pre-create rule: %v", err)
-	}
-	if _, err := f.pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
+	tokens, err := f.pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
 		EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum",
-		RatingRuleVersionID: rule.ID,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("pre-create meter: %v", err)
 	}
-
-	// EUR install must refuse at the meter-adoption probe (aggregation
-	// matches, keys are disjoint — only the currency conflicts).
-	_, err = f.svc.Instantiate(ctx, tenantID, "openai_style",
-		map[string]any{"currency": "EUR"}, InstantiateOptions{})
-	if !errors.Is(err, errs.ErrAlreadyExists) || !strings.Contains(err.Error(), "custom_tokens_usd") {
-		t.Fatalf("want cross-currency adoption refusal naming the key, got %v", err)
+	custom := pricing.PriceInput{MeterID: tokens.ID, DimensionMatch: map[string]string{"model": "gpt-4o", "token_type": "input"},
+		PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0004")}}
+	operator, _, err := f.pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
+		Code: "operator_usd", Name: "Operator USD", Currency: "USD", BillingInterval: domain.BillingMonthly,
+		Prices: []pricing.PriceInput{custom},
+	})
+	if err != nil {
+		t.Fatalf("pre-create plan: %v", err)
+	}
+	if _, err := f.pricingSvc.AddPrice(ctx, tenantID, operator.ID, pricing.PriceInput{
+		MeterID: tokens.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0001")},
+	}); err != nil {
+		t.Fatalf("pre-create catch-all: %v", err)
+	}
+	before, err := f.pricingSvc.ListPlanPrices(ctx, tenantID, operator.ID)
+	if err != nil {
+		t.Fatalf("list prices: %v", err)
 	}
 
-	// Coherent twin: the USD install adopts the meter fine.
-	if _, err := f.svc.Instantiate(ctx, tenantID, "openai_style", nil, InstantiateOptions{}); err != nil {
-		t.Fatalf("USD install over USD meter must pass: %v", err)
+	inst, err := f.svc.Instantiate(ctx, tenantID, "openai_style", map[string]any{"currency": "EUR"}, InstantiateOptions{})
+	if err != nil {
+		t.Fatalf("an EUR install over a meter a USD plan prices: %v", err)
+	}
+	if len(inst.CreatedObjects.MeterIDs) != 1 || inst.CreatedObjects.MeterIDs[0] != tokens.ID {
+		t.Errorf("created meters = %v, want the adopted %s", inst.CreatedObjects.MeterIDs, tokens.ID)
+	}
+	if len(inst.CreatedObjects.PlanIDs) != 1 {
+		t.Fatalf("created plans = %v, want one", inst.CreatedObjects.PlanIDs)
+	}
+	recipePlan, err := f.pricingSvc.GetPlan(ctx, tenantID, inst.CreatedObjects.PlanIDs[0])
+	if err != nil || recipePlan.Currency != "EUR" {
+		t.Errorf("recipe plan = %+v (%v), want EUR", recipePlan, err)
+	}
+	after, err := f.pricingSvc.ListPlanPrices(ctx, tenantID, operator.ID)
+	if err != nil {
+		t.Fatalf("list prices: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("operator plan prices: %d after the install, %d before", len(after), len(before))
+	}
+	for i := range before {
+		if after[i].ID != before[i].ID || !after[i].UnitAmountCents.Equal(before[i].UnitAmountCents) || after[i].UpdatedAt != before[i].UpdatedAt {
+			t.Errorf("operator price %s changed: %+v → %+v", before[i].ID, before[i], after[i])
+		}
 	}
 }
 

@@ -2,7 +2,6 @@ package usage_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -32,7 +31,7 @@ func TestAggregateClaims(t *testing.T) {
 	defer cancel()
 
 	store := usage.NewPostgresStore(db)
-	aggregate := func(t *testing.T, tenantID, customerID, meterID, agg string, claims []domain.UsageClaim, from, to time.Time) []domain.RuleAggregation {
+	aggregate := func(t *testing.T, tenantID, customerID, meterID, agg string, claims []domain.UsageClaim, from, to time.Time) []domain.ClaimedUsage {
 		t.Helper()
 		got, err := store.AggregateClaims(ctx, tenantID, customerID, meterID, agg, claims, from, to)
 		if err != nil {
@@ -138,15 +137,15 @@ func TestAggregateClaims(t *testing.T) {
 		// Coarse rule (priority 50): all gpt-4 events at base rate.
 		// An event matching both is claimed by the first claim, the
 		// priority-100 rule.
-		high := insertTestPricingRule(t, db, tenantID, meterID, highRRV, map[string]any{"model": "gpt-4", "cached": true}, 100)
+		high := insertTestPricingRule(t, db, tenantID, meterID, highRRV, map[string]any{"model": "gpt-4", "cached": "true"}, 100)
 		low := insertTestPricingRule(t, db, tenantID, meterID, lowRRV, map[string]any{"model": "gpt-4"}, 50)
 
 		from := time.Now().Add(-1 * time.Hour)
 		to := time.Now().Add(1 * time.Hour)
 
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4", "cached": true})
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(20), map[string]any{"model": "gpt-4", "cached": false})
-		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(5), map[string]any{"model": "gpt-4", "cached": true})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(10), map[string]any{"model": "gpt-4", "cached": "true"})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(20), map[string]any{"model": "gpt-4", "cached": "false"})
+		ingest(t, ctx, store, tenantID, customerID, meterID, decimal.NewFromInt(5), map[string]any{"model": "gpt-4", "cached": "true"})
 
 		assertRuleAggregations(t, aggregate(t, tenantID, customerID, meterID, "sum", []domain.UsageClaim{high, low}, from, to), map[string]decimal.Decimal{
 			highRRV: decimal.NewFromInt(15), // 10 + 5 cached gpt-4
@@ -227,7 +226,7 @@ func TestAggregateClaims(t *testing.T) {
 
 		var foundRule decimal.Decimal
 		for _, r := range aggregate(t, tenantID, customerID, meterID, "sum", []domain.UsageClaim{c}, from, to) {
-			if r.RatingRuleVersionID == rrvID {
+			if r.PriceID == rrvID {
 				foundRule = r.Quantity
 			}
 		}
@@ -265,12 +264,12 @@ func ingestAt(t *testing.T, ctx context.Context, store *usage.PostgresStore,
 	}
 }
 
-func assertRuleAggregations(t *testing.T, got []domain.RuleAggregation, want map[string]decimal.Decimal) {
+func assertRuleAggregations(t *testing.T, got []domain.ClaimedUsage, want map[string]decimal.Decimal) {
 	t.Helper()
 	gotByRRV := make(map[string]decimal.Decimal, len(got))
 	for _, r := range got {
-		// Key by rating_rule_version_id; "" is the unclaimed bucket.
-		gotByRRV[r.RatingRuleVersionID] = r.Quantity
+		// Key by price id; "" is the unclaimed bucket.
+		gotByRRV[r.PriceID] = r.Quantity
 	}
 	if len(gotByRRV) != len(want) {
 		t.Errorf("aggregation count: got %d entries (%v), want %d (%v)",
@@ -288,79 +287,28 @@ func assertRuleAggregations(t *testing.T, got []domain.RuleAggregation, want map
 	}
 }
 
-// insertTestRatingRule creates a minimal flat-rate rating rule version so
-// pricing-rule rows have a valid FK target. The actual prices are not
-// exercised here — aggregation only cares about the rrv id.
-func insertTestRatingRule(t *testing.T, db *postgres.DB, tenantID, key string) string {
+// insertTestRatingRule names a price for a claim. A claim is in memory
+// (AggregateClaims takes the list), so nothing is stored: the id is what the
+// buckets come back keyed by.
+func insertTestRatingRule(t *testing.T, _ *postgres.DB, _, key string) string {
 	t.Helper()
-
-	id := postgres.NewID("vlx_rrv")
-	tx, err := db.BeginTx(postgres.WithLivemode(context.Background(), false), postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin rrv: %v", err)
-	}
-	defer postgres.Rollback(tx)
-
-	_, err = tx.ExecContext(context.Background(), `
-		INSERT INTO rating_rule_versions (id, tenant_id, rule_key, name, version, lifecycle_state, mode, currency, unit_amount_cents)
-		VALUES ($1, $2, $3, $4, 1, 'active', 'per_unit', 'USD', 100)
-	`, id, tenantID, key, key)
-	if err != nil {
-		t.Fatalf("insert rrv: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit rrv: %v", err)
-	}
-	return id
+	return "vlx_prc_" + key
 }
 
-// insertTestPricingRule writes a row to meter_pricing_rules and returns it
-// as a claim. We hit the table directly rather than going through the
-// pricing service because these tests are scoped to the aggregation query —
-// the service-layer coverage already lives in pricing/service_test.go. The
-// store reads no pricing table: a test passes the claims, in rank order.
-func insertTestPricingRule(t *testing.T, db *postgres.DB,
-	tenantID, meterID, rrvID string,
-	dims map[string]any, priority int,
+// insertTestPricingRule is the claim of price priceID on dims. Claims are
+// listed in the order the caller passes them; priority is not read.
+func insertTestPricingRule(t *testing.T, _ *postgres.DB,
+	_, _, priceID string,
+	dims map[string]any, _ int,
 ) domain.UsageClaim {
 	t.Helper()
-
-	tx, err := db.BeginTx(postgres.WithLivemode(context.Background(), false), postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin mpr: %v", err)
+	match := map[string]string{}
+	for k, v := range dims {
+		s, ok := v.(string)
+		if !ok {
+			t.Fatalf("claim label %q is %T, want a string", k, v)
+		}
+		match[k] = s
 	}
-	defer postgres.Rollback(tx)
-
-	dimsJSON, err := jsonbValue(dims)
-	if err != nil {
-		t.Fatalf("marshal dims: %v", err)
-	}
-
-	id := postgres.NewID("vlx_mpr")
-	_, err = tx.ExecContext(context.Background(), `
-		INSERT INTO meter_pricing_rules
-		    (id, tenant_id, meter_id, rating_rule_version_id, dimension_match, priority)
-		VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-	`, id, tenantID, meterID, rrvID, dimsJSON, priority)
-	if err != nil {
-		t.Fatalf("insert mpr: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit mpr: %v", err)
-	}
-	if dims == nil {
-		dims = map[string]any{}
-	}
-	return domain.UsageClaim{RuleID: id, RatingRuleVersionID: rrvID, Match: dims}
-}
-
-func jsonbValue(m map[string]any) (string, error) {
-	if len(m) == 0 {
-		return "{}", nil
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return domain.UsageClaim{PriceID: priceID, Match: match}
 }

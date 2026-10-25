@@ -10,9 +10,9 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// Unpriced usage (#981, ADR-096 amendment): usage that matches no pricing
-// rule on a meter with no default binding has no price, so an invoice is
-// built and sent without it. That is the peer norm (Lago bills it at a $0
+// Unpriced usage (#981, ADR-096 amendment): usage that matches no price of
+// its subscription's plan has no price, so an invoice is built and sent
+// without it. That is the peer norm (Lago bills it at a $0
 // default, Metronome and Orb leave it off). It is never silent: each place
 // that builds an invoice without it logs a WARN and adds the quantity to
 // velox_usage_unpriced_quantity_total{meter_id}. The invoice builders are

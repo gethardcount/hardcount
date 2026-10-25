@@ -10,8 +10,7 @@
 import type { RecipeDunningPolicy } from './recipeDunningPolicy';
 import type { RecipeMeter } from './recipeMeter';
 import type { RecipePlan } from './recipePlan';
-import type { RecipePricingRule } from './recipePricingRule';
-import type { RecipeRatingRule } from './recipeRatingRule';
+import type { RecipePrice } from './recipePrice';
 import type { RecipeWebhook } from './recipeWebhook';
 
 /**
@@ -19,9 +18,8 @@ import type { RecipeWebhook } from './recipeWebhook';
  */
 export interface RecipePreviewObjects {
   meters: RecipeMeter[];
-  rating_rules: RecipeRatingRule[];
-  pricing_rules: RecipePricingRule[];
   plans: RecipePlan[];
+  prices: RecipePrice[];
   dunning_policies: RecipeDunningPolicy[];
   webhook_endpoints: RecipeWebhook[];
 }

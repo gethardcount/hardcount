@@ -22,13 +22,24 @@ type releaseSubs struct {
 	start, end time.Time
 }
 
-func (s releaseSubs) ListLiveByCustomer(context.Context, string, string) ([]domain.Subscription, map[string][]string, error) {
+func (s releaseSubs) ListLiveByCustomer(context.Context, string, string) ([]domain.Subscription, error) {
 	started := s.start.Add(-time.Hour)
 	return []domain.Subscription{{
 		ID: "sub_release", Status: domain.SubscriptionActive,
 		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &started,
 		Items: []domain.SubscriptionItem{{PlanID: "pln_release"}},
-	}}, map[string][]string{"pln_release": {s.meterID}}, nil
+	}}, nil
+}
+
+// releasePricing reads meters from the store and answers that plan
+// pln_release prices meterID.
+type releasePricing struct {
+	*pricing.PostgresStore
+	meterID string
+}
+
+func (p releasePricing) PlanPricesAt(context.Context, string, string, time.Time, string) ([]domain.PlanPrice, error) {
+	return []domain.PlanPrice{{ID: "vlx_prc_release", PlanID: "pln_release", MeterID: p.meterID}}, nil
 }
 
 // releaseThresholds answers a paid threshold invoice that billed through at.
@@ -81,7 +92,7 @@ func TestRelease_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	}
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{
 		subs:       releaseSubs{meterID: meter.ID, start: now.Add(-2 * time.Hour), end: now.Add(24 * time.Hour)},
-		pricing:    pricingStore,
+		pricing:    releasePricing{PostgresStore: pricingStore, meterID: meter.ID},
 		thresholds: releaseThresholds{at: now.Add(-30 * time.Minute)},
 	})
 

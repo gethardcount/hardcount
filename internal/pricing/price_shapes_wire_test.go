@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// The two routes that take a price, POST /v1/rating-rules and POST
-// /v1/price-overrides, take ADR-130 §3's words: mode per_unit with
+// The two routes that take a price's shape, POST /v1/plans/{plan_id}/prices
+// and POST /v1/price-overrides, take ADR-130 §3's words: mode per_unit with
 // unit_amount_cents, graduated tiers whose last up_to is null, and package
 // with a decimal package_amount_cents. The old words are refused by name. A
 // tier table is checked when it is saved, so one the API accepts always rates.
@@ -27,32 +27,26 @@ type shapeDoor struct {
 
 var shapeDoors = []shapeDoor{
 	{
-		name: "rating rule",
+		name: "plan price",
 		send: func(t *testing.T, price string) *httptest.ResponseRecorder {
-			h := NewHandler(NewService(newMemStore()))
-			return doJSON(t, h.createRatingRule, http.MethodPost, "/", `{"rule_key":"r","name":"r","currency":"USD",`+price+`}`, nil)
+			store := newMemStore()
+			plan, seeded := seedPlanWithPrice(store, "tnt_test")
+			h := NewHandler(NewService(store))
+			return doJSON(t, h.addPrice, http.MethodPost, "/", `{"meter_id":"`+seeded.MeterID+`","dimension_match":{"model":"a"},`+price+`}`, map[string]string{"id": plan.ID})
 		},
 	},
 	{
 		name: "price override",
 		send: func(t *testing.T, price string) *httptest.ResponseRecorder {
-			h := NewHandler(NewService(newMemStore()))
-			rr := doJSON(t, h.createRatingRule, http.MethodPost, "/", `{"rule_key":"r","name":"r","currency":"USD","mode":"per_unit","unit_amount_cents":"1"}`, nil)
-			if rr.Code != http.StatusCreated {
-				t.Fatalf("seed rule: status %d, body %s", rr.Code, rr.Body.String())
-			}
-			var rule struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(rr.Body.Bytes(), &rule); err != nil {
-				t.Fatalf("decode rule: %v", err)
-			}
-			return doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"vlx_cus_1","rating_rule_version_id":"`+rule.ID+`",`+price+`}`, nil)
+			store := newMemStore()
+			_, seeded := seedPlanWithPrice(store, "tnt_test")
+			h := NewHandler(NewService(store))
+			return doJSON(t, h.createOverride, http.MethodPost, "/", `{"customer_id":"vlx_cus_1","price_id":"`+seeded.ID+`",`+price+`}`, nil)
 		},
 	},
 }
 
-// shapeOut is the price part of a rule or an override on the wire, with each
+// shapeOut is the shape of a price or an override on the wire, with each
 // tier's up_to kept raw so a null is told apart from a missing key.
 type shapeOut struct {
 	Mode               string                       `json:"mode"`

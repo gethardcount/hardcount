@@ -274,15 +274,14 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 			if strings.TrimSpace(k) == "" {
 				return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match has an empty key", raw.Key, i)
 			}
-			switch val := v.(type) {
-			case string:
-				if strings.TrimSpace(val) == "" {
-					return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match[%q] is empty", raw.Key, i, k)
-				}
-			case bool, int, int64, float64:
-				// scalar — fine
-			default:
-				return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match[%q] must be a scalar, got %T", raw.Key, i, k, v)
+			// Values are strings only (ADR-130 §1): the install makes each
+			// pricing rule a plan price, whose labels are strings.
+			val, ok := v.(string)
+			if !ok {
+				return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match[%q] must be a string, got %T", raw.Key, i, k, v)
+			}
+			if strings.TrimSpace(val) == "" {
+				return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match[%q] is empty", raw.Key, i, k)
 			}
 		}
 		out.PricingRules = append(out.PricingRules, domain.RecipePricingRule{

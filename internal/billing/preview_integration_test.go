@@ -83,13 +83,13 @@ func newPreviewFixture(t *testing.T, name string) *previewFixture {
 }
 
 // seedSubscription mirrors customer-usage's seedCustomerWithSub. Creates
-// a customer, a plan with the supplied meter, and an active subscription
+// a customer, a plan with the supplied prices, and an active subscription
 // with a current billing cycle of [from, to). Returns customer / plan /
 // sub IDs.
 func (f *previewFixture) seedSubscription(
 	t *testing.T,
 	ctx context.Context,
-	externalID, planCode, meterID string,
+	externalID, planCode string, prices []pricing.PriceInput,
 	cycleStart, cycleEnd time.Time,
 ) (custID, planID, subID string) {
 	t.Helper()
@@ -103,13 +103,13 @@ func (f *previewFixture) seedSubscription(
 		t.Fatalf("create customer: %v", err)
 	}
 
-	plan, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
+	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
 		Code:            planCode,
 		Name:            planCode,
 		Currency:        "USD",
 		BillingInterval: domain.BillingMonthly,
 		BaseAmountCents: 0,
-		MeterIDs:        []string{meterID},
+		Prices:          prices,
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
@@ -163,6 +163,11 @@ func (f *previewFixture) seedSubscription(
 // fixture's tenant. Used by TestCreatePreview_NoWrites to assert the
 // preview path persists nothing — the standout property of this surface
 // vs. /v1/invoices/{id}/finalize.
+// oneCent is one catch-all price of meterID at 1c a unit.
+func oneCent(meterID string) []pricing.PriceInput {
+	return []pricing.PriceInput{{MeterID: meterID, PriceShape: perUnitShape("1")}}
+}
+
 func (f *previewFixture) countInvoiceRows(t *testing.T, ctx context.Context) (invoices, lineItems int) {
 	t.Helper()
 	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
@@ -195,23 +200,15 @@ func TestCreatePreview_SingleMeterFlatParity(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-120 * time.Hour) // far enough back that 100 hourly events stay in the past (future live ingest is rejected)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "tokens_flat", Name: "Tokens Flat",
-		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv: %v", err)
-	}
-
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: "tokens", Name: "Tokens", Unit: "tokens",
-		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
 
-	custID, _, subID := f.seedSubscription(t, ctx, "cus_preview_flat", "pln_flat", meter.ID, cycleStart, cycleEnd)
+	custID, _, subID := f.seedSubscription(t, ctx, "cus_preview_flat", "pln_flat", oneCent(meter.ID), cycleStart, cycleEnd)
 
 	// 100 in-cycle events × qty=10 × 1¢ = 1000c.
 	for i := 0; i < 100; i++ {
@@ -259,8 +256,8 @@ func TestCreatePreview_SingleMeterFlatParity(t *testing.T) {
 	}
 }
 
-// TestCreatePreview_MultiDimDimensionMatchEcho proves a multi-dim meter
-// emits one line per (meter, rule) pair with dimension_match echoed.
+// TestCreatePreview_MultiDimDimensionMatchEcho proves a meter with several
+// prices emits one line per price with its dimension_match echoed.
 // Same fixture as TestCustomerUsage_MultiDimDimensionMatchEcho (1000 input
 // @3¢ + 100 output @5¢ = 3500c).
 func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
@@ -274,41 +271,18 @@ func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	rrvIn, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "tokens_input", Name: "Input", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(3),
-	})
-	if err != nil {
-		t.Fatalf("create rrv input: %v", err)
-	}
-	rrvOut, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "tokens_output", Name: "Output", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
-	})
-	if err != nil {
-		t.Fatalf("create rrv output: %v", err)
-	}
-
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: "tokens_dim", Name: "Tokens Dim", Unit: "tokens",
-		Aggregation: "sum", RatingRuleVersionID: rrvIn.ID,
+		Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
 
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: meter.ID, RatingRuleVersionID: rrvIn.ID,
-		DimensionMatch: map[string]any{"operation": "input"}, Priority: 10,
-	}); err != nil {
-		t.Fatalf("upsert mpr input: %v", err)
-	}
-	if _, err := f.pricingSvc.UpsertMeterPricingRule(ctx, f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: meter.ID, RatingRuleVersionID: rrvOut.ID,
-		DimensionMatch: map[string]any{"operation": "output"}, Priority: 10,
-	}); err != nil {
-		t.Fatalf("upsert mpr output: %v", err)
-	}
-
-	custID, _, _ := f.seedSubscription(t, ctx, "cus_preview_dim", "pln_dim", meter.ID, cycleStart, cycleEnd)
+	custID, _, _ := f.seedSubscription(t, ctx, "cus_preview_dim", "pln_dim", []pricing.PriceInput{
+		{MeterID: meter.ID, DimensionMatch: map[string]string{"operation": "input"}, PriceShape: perUnitShape("3")},
+		{MeterID: meter.ID, DimensionMatch: map[string]string{"operation": "output"}, PriceShape: perUnitShape("5")},
+	}, cycleStart, cycleEnd)
 
 	// 10 input events qty=100 = 1000 input units → 3000c.
 	for i := 0; i < 10; i++ {
@@ -338,7 +312,7 @@ func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
 		t.Fatalf("CreatePreview: %v", err)
 	}
 	if len(res.Lines) < 2 {
-		t.Fatalf("lines: got %d want at least 2 (one per rule)", len(res.Lines))
+		t.Fatalf("lines: got %d want at least 2 (one per price)", len(res.Lines))
 	}
 
 	var totalCents int64
@@ -348,7 +322,7 @@ func TestCreatePreview_MultiDimDimensionMatchEcho(t *testing.T) {
 			continue
 		}
 		if line.DimensionMatch == nil {
-			t.Errorf("line %q dimension_match must echo the meter pricing rule's filter", line.RuleKey)
+			t.Errorf("line %q dimension_match must echo the price's dimension_match", line.Description)
 			continue
 		}
 		dimMatchSeen++
@@ -380,20 +354,14 @@ func TestCreatePreview_NoWrites(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-12 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "x", Name: "x", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv: %v", err)
-	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
 
-	custID, _, _ := f.seedSubscription(t, ctx, "cus_nowrites", "pln_nowrites", meter.ID, cycleStart, cycleEnd)
+	custID, _, _ := f.seedSubscription(t, ctx, "cus_nowrites", "pln_nowrites", oneCent(meter.ID), cycleStart, cycleEnd)
 
 	for i := 0; i < 5; i++ {
 		ts := cycleStart.Add(time.Duration(i) * time.Hour)
@@ -432,21 +400,15 @@ func TestCreatePreview_CrossTenantIsolation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
 
-	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "x", Name: "x", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv: %v", err)
-	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
-	custA, _, _ := f.seedSubscription(t, ctx, "cus_xtenA", "pln_a", meter.ID, cycleStart, cycleEnd)
+	custA, _, _ := f.seedSubscription(t, ctx, "cus_xtenA", "pln_a", oneCent(meter.ID), cycleStart, cycleEnd)
 
 	tenantB := testutil.CreateTestTenant(t, f.db, "Create Preview Cross Tenant B")
 	_, err = f.preview.CreatePreview(ctx, tenantB, billing.CreatePreviewRequest{CustomerID: custA})
@@ -495,14 +457,8 @@ func TestCreatePreview_ExplicitSubscriptionWrongCustomer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 15*time.Second)
 	defer cancel()
 
-	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "x", Name: "x", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv: %v", err)
-	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
-		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		EventName: "x", Name: "x", Unit: "u", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -510,8 +466,8 @@ func TestCreatePreview_ExplicitSubscriptionWrongCustomer(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-24 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	_, _, subA := f.seedSubscription(t, ctx, "cus_wrong_a", "pln_wrong_a", meter.ID, cycleStart, cycleEnd)
-	custB, _, _ := f.seedSubscription(t, ctx, "cus_wrong_b", "pln_wrong_b", meter.ID, cycleStart, cycleEnd)
+	_, _, subA := f.seedSubscription(t, ctx, "cus_wrong_a", "pln_wrong_a", oneCent(meter.ID), cycleStart, cycleEnd)
+	custB, _, _ := f.seedSubscription(t, ctx, "cus_wrong_b", "pln_wrong_b", oneCent(meter.ID), cycleStart, cycleEnd)
 
 	// Customer B asking for Customer A's subscription — must reject.
 	_, err = f.preview.CreatePreview(ctx, f.tenantID, billing.CreatePreviewRequest{
@@ -565,16 +521,9 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-120 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	rrv, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "warn_flat", Name: "Warn Flat",
-		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rrv: %v", err)
-	}
 	meter, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: "warn_tokens", Name: "Warn Tokens", Unit: "tokens",
-		Aggregation: "sum", RatingRuleVersionID: rrv.ID,
+		Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
@@ -610,7 +559,7 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 	}
 
 	t.Run("clean sub (no change) has no scope warnings", func(t *testing.T) {
-		custID, _, _ := f.seedSubscription(t, ctx, "cus_clean", "pln_clean", meter.ID, cycleStart, cycleEnd)
+		custID, _, _ := f.seedSubscription(t, ctx, "cus_clean", "pln_clean", oneCent(meter.ID), cycleStart, cycleEnd)
 		ingest(custID, 100)
 		res := preview(custID)
 		if len(res.Warnings) != 0 {
@@ -619,7 +568,7 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 	})
 
 	t.Run("mid-period item change surfaces the segment warning", func(t *testing.T) {
-		custID, planID, subID := f.seedSubscription(t, ctx, "cus_seg", "pln_seg", meter.ID, cycleStart, cycleEnd)
+		custID, planID, subID := f.seedSubscription(t, ctx, "cus_seg", "pln_seg", oneCent(meter.ID), cycleStart, cycleEnd)
 		f.seedItemChange(t, ctx, subID, planID, cycleStart.Add(24*time.Hour))
 		ingest(custID, 10)
 		// An EXPLICIT window is the flat estimate, which still disclaims
@@ -632,7 +581,7 @@ func TestCreatePreview_EstimateScopeWarnings(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreatePreview: %v", err)
 		}
-		if !warns(res.Warnings, "mid-period proration") {
+		if !warns(res.Warnings, "prorate base fees per segment") {
 			t.Errorf("mid-period-changed sub must warn about segment proration, got %v", res.Warnings)
 		}
 	})

@@ -9,12 +9,12 @@
  */
 
 /**
- * `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
+ * As on PriceShape.
  */
-export type RatingRuleMode = typeof RatingRuleMode[keyof typeof RatingRuleMode];
+export type PlanPriceMode = typeof PlanPriceMode[keyof typeof PlanPriceMode];
 
 
-export const RatingRuleMode = {
+export const PlanPriceMode = {
   per_unit: 'per_unit',
   graduated: 'graduated',
   package: 'package',

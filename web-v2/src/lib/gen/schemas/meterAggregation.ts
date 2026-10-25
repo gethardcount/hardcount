@@ -10,7 +10,7 @@
 
 /**
  * How the meter rolls its events into one quantity per billing
- * period. Every pricing rule of the meter bills under it. `last`
+ * period. Every price of the meter bills under it. `last`
  * is the latest event by timestamp, then by id. Fixed once the
  * meter has a usage event (see `has_usage`).
  */

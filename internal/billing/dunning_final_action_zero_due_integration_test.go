@@ -158,7 +158,7 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	plan, err := pricing.NewService(pricingStore).CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
+	plan, _, err := pricing.NewService(pricingStore).CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
 		Code: "pro-adv", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
 		BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance,
 	})

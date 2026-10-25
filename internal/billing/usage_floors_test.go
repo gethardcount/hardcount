@@ -54,22 +54,23 @@ func TestMeterUsageIntervals_FloorsBothMaps_WatermarkOnlyClamped(t *testing.T) {
 	trialEnd := d.Add(18 * time.Hour)
 	wm := d.Add(21 * time.Hour)
 	sub := domain.Subscription{Items: []domain.SubscriptionItem{{ID: "it", PlanID: "p"}}}
-	plans := map[string]domain.Plan{"p": {ID: "p", MeterIDs: []string{"m"}}}
+	plans := map[string][]string{"p": {"m"}}
+	m := planMeter{planID: "p", meterID: "m"}
 	segs := map[string][]baseSegment{"it": {{start: d, end: pe, planID: "p"}}}
 
 	clamped, full := meterUsageIntervals(sub, segs, plans, d, pe, &wm, usageFloors{trialEnd: &trialEnd})
-	if got := clamped["m"]; len(got) != 1 || !got[0].start.Equal(wm) || !got[0].end.Equal(pe) {
+	if got := clamped[m]; len(got) != 1 || !got[0].start.Equal(wm) || !got[0].end.Equal(pe) {
 		t.Errorf("clamped = %v, want [[watermark, period end)]", got)
 	}
-	if got := full["m"]; len(got) != 1 || !got[0].start.Equal(trialEnd) || !got[0].end.Equal(pe) {
+	if got := full[m]; len(got) != 1 || !got[0].start.Equal(trialEnd) || !got[0].end.Equal(pe) {
 		t.Errorf("full = %v, want [[trial end, period end)]: the deferred max bucket must not reach trial usage", got)
 	}
 
 	// A window wholly before the floor drops out of both maps.
 	early := map[string][]baseSegment{"it": {{start: d, end: d.Add(10 * time.Hour), planID: "p"}}}
 	clamped, full = meterUsageIntervals(sub, early, plans, d, pe, &wm, usageFloors{trialEnd: &trialEnd})
-	if len(clamped["m"]) != 0 || len(full["m"]) != 0 {
-		t.Errorf("a segment wholly in the trial: clamped %v, full %v; want both empty", clamped["m"], full["m"])
+	if len(clamped[m]) != 0 || len(full[m]) != 0 {
+		t.Errorf("a segment wholly in the trial: clamped %v, full %v; want both empty", clamped[m], full[m])
 	}
 }
 

@@ -8,4 +8,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 
-export type GetV1PublicCostDashboardToken200UsageItemRulesItemDimensionMatch = {[key: string]: string};
+export type PriceWriteEndedOverridesItem = {
+  id: string;
+  customer_id: string;
+};

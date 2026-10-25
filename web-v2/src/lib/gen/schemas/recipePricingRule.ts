@@ -9,6 +9,9 @@
  */
 import type { RecipePricingRuleDimensionMatch } from './recipePricingRuleDimensionMatch';
 
+/**
+ * One price of the recipe's YAML: the meter, the events it takes and the rating rule that gives its rate. An install puts it on each plan that names the meter. `priority` is not used: the price with the most labels takes an event.
+ */
 export interface RecipePricingRule {
   /** The recipe meter the rule prices. */
   event_name: string;
