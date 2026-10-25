@@ -206,10 +206,11 @@ func (s *PostgresStore) Delete(ctx context.Context, tenantID, id string) error {
 	// bottom-up for the foreign keys, outside the lock order every other
 	// writer follows; a price write or override write reads this clock FOR
 	// SHARE before it touches a row teardown deletes (the clock's stamps, an
-	// override of its customer), so one of the two waits for the other here
-	// and they cannot deadlock. Existence comes from the same read: tearing
-	// down a gone clock hits an empty customer set (harmless), but the
-	// contract is ErrNotFound.
+	// override of its customer), and a subscription create reads it FOR KEY
+	// SHARE before its insert locks the customer, so one of the two waits for
+	// the other here and they cannot deadlock. Existence comes from the
+	// same read: tearing down a gone clock hits an empty customer set
+	// (harmless), but the contract is ErrNotFound.
 	var locked string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM test_clocks WHERE id = $1 FOR UPDATE`, id).Scan(&locked)
 	if errors.Is(err, sql.ErrNoRows) {

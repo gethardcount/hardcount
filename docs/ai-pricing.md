@@ -181,10 +181,17 @@ it started, so:
   that period is billed at the old rate, a price removed earlier is still
   billed, and a meter the plan first priced earlier in that period is not
   billed that period. That usage does not appear as not billed either: the
-  plan did not price the meter at the period's start.
+  plan did not price the meter at the period's start. An immediate change
+  from a plan with another billing interval is the exception: it starts a
+  new period at the change, so it pays the plan's prices as they are then.
 - A customer's negotiated rate (a price override) keeps applying when the
   price's rate changes. Removing the price ends it, and the answer lists the
   overrides it ended.
+- An override, too, applies from the customer's next billing period. One
+  created on the day a subscription of the customer starts without a
+  trial, before or after it, applies from its second period: the first
+  period started at midnight and bills the price's rate. To bill the first period at the
+  override, create it on an earlier day in your billing timezone.
 
 On the dashboard, open the plan under **Pricing**. Its **Usage prices**
 card says which of the two applies before you save.

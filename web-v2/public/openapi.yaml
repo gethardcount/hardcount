@@ -440,7 +440,9 @@ components:
         A subscription that moves to the plan mid-period (an immediate plan
         change or an added item) gets it from its next period too: the rest
         of its current period is priced by the plan's prices at that
-        period's start.
+        period's start. An immediate change from a plan with another
+        billing interval is the exception: it starts a new period at the
+        change, so it gets the write at once.
       allOf:
         - $ref: "#/components/schemas/PlanPrice"
         - type: object
@@ -7747,8 +7749,8 @@ paths:
             same number of labels, so neither would win; the message names
             it. Add a label to make one more specific, or give a shared
             label another value. `meter_overlap`: the meter is new to a used
-            plan, and a customer on the plan already has it on another
-            subscription.
+            plan, and a customer on the plan already has it on another item,
+            of the same subscription or another one.
           content:
             application/json:
               schema:
@@ -12944,9 +12946,14 @@ paths:
         active override for that price, it is closed and replaced by this
         one. A new or replaced rate applies from the customer's next
         billing period, in the customer's time (its test clock's, if it has
-        one); the current period keeps the rate it started with. The
-        override takes the plan's currency. A plan swap does not carry it:
-        the new plan's price is another price.
+        one); the current period keeps the rate it started with. A
+        subscription that starts without a trial has a first period from
+        midnight of its first day. So an override created on the day the
+        customer's subscription starts, before or after it, applies from
+        its second period: the first period bills the price's rate. To
+        bill the first period at the override, create it on an earlier day.
+        The override takes the plan's currency. A plan swap does not carry
+        it: the new plan's price is another price.
       operationId: createPriceOverride
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"

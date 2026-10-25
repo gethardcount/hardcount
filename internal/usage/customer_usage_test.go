@@ -446,3 +446,45 @@ func containsField(res CustomerUsageResult, needle string) bool {
 	b, _ := json.Marshal(res)
 	return strings.Contains(string(b), needle)
 }
+
+// A row can name a plan the subscription swapped away from this period: the
+// close still bills it. Its plan comes from the rater, not the items, so the
+// meter has the plan's currency and counts in the totals; the no_price
+// warning names that plan. A row naming a plan nobody returned fails loud
+// rather than drop the meter from the totals.
+func TestCustomerUsage_RowOnAPlanSwappedAway(t *testing.T) {
+	old := domain.Plan{ID: "pln_old", Name: "Old", Currency: "USD"}
+	svc, _, _ := usageFixture(domain.RatedSubscription{
+		MeterIDs: []string{"mtr_tokens"},
+		Plans:    map[string]domain.Plan{"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD"}, "pln_old": old},
+		Usage: []domain.RatedUsage{
+			{PlanID: "pln_old", MeterID: "mtr_tokens", PriceID: "prc_old", Quantity: d("7"), AmountCents: 21, UnitAmountDecimal: d("3")},
+			{PlanID: "pln_old", MeterID: "mtr_tokens", Quantity: d("2")},
+		},
+	})
+	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if m := res.Meters[0]; m.Currency != "USD" || m.TotalAmountCents != 21 {
+		t.Errorf("meter = %+v, want USD 21", m)
+	}
+	if len(res.Totals) != 1 || res.Totals[0].Currency != "USD" || res.Totals[0].AmountCents != 21 {
+		t.Errorf("totals = %+v, want [USD 21]", res.Totals)
+	}
+	var named bool
+	for _, w := range res.Warnings {
+		named = named || strings.Contains(w, `plan "Old"`)
+	}
+	if !named {
+		t.Errorf("warnings = %v, want the no_price one naming plan Old", res.Warnings)
+	}
+
+	svc, _, _ = usageFixture(domain.RatedSubscription{
+		MeterIDs: []string{"mtr_tokens"},
+		Usage:    []domain.RatedUsage{{PlanID: "pln_gone", MeterID: "mtr_tokens", PriceID: "prc_x", Quantity: d("1"), AmountCents: 1}},
+	})
+	if _, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{}); err == nil || !strings.Contains(err.Error(), "pln_gone") {
+		t.Errorf("Get with a row on an unknown plan: err = %v, want one naming pln_gone", err)
+	}
+}

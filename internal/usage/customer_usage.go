@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -240,6 +241,10 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 		rows     []domain.RatedUsage
 		meterIDs []string
 		seen     = map[string]bool{}
+		// rowPlans are the plans the rated rows name: the items' plans and
+		// every plan the rater read, such as one a subscription swapped
+		// away from this period, whose usage the close still bills.
+		rowPlans = maps.Clone(plansByID)
 		// reads are the windows the chart reads: the explicit window for
 		// every meter, or each subscription's current period for its own
 		// meters, the window its totals were rated over.
@@ -256,6 +261,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 			return CustomerUsageResult{}, fmt.Errorf("rate subscription %s: %w", sub.ID, err)
 		}
 		rows = append(rows, rated.Usage...)
+		maps.Copy(rowPlans, rated.Plans)
 		for _, id := range rated.MeterIDs {
 			if !seen[id] {
 				seen[id] = true
@@ -287,7 +293,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 		warnings = append(warnings, "Estimate: usage over a chosen window is priced at each subscription's current-period prices.")
 	}
 
-	meters, w, err := s.composeMeters(ctx, tenantID, meterIDs, rows, plansByID)
+	meters, w, err := s.composeMeters(ctx, tenantID, meterIDs, rows, rowPlans)
 	if err != nil {
 		return CustomerUsageResult{}, err
 	}
@@ -466,7 +472,8 @@ func (s *CustomerUsageService) readPlans(ctx context.Context, tenantID string, s
 // composeMeters groups the rated rows by meter, in meterIDs order, one row
 // per (plan, price) with the windows of a price added together. A bucket
 // below zero counts as 0, as on the invoice, with a warning; usage no price
-// took is a no_price row outside the totals, with a warning.
+// took is a no_price row outside the totals, with a warning. plans holds
+// every plan a row names; the meter takes the currency of its rows' plan.
 func (s *CustomerUsageService) composeMeters(ctx context.Context, tenantID string, meterIDs []string, rows []domain.RatedUsage, plans map[string]domain.Plan) ([]CustomerUsageMeter, []string, error) {
 	var warnings []string
 	byMeter := map[string][]domain.RatedUsage{}
@@ -493,8 +500,12 @@ func (s *CustomerUsageService) composeMeters(ctx context.Context, tenantID strin
 				warnings = append(warnings, fmt.Sprintf("meter %q: usage below zero (%s) after corrections — counted as 0, as on the invoice", meter.EventName, r.Quantity.String()))
 				continue
 			}
+			plan, ok := plans[r.PlanID]
+			if !ok {
+				return nil, nil, fmt.Errorf("meter %q: rated usage names plan %q, which the rater did not return", meter.EventName, r.PlanID)
+			}
 			if m.Currency == "" {
-				m.Currency = plans[r.PlanID].Currency
+				m.Currency = plan.Currency
 			}
 			k := key{plan: r.PlanID, price: r.PriceID}
 			i, ok := index[k]

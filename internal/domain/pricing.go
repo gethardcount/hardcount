@@ -536,9 +536,11 @@ type RatedUsage struct {
 }
 
 // RatedSubscription is a subscription's usage rated over a window: each
-// bucket, and every meter its plans price over the window, with usage or
-// not.
+// bucket, every meter its plans price over the window, with usage or not,
+// and every plan a row names, as the rater read it. A plan the subscription
+// swapped away from in the window is among them, not on its items.
 type RatedSubscription struct {
 	Usage    []RatedUsage
 	MeterIDs []string
+	Plans    map[string]Plan
 }

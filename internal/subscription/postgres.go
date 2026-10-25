@@ -151,6 +151,25 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 	id := postgres.NewID("vlx_sub")
 	now := clock.Now(ctx)
 
+	// A clock customer's subscription takes its clock FOR KEY SHARE before
+	// the insert (ADR-130 §8). The insert's foreign keys lock the customer
+	// first and the clock second. A test-clock teardown holds its clock FOR
+	// UPDATE and later deletes the customer, so waiting at the clock while
+	// holding the customer deadlocks it. Read first, the create waits at the
+	// clock holding nothing the teardown deletes.
+	if sub.TestClockID != "" {
+		var locked string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM test_clocks WHERE id = $1 FOR KEY SHARE`, sub.TestClockID).Scan(&locked)
+		if errors.Is(err, sql.ErrNoRows) {
+			// A teardown of the clock committed while this waited for it,
+			// and deleted the customer with it.
+			return domain.Subscription{}, errs.NotFound("customer")
+		}
+		if err != nil {
+			return domain.Subscription{}, fmt.Errorf("lock test clock %s: %w", sub.TestClockID, err)
+		}
+	}
+
 	err := scanSubRow(tx.QueryRowContext(ctx, `
 		INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status,
 			billing_time, trial_start_at, trial_end_at, started_at,

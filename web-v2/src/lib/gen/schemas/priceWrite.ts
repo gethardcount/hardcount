@@ -24,7 +24,9 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * A subscription that moves to the plan mid-period (an immediate plan
  * change or an added item) gets it from its next period too: the rest
  * of its current period is priced by the plan's prices at that
- * period's start.
+ * period's start. An immediate change from a plan with another
+ * billing interval is the exception: it starts a new period at the
+ * change, so it gets the write at once.
  */
 export type PriceWrite = PlanPrice & {
   effective: PriceWriteEffective;

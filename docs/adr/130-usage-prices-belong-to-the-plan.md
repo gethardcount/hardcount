@@ -335,8 +335,8 @@ applies and the docs say so.
 
 Subscription writers, price writes and override writes take rows in this
 order. Once one holds a row of one step, it takes no row of an earlier
-step. A test-clock teardown is one exception, and a price write's clock
-read is the other (both below).
+step. A test-clock teardown is one exception, and the clock reads of a
+price write and of a subscription create are the others (below).
 
 1. the subscription row ([ADR-115](115-one-closer-for-the-billing-period.md));
 2. plan rows in ascending id, in one statement: `FOR KEY SHARE` for
@@ -372,6 +372,15 @@ clock's customer deadlocks with a teardown the same way, and the clock lock
 first fixes it too. A never-used write that deleted the clock's stamps
 without reading the clock deadlocked even with a clock-first teardown;
 reading the clock first fixed it.
+
+A subscription create for a clock customer is the third writer that meets
+a teardown (amended 2026-10-26, third review of #1386). Its insert's
+foreign keys lock the customer row and then the clock row. A create that
+inserted while a teardown held the clock waited there holding the
+customer, and the teardown then waited to delete that customer: a
+real-Postgres test aborted one with `40P01`. So a create reads its clock
+`FOR KEY SHARE` before the insert, waits at the clock holding nothing the
+teardown deletes, and answers 404 when the teardown took the customer.
 
 **A price write reads the test clocks before its plan** (amended
 2026-10-25, review of #1386). A teardown holds its clock `FOR UPDATE` while
@@ -672,8 +681,8 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   write (section 7), and one ingest `no_price` flag can be wrong (section
   12).
 - **A test-clock teardown is outside the lock order.** It takes its clock
-  row first, which orders it against price and override writes (section
-  8).
+  row first, which orders it against price writes, override writes and
+  subscription creates on the clock (section 8).
 - **Price add against a concurrent subscription create is check-then-act.**
   A price for a meter new to a used plan runs the overlap check for every
   customer on the plan (409 `meter_overlap`). A writer that puts a plan on
@@ -687,8 +696,12 @@ The breaks that concerned moving 0.8.x data went with the clean break.
 - **A new subscriber later on the day of an edit** pays the old price for
   the first period, because the pin is the period start, a midnight. The
   same holds for an add and a removal: that first period does not bill a
-  price added that day, and still bills a price removed that day. The
-  pricing guide, the API reference and the plan page say so. Pinning a
+  price added that day, and still bills a price removed that day. It holds
+  for an override too: one created on the day the customer's subscription
+  starts, before or after it, applies from its second period, and the
+  first period bills the price's rate (third review of #1386). The
+  pricing guide, the API reference, the plan page and the customer's
+  override dialog say so. Pinning a
   first period at the subscription's start instead was dropped in the
   panel (a second pin rule); it is an open owner decision from the review
   of #1386.
@@ -699,7 +712,10 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   bills at the old rate, a price removed earlier still bills, and a meter
   the plan first priced earlier in the period bills nothing that period,
   with no unpriced warning or counter: the plan did not price the meter at
-  the pin. The pricing guide, the API reference and the plan page say so.
+  the pin. An immediate swap from a plan with another billing interval is
+  the exception: it starts a new period at the swap, pinned there, so the
+  mover pays the plan's prices as they are at the swap (third review of
+  #1386). The pricing guide, the API reference and the plan page say so.
   Pinning each window at its own start would fix this and the same-day
   case together; it is part of the same open owner decision (second review
   of #1386).

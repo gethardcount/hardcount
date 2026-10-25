@@ -35,7 +35,7 @@ func (e *Engine) RateCurrentPeriod(ctx context.Context, sub domain.Subscription)
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}
-	return domain.RatedSubscription{Usage: ratedRows(cp.buckets), MeterIDs: meterIDs}, nil
+	return domain.RatedSubscription{Usage: ratedRows(cp.buckets), MeterIDs: meterIDs, Plans: cp.plans}, nil
 }
 
 // RateWindow rates the subscription's usage over [from, to): an estimate.
@@ -89,7 +89,7 @@ func (e *Engine) RateWindow(ctx context.Context, sub domain.Subscription, from, 
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}
-	return domain.RatedSubscription{Usage: ratedRows(buckets), MeterIDs: meterSet(planMeters)}, nil
+	return domain.RatedSubscription{Usage: ratedRows(buckets), MeterIDs: meterSet(planMeters), Plans: plans}, nil
 }
 
 // pricedMeters is every meter the subscription's plans price at the pin at.
