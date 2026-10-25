@@ -200,32 +200,6 @@ func TestProrationCents_NoDriftAgainstBigIntOracle(t *testing.T) {
 	}
 }
 
-// TestGrossUpByInvoiceRatio pins the net→gross scaling used by the downgrade
-// clawback (ADR-048): identity when the source invoice carried no tax, and the
-// invoice's Total/Subtotal ratio applied (with banker's rounding) when it did.
-func TestGrossUpByInvoiceRatio(t *testing.T) {
-	cases := []struct {
-		name            string
-		net             int64
-		subtotal, total int64
-		want            int64
-	}{
-		{"zero-tax invoice → identity", 2000, 6000, 6000, 2000},
-		{"no provider (subtotal 0) → identity", 2000, 0, 0, 2000},
-		{"10% tax → +10%", 2000, 6000, 6600, 2200},
-		{"qty-decrease 10% slice", 1000, 3000, 3300, 1100},
-		// 2001 × 6600 / 6000 = 2201.1 → banker's rounds to 2201.
-		{"banker's rounding on the slice", 2001, 6000, 6600, 2201},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := grossUpByInvoiceRatio(c.net, c.subtotal, c.total); got != c.want {
-				t.Errorf("grossUpByInvoiceRatio(%d, %d, %d) = %d, want %d", c.net, c.subtotal, c.total, got, c.want)
-			}
-		})
-	}
-}
-
 // TestClawbackReason locks the per-change-type credit-note reason strings so a
 // downgrade, a quantity decrease, and an item removal stay distinguishable on
 // the issued credit note (ADR-048).

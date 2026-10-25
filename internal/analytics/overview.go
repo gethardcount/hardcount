@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"log/slog"
+	"math/big"
 	"net/http"
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/auth"
-	"github.com/sagarsuperuser/velox/internal/platform/money"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
@@ -543,17 +543,15 @@ func computeMRRMovement(ctx context.Context, tx *sql.Tx, start, end any, currenc
 // total past int64 is an error, never a wrapped figure. The four parts are
 // SQL sums of non-negative amounts.
 func netMRR(m MRRMovementTotals) (int64, error) {
-	net, ok := money.Add(m.New, m.Expansion)
-	if ok {
-		net, ok = money.Add(net, -m.Contraction)
-	}
-	if ok {
-		net, ok = money.Add(net, -m.Churned)
-	}
-	if !ok {
+	// Summed in big integers so only the net must fit int64, not each step.
+	net := new(big.Int).SetInt64(m.New)
+	net.Add(net, big.NewInt(m.Expansion))
+	net.Sub(net, big.NewInt(m.Contraction))
+	net.Sub(net, big.NewInt(m.Churned))
+	if !net.IsInt64() {
 		return 0, fmt.Errorf("net MRR: %w", domain.ErrAmountOverflow)
 	}
-	return net, nil
+	return net.Int64(), nil
 }
 
 // churnRate = canceled-in-period / active-at-period-start.

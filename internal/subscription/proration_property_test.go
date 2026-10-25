@@ -216,23 +216,6 @@ func TestProperty_SplitUpgradeProration_CreditIsNeverPositive(t *testing.T) {
 	}
 }
 
-// TestProperty_GrossUpByInvoiceRatio_IdentityWithoutTax: an invoice carrying
-// no tax must gross up to itself. Any drift here would silently inflate every
-// clawback credit on zero-rated invoices.
-func TestProperty_GrossUpByInvoiceRatio_IdentityWithoutTax(t *testing.T) {
-	r := genRand()
-	for i := 0; i < propIters; i++ {
-		net := genAmount(r)
-		total := genAmount(r)
-		if got := grossUpByInvoiceRatio(net, 0, total); got != net {
-			t.Fatalf("no-tax invoice must gross up to identity: net=%d total=%d got=%d", net, total, got)
-		}
-		if got := grossUpByInvoiceRatio(net, net, net); got != net {
-			t.Fatalf("subtotal==total must be identity: net=%d got=%d", net, got)
-		}
-	}
-}
-
 // TestProperty_ProrationCents_RoundsToNearestNotToward0 closes a gap mutation
 // testing exposed: every earlier property also passes if banker's rounding is
 // replaced by integer truncation, because truncation is antisymmetric too

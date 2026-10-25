@@ -117,18 +117,3 @@ func splitUpgradeProration(oldAmount, remainingDays, denomDays, netCents, taxCen
 	}
 	return creditCents, chargeCents, creditTax, chargeTax, nil
 }
-
-// grossUpByInvoiceRatio scales a net (tax-exclusive) amount up to the gross
-// (tax-inclusive) amount the customer actually paid, using the source
-// invoice's own Total/Subtotal ratio. Identity when the invoice carried no tax
-// (subtotalCents <= 0 — no provider or zero-rated). Mirrors the engine's
-// creditUnusedPrebill gross-up (ADR-048) so the downgrade clawback credits the
-// same gross the cancel/swap clawbacks do, and so the credit-note's own
-// proportional-tax breakout (which uses the same invoice ratio) reverses
-// exactly the tax slice on that gross.
-func grossUpByInvoiceRatio(net, subtotalCents, totalCents int64) int64 {
-	if subtotalCents <= 0 {
-		return net
-	}
-	return money.RoundHalfToEven(net*totalCents, subtotalCents)
-}

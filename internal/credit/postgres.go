@@ -630,7 +630,7 @@ func (s *PostgresStore) drainPositiveBlocks(
 			_ = rows.Close()
 			return 0, 0, nil, fmt.Errorf("scan block: %w", err)
 		}
-		rem := amount - consumed // 0 < consumed < amount (the query's filter)
+		rem := amount - consumed // 0 <= consumed < amount (the query's filter)
 		blocks = append(blocks, block{id: id, remaining: rem})
 		var serr error
 		if available, serr = domain.SumCents(available, rem); serr != nil {
