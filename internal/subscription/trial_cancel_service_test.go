@@ -122,7 +122,7 @@ func TestScheduleCancel_TrialingBoundaries(t *testing.T) {
 		t.Fatalf("cancel_at == trial_end rejected: %v", err)
 	}
 	// Reset schedule.
-	if _, err := svc.ClearScheduledCancel(context.Background(), "t1", sub.ID); err != nil {
+	if _, _, err := svc.ClearScheduledCancel(context.Background(), "t1", sub.ID); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 
