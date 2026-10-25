@@ -11,7 +11,7 @@ import (
 // nominalRate stamps the configured flat rate on flat-mode usage lines and
 // refuses to fabricate a single rate for graduated/package modes (which have
 // none — the effective blended rate is the only honest figure there). The
-// FlatAmountCents on the non-flat cases is set deliberately: the mode gate,
+// UnitAmountCents on the non-flat cases is set deliberately: the mode gate,
 // not the field, is what makes those nil.
 func TestNominalRate(t *testing.T) {
 	flat := decimal.RequireFromString("0.0003")
@@ -20,9 +20,9 @@ func TestNominalRate(t *testing.T) {
 		rule domain.RatingRuleVersion
 		want string // "" = expect nil
 	}{
-		{"flat mode returns the configured rate", domain.RatingRuleVersion{Mode: domain.PricingFlat, FlatAmountCents: flat}, "0.0003"},
-		{"graduated mode returns nil (no single rate)", domain.RatingRuleVersion{Mode: domain.PricingGraduated, FlatAmountCents: flat}, ""},
-		{"package mode returns nil (no single rate)", domain.RatingRuleVersion{Mode: domain.PricingPackage, FlatAmountCents: flat}, ""},
+		{"flat mode returns the configured rate", domain.RatingRuleVersion{Mode: domain.PricingPerUnit, UnitAmountCents: flat}, "0.0003"},
+		{"graduated mode returns nil (no single rate)", domain.RatingRuleVersion{Mode: domain.PricingGraduated, UnitAmountCents: flat}, ""},
+		{"package mode returns nil (no single rate)", domain.RatingRuleVersion{Mode: domain.PricingPackage, UnitAmountCents: flat}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

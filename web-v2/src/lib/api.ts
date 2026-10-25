@@ -220,7 +220,7 @@ export const api = {
     apiRequest<{ data: RatingRule[] }>('GET', '/rating-rules'),
   getRatingRule: (id: string) =>
     apiRequest<RatingRule>('GET', `/rating-rules/${id}`),
-  createRatingRule: (data: { rule_key: string; name: string; mode: string; currency: string; flat_amount_cents?: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size?: number; package_amount_cents?: number }) =>
+  createRatingRule: (data: { rule_key: string; name: string; mode: string; currency: string; unit_amount_cents?: string; tiers?: PriceTier[]; package_size?: number; package_amount_cents?: string }) =>
     apiRequest<RatingRule>('POST', '/rating-rules', data),
 
   // Price overrides (ADR-070): negotiated per-customer prices, keyed by
@@ -230,7 +230,7 @@ export const api = {
   // delete) take effect at the next period open, never mid-period.
   listPriceOverrides: (customerId?: string) =>
     apiRequest<{ data: PriceOverride[] }>('GET', `/price-overrides${customerId ? `?customer_id=${customerId}` : ''}`),
-  createPriceOverride: (data: { customer_id: string; rating_rule_version_id: string; mode: string; flat_amount_cents?: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size?: number; package_amount_cents?: number; reason?: string }) =>
+  createPriceOverride: (data: { customer_id: string; rating_rule_version_id: string; mode: string; unit_amount_cents?: string; tiers?: PriceTier[]; package_size?: number; package_amount_cents?: string; reason?: string }) =>
     apiRequest<PriceOverride>('POST', '/price-overrides', data),
   deletePriceOverride: (id: string) =>
     apiRequest<void>('DELETE', `/price-overrides/${id}`),
@@ -1213,6 +1213,12 @@ export interface Plan {
   created_at: string
 }
 
+// One graduated tier. up_to is null on the open last tier, and only there.
+export interface PriceTier {
+  up_to: number | null
+  unit_amount_cents: string
+}
+
 // A negotiated per-customer price (ADR-070). rule_key is the identity —
 // the deal follows the rule across version publishes; rating_rule_version_id
 // only records which version the operator was looking at (provenance).
@@ -1222,10 +1228,10 @@ export interface PriceOverride {
   customer_id: string
   rating_rule_version_id: string
   mode: string
-  flat_amount_cents: string
-  graduated_tiers?: { up_to: number; unit_amount_cents: string }[]
+  unit_amount_cents: string
+  tiers?: PriceTier[]
   package_size: number
-  package_amount_cents: number
+  package_amount_cents: string
   reason?: string
   active: boolean
   created_at: string
@@ -1238,17 +1244,13 @@ export interface RatingRule {
   version: number
   mode: string
   currency: string
-  // Per-unit rates are decimal cents serialized as strings (Stripe
-  // unit_amount_decimal model) so sub-cent prices bill exactly. package_size /
-  // package_amount_cents stay whole — a package is a fixed fee for a block.
-  flat_amount_cents: string
-  graduated_tiers?: { up_to: number; unit_amount_cents: string }[]
+  // Amounts are decimal cents serialized as strings (Stripe
+  // unit_amount_decimal model) so sub-cent prices bill exactly. A package
+  // bills ceil(quantity / package_size) packages at package_amount_cents.
+  unit_amount_cents: string
+  tiers?: PriceTier[]
   package_size: number
-  package_amount_cents: number
-  // Per-unit rate charged for units beyond full packages (decimal-string
-  // cents) — the billing engine charges it; omitting it from display
-  // implies beyond-package usage is free.
-  overage_unit_amount_cents: string
+  package_amount_cents: string
   lifecycle_state: string
   created_at: string
 }

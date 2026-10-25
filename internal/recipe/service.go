@@ -650,16 +650,15 @@ func ratingRuleFromRecipe(r domain.RecipeRatingRule) domain.RatingRuleVersion {
 		name = r.Key
 	}
 	return domain.RatingRuleVersion{
-		RuleKey:                r.Key,
-		Name:                   name,
-		LifecycleState:         domain.RatingRuleActive,
-		Mode:                   r.Mode,
-		Currency:               r.Currency,
-		FlatAmountCents:        r.FlatAmountCents,
-		GraduatedTiers:         r.GraduatedTiers,
-		PackageSize:            r.PackageSize,
-		PackageAmountCents:     r.PackageAmountCents,
-		OverageUnitAmountCents: r.OverageUnitAmountCents,
+		RuleKey:            r.Key,
+		Name:               name,
+		LifecycleState:     domain.RatingRuleActive,
+		Mode:               r.Mode,
+		Currency:           r.Currency,
+		UnitAmountCents:    r.UnitAmountCents,
+		Tiers:              r.Tiers,
+		PackageSize:        r.PackageSize,
+		PackageAmountCents: r.PackageAmountCents,
 	}
 }
 

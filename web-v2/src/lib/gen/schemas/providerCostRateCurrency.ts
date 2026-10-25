@@ -9,7 +9,7 @@
  */
 
 /**
- * Always USD. Cost and margin count every rate in dollars.
+ * Always USD. Cost and margin count every rate in US cents.
  */
 export type ProviderCostRateCurrency = typeof ProviderCostRateCurrency[keyof typeof ProviderCostRateCurrency];
 

@@ -188,7 +188,7 @@ func TestP9Indexes(t *testing.T) {
 	}
 	rrv, err := pricing.NewPostgresStore(db).CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
 		RuleKey: "idx_calls", Name: "Idx", LifecycleState: domain.RatingRuleActive,
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rrv: %v", err)

@@ -303,7 +303,7 @@ func TestLiveBalance_NonAdditiveBucketDeferredByFire_CountedFullWindow(t *testin
 
 	rrvMax, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "gpu_peak", Name: "GPU Peak",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(100),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
 	})
 	if err != nil {
 		t.Fatalf("create max rule: %v", err)
@@ -385,8 +385,8 @@ func TestLiveBalance_PricesAtThePeriodOpenAfterAFire(t *testing.T) {
 		lf.grant(t, 20000)
 		// Published now: after the period opened, before the fire.
 		if _, err := p.f.pricingSvc.CreateRatingRule(p.ctx, p.f.tenantID, pricing.CreateRatingRuleInput{
-			RuleKey: "calls_flat", Name: "Calls Repriced", Mode: domain.PricingFlat, Currency: "USD",
-			FlatAmountCents: decimal.NewFromInt(50),
+			RuleKey: "calls_flat", Name: "Calls Repriced", Mode: domain.PricingPerUnit, Currency: "USD",
+			UnitAmountCents: decimal.NewFromInt(50),
 		}); err != nil {
 			t.Fatalf("publish mid-period version: %v", err)
 		}
@@ -524,7 +524,7 @@ func TestLiveBalance_PlanSwapMidPeriod_OutgoingMeterStillCounted(t *testing.T) {
 
 	rrv, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "tok_flat", Name: "Tok Flat",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -622,7 +622,7 @@ func TestLiveBalance_TwoSubscriptionsDifferentCycles_EachOwnWindow(t *testing.T)
 
 	rrv, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "tokens_flat", Name: "Tokens Flat",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)

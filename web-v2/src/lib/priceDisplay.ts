@@ -20,11 +20,23 @@ import { getCurrencySymbol } from './api'
 export interface PricedRule {
   mode: string
   currency?: string
-  flat_amount_cents?: string
-  graduated_tiers?: { up_to?: number; unit_amount_cents?: string }[]
+  unit_amount_cents?: string
+  tiers?: { up_to?: number | null; unit_amount_cents?: string }[]
   package_size?: number
-  package_amount_cents?: number
-  overage_unit_amount_cents?: string
+  package_amount_cents?: string
+}
+
+// PRICING_MODES are the price shapes, in the order a form offers them.
+export const PRICING_MODES = ['per_unit', 'graduated', 'package'] as const
+
+// pricingModeLabel names a price shape for display.
+export function pricingModeLabel(mode: string): string {
+  switch (mode) {
+    case 'per_unit': return 'Per unit'
+    case 'graduated': return 'Graduated tiers'
+    case 'package': return 'Per package'
+    default: return mode
+  }
 }
 
 // shiftDecimal moves a decimal string's point right by `places` without
@@ -81,24 +93,20 @@ export function priceRate(r: PricedRule, unit: string): string {
   const cur = r.currency
   switch (r.mode) {
     case 'graduated': {
-      const tiers = r.graduated_tiers ?? []
+      const tiers = r.tiers ?? []
       if (tiers.length === 0) return `tiered / ${per}`
       const parts = tiers.map(t =>
-        t.up_to && t.up_to > 0
+        t.up_to != null
           ? `up to ${t.up_to.toLocaleString()} @ ${money(t.unit_amount_cents ?? '0', scale, cur)}`
           : `beyond @ ${money(t.unit_amount_cents ?? '0', scale, cur)}`,
       )
       return `tiered / ${per}: ${parts.join(', ')}`
     }
-    case 'package': {
-      const pkg = `${money(String(r.package_amount_cents ?? 0), 0, cur)} per ${(r.package_size ?? 0).toLocaleString()} ${unit || 'units'}`
-      const overage = r.overage_unit_amount_cents && r.overage_unit_amount_cents !== '0'
-        ? `, then ${money(r.overage_unit_amount_cents, scale, cur)} / ${per}`
-        : ''
-      return pkg + overage
-    }
+    case 'package':
+      // A part package bills as a whole one, so there is nothing after it.
+      return `${money(r.package_amount_cents ?? '0', 0, cur)} per ${(r.package_size ?? 0).toLocaleString()} ${unit || 'units'}`
     default:
-      return `${money(r.flat_amount_cents ?? '0', scale, cur)} / ${per}`
+      return `${money(r.unit_amount_cents ?? '0', scale, cur)} / ${per}`
   }
 }
 

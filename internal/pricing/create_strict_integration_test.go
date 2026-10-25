@@ -118,7 +118,7 @@ func TestPlanCreateAndStatus_Validated(t *testing.T) {
 
 // TestRatingRuleAndOverrideCreate_RefuseUnknownField: the rate lives on the
 // rating rule and the price override, and validation accepts 0 as a free
-// rate. So POST /v1/rating-rules with `flat_amount` (not flat_amount_cents),
+// rate. So POST /v1/rating-rules with `flat_amount` (not unit_amount_cents),
 // or a tier with `unit_amount`, and POST /v1/price-overrides with
 // `unit_amount_decimal`, each made a $0 price with a 201. The unknown key is
 // now a 422 naming it and nothing is written.
@@ -160,9 +160,9 @@ func TestRatingRuleAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 		body  string
 		param string
 	}{
-		{"rule flat_amount", rules, `{"rule_key":"r_flat","name":"r","mode":"flat","currency":"USD","flat_amount":2}`, "flat_amount"},
-		{"rule tier unit_amount", rules, `{"rule_key":"r_tier","name":"r","mode":"graduated","currency":"USD","graduated_tiers":[{"up_to":0,"unit_amount":"5"}]}`, "unit_amount"},
-		{"override unit_amount_decimal", overrides, `{"customer_id":"vlx_cus_x","rating_rule_version_id":"vlx_rrv_x","mode":"flat","unit_amount_decimal":"1.5"}`, "unit_amount_decimal"},
+		{"rule flat_amount", rules, `{"rule_key":"r_flat","name":"r","mode":"per_unit","currency":"USD","flat_amount":2}`, "flat_amount"},
+		{"rule tier unit_amount", rules, `{"rule_key":"r_tier","name":"r","mode":"graduated","currency":"USD","tiers":[{"up_to":null,"unit_amount":"5"}]}`, "unit_amount"},
+		{"override unit_amount_decimal", overrides, `{"customer_id":"vlx_cus_x","rating_rule_version_id":"vlx_rrv_x","mode":"per_unit","unit_amount_decimal":"1.5"}`, "unit_amount_decimal"},
 	}
 	for _, tc := range refusals {
 		rr := do(tc.srv, tc.body)
@@ -185,7 +185,7 @@ func TestRatingRuleAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 	}
 
 	// Control: the known body is created at the price sent.
-	rr := do(rules, `{"rule_key":"r_ok","name":"r","mode":"flat","currency":"USD","flat_amount_cents":"2"}`)
+	rr := do(rules, `{"rule_key":"r_ok","name":"r","mode":"per_unit","currency":"USD","unit_amount_cents":"2"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("known body: status %d, want 201; body %s", rr.Code, rr.Body.String())
 	}
@@ -193,7 +193,7 @@ func TestRatingRuleAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &rule); err != nil {
 		t.Fatalf("decode rule: %v", err)
 	}
-	if rule.FlatAmountCents.String() != "2" {
-		t.Fatalf("created rule flat_amount_cents=%s, want 2", rule.FlatAmountCents)
+	if rule.UnitAmountCents.String() != "2" {
+		t.Fatalf("created rule unit_amount_cents=%s, want 2", rule.UnitAmountCents)
 	}
 }

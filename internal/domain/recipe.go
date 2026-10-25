@@ -84,15 +84,14 @@ type RecipeMeter struct {
 }
 
 type RecipeRatingRule struct {
-	Key                    string          `json:"key"`
-	Name                   string          `json:"name,omitempty"`
-	Mode                   PricingMode     `json:"mode"`
-	Currency               string          `json:"currency"`
-	FlatAmountCents        decimal.Decimal `json:"flat_amount_cents,omitempty"`
-	GraduatedTiers         []RatingTier    `json:"graduated_tiers,omitempty"`
-	PackageSize            int64           `json:"package_size,omitempty"`
-	PackageAmountCents     int64           `json:"package_amount_cents,omitempty"`
-	OverageUnitAmountCents decimal.Decimal `json:"overage_unit_amount_cents,omitempty"`
+	Key                string          `json:"key"`
+	Name               string          `json:"name,omitempty"`
+	Mode               PricingMode     `json:"mode"`
+	Currency           string          `json:"currency"`
+	UnitAmountCents    decimal.Decimal `json:"unit_amount_cents,omitempty"`
+	Tiers              []RatingTier    `json:"tiers,omitempty"`
+	PackageSize        int64           `json:"package_size,omitempty"`
+	PackageAmountCents decimal.Decimal `json:"package_amount_cents,omitempty"`
 }
 
 type RecipePricingRule struct {

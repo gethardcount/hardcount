@@ -136,7 +136,7 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 		t.Fatalf("create customer: %v", err)
 	}
 	rule, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		RuleKey: "calls_flat", Name: "Calls", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rating rule: %v", err)

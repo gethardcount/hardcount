@@ -18,6 +18,7 @@
 > 8. The dunning policy's `final_action` was removed from the recipe format (ADR-112).
 > 9. The dunning policy's schedule is one list of days, `retry_days` (2026-10-23, ADR-036 amendment). It replaced `max_retries` and `intervals_hours`, which the parser now refuses.
 > 10. A recipe meter is named by `event_name`, not `key`, and a pricing rule has no `aggregation_mode`: it bills under its meter's aggregation ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §2). In the preview, a pricing rule names its meter by `event_name` and a plan lists `event_names`. The built-ins are now at 8.0.0 (anthropic), 7.0.0 (openai) and 5.0.0 (replicate), not the `1.0.0` shown.
+> 11. A rating rule's rate is `unit_amount_cents` with `mode: per_unit` (not `flat`/`flat_amount_cents`), and graduated tiers are `tiers` with `up_to: null` on the last ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/getvelox/velox/pull/1381)).
 
 ## Motivation
 

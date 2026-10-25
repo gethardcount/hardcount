@@ -27,8 +27,8 @@ func TestReadRoutesHonest(t *testing.T) {
 	}
 
 	ruleID := flowStr(call("POST", "/v1/rating-rules", map[string]any{
-		"rule_key": "honest_calls", "name": "Honest calls", "mode": "flat",
-		"currency": "USD", "flat_amount_cents": 10,
+		"rule_key": "honest_calls", "name": "Honest calls", "mode": "per_unit",
+		"currency": "USD", "unit_amount_cents": 10,
 	}).want(t, 201, "create rating rule").body, "id")
 	meterID := flowStr(call("POST", "/v1/meters", map[string]any{
 		"event_name": "honest_calls", "name": "Honest calls", "unit": "call",
@@ -118,7 +118,7 @@ func TestReadRoutesHonest(t *testing.T) {
 	// in another currency is refused instead of stored.
 	t.Run("provider cost rates are USD only", func(t *testing.T) {
 		rate := func(currency any) flowResp {
-			body := map[string]any{"provider": "anthropic", "model": "claude-x", "token_type": "input", "cost_per_token": "0.000003"}
+			body := map[string]any{"provider": "anthropic", "model": "claude-x", "token_type": "input", "unit_cost_cents": "0.0003"}
 			if currency != nil {
 				body["currency"] = currency
 			}
@@ -135,20 +135,20 @@ func TestReadRoutesHonest(t *testing.T) {
 		}
 	})
 
-	// D-14: a non-graduated rule reads graduated_tiers as [], not null, and
+	// D-14: a non-graduated rule reads tiers as [], not null, and
 	// an item with no metadata leaves the field out instead of sending
 	// "e30=" (base64 of "{}").
 	t.Run("empty values read as empty", func(t *testing.T) {
 		rule := call("GET", "/v1/rating-rules/"+ruleID, nil).want(t, 200, "read rating rule")
-		if !bytes.Contains(rule.raw, []byte(`"graduated_tiers":[]`)) {
-			t.Errorf("rating rule graduated_tiers is not []: %s", rule.raw)
+		if !bytes.Contains(rule.raw, []byte(`"tiers":[]`)) {
+			t.Errorf("rating rule tiers is not []: %s", rule.raw)
 		}
 		override := call("POST", "/v1/price-overrides", map[string]any{
 			"customer_id": customerID, "rating_rule_version_id": ruleID,
-			"mode": "flat", "flat_amount_cents": 5, "reason": "honest test",
+			"mode": "per_unit", "unit_amount_cents": 5, "reason": "honest test",
 		}).want(t, 201, "create price override")
-		if !bytes.Contains(override.raw, []byte(`"graduated_tiers":[]`)) {
-			t.Errorf("price override graduated_tiers is not []: %s", override.raw)
+		if !bytes.Contains(override.raw, []byte(`"tiers":[]`)) {
+			t.Errorf("price override tiers is not []: %s", override.raw)
 		}
 		read := call("GET", "/v1/subscriptions/"+subID, nil).want(t, 200, "read subscription")
 		items := flowList(read.body, "items")

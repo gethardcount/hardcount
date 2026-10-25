@@ -50,7 +50,7 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 	pricingSvc.SetSubscriptionPlanUsageReader(subStore)
 	// A default price, so that clearing it is an edit the D05 guard checks.
 	defaultPrice, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "swap-lockord-default", Name: "swap-lockord", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		RuleKey: "swap-lockord-default", Name: "swap-lockord", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create default price: %v", err)

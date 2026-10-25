@@ -105,7 +105,7 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 
 	rrv, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "calls_flat", Name: "Calls Flat",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rrv: %v", err)
@@ -1014,7 +1014,7 @@ func TestThresholdCycle_DeferredMax_FullWindowOnce(t *testing.T) {
 	// A max-aggregated meter alongside the fixture's sum meter, on one plan.
 	rrvMax, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "gpu_peak", Name: "GPU Peak",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(100),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
 	})
 	if err != nil {
 		t.Fatalf("create max rrv: %v", err)
@@ -1209,7 +1209,7 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 	// Max meter + base-fee plan alongside the fixture's sum meter.
 	rrvMax, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "gpu_peak_c", Name: "GPU Peak C",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(100),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
 	})
 	if err != nil {
 		t.Fatalf("create max rrv: %v", err)

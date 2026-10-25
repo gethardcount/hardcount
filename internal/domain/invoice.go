@@ -561,11 +561,11 @@ type InvoiceLineItem struct {
 	PricingMode         string `json:"pricing_mode,omitempty"`
 	RatingRuleVersionID string `json:"rating_rule_version_id,omitempty"`
 	// NominalUnitAmountDecimal is the actually-billed CONFIGURED per-unit rate
-	// (decimal cents) for FLAT-mode usage lines — the clean rate-card figure
+	// (decimal cents) for per_unit usage lines — the clean rate-card figure
 	// (0.0003 = $0.000003/token), unlike EffectiveUnitAmountDecimal
 	// (amount÷quantity) which drifts by the cent-rounding of the line total
 	// (e.g. 6,000 tokens billed 2¢ → effective 0.00033¢, nominal 0.0003¢).
-	// It is STAMPED at build from the override-applied rule.FlatAmountCents,
+	// It is STAMPED at build from the override-applied rule.UnitAmountCents,
 	// NOT derived on read: a CustomerPriceOverride preserves the
 	// rating_rule_versions id while swapping the price, so re-reading that row
 	// yields list price, not the negotiated price billed (ADR-054
@@ -575,7 +575,7 @@ type InvoiceLineItem struct {
 	// (whole-cent unit already equals nominal) — which fall back to the
 	// effective rate. Internal-only (json:"-"): the wire's unit_amount_decimal
 	// already carries the display value via DisplayUnitAmountDecimal, so
-	// exposing this separately would just duplicate it on flat lines.
+	// exposing this separately would just duplicate it on per_unit lines.
 	NominalUnitAmountDecimal *decimal.Decimal `json:"-"`
 	BillingPeriodStart       *time.Time       `json:"billing_period_start,omitempty"`
 	BillingPeriodEnd         *time.Time       `json:"billing_period_end,omitempty"`
@@ -648,7 +648,7 @@ func EffectiveUnitAmountDecimalFor(amountCents int64, quantity decimal.Decimal) 
 }
 
 // DisplayUnitAmountDecimalFor is the per-unit price to SHOW for a LIVE-resolved
-// rule (decimal cents): the configured nominal rate for flat rules, else the
+// rule (decimal cents): the configured nominal rate for per_unit rules, else the
 // effective amount÷quantity. It mirrors InvoiceLineItem.DisplayUnitAmountDecimal
 // — which reads the nominal stamped at invoice build — for surfaces that resolve
 // the rating rule live (the usage Activity panel and the public cost dashboard),
@@ -661,10 +661,10 @@ func DisplayUnitAmountDecimalFor(rule RatingRuleVersion, amountCents int64, quan
 }
 
 // DisplayUnitAmountDecimal is the per-unit price to SHOW on invoices (decimal
-// cents): the stamped nominal configured rate when present (flat usage lines),
+// cents): the stamped nominal configured rate when present (per_unit usage lines),
 // else the effective amount÷quantity rate. This is the single value the
 // dashboard wire form, the hosted DTO, and the PDF all render, so the
-// displayed rate is consistent across surfaces and clean for sub-cent flat
+// displayed rate is consistent across surfaces and clean for sub-cent per_unit
 // rates — $0.000003, not the effective $0.00000333333333 that the line's
 // cent-rounding produces (ADR-054 re-examination). See
 // NominalUnitAmountDecimal for why nominal is stamped, not derived on read.
@@ -678,7 +678,7 @@ func (li InvoiceLineItem) DisplayUnitAmountDecimal() decimal.Decimal {
 // MarshalJSON gives the line one quantity and one unit price on the wire
 // (B5): `quantity` is ExactQuantity as a decimal string, and
 // `unit_amount_decimal` is the full-precision per-unit price in decimal cents
-// from DisplayUnitAmountDecimal (the nominal configured rate on flat usage
+// from DisplayUnitAmountDecimal (the nominal configured rate on per_unit usage
 // lines, else the effective amount÷quantity rate), so a sub-cent rate never
 // collapses to "$0.00" (ADR-054). Both are computed on the fly.
 func (li InvoiceLineItem) MarshalJSON() ([]byte, error) {

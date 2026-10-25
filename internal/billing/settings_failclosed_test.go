@@ -152,7 +152,7 @@ func cancelFixture(settings SettingsReader) (*Engine, domain.Subscription, *mock
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_api": {ID: "rrv_api", RuleKey: "api_calls", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(2)},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(2)},
 		},
 	}
 	invoices := &mockInvoices{}

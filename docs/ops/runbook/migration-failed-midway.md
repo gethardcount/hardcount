@@ -151,6 +151,32 @@ Delete each rule, or put it on a meter with the aggregation it needs. Set
 each meter's aggregation to the one it should bill by. Then run
 `velox migrate` again. Or re-create the database.
 
+## 00210 found prices it does not convert
+
+**Symptom:** a line like this, with one count for each kind of row found:
+
+```
+migration 00210_price_shapes.sql failed: ERROR: migration 00210 renames the price shapes and moves provider costs to cents, and this database has rows it does not convert:
+  3 rating rule version(s)
+  1 customer price override(s)
+  5 provider cost rate(s)
+  12 invoice line(s) priced flat
+```
+
+**Why:** from this release a price's shape has new names (`flat` is
+`per_unit`, an open last tier is `"up_to": null`), a package rounds a part
+package up to a whole one, and a provider cost rate is in cents, not
+dollars. Every row of these tables would need converting, and so would
+every invoice line labelled `flat`. The migration converts nothing, and
+nothing was changed. This release has no upgrade path from Velox 0.8.x, so a
+production database never reaches this step: install fresh (see the v0.9.0
+release notes).
+
+**Fix:** a development database cannot keep these rows. Re-create it (drop
+and create the database, then run `velox-bootstrap`), or point Velox at a
+new one. Never run `docker compose down -v` on a volume another checkout
+uses.
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).

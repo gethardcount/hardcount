@@ -86,16 +86,16 @@ the first time, so the overrides count only on the first apply.
 You need two calls: one makes the price, and one tells the meter which
 events it prices.
 
-1. **Make the price.** This is a rating rule. `flat_amount_cents` is the
-   price of one unit in cents, and can be a fraction: `0.0002` cents per
-   token is $2.00 per million tokens.
+1. **Make the price.** This is a rating rule. `mode: "per_unit"` bills each
+   unit at `unit_amount_cents`, the price of one unit in cents, which can be a
+   fraction: `0.0002` cents per token is $2.00 per million tokens.
 
    ```bash
    RATE_ID=$(curl -s -X POST "$VELOX/v1/rating-rules" \
      -H "Authorization: Bearer $VELOX_KEY" \
      -H "Content-Type: application/json" \
-     -d '{"rule_key": "my_model_input", "name": "My model input", "mode": "flat",
-          "currency": "USD", "flat_amount_cents": "0.0002"}' | jq -r .id)
+     -d '{"rule_key": "my_model_input", "name": "My model input", "mode": "per_unit",
+          "currency": "USD", "unit_amount_cents": "0.0002"}' | jq -r .id)
    echo "$RATE_ID"
    ```
 
@@ -274,7 +274,7 @@ METER_ID=$(curl -s "$VELOX/v1/meters" -H "Authorization: Bearer $VELOX_KEY" \
 # add_price <rule key> <name> <cents per token> <model> <token type> [context tier]
 add_price() {
   rate_id=$(jq -n --arg key "$1" --arg name "$2" --arg cents "$3" --arg cur "$CURRENCY" \
-      '{rule_key: $key, name: $name, mode: "flat", currency: $cur, flat_amount_cents: $cents}' \
+      '{rule_key: $key, name: $name, mode: "per_unit", currency: $cur, unit_amount_cents: $cents}' \
     | curl -s -X POST "$VELOX/v1/rating-rules" \
       -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
       -d @- | jq -r .id)
@@ -332,10 +332,10 @@ CURRENCY=USD   # the currency you installed the recipe in
 # new_version <rule key> <name> <cents per token>
 new_version() {
   jq -n --arg key "$1" --arg name "$2" --arg cents "$3" --arg cur "$CURRENCY" \
-      '{rule_key: $key, name: $name, mode: "flat", currency: $cur, flat_amount_cents: $cents}' \
+      '{rule_key: $key, name: $name, mode: "per_unit", currency: $cur, unit_amount_cents: $cents}' \
     | curl -s -X POST "$VELOX/v1/rating-rules" \
       -H "Authorization: Bearer $VELOX_KEY" -H "Content-Type: application/json" \
-      -d @- | jq -c '{rule_key, version, flat_amount_cents}'
+      -d @- | jq -c '{rule_key, version, unit_amount_cents}'
 }
 new_version sonnet5_input "Claude Sonnet 5 input" 0.0002
 new_version sonnet5_output "Claude Sonnet 5 output" 0.001
@@ -345,7 +345,7 @@ new_version sonnet5_cache_write_1h "Claude Sonnet 5 cache write (1h)" 0.0004
 ```
 
 **You see:** five lines such as
-`{"rule_key":"sonnet5_input","version":2,"flat_amount_cents":"0.0002"}`.
+`{"rule_key":"sonnet5_input","version":2,"unit_amount_cents":"0.0002"}`.
 
 ### Rules you wrote on a raw Claude name
 
@@ -523,25 +523,28 @@ the customer.
    LiteLLM's cost instead of yours
    ([when](integrations/litellm.md#things-to-know)).
 
+   A cost is `unit_cost_cents`, US cents per token, like every `*_cents`
+   field: `0.00012` cents per token is $1.20 per million tokens.
+
    ```bash
-   save_cost() {   # save_cost <token type> <cost per token in dollars>
+   save_cost() {   # save_cost <token type> <cost per token in cents>
      jq -n --arg type "$1" --arg cost "$2" \
          '{provider: "anthropic", model: "claude-sonnet-4.5",
-           token_type: $type, cost_per_token: $cost}' \
+           token_type: $type, unit_cost_cents: $cost}' \
        | curl -s -X PUT "$VELOX/v1/provider-costs" \
          -H "Authorization: Bearer $VELOX_KEY" \
          -H "Content-Type: application/json" \
-         -d @- | jq -c '{id, token_type, cost_per_token}'
+         -d @- | jq -c '{id, token_type, unit_cost_cents}'
    }
-   save_cost input 0.0000012
-   save_cost output 0.0000045
+   save_cost input 0.00012
+   save_cost output 0.00045
    ```
 
    **You see:**
 
    ```text
-   {"id":"vlx_pcr_…","token_type":"input","cost_per_token":"0.0000012"}
-   {"id":"vlx_pcr_…","token_type":"output","cost_per_token":"0.0000045"}
+   {"id":"vlx_pcr_…","token_type":"input","unit_cost_cents":"0.00012"}
+   {"id":"vlx_pcr_…","token_type":"output","unit_cost_cents":"0.00045"}
    ```
 
    The **Provider costs** page lists them.
@@ -554,7 +557,7 @@ the customer.
      -H "Authorization: Bearer $VELOX_KEY" \
      | jq -r '.invoice | "from=\(.billing_period_start | @uri)&to=\(.billing_period_end | @uri)"')
    curl -s "$VELOX/v1/customers/$CUSTOMER_ID/margin?$PERIOD" \
-     -H "Authorization: Bearer $VELOX_KEY" | jq '{revenue_cents, cost_micros, margin_bps}'
+     -H "Authorization: Bearer $VELOX_KEY" | jq '{revenue_cents, cost_cents, margin_bps}'
    ```
 
    **You see,** for a [first invoice](first-invoice.md) made after you
@@ -563,12 +566,12 @@ the customer.
    ```json
    {
      "revenue_cents": 600,
-     "cost_micros": 2100000,
+     "cost_cents": "210",
      "margin_bps": 6500
    }
    ```
 
-   Billed $6.00, cost $2.10 (`cost_micros` is in millionths of a dollar),
+   Billed $6.00, cost $2.10 (`cost_cents` is in cents, as a decimal string),
    and a 65% margin (`margin_bps` is in hundredths of a percent).
 
 The margin covers usage only: base fees, credits and taxes are left out.
@@ -576,7 +579,7 @@ Revenue Velox cannot match to a model is shown apart, in
 `unattributed_revenue_cents`. A token event that names its `provider`,
 `token_type` and `model` but matches no cost rate is counted in
 `unresolved_events`. So is an event whose cost, quantity ×
-`cost_per_token`, is too large to record (about $9.2 trillion or more);
+`unit_cost_cents`, is too large to record (about $9.2 trillion or more);
 it is still billed. While any such event is in the window,
 `margin_bps` is left out. An event sent through the usage API without one
 of those three labels, such as usage on a meter that is not for tokens,

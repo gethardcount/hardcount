@@ -47,12 +47,12 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 		{
 			name: "package",
 			price: func(t *testing.T, lf *liveFixture) {
-				publishCallsRule(t, lf, packageRule("calls_flat", 100, 250, "1.5"))
+				publishCallsRule(t, lf, packageRule("calls_flat", 100, "250"))
 			},
 			events: []event{{qty: "130"}, {qty: "75"}, {qty: "260"}},
 		},
 		{
-			name:   "decimal flat rate, fractional quantities",
+			name:   "decimal per-unit rate, fractional quantities",
 			price:  func(t *testing.T, lf *liveFixture) { publishCallsRule(t, lf, flatRule("calls_flat", "0.0035")) },
 			events: []event{{qty: "1234.5"}, {qty: "0.25"}, {qty: "999999.125"}},
 			cancel: true,
@@ -60,10 +60,10 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 		{
 			name: "multi-dimension: package, graduated and the meter's own rate",
 			price: func(t *testing.T, lf *liveFixture) {
-				pkg := createRule(t, lf, packageRule("model_a_pkg", 50, 120, "0.75"))
+				pkg := createRule(t, lf, packageRule("model_a_pkg", 50, "120.5"))
 				grad := createRule(t, lf, gradRule("model_b_grad", []domain.RatingTier{
-					{UpTo: 200, UnitAmountCents: decimal.RequireFromString("2.5")},
-					{UpTo: 0, UnitAmountCents: decimal.RequireFromString("0.5")},
+					{UpTo: new(int64(200)), UnitAmountCents: decimal.RequireFromString("2.5")},
+					{UpTo: nil, UnitAmountCents: decimal.RequireFromString("0.5")},
 				}))
 				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
 					MeterID: lf.meterID, RatingRuleVersionID: pkg.ID, DimensionMatch: map[string]any{"model": "a"}, Priority: 10,
@@ -82,14 +82,14 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 			name: "graduated customer override",
 			price: func(t *testing.T, lf *liveFixture) {
 				v2 := publishCallsRule(t, lf, gradRule("calls_flat", []domain.RatingTier{
-					{UpTo: 500, UnitAmountCents: decimal.NewFromInt(4)},
-					{UpTo: 0, UnitAmountCents: decimal.NewFromInt(1)},
+					{UpTo: new(int64(500)), UnitAmountCents: decimal.NewFromInt(4)},
+					{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
 				}))
 				o, err := lf.pricingSvc.CreateOverride(lf.ctx, lf.tenantID, pricing.CreateOverrideInput{
 					CustomerID: lf.customerID, RatingRuleVersionID: v2.ID, Mode: domain.PricingGraduated,
-					GraduatedTiers: []domain.RatingTier{
-						{UpTo: 300, UnitAmountCents: decimal.RequireFromString("3.25")},
-						{UpTo: 0, UnitAmountCents: decimal.RequireFromString("0.75")},
+					Tiers: []domain.RatingTier{
+						{UpTo: new(int64(300)), UnitAmountCents: decimal.RequireFromString("3.25")},
+						{UpTo: nil, UnitAmountCents: decimal.RequireFromString("0.75")},
 					},
 					Reason: "negotiated",
 				})
@@ -105,8 +105,8 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 			name: "tax-inclusive tenant, graduated tiers continue across the threshold invoice",
 			price: func(t *testing.T, lf *liveFixture) {
 				publishCallsRule(t, lf, gradRule("calls_flat", []domain.RatingTier{
-					{UpTo: 400, UnitAmountCents: decimal.NewFromInt(7)},
-					{UpTo: 0, UnitAmountCents: decimal.RequireFromString("2.5")},
+					{UpTo: new(int64(400)), UnitAmountCents: decimal.NewFromInt(7)},
+					{UpTo: nil, UnitAmountCents: decimal.RequireFromString("2.5")},
 				}))
 			},
 			events:       []event{{qty: "150"}, {qty: "180"}},
@@ -115,7 +115,7 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 		{
 			name: "test clock",
 			price: func(t *testing.T, lf *liveFixture) {
-				publishCallsRule(t, lf, packageRule("calls_flat", 10, 35, "4"))
+				publishCallsRule(t, lf, packageRule("calls_flat", 10, "0.35"))
 			},
 			events:    []event{{qty: "27"}, {qty: "0.5"}},
 			testClock: true,
@@ -234,16 +234,16 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 }
 
 func flatRule(key, cents string) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.RequireFromString(cents)}
+	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.RequireFromString(cents)}
 }
 
 func gradRule(key string, tiers []domain.RatingTier) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingGraduated, Currency: "USD", GraduatedTiers: tiers}
+	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingGraduated, Currency: "USD", Tiers: tiers}
 }
 
-func packageRule(key string, size, cents int64, overage string) pricing.CreateRatingRuleInput {
+func packageRule(key string, size int64, cents string) pricing.CreateRatingRuleInput {
 	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPackage, Currency: "USD",
-		PackageSize: size, PackageAmountCents: cents, OverageUnitAmountCents: decimal.RequireFromString(overage)}
+		PackageSize: size, PackageAmountCents: decimal.RequireFromString(cents)}
 }
 
 func createRule(t *testing.T, lf *liveFixture, in pricing.CreateRatingRuleInput) domain.RatingRuleVersion {

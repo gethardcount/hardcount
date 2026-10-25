@@ -37,8 +37,8 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 	}
 
 	ruleID := flowStr(call("POST", "/v1/rating-rules", map[string]any{
-		"rule_key": "removed_calls", "name": "Removed calls", "mode": "flat",
-		"currency": "USD", "flat_amount_cents": 10,
+		"rule_key": "removed_calls", "name": "Removed calls", "mode": "per_unit",
+		"currency": "USD", "unit_amount_cents": 10,
 	}).want(t, 201, "create rating rule").body, "id")
 	meterID := flowStr(call("POST", "/v1/meters", map[string]any{
 		"event_name": "removed_calls", "name": "Removed calls", "unit": "call",

@@ -46,8 +46,8 @@ func setupMaxLastEngine(thresholds *domain.BillingThresholds) (*Engine, *thresho
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	mp := engine.pricing.(*mockPricing)
 	mp.rules["rrv_max"] = domain.RatingRuleVersion{
-		ID: "rrv_max", RuleKey: "gpu_peak", Version: 1, Mode: domain.PricingFlat,
-		FlatAmountCents: decimal.NewFromInt(100), Currency: "USD",
+		ID: "rrv_max", RuleKey: "gpu_peak", Version: 1, Mode: domain.PricingPerUnit,
+		UnitAmountCents: decimal.NewFromInt(100), Currency: "USD",
 	}
 	mp.meters["mtr_gpu"] = domain.Meter{ID: "mtr_gpu", Name: "GPU Peak", Unit: "gpus", Aggregation: domain.AggregationMax, RatingRuleVersionID: "rrv_max"}
 	pln := mp.plans["pln_1"]

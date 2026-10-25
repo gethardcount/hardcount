@@ -9,13 +9,13 @@ import (
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
-// cost_per_token is a request decimal with documented limits: required, a
+// unit_cost_cents is a request decimal with documented limits: required, a
 // JSON number or a string holding one, at most 100 characters, 0 or more,
-// under 10^8 dollars, at most 12 decimal places (the column is
-// NUMERIC(20,12)). A value outside them is a 422 naming cost_per_token and
-// nothing is written. Before, Postgres rounded a 13th decimal place away and
-// answered a value of 10^8 or more with an error (a 500), and a missing
-// cost was stored as 0.
+// under 10^10 cents, at most 12 decimal places (the column is
+// NUMERIC(22,12)). A value outside them is a 422 naming unit_cost_cents and
+// nothing is written. Without the check, Postgres would round a 13th
+// decimal place away and answer a value of 10^10 or more with an error (a
+// 500), and a missing cost would be stored as 0.
 //
 // Mutation-verify: drop the domain.CheckDecimal call in the upsert handler →
 // the size and scale cases go red; drop the required check → the absent case
@@ -24,7 +24,7 @@ import (
 func costBody(raw string) string {
 	cost := ""
 	if raw != "" {
-		cost = `,"cost_per_token":` + raw
+		cost = `,"unit_cost_cents":` + raw
 	}
 	return `{"provider":"openai","model":"gpt-4o","token_type":"input"` + cost + `}`
 }
@@ -37,7 +37,7 @@ func TestProviderCostRate_ValidEdgesStoredAsSent(t *testing.T) {
 	for _, tc := range []struct{ raw, want string }{
 		{`"0"`, "0"},
 		{`"0.000000000001"`, "0.000000000001"},
-		{`"99999999.999999999999"`, "99999999.999999999999"},
+		{`"9999999999.999999999999"`, "9999999999.999999999999"},
 		{`"0.0000015"`, "0.0000015"},
 		{`0.0000025`, "0.0000025"},
 		{`"1.500000000000000"`, "1.5"},
@@ -49,13 +49,13 @@ func TestProviderCostRate_ValidEdgesStoredAsSent(t *testing.T) {
 			t.Fatalf("%s: status %d, want 200; body %s", tc.raw, rec.Code, rec.Body.String())
 		}
 		var out struct {
-			CostPerToken string `json:"cost_per_token"`
+			UnitCostCents string `json:"unit_cost_cents"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if out.CostPerToken != tc.want {
-			t.Errorf("%s: stored %s, want %s", tc.raw, out.CostPerToken, tc.want)
+		if out.UnitCostCents != tc.want {
+			t.Errorf("%s: stored %s, want %s", tc.raw, out.UnitCostCents, tc.want)
 		}
 		// The row in Postgres holds the same value.
 		var exact bool
@@ -63,7 +63,7 @@ func TestProviderCostRate_ValidEdgesStoredAsSent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin: %v", err)
 		}
-		err = tx.QueryRowContext(f.ctx, `SELECT cost_per_token = $1::numeric FROM provider_cost_rates`, tc.want).Scan(&exact)
+		err = tx.QueryRowContext(f.ctx, `SELECT unit_cost_cents = $1::numeric FROM provider_cost_rates`, tc.want).Scan(&exact)
 		postgres.Rollback(tx)
 		if err != nil {
 			t.Fatalf("read row: %v", err)
@@ -82,8 +82,8 @@ func TestProviderCostRate_OutOfRangeRefusedNamingTheField(t *testing.T) {
 	for _, raw := range []string{
 		``, // absent
 		`null`,
-		`"100000000"`, // 10^8
-		`"1e8"`,
+		`"10000000000"`, // 10^10
+		`"1e10"`,
 		`"0.0000000000001"`, // 13 places
 		`"1.0000000000001"`,
 		`"-0.1"`,
@@ -97,8 +97,8 @@ func TestProviderCostRate_OutOfRangeRefusedNamingTheField(t *testing.T) {
 			t.Errorf("%s: status %d, want 422; body %s", raw, rec.Code, rec.Body.String())
 			continue
 		}
-		if !strings.Contains(rec.Body.String(), `"param":"cost_per_token"`) {
-			t.Errorf("%s: 422 does not name cost_per_token: %s", raw, rec.Body.String())
+		if !strings.Contains(rec.Body.String(), `"param":"unit_cost_cents"`) {
+			t.Errorf("%s: 422 does not name unit_cost_cents: %s", raw, rec.Body.String())
 		}
 	}
 	if n := f.rateCount(t); n != 0 {

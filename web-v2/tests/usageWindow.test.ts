@@ -92,9 +92,9 @@ test('rangeIncluding runs from the latest usage day to today, in the tenant zone
 })
 
 test('empty windows: margin with nothing in it, usage buckets all zero', () => {
-  assert.equal(marginWindowIsEmpty({ revenue_cents: 0, cost_micros: 0, unresolved_events: 0, by_model: [] }), true)
-  assert.equal(marginWindowIsEmpty({ revenue_cents: 0, cost_micros: 5, unresolved_events: 0, by_model: [{}] }), false)
-  assert.equal(marginWindowIsEmpty({ revenue_cents: 0, cost_micros: 0, unresolved_events: 2, by_model: [] }), false)
+  assert.equal(marginWindowIsEmpty({ revenue_cents: 0, cost_cents: '0', unresolved_events: 0, by_model: [] }), true)
+  assert.equal(marginWindowIsEmpty({ revenue_cents: 0, cost_cents: '0.0005', unresolved_events: 0, by_model: [{}] }), false)
+  assert.equal(marginWindowIsEmpty({ revenue_cents: 0, cost_cents: '0', unresolved_events: 2, by_model: [] }), false)
   assert.equal(usageWindowIsEmpty([{ per_meter: {} }, { per_meter: { m: '0.000000000000' } }]), true)
   assert.equal(usageWindowIsEmpty([{ per_meter: { m: '0' } }, { per_meter: { m: '3' } }]), false)
   assert.equal(usageWindowIsEmpty([]), true)

@@ -104,16 +104,16 @@ func TestCheckDecimal_MessagesNameTheFieldAndTheLimit(t *testing.T) {
 		lim     DecimalLimits
 		message string
 	}{
-		{"1e18", RateLimits, "flat_amount_cents is too large: it must be under 10^18"},
-		{"1e-13", RateLimits, "flat_amount_cents has more than 12 decimal places"},
-		{"100000000", ProviderCostLimits, "flat_amount_cents is too large: it must be under 10^8"},
-		{"-1e26", QuantityLimits, "flat_amount_cents is too large: it must be under 10^26"},
+		{"1e18", RateLimits, "unit_amount_cents is too large: it must be under 10^18"},
+		{"1e-13", RateLimits, "unit_amount_cents has more than 12 decimal places"},
+		{"10000000000", ProviderCostLimits, "unit_amount_cents is too large: it must be under 10^10"},
+		{"-1e26", QuantityLimits, "unit_amount_cents is too large: it must be under 10^26"},
 	}
 	for _, tc := range cases {
-		_, err := CheckDecimal("flat_amount_cents", decimal.RequireFromString(tc.d), tc.lim)
+		_, err := CheckDecimal("unit_amount_cents", decimal.RequireFromString(tc.d), tc.lim)
 		var de *errs.DomainError
-		if !errors.As(err, &de) || de.Field != "flat_amount_cents" || de.Message != tc.message || !errors.Is(err, errs.ErrValidation) {
-			t.Errorf("%s: err = %#v, want a validation error on flat_amount_cents saying %q", tc.d, err, tc.message)
+		if !errors.As(err, &de) || de.Field != "unit_amount_cents" || de.Message != tc.message || !errors.Is(err, errs.ErrValidation) {
+			t.Errorf("%s: err = %#v, want a validation error on unit_amount_cents saying %q", tc.d, err, tc.message)
 		}
 	}
 }

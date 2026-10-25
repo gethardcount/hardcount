@@ -141,19 +141,18 @@ type CustomerPriceOverride struct {
 	// follows the RULE across version publishes. RatingRuleVersionID
 	// records which version the operator was looking at when the
 	// override was created — provenance, never a lookup key.
-	RuleKey                string          `json:"rule_key"`
-	CustomerID             string          `json:"customer_id"`
-	RatingRuleVersionID    string          `json:"rating_rule_version_id"`
-	Mode                   PricingMode     `json:"mode"`
-	FlatAmountCents        decimal.Decimal `json:"flat_amount_cents"`
-	GraduatedTiers         RatingTiers     `json:"graduated_tiers"`
-	PackageSize            int64           `json:"package_size"`
-	PackageAmountCents     int64           `json:"package_amount_cents"`
-	OverageUnitAmountCents decimal.Decimal `json:"overage_unit_amount_cents"`
-	Reason                 string          `json:"reason,omitempty"`
-	Active                 bool            `json:"active"`
-	CreatedAt              time.Time       `json:"created_at"`
-	UpdatedAt              time.Time       `json:"updated_at"`
+	RuleKey             string          `json:"rule_key"`
+	CustomerID          string          `json:"customer_id"`
+	RatingRuleVersionID string          `json:"rating_rule_version_id"`
+	Mode                PricingMode     `json:"mode"`
+	UnitAmountCents     decimal.Decimal `json:"unit_amount_cents"`
+	Tiers               RatingTiers     `json:"tiers"`
+	PackageSize         int64           `json:"package_size"`
+	PackageAmountCents  decimal.Decimal `json:"package_amount_cents"`
+	Reason              string          `json:"reason,omitempty"`
+	Active              bool            `json:"active"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
 }
 
 // ApplyTo patches the override's PRICE onto the resolved rating-rule
@@ -167,10 +166,9 @@ type CustomerPriceOverride struct {
 func (o CustomerPriceOverride) ApplyTo(base RatingRuleVersion) RatingRuleVersion {
 	patched := base
 	patched.Mode = o.Mode
-	patched.FlatAmountCents = o.FlatAmountCents
-	patched.GraduatedTiers = o.GraduatedTiers
+	patched.UnitAmountCents = o.UnitAmountCents
+	patched.Tiers = o.Tiers
 	patched.PackageSize = o.PackageSize
 	patched.PackageAmountCents = o.PackageAmountCents
-	patched.OverageUnitAmountCents = o.OverageUnitAmountCents
 	return patched
 }

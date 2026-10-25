@@ -81,7 +81,7 @@ func newLockOrderRig(t *testing.T) *lockOrderRig {
 func (r *lockOrderRig) defaultPrice(t *testing.T, key string) string {
 	t.Helper()
 	rule, err := r.pricing.CreateRatingRule(r.ctx, r.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key + "_default", Name: key, Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		RuleKey: key + "_default", Name: key, Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create default price %s: %v", key, err)

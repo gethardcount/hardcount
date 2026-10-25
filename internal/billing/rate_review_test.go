@@ -66,9 +66,9 @@ func TestCancelAfterFire_EachMeterContinuesItsOwnTiers(t *testing.T) {
 	engine, subs, usage, pricing, _ := setupEngine()
 	pricing.rules["rrv_storage"] = domain.RatingRuleVersion{
 		ID: "rrv_storage", RuleKey: "storage_gb", Version: 1, Mode: domain.PricingGraduated,
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(20)},
+		Tiers: []domain.RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(20)},
 		},
 	}
 	sub := subs.subs["sub_1"]

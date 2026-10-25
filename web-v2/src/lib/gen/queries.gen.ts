@@ -13948,7 +13948,7 @@ export const getExportUsageEventsCsvUrl = (params: ExportUsageEventsCsvParams,) 
  * both required and may span at most 366 days. `customer_id`,
  * `meter_id` and `dimensions` narrow it like the event list. Columns: id,
  * customer_id, meter_id, quantity, timestamp, idempotency_key,
- * origin, dimensions_json, provider_cost_micros,
+ * origin, dimensions_json, provider_cost_cents (US cents, a decimal),
  * provider_cost_source.
  *
  * Audit row, `EXPORT_INCOMPLETE` marker and formula escaping work

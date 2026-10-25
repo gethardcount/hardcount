@@ -44,8 +44,8 @@ func unmatchedFixtures() (*CustomerUsageService, *fakeSubLister) {
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_1": {
-				ID: "rrv_1", RuleKey: "sonnet_input", Mode: domain.PricingFlat,
-				Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+				ID: "rrv_1", RuleKey: "sonnet_input", Mode: domain.PricingPerUnit,
+				Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 			},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{

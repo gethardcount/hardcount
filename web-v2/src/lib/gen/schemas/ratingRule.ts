@@ -7,7 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { RatingRuleGraduatedTiersItem } from './ratingRuleGraduatedTiersItem';
+import type { PriceTier } from './priceTier';
 import type { RatingRuleLifecycleState } from './ratingRuleLifecycleState';
 import type { RatingRuleMode } from './ratingRuleMode';
 
@@ -17,15 +17,16 @@ export interface RatingRule {
   rule_key?: string;
   name?: string;
   version?: number;
+  /** `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one. */
   mode?: RatingRuleMode;
   currency?: string;
-  /** Per-unit rate in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents. */
-  flat_amount_cents?: string;
-  graduated_tiers?: RatingRuleGraduatedTiersItem[];
+  /** Price per unit in cents, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 units), returned as stored. The limits on a new rate are on `POST /v1/rating-rules`. Invoice line amounts and totals still round to whole cents. */
+  unit_amount_cents?: string;
+  /** Empty (`[]`) unless `mode` is `graduated`. */
+  tiers?: PriceTier[];
   lifecycle_state?: RatingRuleLifecycleState;
   package_size?: number;
-  package_amount_cents?: number;
-  /** Per-unit overage rate in cents, as a decimal string. */
-  overage_unit_amount_cents?: string;
+  /** Price of one package in cents, as a decimal string (e.g. "0.2" = $0.002). */
+  package_amount_cents?: string;
   created_at?: string;
 }

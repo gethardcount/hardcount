@@ -55,8 +55,8 @@ func TestOneAggregationPerMeter_EveryPathUnchanged(t *testing.T) {
 					if shape == "two pricing rules and the meter's own price" {
 						a := createRule(t, lf, flatRule("model_a", "2"))
 						b := createRule(t, lf, gradRule("model_b", []domain.RatingTier{
-							{UpTo: 3, UnitAmountCents: decimal.NewFromInt(5)},
-							{UpTo: 0, UnitAmountCents: decimal.NewFromInt(1)},
+							{UpTo: new(int64(3)), UnitAmountCents: decimal.NewFromInt(5)},
+							{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
 						}))
 						keys[a.ID], keys[b.ID] = "model_a", "model_b"
 						for _, r := range []struct {
@@ -190,233 +190,235 @@ func writePreview(out *strings.Builder, stage string, p billing.PreviewResult) {
 var firedThrough = regexp.MustCompile(`through [A-Z][a-z]{2} \d{1,2}, \d{4} \d{2}:\d{2} UTC`)
 
 // oneAggregationGolden is each case's output, recorded on main at 1717f4a8.
+// ADR-130 §3 (PR-3) renamed the flat shape per_unit; the line label
+// mode=flat → mode=per_unit is the only edit to this text since.
 var oneAggregationGolden = map[string]string{
 	"sum, two pricing rules and the meter's own price, period close": `open preview:
-  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=11 unit=2 amount=23 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:45}
 open window preview:
-  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=11 unit=2 amount=23 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:45}
 open live: unbilled=45
 threshold invoices: 1
 after fire preview:
-  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=11 unit=1 amount=11 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
   warning A spend-threshold invoice already billed this period through <the threshold invoice's end>; this estimate shows only what is left. Tiered prices and max or last-value meters may differ on the actual invoice.
 after fire window preview:
-  line usage "Calls (a)" qty=12 unit=2 amount=24 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=12 unit=2 amount=24 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=22 unit=2 amount=34 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=20 unit=1 amount=20 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=20 unit=1 amount=20 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:78}
 after fire live: unbilled=33
 invoice threshold: subtotal=45 total=45
-  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=flat rule=model_a
+  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=per_unit rule=model_a
   line usage "Calls (b)" qty=11 unit=2 amount=23 mode=graduated rule=model_b
-  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=per_unit rule=calls_flat
 invoice subscription_cycle: subtotal=33 total=33
-  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=flat rule=model_a
+  line usage "Calls (a)" qty=6 unit=2 amount=12 mode=per_unit rule=model_a
   line usage "Calls (b)" qty=11 unit=1 amount=11 mode=graduated rule=model_b
-  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=10 unit=1 amount=10 mode=per_unit rule=calls_flat
 `,
 	"sum, the meter's own price only, period close": `open preview:
-  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:27}
 open window preview:
-  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:27}
 open live: unbilled=27
 threshold invoices: 1
 after fire preview:
-  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:27}
   warning A spend-threshold invoice already billed this period through <the threshold invoice's end>; this estimate shows only what is left. Tiered prices and max or last-value meters may differ on the actual invoice.
 after fire window preview:
-  line usage "Calls (calls)" qty=54 unit=1 amount=54 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=54 unit=1 amount=54 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:54}
 after fire live: unbilled=27
 invoice threshold: subtotal=27 total=27
-  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=per_unit rule=calls_flat
 invoice subscription_cycle: subtotal=27 total=27
-  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=27 unit=1 amount=27 mode=per_unit rule=calls_flat
 `,
 	"count, two pricing rules and the meter's own price, period close": `open preview:
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=2 unit=5 amount=10 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:16}
 open window preview:
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=2 unit=5 amount=10 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:16}
 open live: unbilled=16
 threshold invoices: 1
 after fire preview:
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=2 unit=3 amount=6 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:12}
   warning A spend-threshold invoice already billed this period through <the threshold invoice's end>; this estimate shows only what is left. Tiered prices and max or last-value meters may differ on the actual invoice.
 after fire window preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=4 unit=4 amount=16 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=4 unit=1 amount=4 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=4 unit=1 amount=4 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:28}
 after fire live: unbilled=12
 invoice threshold: subtotal=16 total=16
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a
   line usage "Calls (b)" qty=2 unit=5 amount=10 mode=graduated rule=model_b
-  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=per_unit rule=calls_flat
 invoice subscription_cycle: subtotal=12 total=12
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a
   line usage "Calls (b)" qty=2 unit=3 amount=6 mode=graduated rule=model_b
-  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=2 unit=1 amount=2 mode=per_unit rule=calls_flat
 `,
 	"count, the meter's own price only, period close": `open preview:
-  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:6}
 open window preview:
-  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:6}
 open live: unbilled=6
 threshold invoices: 1
 after fire preview:
-  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:6}
   warning A spend-threshold invoice already billed this period through <the threshold invoice's end>; this estimate shows only what is left. Tiered prices and max or last-value meters may differ on the actual invoice.
 after fire window preview:
-  line usage "Calls (calls)" qty=12 unit=1 amount=12 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=12 unit=1 amount=12 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:12}
 after fire live: unbilled=6
 invoice threshold: subtotal=6 total=6
-  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=per_unit rule=calls_flat
 invoice subscription_cycle: subtotal=6 total=6
-  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=6 unit=1 amount=6 mode=per_unit rule=calls_flat
 `,
 	"max, two pricing rules and the meter's own price, period close": `open preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 open window preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 open live: unbilled=33
 threshold invoices: 0
 after fire preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 after fire window preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 after fire live: unbilled=33
 invoice subscription_cycle: subtotal=33 total=33
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat
 `,
 	"max, two pricing rules and the meter's own price, immediate cancel": `open preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 open window preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 open live: unbilled=33
 threshold invoices: 0
 after fire preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 after fire window preview:
-  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=4 unit=2 amount=8 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=6 unit=3 amount=18 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:33}
 after fire live: unbilled=33
 invoice subscription_cancel: subtotal=33 total=33
-  line usage "Calls (a) - canceled mid-period" qty=4 unit=2 amount=8 mode=flat rule=model_a
+  line usage "Calls (a) - canceled mid-period" qty=4 unit=2 amount=8 mode=per_unit rule=model_a
   line usage "Calls (b) - canceled mid-period" qty=6 unit=3 amount=18 mode=graduated rule=model_b
-  line usage "Calls (calls) - canceled mid-period" qty=7 unit=1 amount=7 mode=flat rule=calls_flat
+  line usage "Calls (calls) - canceled mid-period" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat
 `,
 	"max, the meter's own price only, period close": `open preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 open window preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 open live: unbilled=7
 threshold invoices: 0
 after fire preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 after fire window preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 after fire live: unbilled=7
 invoice subscription_cycle: subtotal=7 total=7
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat
 `,
 	"last, two pricing rules and the meter's own price, period close": `open preview:
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=5 unit=3 amount=17 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:28}
 open window preview:
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=5 unit=3 amount=17 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:28}
 open live: unbilled=28
 threshold invoices: 0
 after fire preview:
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=5 unit=3 amount=17 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:28}
 after fire window preview:
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a match=model=a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a match=model=a
   line usage "Calls (b)" qty=5 unit=3 amount=17 mode=graduated rule=model_b match=model=b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:28}
 after fire live: unbilled=28
 invoice subscription_cycle: subtotal=28 total=28
-  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=flat rule=model_a
+  line usage "Calls (a)" qty=2 unit=2 amount=4 mode=per_unit rule=model_a
   line usage "Calls (b)" qty=5 unit=3 amount=17 mode=graduated rule=model_b
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat
 `,
 	"last, the meter's own price only, period close": `open preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 open window preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 open live: unbilled=7
 threshold invoices: 0
 after fire preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 after fire window preview:
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat match=
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat match=
   total {Currency:USD AmountCents:7}
 after fire live: unbilled=7
 invoice subscription_cycle: subtotal=7 total=7
-  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=flat rule=calls_flat
+  line usage "Calls (calls)" qty=7 unit=1 amount=7 mode=per_unit rule=calls_flat
 `,
 }

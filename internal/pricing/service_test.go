@@ -396,9 +396,9 @@ func TestCreateRatingRule_Flat(t *testing.T) {
 	rule, err := svc.CreateRatingRule(ctx, "tenant1", CreateRatingRuleInput{
 		RuleKey:         "api_calls",
 		Name:            "API Calls",
-		Mode:            domain.PricingFlat,
+		Mode:            domain.PricingPerUnit,
 		Currency:        "usd",
-		FlatAmountCents: decimal.NewFromInt(500),
+		UnitAmountCents: decimal.NewFromInt(500),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -426,16 +426,16 @@ func TestCreateRatingRule_Graduated(t *testing.T) {
 		Name:     "Storage GB",
 		Mode:     domain.PricingGraduated,
 		Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(10)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},
+		Tiers: []domain.RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(10)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
 		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(rule.GraduatedTiers) != 2 {
-		t.Errorf("got %d tiers, want 2", len(rule.GraduatedTiers))
+	if len(rule.Tiers) != 2 {
+		t.Errorf("got %d tiers, want 2", len(rule.Tiers))
 	}
 }
 
@@ -449,7 +449,7 @@ func TestCreateRatingRule_Package(t *testing.T) {
 		Mode:               domain.PricingPackage,
 		Currency:           "USD",
 		PackageSize:        1000,
-		PackageAmountCents: 2000,
+		PackageAmountCents: decimal.NewFromInt(2000),
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -461,10 +461,10 @@ func TestCreateRatingRule_AutoVersioning(t *testing.T) {
 	ctx := context.Background()
 
 	v1, _ := svc.CreateRatingRule(ctx, "tenant1", CreateRatingRuleInput{
-		RuleKey: "api_calls", Name: "V1", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(100),
+		RuleKey: "api_calls", Name: "V1", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
 	})
 	v2, _ := svc.CreateRatingRule(ctx, "tenant1", CreateRatingRuleInput{
-		RuleKey: "api_calls", Name: "V2", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(200),
+		RuleKey: "api_calls", Name: "V2", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(200),
 	})
 
 	if v1.Version != 1 {
@@ -483,9 +483,9 @@ func TestCreateRatingRule_Validation(t *testing.T) {
 		name  string
 		input CreateRatingRuleInput
 	}{
-		{"missing rule_key", CreateRatingRuleInput{Name: "test", Mode: domain.PricingFlat, Currency: "USD"}},
-		{"missing name", CreateRatingRuleInput{RuleKey: "x", Mode: domain.PricingFlat, Currency: "USD"}},
-		{"missing currency", CreateRatingRuleInput{RuleKey: "x", Name: "test", Mode: domain.PricingFlat}},
+		{"missing rule_key", CreateRatingRuleInput{Name: "test", Mode: domain.PricingPerUnit, Currency: "USD"}},
+		{"missing name", CreateRatingRuleInput{RuleKey: "x", Mode: domain.PricingPerUnit, Currency: "USD"}},
+		{"missing currency", CreateRatingRuleInput{RuleKey: "x", Name: "test", Mode: domain.PricingPerUnit}},
 		{"invalid mode", CreateRatingRuleInput{RuleKey: "x", Name: "test", Mode: "bad", Currency: "USD"}},
 		{"graduated no tiers", CreateRatingRuleInput{RuleKey: "x", Name: "test", Mode: domain.PricingGraduated, Currency: "USD"}},
 		{"package zero size", CreateRatingRuleInput{RuleKey: "x", Name: "test", Mode: domain.PricingPackage, Currency: "USD", PackageSize: 0}},
@@ -512,17 +512,17 @@ func TestCreateRatingRule_ZeroRatesAllowed_NegativeRejected(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "free-flat", Name: "free", Mode: domain.PricingFlat, Currency: "USD",
-		FlatAmountCents: decimal.Zero,
+		RuleKey: "free-flat", Name: "free", Mode: domain.PricingPerUnit, Currency: "USD",
+		UnitAmountCents: decimal.Zero,
 	}); err != nil {
 		t.Errorf("zero flat rate must be allowed (free dimension): %v", err)
 	}
 
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
 		RuleKey: "free-tier", Name: "free tier", Mode: domain.PricingGraduated, Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 1_000_000, UnitAmountCents: decimal.Zero},         // included allowance
-			{UpTo: 0, UnitAmountCents: decimal.NewFromFloat(0.0002)}, // then $2/M
+		Tiers: []domain.RatingTier{
+			{UpTo: new(int64(1_000_000)), UnitAmountCents: decimal.Zero}, // included allowance
+			{UpTo: nil, UnitAmountCents: decimal.NewFromFloat(0.0002)},   // then $2/M
 		},
 	}); err != nil {
 		t.Errorf("zero-price first tier must be allowed (included allowance): %v", err)
@@ -530,20 +530,20 @@ func TestCreateRatingRule_ZeroRatesAllowed_NegativeRejected(t *testing.T) {
 
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
 		RuleKey: "free-pkg", Name: "free pkg", Mode: domain.PricingPackage, Currency: "USD",
-		PackageSize: 1000, PackageAmountCents: 0,
+		PackageSize: 1000, PackageAmountCents: decimal.NewFromInt(0),
 	}); err != nil {
 		t.Errorf("zero-priced package must be allowed: %v", err)
 	}
 
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "neg-flat", Name: "neg", Mode: domain.PricingFlat, Currency: "USD",
-		FlatAmountCents: decimal.NewFromInt(-1),
+		RuleKey: "neg-flat", Name: "neg", Mode: domain.PricingPerUnit, Currency: "USD",
+		UnitAmountCents: decimal.NewFromInt(-1),
 	}); err == nil {
 		t.Error("negative flat rate must be rejected")
 	}
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
 		RuleKey: "neg-tier", Name: "neg tier", Mode: domain.PricingGraduated, Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{{UpTo: 0, UnitAmountCents: decimal.NewFromInt(-1)}},
+		Tiers: []domain.RatingTier{{UpTo: nil, UnitAmountCents: decimal.NewFromInt(-1)}},
 	}); err == nil {
 		t.Error("negative tier rate must be rejected")
 	}
@@ -922,8 +922,8 @@ func TestUpdatePlan_ImmutabilityGuard_ADR034(t *testing.T) {
 func seedMeterAndRule(t *testing.T, svc *Service, tenantID string) (meterID, rrvID string) {
 	t.Helper()
 	rule, err := svc.CreateRatingRule(context.Background(), tenantID, CreateRatingRuleInput{
-		RuleKey: "tokens_in", Name: "Input tokens", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
+		RuleKey: "tokens_in", Name: "Input tokens", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
 	})
 	if err != nil {
 		t.Fatalf("seed rating rule: %v", err)
@@ -1070,8 +1070,8 @@ func TestListMeterPricingRulesByMeter(t *testing.T) {
 
 	// Seed a second rating rule so we can attach two pricing rules.
 	rule2, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "tokens_cached", Name: "Cached", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		RuleKey: "tokens_cached", Name: "Cached", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("second rating rule: %v", err)
@@ -1136,7 +1136,7 @@ func TestCreateRatingRule_TierShapeValidation(t *testing.T) {
 	mk := func(tiers []domain.RatingTier) CreateRatingRuleInput {
 		return CreateRatingRuleInput{
 			RuleKey: "tiered", Name: "Tiered", Mode: domain.PricingGraduated,
-			Currency: "USD", GraduatedTiers: tiers,
+			Currency: "USD", Tiers: tiers,
 		}
 	}
 	unit := decimal.NewFromInt(10)
@@ -1144,26 +1144,26 @@ func TestCreateRatingRule_TierShapeValidation(t *testing.T) {
 	// Non-monotonic up_to: accepted pre-ADR-070 (the qty=1 probe never
 	// reached tier 2), then hard-failed billOnePeriod at cycle close.
 	if _, err := svc.CreateRatingRule(ctx, "t1", mk([]domain.RatingTier{
-		{UpTo: 100, UnitAmountCents: unit}, {UpTo: 50, UnitAmountCents: unit}, {UpTo: 0, UnitAmountCents: unit},
+		{UpTo: new(int64(100)), UnitAmountCents: unit}, {UpTo: new(int64(50)), UnitAmountCents: unit}, {UpTo: nil, UnitAmountCents: unit},
 	})); err == nil {
 		t.Error("non-monotonic up_to accepted; want 422")
 	}
 	// Catch-all not last: dead tiers after it.
 	if _, err := svc.CreateRatingRule(ctx, "t1", mk([]domain.RatingTier{
-		{UpTo: 0, UnitAmountCents: unit}, {UpTo: 100, UnitAmountCents: unit},
+		{UpTo: nil, UnitAmountCents: unit}, {UpTo: new(int64(100)), UnitAmountCents: unit},
 	})); err == nil {
 		t.Error("mid-table catch-all accepted; want 422")
 	}
 	// Bounded final tier: quantity past the bound is unpriceable and
 	// blocks invoice generation.
 	if _, err := svc.CreateRatingRule(ctx, "t1", mk([]domain.RatingTier{
-		{UpTo: 100, UnitAmountCents: unit},
+		{UpTo: new(int64(100)), UnitAmountCents: unit},
 	})); err == nil {
 		t.Error("bounded final tier accepted; want 422 (requires a catch-all)")
 	}
 	// Valid shape.
 	if _, err := svc.CreateRatingRule(ctx, "t1", mk([]domain.RatingTier{
-		{UpTo: 100, UnitAmountCents: unit}, {UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},
+		{UpTo: new(int64(100)), UnitAmountCents: unit}, {UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
 	})); err != nil {
 		t.Errorf("valid tier table rejected: %v", err)
 	}
@@ -1175,15 +1175,15 @@ func TestCreateRatingRule_CurrencyGuardWithActiveOverrides(t *testing.T) {
 	ctx := context.Background()
 
 	v1, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "gpu", Name: "GPU", Mode: domain.PricingFlat,
-		Currency: "usd", FlatAmountCents: decimal.NewFromInt(100),
+		RuleKey: "gpu", Name: "GPU", Mode: domain.PricingPerUnit,
+		Currency: "usd", UnitAmountCents: decimal.NewFromInt(100),
 	})
 	if err != nil {
 		t.Fatalf("create v1: %v", err)
 	}
 	if _, err := svc.CreateOverride(ctx, "t1", CreateOverrideInput{
 		CustomerID: "cus_1", RatingRuleVersionID: v1.ID,
-		Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(80),
+		Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(80),
 	}); err != nil {
 		t.Fatalf("create override: %v", err)
 	}
@@ -1191,15 +1191,15 @@ func TestCreateRatingRule_CurrencyGuardWithActiveOverrides(t *testing.T) {
 	// Currency change while an override references the key: the
 	// override's bare cents would be silently reinterpreted in EUR.
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "gpu", Name: "GPU EUR", Mode: domain.PricingFlat,
-		Currency: "EUR", FlatAmountCents: decimal.NewFromInt(100),
+		RuleKey: "gpu", Name: "GPU EUR", Mode: domain.PricingPerUnit,
+		Currency: "EUR", UnitAmountCents: decimal.NewFromInt(100),
 	}); err == nil {
 		t.Error("currency change with active override accepted; want 409")
 	}
 	// Same currency: publishes fine (version 2).
 	v2, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "gpu", Name: "GPU v2", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(120),
+		RuleKey: "gpu", Name: "GPU v2", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(120),
 	})
 	if err != nil {
 		t.Fatalf("same-currency publish: %v", err)
@@ -1209,14 +1209,14 @@ func TestCreateRatingRule_CurrencyGuardWithActiveOverrides(t *testing.T) {
 	}
 	// Without overrides a currency change is allowed: new key, no override.
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "cpu", Name: "CPU", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(10),
+		RuleKey: "cpu", Name: "CPU", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(10),
 	}); err != nil {
 		t.Fatalf("create cpu v1: %v", err)
 	}
 	if _, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "cpu", Name: "CPU EUR", Mode: domain.PricingFlat,
-		Currency: "EUR", FlatAmountCents: decimal.NewFromInt(10),
+		RuleKey: "cpu", Name: "CPU EUR", Mode: domain.PricingPerUnit,
+		Currency: "EUR", UnitAmountCents: decimal.NewFromInt(10),
 	}); err != nil {
 		t.Errorf("currency change WITHOUT overrides rejected: %v (should be allowed — periods pin their version)", err)
 	}
@@ -1230,14 +1230,14 @@ func TestCreateOverride_ResolvesRuleInTenant(t *testing.T) {
 	// Unknown / cross-tenant version id: clean 422, not a raw FK error.
 	if _, err := svc.CreateOverride(ctx, "t1", CreateOverrideInput{
 		CustomerID: "cus_1", RatingRuleVersionID: "vlx_rrv_nope",
-		Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5),
+		Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5),
 	}); err == nil {
 		t.Error("override against unknown rule accepted; want 422")
 	}
 
 	v1, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "tokens", Name: "Tokens", Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+		RuleKey: "tokens", Name: "Tokens", Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)
@@ -1246,7 +1246,7 @@ func TestCreateOverride_ResolvesRuleInTenant(t *testing.T) {
 	// fake's tenant check).
 	if _, err := svc.CreateOverride(ctx, "t2", CreateOverrideInput{
 		CustomerID: "cus_1", RatingRuleVersionID: v1.ID,
-		Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5),
+		Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5),
 	}); err == nil {
 		t.Error("cross-tenant rule id accepted; want 422")
 	}
@@ -1255,9 +1255,9 @@ func TestCreateOverride_ResolvesRuleInTenant(t *testing.T) {
 	if _, err := svc.CreateOverride(ctx, "t1", CreateOverrideInput{
 		CustomerID: "cus_1", RatingRuleVersionID: v1.ID,
 		Mode: domain.PricingGraduated,
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 100, UnitAmountCents: decimal.NewFromInt(10)},
-			{UpTo: 50, UnitAmountCents: decimal.NewFromInt(5)},
+		Tiers: []domain.RatingTier{
+			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(10)},
+			{UpTo: new(int64(50)), UnitAmountCents: decimal.NewFromInt(5)},
 		},
 	}); err == nil {
 		t.Error("non-monotonic override tiers accepted; want 422")
@@ -1266,7 +1266,7 @@ func TestCreateOverride_ResolvesRuleInTenant(t *testing.T) {
 	// Valid: derives rule_key from the referenced version.
 	o, err := svc.CreateOverride(ctx, "t1", CreateOverrideInput{
 		CustomerID: "cus_1", RatingRuleVersionID: v1.ID,
-		Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(5),
+		Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5),
 	})
 	if err != nil {
 		t.Fatalf("create override: %v", err)
@@ -1286,8 +1286,8 @@ func TestUpdateMeter_DefaultBinding(t *testing.T) {
 	ctx := context.Background()
 
 	rule, err := svc.CreateRatingRule(ctx, "t1", CreateRatingRuleInput{
-		RuleKey: "catchall", Name: "catch-all", Mode: domain.PricingFlat, Currency: "USD",
-		FlatAmountCents: decimal.NewFromFloat(0.0001),
+		RuleKey: "catchall", Name: "catch-all", Mode: domain.PricingPerUnit, Currency: "USD",
+		UnitAmountCents: decimal.NewFromFloat(0.0001),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)

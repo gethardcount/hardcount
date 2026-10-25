@@ -206,7 +206,8 @@ func TestThresholdInArrearsBase_LegacyFireWithBase_BilledOnce(t *testing.T) {
 // it. It was rewritten once on purpose, by the review fix that moved the
 // in_arrears base off the fire: the threshold invoices lost their base line,
 // and the close and the cancel gained it (3000c full, 2400c prorated). Every
-// usage line stayed the same.
+// usage line stayed the same. Since ADR-130 §3 (PR-3) the label of a line
+// priced per unit is mode=per_unit, not mode=flat: the only edit since.
 //
 // The cases cover each reader of the threshold watermark: the fire's line
 // build (usage only, a max bucket left for the close, a prepaid in_advance
