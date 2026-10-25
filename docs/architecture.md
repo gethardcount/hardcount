@@ -25,7 +25,7 @@ your app → usage → billing → invoice → payment → paid
    period end plus `INVOICE_GRACE_PERIOD` (default 1 hour). It runs every
    hour, or every 5 minutes when `APP_ENV=local`.
 3. **`billing`** asks `usage` for the period's totals per meter and
-   `pricing` for the rating rules, adds the plan's flat fees, and builds the
+   `pricing` for the plan's prices, adds the plan's flat fees, and builds the
    invoice through `invoice`.
 4. **`invoice`** finalizes it. Tax comes from the tenant's tax provider
    ([Tax providers](#tax-providers)); if tax cannot be worked out yet, the
@@ -74,7 +74,7 @@ internal/                     (abridged — one package per domain)
   domain/                   — pure domain models, zero deps
   auth/                     — API key auth (3 stored key types plus dashboard sessions, per-route permissions)
   customer/                 — customer CRUD + billing profiles
-  pricing/                  — meters, rating rules, plans, price overrides
+  pricing/                  — meters, plans and their prices, price overrides
   subscription/             — lifecycle (created trialing or active, or as a draft until activated; trialing → active → canceled)
   usage/                    — event ingestion + multi-dim aggregation
   invoice/                  — lifecycle (draft → finalized → paid, or voided / uncollectible) + PDF

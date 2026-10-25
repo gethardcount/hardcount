@@ -69,8 +69,15 @@ Before you send usage, read [the retry rules](#sending-usage-safely).
 |---|---|---|
 | `POST` | `/v1/recipes/{key}/instantiate` | Create a ready-made pricing setup (meter, prices and plan) in one call |
 | `POST` | `/v1/meters` | Create a meter (a counter for one kind of usage) |
-| `POST` | `/v1/meters/{id}/pricing-rules` | Add a pricing rule that prices events by their dimensions |
-| `GET` | `/v1/plans` | List plans |
+| `POST` | `/v1/plans` | Create a plan, with its usage prices |
+| `POST` | `/v1/plans/{id}/prices` | Add a price to a plan: a meter, the labels its events must carry, and a rate |
+| `PATCH` | `/v1/plans/{id}/prices/{price_id}` | Change a price's rate |
+| `GET` | `/v1/plans` | List plans, with their prices |
+
+**A price belongs to a plan.** Two plans can price one meter differently.
+When an event fits more than one price of the plan, the price with the most
+labels takes it. On a plan no subscription has used, a price change applies
+at once; on a used plan, from each subscriber's next billing period.
 
 **A price has one `mode`:**
 

@@ -16,15 +16,6 @@ first. Every shipped change, with its date, is in the
 - **Done:** each prepaid credit carries its own currency and pays only
   invoices in that currency. Grant and adjust take a `currency`
   ([ADR-129](adr/129-credit-carries-its-own-currency.md)).
-- **Done:** while a draft, trialing or active subscription uses a meter,
-  Velox refuses three edits that would reprice the billing period already
-  open. A new price version applies from the next period
-  ([how](ai-pricing.md#change-a-price)). The three edits:
-  - editing or deleting a pricing rule;
-  - a new rule that could take usage from a price that bills it now;
-  - pointing the default price at another price, or removing it.
-
-  Per-plan usage prices (below) replace this check before the release.
 - **Done:** a meter has one aggregation, which every price of it bills
   under. It is fixed once the meter has a usage event; held usage does
   not count. A meter's `key` is now
@@ -45,13 +36,17 @@ first. Every shipped change, with its date, is in the
   signatures must change.
 - **Planned:** the commands in the [first-invoice guide](first-invoice.md)
   run in CI, so a change that breaks them fails.
-- **Planned: usage prices set per plan.** Today a usage price is set on the
-  meter, so two plans that charge different token rates need two meters.
-  In v0.9.0, each plan sets its own price for each meter, and a price edit
-  takes effect at each subscriber's next billing period. The pricing API
-  changes. The design is
-  [ADR-130](adr/130-usage-prices-belong-to-the-plan.md). v0.9.0 is
-  released after this ships.
+- **Done: usage prices are set per plan.** A price belongs to a plan, so
+  two plans can charge different rates for one meter. A price change applies
+  at once on a plan no one has subscribed to, and from each subscriber's next
+  billing period otherwise, on a test clock too. A customer's negotiated
+  rate names one plan price. Rating rules, meter pricing rules and a meter's
+  default price are gone
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
+- **Planned:** recipe files written as plan prices; an install translates
+  today's files. A base fee change that waits for each subscriber's next
+  period may follow
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
 
 Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
 
