@@ -24,7 +24,9 @@ import (
 //
 //   - On a plan no subscription has used, a write applies at once: the price
 //     keeps one version, from the beginning of time ('-infinity'), and the
-//     write replaces every earlier version and its clock stamps.
+//     write replaces every earlier version and its clock stamps. Every other
+//     price of the plan keeps only its latest version, from the beginning of
+//     time too (settleNeverUsedTx).
 //   - On a used plan, a write appends a version that takes effect when it
 //     commits: valid_from is clock_timestamp() read after the plan lock, and
 //     at least 1 microsecond after the plan's latest valid_from, so versions
@@ -239,10 +241,12 @@ type testClock struct {
 	frozen time.Time
 }
 
-// lockClocksTx reads every test clock of the account FOR SHARE, in id order
-// (ADR-130 §8 step 5). FOR SHARE orders the write against a clock advance
-// (MarkAdvancing, the only writer of frozen_time) and against a teardown,
-// which takes its clock FOR UPDATE first. Row-level security scopes the read
+// lockClocksTx reads every test clock of the account FOR SHARE, in id order,
+// before the plan lock (ADR-130 §8). FOR SHARE orders the write against a
+// clock advance (MarkAdvancing, the only writer of frozen_time) and against
+// a teardown, which takes its clock FOR UPDATE first. Every writer that takes
+// a clock row exclusively takes it first and holds no plan, so reading the
+// clocks before the plan makes no cycle. Row-level security scopes the read
 // to the tenant and the mode, so in live mode it reads nothing: a test clock
 // is always test mode.
 func lockClocksTx(ctx context.Context, tx *sql.Tx) ([]testClock, error) {
@@ -270,9 +274,17 @@ func (s *PostgresStore) WritePrice(ctx context.Context, tenantID, planID string,
 	}
 	defer postgres.Rollback(tx)
 
-	// Lock order (ADR-130 §8): the plan, FOR UPDATE as a writer of plan
-	// content; the meter, FOR KEY SHARE through the new price's foreign key;
-	// the test clocks, FOR SHARE; then the override rows a removal ends.
+	// Lock order (ADR-130 §8): the test clocks, FOR SHARE, before the plan;
+	// the plan, FOR UPDATE as a writer of plan content; the meter, FOR KEY
+	// SHARE through the new price's foreign key; then the override rows a
+	// removal ends. The clocks come first because a teardown holds its clock
+	// FOR UPDATE while it waits for subscription rows, and a subscription
+	// writer holding one of those rows waits for its plans: a price write
+	// that held the plan while it waited for the clock would close the cycle.
+	clocks, err := lockClocksTx(ctx, tx)
+	if err != nil {
+		return PriceWrite{}, err
+	}
 	if _, err := lockPlanTx(ctx, tx, planID); err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return PriceWrite{}, errs.NotFound("plan")
@@ -311,14 +323,14 @@ func (s *PostgresStore) WritePrice(ctx context.Context, tenantID, planID string,
 		return PriceWrite{}, fmt.Errorf("unknown price change %d", ch.Op)
 	}
 
-	clocks, err := lockClocksTx(ctx, tx)
-	if err != nil {
-		return PriceWrite{}, err
-	}
-
 	shape := ch.Shape
 	if ch.Op == PriceRemove {
 		shape = target.price.PriceShape
+	}
+	if !used {
+		if err := settleNeverUsedTx(ctx, tx, planID); err != nil {
+			return PriceWrite{}, err
+		}
 	}
 	v, err := writeVersionTx(ctx, tx, tenantID, planID, target.price.ID, used, ch.Op == PriceRemove, ch.Shape, clocks)
 	if err != nil {
@@ -431,6 +443,41 @@ func insertPriceTx(ctx context.Context, tx *sql.Tx, tenantID, planID, meterID st
 		return domain.PlanPrice{}, fmt.Errorf("insert price: %w", err)
 	}
 	return p, nil
+}
+
+// settleNeverUsedTx puts every price of a never-used plan at its latest
+// version from the beginning of time, with no clock stamps (ADR-130 §5). A
+// plan is never-used again only after a test-clock teardown deleted its
+// subscriptions, and then it can hold versions written while it was used. A
+// write to a never-used plan applies at once, so no older version may stay
+// in force at an earlier pin: a price removed while the plan was used would
+// otherwise still take events at those pins, beside a price added now that
+// ties with it. No period of the plan has been priced, so nothing billed
+// read the versions it drops.
+func settleNeverUsedTx(ctx context.Context, tx *sql.Tx, planID string) error {
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM plan_price_versions v
+		USING plan_prices p
+		WHERE p.id = v.price_id AND p.plan_id = $1
+		  AND v.id <> (SELECT l.id FROM plan_price_versions l WHERE l.price_id = v.price_id ORDER BY l.valid_from DESC LIMIT 1)`,
+		planID); err != nil {
+		return fmt.Errorf("drop the older price versions of plan %s: %w", planID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM plan_price_version_clocks c
+		USING plan_price_versions v, plan_prices p
+		WHERE c.version_id = v.id AND p.id = v.price_id AND p.plan_id = $1`,
+		planID); err != nil {
+		return fmt.Errorf("drop the clock stamps of plan %s: %w", planID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE plan_price_versions v SET valid_from = '-infinity'
+		FROM plan_prices p
+		WHERE p.id = v.price_id AND p.plan_id = $1 AND v.valid_from <> '-infinity'`,
+		planID); err != nil {
+		return fmt.Errorf("put the prices of plan %s from the beginning of time: %w", planID, err)
+	}
+	return nil
 }
 
 // writtenVersion is the version a write appended or put in place.

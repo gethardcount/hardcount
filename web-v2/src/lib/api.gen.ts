@@ -7013,7 +7013,12 @@ export interface components {
          * @description The answer to a price write: the price, and when the write applies.
          *     `now`: no subscription has used the plan, so it applies at once.
          *     `next_period`: each subscriber pays the new content from their next
-         *     billing period; the current period keeps the price it started with.
+         *     billing period; the current period keeps the prices it started with.
+         *     A period is priced by the prices in force at its start, and a
+         *     subscription that starts without a trial has a first period from
+         *     midnight of its first day. So one that starts later on the day of
+         *     the write gets it from its second period: its first period still
+         *     bills a price removed that day and does not bill one added that day.
          */
         PriceWrite: components["schemas"]["PlanPrice"] & {
             /** @enum {string} */
@@ -8188,6 +8193,13 @@ export interface components {
         };
         CustomerUsage: {
             customer_id: string;
+            /**
+             * @description The window the response covers. With no `from` and `to`
+             *     (`current_billing_cycle`), each subscription is rated over its
+             *     own current billing period, and the period runs from the
+             *     earliest start to the latest end of those periods. A meter's
+             *     totals and daily `buckets` cover its own subscription's period.
+             */
             period: {
                 /** Format: date-time */
                 from: string;

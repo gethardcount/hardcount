@@ -170,7 +170,7 @@ func (s *Service) GetCustomerUsage(
 
 ### Period resolution
 
-- **Default (no `from`/`to`):** look at the customer's primary active subscription (most recent `current_period_start`). Use its `current_period_start` and `current_period_end`. If multiple active subs with divergent cycles, pick the latest start; emit a warning if cycle bounds disagree.
+- **Default (no `from`/`to`):** each subscription is rated over its own current period (ADR-130 §10). The response's period runs from the earliest start to the latest end of those periods, and each meter's daily buckets are read over its own subscription's period. With no rated subscription, the period is the current cycle of the subscription that started last.
 - **Explicit:** parse `from` / `to`, validate `from < to`, validate window ≤ 1 year (configurable via env at v2).
 - **Cap to 1 year** because the LATERAL JOIN cost grows linearly with row count; one year of high-volume usage events on a multi-dim meter is already 100M+ rows for active tenants. We surface this as a 400 rather than silently degrading.
 

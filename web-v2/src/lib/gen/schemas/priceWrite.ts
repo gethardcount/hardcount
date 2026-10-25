@@ -15,7 +15,12 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * The answer to a price write: the price, and when the write applies.
  * `now`: no subscription has used the plan, so it applies at once.
  * `next_period`: each subscriber pays the new content from their next
- * billing period; the current period keeps the price it started with.
+ * billing period; the current period keeps the prices it started with.
+ * A period is priced by the prices in force at its start, and a
+ * subscription that starts without a trial has a first period from
+ * midnight of its first day. So one that starts later on the day of
+ * the write gets it from its second period: its first period still
+ * bills a price removed that day and does not bill one added that day.
  */
 export type PriceWrite = PlanPrice & {
   effective: PriceWriteEffective;

@@ -316,7 +316,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   // each subscriber's next period.
   await page.goto(`/plans/${plan.id}`)
   await expect(card(page, 'Usage prices (1)').getByTestId('plan-prices-notice')).toHaveText(
-    "Price changes apply from each subscriber's next billing period. The current period keeps the price it started with.")
+    "Price changes apply from each subscriber's next billing period. The current period keeps the price it started with, and so does the first period of a subscription that starts later the same day.")
 
   // Control: the list rate, 2 cents a call.
   expect(usageRate(await expectUpcomingInvoiceMatchesAPI(page, subscription.id))).toEqual([2])

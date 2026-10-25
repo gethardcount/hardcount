@@ -19,6 +19,7 @@ test('plan lock names the server count, singular and plural, same words as the r
 
 test('price changes say when they apply, before saving', () => {
   assert.match(planPricesNotice(true), /next billing period/)
+  assert.match(planPricesNotice(true), /first period of a subscription that starts later the same day/)
   assert.match(planPricesNotice(false), /apply at once/)
 })
 
@@ -37,6 +38,7 @@ test('removing a price names the overrides it ends', () => {
     "It is removed at once. Its events go to another price of the plan that matches them, or aren't billed if none does. Adding the price back later doesn't bring the overrides back.",
   )
   assert.match(priceRemoveSentence(true, 0), /^From each subscriber's next billing period/)
+  assert.match(priceRemoveSentence(true, 0), /first period of a subscription that starts later the same day/)
   assert.match(priceRemoveSentence(true, 1), /ends 1 customer override of it/)
   assert.match(priceRemoveSentence(true, 3), /ends 3 customer overrides of it/)
   assert.match(priceRemoveSentence(true, null), /ends any customer override/)

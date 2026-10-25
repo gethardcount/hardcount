@@ -4180,7 +4180,13 @@ type CustomerUsage struct {
 	} `json:"buckets"`
 	CustomerId string               `json:"customer_id"`
 	Meters     []CustomerUsageMeter `json:"meters"`
-	Period     struct {
+
+	// Period The window the response covers. With no `from` and `to`
+	// (`current_billing_cycle`), each subscription is rated over its
+	// own current billing period, and the period runs from the
+	// earliest start to the latest end of those periods. A meter's
+	// totals and daily `buckets` cover its own subscription's period.
+	Period struct {
 		From   time.Time                 `json:"from"`
 		Source CustomerUsagePeriodSource `json:"source"`
 		To     time.Time                 `json:"to"`

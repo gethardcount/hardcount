@@ -117,7 +117,8 @@ takes the plan's currency.
 `effective` says when it applies. On a plan no subscription has used it is
 `now`. On a used plan it is `next_period`: each subscriber pays it from
 their next billing period, and the period already open keeps the prices it
-started with. Add one price for each kind of token you sell. Other plans
+started with. A subscription that starts later that day pays it from its
+second period ([Change a price](#change-a-price)). Add one price for each kind of token you sell. Other plans
 that price the `tokens` meter are not changed.
 
 ## How Velox picks the price for an event
@@ -167,6 +168,12 @@ it started, so:
   (`effective: next_period`). The period already open keeps the price it
   started with. A customer on a test clock follows the clock: the change
   applies from the clock's next period.
+- A subscription that starts without a trial has a first period from
+  midnight of its first day. So one that starts later on the day of a
+  change gets the change from its second period. Its first period pays the
+  old rate, still bills a price removed that day, and does not bill a price
+  added that day. For a new customer to get the new prices at once,
+  subscribe them the next day in your billing timezone, or on a new plan.
 - A customer's negotiated rate (a price override) keeps applying when the
   price's rate changes. Removing the price ends it, and the answer lists the
   overrides it ended.

@@ -198,11 +198,12 @@ func TestE2E_PlanPrices_PriceWriteAgainstFirstSubscription(t *testing.T) {
 		admin := testutil.AdminPool(t)
 		calls := r.meter("calls", "sum")
 		plan, ids := r.plan("pro", perUnit(calls, "1", nil))
-		r.clock("c3", time.Now().UTC()) // a clock, so the write waits at the clocks after its plan lock
 		cust := r.customer("pp-c3w", "")
-		h := hold(t, admin, `SELECT 1 FROM test_clocks WHERE tenant_id = $1 FOR UPDATE`, r.tenantID)
+		// The price row held, so the write waits at its version insert (the
+		// foreign key's KEY SHARE) after its plan lock.
+		h := hold(t, admin, `SELECT 1 FROM plan_prices WHERE id = $1 FOR UPDATE`, ids[0])
 		edit := r.async(http.MethodPatch, "/v1/plans/"+plan+"/prices/"+ids[0], map[string]any{"mode": "per_unit", "unit_amount_cents": "5"})
-		testutil.WaitForLockWaiter(t, context.Background(), admin, clocksLockSQL)
+		testutil.WaitForLockWaiter(t, context.Background(), admin, "INSERT INTO plan_price_versions")
 		r.seq++
 		sub := r.async(http.MethodPost, "/v1/subscriptions", map[string]any{
 			"code": "pp-c3w", "display_name": "C3", "customer_id": cust, "billing_time": "anniversary",
@@ -305,7 +306,7 @@ func TestE2E_PlanPrices_PriceWriteAgainstClockAdvance(t *testing.T) {
 // TestE2E_PlanPrices_SwapAgainstPriceWrites (C10): an immediate swap from
 // plan A to plan B against a price write on each, many times. The swap takes
 // both plans FOR KEY SHARE in ascending id after its subscription row; a
-// price write takes one plan FOR UPDATE, then the test clocks. No cycle: no
+// price write takes the test clocks, then one plan FOR UPDATE. No cycle: no
 // request fails with a deadlock (40P01 answers 500).
 func TestE2E_PlanPrices_SwapAgainstPriceWrites(t *testing.T) {
 	r := newPPRig(t, "c10")

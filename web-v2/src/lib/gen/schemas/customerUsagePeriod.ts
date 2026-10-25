@@ -9,6 +9,13 @@
  */
 import type { CustomerUsagePeriodSource } from './customerUsagePeriodSource';
 
+/**
+ * The window the response covers. With no `from` and `to`
+ * (`current_billing_cycle`), each subscription is rated over its
+ * own current billing period, and the period runs from the
+ * earliest start to the latest end of those periods. A meter's
+ * totals and daily `buckets` cover its own subscription's period.
+ */
 export type CustomerUsagePeriod = {
   from: string;
   to: string;

@@ -224,25 +224,31 @@ func TestE2E_PlanPrices_NeverUsedAgainAfterTeardown(t *testing.T) {
 // while the plan was used keeps its old version before the removal. Once a
 // teardown leaves the plan never-used, a write applies at once, so it puts
 // every price of the plan at its latest content from the beginning of time,
-// a removed price included (ADR-130 §5). An add that ties with the removed
-// price then takes its events at every pin: in wall time and on a clock that
-// had a stamp for the removal.
+// with no clock stamps, a removed price included (ADR-130 §5). An add that
+// ties with the removed price then takes its events at every pin, and a
+// price edited while the plan was used bills its latest rate: in wall time
+// and on a clock that had stamps for the edit and the removal.
 //
 // Mutation: replace only the written price's versions, and the removed
 // price's old version is in force at the new subscribers' first period
-// pins, ties with the added price and wins by age.
+// pins, ties with the added price and wins by age; the edited price bills
+// its old rate in wall time. Keep the other prices' clock stamps, and on
+// the clock the edited price takes no part (its only version starts at the
+// stamp).
 func TestE2E_PlanPrices_NeverUsedAgainForgetsRemovedPrices(t *testing.T) {
 	r := newPPRig(t, "never used removed")
 	tokens := r.meter("tokens", "sum")
-	plan, ids := r.plan("pro", perUnit(tokens, "1", map[string]string{"model": "a"}))
-	removed := ids[0]
+	calls := r.meter("calls", "sum")
+	plan, ids := r.plan("pro", perUnit(tokens, "1", map[string]string{"model": "a"}), perUnit(calls, "1", nil))
+	removed, edited := ids[0], ids[1]
 	frozen := time.Now().UTC().AddDate(0, 0, -45).Truncate(time.Second)
 	clk := r.clock("used", frozen)
 	r.clockSub("pp-nr", clk, plan)
 	other := r.clock("other", time.Now().UTC().AddDate(0, 0, -20).Truncate(time.Second))
+	r.editTo(plan, edited, "3", "next_period")
 	r.must(time.Time{}, http.MethodDelete, "/v1/plans/"+plan+"/prices/"+removed, nil, http.StatusOK)
-	if n := r.count(`SELECT count(*) FROM plan_price_version_clocks WHERE test_clock_id = $1`, other); n != 1 {
-		t.Fatalf("stamps for the other clock = %d, want 1 (the removal's)", n)
+	if n := r.count(`SELECT count(*) FROM plan_price_version_clocks WHERE test_clock_id = $1`, other); n != 2 {
+		t.Fatalf("stamps for the other clock = %d, want 2 (the edit's and the removal's)", n)
 	}
 	r.must(time.Time{}, http.MethodDelete, "/v1/test-clocks/"+clk, nil, http.StatusOK)
 
@@ -255,15 +261,20 @@ func TestE2E_PlanPrices_NeverUsedAgainForgetsRemovedPrices(t *testing.T) {
 		WHERE p.plan_id = $1 AND v.valid_from <> '-infinity'`, plan); n != 0 {
 		t.Errorf("versions not from the beginning of time after the never-used write = %d, want 0", n)
 	}
+	if n := r.count(`SELECT count(*) FROM plan_price_version_clocks WHERE test_clock_id = $1`, other); n != 0 {
+		t.Errorf("stamps for the other clock after the never-used write = %d, want 0", n)
+	}
 	dims := map[string]string{"model": "a", "token_type": "input"}
 
 	wallSub, w0, w1 := r.subscribe(time.Time{}, r.customer("pp-nr-wall", ""), plan)
 	r.ingest(time.Time{}, "pp-nr-wall", "tokens", 10, recent(w0), dims)
+	r.ingest(time.Time{}, "pp-nr-wall", "calls", 10, recent(w0), nil)
 	r.run(w1.Add(time.Hour))
-	wantUsage(t, "wall time: the added price", r.cycle(wallSub, w0), map[string]int64{added: 90})
+	wantUsage(t, "wall time: the added price and the edited rate", r.cycle(wallSub, w0), map[string]int64{added: 90, edited: 30})
 
 	clockSub, c0, c1 := r.clockSub("pp-nr-clk", other, plan)
 	r.ingest(time.Time{}, "pp-nr-clk", "tokens", 10, c0.Add(time.Hour), dims)
+	r.ingest(time.Time{}, "pp-nr-clk", "calls", 10, c0.Add(time.Hour), nil)
 	r.advance(other, c1.Add(time.Hour))
-	wantUsage(t, "the other clock: the added price", r.cycle(clockSub, c0), map[string]int64{added: 90})
+	wantUsage(t, "the other clock: the added price and the edited rate", r.cycle(clockSub, c0), map[string]int64{added: 90, edited: 30})
 }

@@ -21,7 +21,7 @@ export function planLockedSentence(liveSubscriptions: number): string {
 // the operator saves.
 export function planPricesNotice(used: boolean): string {
   return used
-    ? "Price changes apply from each subscriber's next billing period. The current period keeps the price it started with."
+    ? "Price changes apply from each subscriber's next billing period. The current period keeps the price it started with, and so does the first period of a subscription that starts later the same day."
     : 'No one has subscribed to this plan yet, so price changes apply at once.'
 }
 
@@ -39,7 +39,7 @@ export function priceWriteToast(w: { effective: 'now' | 'next_period'; removed?:
 export function priceRemoveSentence(used: boolean, overrides: number | null): string {
   // The events it took go to the plan's next most specific price for them.
   const when = used
-    ? "From each subscriber's next billing period, its events go to another price of the plan that matches them, or aren't billed if none does. The current period keeps it."
+    ? "From each subscriber's next billing period, its events go to another price of the plan that matches them, or aren't billed if none does. The current period keeps it, and so does the first period of a subscription that starts later the same day."
     : "It is removed at once. Its events go to another price of the plan that matches them, or aren't billed if none does."
   const ends = overrides === null
     ? ' It also ends any customer override of it.'

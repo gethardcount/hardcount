@@ -95,7 +95,9 @@ type CustomerUsageResult struct {
 	Warnings      []string                    `json:"warnings"`
 	// Buckets is the daily-grain time series powering the customer-usage
 	// chart. One entry per UTC day in [period.from, period.to), missing
-	// days zero-filled so chart consumers don't have to gap-fill. Each
+	// days zero-filled so chart consumers don't have to gap-fill. With no
+	// explicit window, a meter's quantities are read over its own
+	// subscription's current period, the window its totals cover. Each
 	// bucket carries per-meter quantities — the frontend stacks them or
 	// flattens depending on the meter cardinality. Bucket quantities are raw
 	// SUM(quantity) per meter and include usage no price matched, so they
@@ -191,7 +193,11 @@ type CustomerUsageBucket struct {
 //     current period exactly as its close would bill it now (windows,
 //     floors, threshold watermark, ladder); with an explicit window, an
 //     estimate at its current-period prices.
-//  5. Per-currency totals roll-up, warnings collection, subscription
+//  5. With no window, the period becomes the earliest start to the latest
+//     end of the rated subscriptions' current periods, and each meter's
+//     daily buckets are read over its own subscription's period, so the
+//     chart shows the usage the totals rated.
+//  6. Per-currency totals roll-up, warnings collection, subscription
 //     summary.
 func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID string, period CustomerUsagePeriod) (CustomerUsageResult, error) {
 	customerID = strings.TrimSpace(customerID)
@@ -232,6 +238,10 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 		rows     []domain.RatedUsage
 		meterIDs []string
 		seen     = map[string]bool{}
+		// reads are the windows the chart reads: the explicit window for
+		// every meter, or each subscription's current period for its own
+		// meters, the window its totals were rated over.
+		reads []bucketRead
 	)
 	for _, sub := range activeSubs {
 		var rated domain.RatedSubscription
@@ -248,6 +258,26 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 			if !seen[id] {
 				seen[id] = true
 				meterIDs = append(meterIDs, id)
+			}
+		}
+		if source != "explicit" && len(rated.MeterIDs) > 0 && sub.CurrentBillingPeriodStart != nil && sub.CurrentBillingPeriodEnd != nil {
+			reads = append(reads, bucketRead{meterIDs: rated.MeterIDs, from: *sub.CurrentBillingPeriodStart, to: *sub.CurrentBillingPeriodEnd})
+		}
+	}
+	switch {
+	case source == "explicit":
+		reads = []bucketRead{{meterIDs: meterIDs, from: from, to: to}}
+	case len(reads) > 0:
+		// Each subscription is rated over its own current period, so the
+		// response covers all of them: from the earliest start to the
+		// latest end.
+		from, to = reads[0].from, reads[0].to
+		for _, rd := range reads[1:] {
+			if rd.from.Before(from) {
+				from = rd.from
+			}
+			if rd.to.After(to) {
+				to = rd.to
 			}
 		}
 	}
@@ -273,7 +303,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	// vanishes, the rest stays.
 	buckets := []CustomerUsageBucket{}
 	if len(meterIDs) > 0 {
-		dailyRows, err := s.usage.AggregateDailyBuckets(ctx, tenantID, customerID, meterIDs, from, to)
+		dailyRows, err := s.readBuckets(ctx, tenantID, customerID, reads)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("daily bucket aggregation failed: %v", err))
 		} else {
@@ -290,6 +320,25 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 		Warnings:      nilToEmptyStrings(warnings),
 		Buckets:       buckets,
 	}, nil
+}
+
+// bucketRead is one window of the chart's read: meterIDs over [from, to).
+type bucketRead struct {
+	meterIDs []string
+	from, to time.Time
+}
+
+// readBuckets reads the daily rows of each window.
+func (s *CustomerUsageService) readBuckets(ctx context.Context, tenantID, customerID string, reads []bucketRead) ([]DailyBucketRow, error) {
+	var out []DailyBucketRow
+	for _, rd := range reads {
+		got, err := s.usage.AggregateDailyBuckets(ctx, tenantID, customerID, rd.meterIDs, rd.from, rd.to)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	return out, nil
 }
 
 // composeDailyBuckets fills missing UTC-day buckets in [from, to) with
@@ -318,7 +367,7 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 	for cursor := start; cursor.Before(end); cursor = cursor.Add(24 * time.Hour) {
 		bucket := CustomerUsageBucket{BucketStart: cursor, PerMeter: map[string]decimal.Decimal{}}
 		for _, r := range byDay[cursor] {
-			bucket.PerMeter[r.MeterID] = r.Quantity
+			bucket.PerMeter[r.MeterID] = bucket.PerMeter[r.MeterID].Add(r.Quantity)
 		}
 		out = append(out, bucket)
 	}
@@ -326,7 +375,8 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 }
 
 // resolvePeriod decides the [from, to) window to query. Default is the
-// primary active subscription's current cycle. Explicit ?from=&to= must
+// primary active subscription's current cycle; Get widens it to every rated
+// subscription's current period. Explicit ?from=&to= must
 // have from < to and span at most one calendar year (to ≤ from + 1y).
 //
 // Returns a DomainError so the handler maps to 422 with the right code.
