@@ -63,8 +63,9 @@ func WithLivemode(ctx context.Context, live bool) context.Context {
 
 // Livemode reads the livemode flag from ctx. An unset flag is a bug at the
 // entry point, so it is reported (see reportUnsetLivemode): tests panic, and
-// production logs a warning and returns true. True matches the database,
-// which also reads an unset app.livemode as live.
+// production logs a warning and returns true. True matches the database: the
+// RLS policies and the livemode insert trigger also read an unset
+// app.livemode as live.
 func Livemode(ctx context.Context) bool {
 	p, ok := ctx.Value(livemodeCtxKey{}).(*bool)
 	if !ok || p == nil {
