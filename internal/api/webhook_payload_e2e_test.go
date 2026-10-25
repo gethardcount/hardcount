@@ -477,6 +477,20 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 	if ev.Data["triggered_by"] != "operator" {
 		t.Errorf("subscription.collection_resumed triggered_by = %v, want operator", ev.Data["triggered_by"])
 	}
+	// Again, with nothing to undo: 200 with the subscription as it is, and
+	// no event, since nothing changed.
+	unchanged := getSub(subID)
+	for _, again := range []struct{ what, path string }{
+		{"resume collection again", base + "/pause-collection"},
+		{"clear scheduled cancel again", base + "/scheduled-cancel"},
+	} {
+		if body := call("DELETE", again.path, flowReq{}).want(t, 200, again.what).body; body["updated_at"] != unchanged["updated_at"] {
+			t.Errorf("%s: updated_at %v, want %v (nothing changed)", again.what, body["updated_at"], unchanged["updated_at"])
+		}
+		if extra := events.next(again.what); len(extra) != 0 {
+			t.Errorf("%s queued %v, want none", again.what, extra)
+		}
+	}
 
 	added := call("POST", base+"/items", flowReq{body: map[string]any{"plan_id": extra, "quantity": 2}}).want(t, 201, "add item").body
 	addedID := flowStr(added, "id")

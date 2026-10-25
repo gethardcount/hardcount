@@ -1505,6 +1505,67 @@ func TestHandler_ClearScheduledCancel_FiresEvent(t *testing.T) {
 	}
 }
 
+// TestHandler_NothingToUndo_SendsNoEvent: resuming collection that is not
+// paused, or clearing a cancel that is not scheduled, answers 200 with the
+// subscription and changes nothing. So it sends no event and writes no audit
+// entry: a receiver that acts on subscription.collection_resumed or
+// .cancel_cleared must not act on a change that did not happen.
+func TestHandler_NothingToUndo_SendsNoEvent(t *testing.T) {
+	cases := []struct {
+		name   string
+		path   string
+		call   func(h *Handler, w http.ResponseWriter, r *http.Request)
+		absent string
+	}{
+		{"resume collection, not paused", "/pause-collection", (*Handler).resumeCollection, domain.EventSubscriptionCollectionResumed},
+		{"clear scheduled cancel, none scheduled", "/scheduled-cancel", (*Handler).clearScheduledCancel, domain.EventSubscriptionCancelCleared},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tenantID := "t1"
+			store := newMemStore()
+			subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
+			before, err := store.Get(ctx, tenantID, subID)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+
+			dispatcher := &capturingDispatcher{}
+			audits := &capturingAudit{}
+			h := NewHandler(NewService(store, nil))
+			h.SetEventDispatcher(dispatcher)
+			h.SetAuditLogger(audits)
+
+			req := httptest.NewRequest(http.MethodDelete, "/subscriptions/"+subID+tc.path, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", subID)
+			req = req.WithContext(context.WithValue(
+				context.WithValue(ctx, chi.RouteCtxKey, rctx),
+				auth.TestTenantIDKey(), tenantID,
+			))
+			rr := httptest.NewRecorder()
+			tc.call(h, rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
+			}
+			var got domain.Subscription
+			if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if got.ID != subID || !got.UpdatedAt.Equal(before.UpdatedAt) {
+				t.Errorf("response: id %s updated_at %v, want %s unchanged at %v", got.ID, got.UpdatedAt, subID, before.UpdatedAt)
+			}
+			if len(dispatcher.events) != 0 {
+				t.Errorf("events sent %v, want none (%s for a change that did not happen)", eventTypes(dispatcher.events), tc.absent)
+			}
+			if len(audits.entries) != 0 {
+				t.Errorf("audit entries %v, want none", audits.actions())
+			}
+		})
+	}
+}
+
 // TestHandler_EndTrial_FiresEvent covers the operator-driven trial end:
 // POST /end-trial flips a trialing sub to active, fires
 // subscription.trial_ended with triggered_by="operator".
