@@ -35,7 +35,7 @@ func TestCancel_PausedSub_FinalInvoiceStaysDraft(t *testing.T) {
 			store := subscription.NewPostgresStore(db)
 			if _, err := store.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{
 				Behavior: domain.PauseCollectionKeepAsDraft,
-			}); err != nil {
+			}, nil); err != nil {
 				t.Fatalf("pause collection: %v", err)
 			}
 

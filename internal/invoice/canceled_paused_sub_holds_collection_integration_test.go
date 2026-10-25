@@ -67,7 +67,7 @@ func TestCanceledPausedSub_PauseStillHoldsItsInvoices(t *testing.T) {
 
 	// Negative control: resuming collection releases the queued invoice, so
 	// the sweep check above can see it.
-	if _, err := subs.ClearPauseCollection(r.ctx, r.tenantID, subID); err != nil {
+	if _, err := subs.ClearPauseCollection(r.ctx, r.tenantID, subID, nil); err != nil {
 		t.Fatalf("resume collection: %v", err)
 	}
 	if !r.sweepLists(t, queued.ID) {

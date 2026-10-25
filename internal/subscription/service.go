@@ -138,8 +138,11 @@ type Service struct {
 	// pause and cancel wait for it; see SetInvoiceGrace.
 	invoiceGrace time.Duration
 	resolver     clock.Resolver
-	events       domain.EventDispatcher
-	audit        AuditLogger
+	// No event dispatcher: the service sends no webhook itself. A writer's
+	// events are queued in its transaction by the store
+	// (PostgresStore.SetOutboxEnqueuer); the operator's own are sent by
+	// the handler.
+	audit AuditLogger
 }
 
 // AuditLogger is the narrow audit-write interface the service uses to
@@ -210,34 +213,6 @@ func (s *Service) SetProfileReader(r ProfileCurrencyReader) {
 // router.go.
 func (s *Service) SetPlanReader(r PlanReader) {
 	s.plans = r
-}
-
-// SetEventDispatcher wires the outbound-webhook dispatcher used by
-// the trial-expiry scan paths (ProcessExpiredTrialsForClock +
-// ProcessExpiredTrials) to fire `subscription.trial_ended` events
-// when status flips at trial_end_at. Engine auto-flip path emits
-// the same event from billing/engine.go; this setter brings the
-// catchup-orchestrator and wall-clock-cron paths into parity so
-// webhook consumers see one event per trial transition regardless
-// of which path activated the sub.
-func (s *Service) SetEventDispatcher(d domain.EventDispatcher) {
-	s.events = d
-}
-
-// dispatchEvent enqueues an outbound webhook event and LOGS on failure rather
-// than silently dropping it. Once the enqueue commits the dispatcher delivers
-// durably (ADR-040 outbox); a non-nil error means the enqueue INSERT failed and
-// the event is lost — make that visible (no-silent-fallbacks) instead of the
-// prior `_ =` swallow. In-tx atomicity with the state change (DispatchTx) is the
-// deferred follow-up; this only closes the silent-error vector.
-func (s *Service) dispatchEvent(ctx context.Context, tenantID, eventType string, payload map[string]any) {
-	if s.events == nil {
-		return
-	}
-	if err := s.events.Dispatch(ctx, tenantID, eventType, payload); err != nil {
-		slog.ErrorContext(ctx, "failed to enqueue webhook event",
-			"event_type", eventType, "tenant_id", tenantID, "error", err)
-	}
 }
 
 // SetBiller wires the billing engine for the in_advance first-invoice
@@ -2768,7 +2743,7 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 		pc.ResumesAt = &ts
 	}
 
-	sub, err := s.store.SetPauseCollection(ctx, tenantID, id, pc)
+	sub, err := s.store.SetPauseCollection(ctx, tenantID, id, pc, s.resumeAudit())
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -2837,7 +2812,7 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 			return nil
 		}
 	}
-	_, outcome, err := s.store.SetDunningPause(ctx, tenantID, id, invoiceID, auditTx)
+	_, outcome, err := s.store.SetDunningPause(ctx, tenantID, id, invoiceID, auditTx, s.resumeAudit())
 	if err != nil {
 		return false, err
 	}
@@ -2846,8 +2821,10 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 
 // ResumeCollection clears any active collection-pause. Idempotent — a row
 // without an active pause returns unchanged, with resumed false, so the
-// caller announces nothing. Distinct from Resume (which flips status from
-// paused back to active).
+// caller announces nothing. A pause that had already lifted (a payment
+// released it, or its date came) is resumed as the scheduled resumer would
+// resume it, with that trigger, and resumed is false too. Distinct from
+// Resume (which flips status from paused back to active).
 //
 // Its one caller is the operator (handler). The scheduled resumers write
 // their own row (triggered_by "schedule", or "payment" for a dunning pause
@@ -2859,9 +2836,11 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
 		return domain.Subscription{}, false, err
 	}
-	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id)
-	if errors.Is(err, ErrNotPaused) {
-		// Idempotent for the operator: nothing changed, nothing announced.
+	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id, s.resumeAudit())
+	if errors.Is(err, ErrNotPaused) || errors.Is(err, ErrPauseLifted) {
+		// Idempotent for the operator: nothing was paused, so the operator
+		// announces nothing. A lifted pause's resume was announced by the
+		// store, with its own trigger.
 		sub, err = s.store.Get(ctx, tenantID, id)
 		return sub, false, err
 	}
@@ -3249,12 +3228,11 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 
 // ProcessExpiredPauseCollectionsForClock is the catchup-orchestrator
 // entry point that scans clock-pinned subs whose
-// pause_collection_resumes_at has passed in simulated time, clears the
-// pause, writes audit (triggered_by=schedule), and dispatches
-// `subscription.collection_resumed`. Runs as a catchup phase AFTER
-// cycle billing, and the store query skips a sub that still owes a close
-// before resumes_at: that close bills the pause as it stood at the
-// period's end, so the pause must still be on the row when it runs.
+// pause_collection_resumes_at has passed in simulated time and resumes
+// each (resumeListedPauses). Runs as a catchup phase AFTER cycle billing,
+// and the store query skips a sub that still owes a close before
+// resumes_at: that close bills the pause as it stood at the period's end,
+// so the pause must still be on the row when it runs.
 //
 // Stripe-parity rationale: Stripe resumes collection AT resumes_at,
 // not at the next cycle close. The pre-fix gate inside billOnePeriod
@@ -3267,69 +3245,7 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired pause collections: %w", err)}
 	}
-	var (
-		processed int
-		batchErrs []error
-	)
-	for _, sub := range expired {
-		// The resume's instant is the CONTRACTED resumes_at, not wherever
-		// the advance happened to land (same split as trial flips, boundary
-		// cancels, and ADR-097: contractual facts stamp their promised
-		// instant). Pre-fix a Sep 4 auto-resume swept by an advance to
-		// Oct 2 stamped resumed_at/sim_effective_at = Oct 2 — an event
-		// consumer asking "when did collection resume" got a date up to
-		// the whole advance-span late. Fallback to frozen is defensive
-		// (the scan only returns rows with a due resumes_at).
-		resumeAt := frozen
-		if sub.PauseCollection != nil && sub.PauseCollection.ResumesAt != nil {
-			resumeAt = *sub.PauseCollection.ResumesAt
-		}
-		// Override the INSTANT while keeping the CLOCK: WithEffectiveNow
-		// deliberately clears the clock id (it means "time from no clock I
-		// can name"), which stripped sim_effective_at/test_clock_id off the
-		// resume's audit row and cost it the test-clock chip. This phase
-		// runs inside a named clock's catchup — WithSim keeps the pair.
-		bound := clock.WithSim(s.bindForSub(ctx, tenantID, sub.ID), clock.Sim{At: resumeAt, TestClockID: clockID})
-		cleared, err := s.store.ClearPauseCollection(bound, tenantID, sub.ID)
-		if errors.Is(err, ErrNotPaused) {
-			// Another clearer (a sibling leader, an operator) got there
-			// first: it announced the resume; we announce nothing.
-			slog.InfoContext(bound, "pause collection already cleared — skipping resume announcement", "subscription_id", sub.ID)
-			continue
-		}
-		if err != nil {
-			batchErrs = append(batchErrs, fmt.Errorf("clear pause %s: %w", sub.ID, err))
-			continue
-		}
-		triggeredBy := scheduledResumeTrigger(sub)
-		if s.audit != nil {
-			_ = s.audit.Log(bound, tenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       domain.SubAuditCollectionResumed,
-				"customer_id":  cleared.CustomerID,
-				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": triggeredBy,
-			})
-		}
-		if s.events != nil {
-			s.dispatchEvent(bound, tenantID, domain.EventSubscriptionCollectionResumed, domain.SubscriptionWebhookData(cleared, map[string]any{
-				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": triggeredBy,
-			}))
-		}
-		processed++
-	}
-	return processed, batchErrs
-}
-
-// scheduledResumeTrigger names what lifted a pause the scheduled resumer
-// clears: "payment" for a dunning pause, whose resumes_at only the payment
-// of the invoice it was set for sets (ReleaseDunningPauseTx);
-// "schedule" for an operator's timed pause.
-func scheduledResumeTrigger(listed domain.Subscription) string {
-	if listed.PauseCollection != nil && listed.PauseCollection.SetBy == domain.PauseSetByDunning {
-		return "payment"
-	}
-	return "schedule"
+	return s.resumeListedPauses(ctx, expired)
 }
 
 // ProcessExpiredPauseCollections is the wall-clock cron counterpart —
@@ -3346,47 +3262,57 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired pause collections: %w", err)}
 	}
+	return s.resumeListedPauses(ctx, expired)
+}
+
+// resumeListedPauses resumes each lifted pause a resumer listed. The clear
+// is a compare-and-set on the pause as listed (Store.ResumeLiftedPause):
+// the "Collection resumed" row and subscription.collection_resumed commit
+// with it, triggered_by "schedule" for an operator's timed pause or
+// "payment" for a dunning pause, resumed_at the CONTRACTED resumes_at (on
+// a test clock, also the audit row's simulated instant), not when the scan
+// ran. When another writer got to the row after the list (a sibling
+// leader, the operator, a new pause), the clear misses and the row is
+// skipped: that writer announced what it did.
+func (s *Service) resumeListedPauses(ctx context.Context, listed []domain.Subscription) (int, []error) {
 	var (
 		processed int
 		batchErrs []error
 	)
-	for _, sub := range expired {
-		// Contracted instant, same rationale as the clock path above. On
-		// the cron this is at most one tick behind wall now, but the
-		// principle holds: resumed_at is when the resume was promised.
-		resumeAt := now
-		if sub.PauseCollection != nil && sub.PauseCollection.ResumesAt != nil {
-			resumeAt = *sub.PauseCollection.ResumesAt
-		}
-		cleared, err := s.store.ClearPauseCollection(ctx, sub.TenantID, sub.ID)
+	for _, sub := range listed {
+		// The store binds a test-clock row's ctx to its resumes_at.
+		_, err := s.store.ResumeLiftedPause(ctx, sub.TenantID, sub, s.resumeAudit())
 		if errors.Is(err, ErrNotPaused) {
-			// Another clearer (a sibling leader in a failover window, an
-			// operator) got there first and announced the resume.
-			slog.InfoContext(ctx, "pause collection already cleared — skipping resume announcement", "subscription_id", sub.ID)
+			slog.InfoContext(ctx, "pause collection changed since the list — skipping resume announcement", "subscription_id", sub.ID)
 			continue
 		}
 		if err != nil {
-			batchErrs = append(batchErrs, fmt.Errorf("clear pause %s: %w", sub.ID, err))
+			batchErrs = append(batchErrs, fmt.Errorf("resume pause %s: %w", sub.ID, err))
 			continue
-		}
-		triggeredBy := scheduledResumeTrigger(sub)
-		if s.audit != nil {
-			_ = s.audit.Log(ctx, sub.TenantID, domain.AuditActionUpdate, "subscription", cleared.ID, cleared.Code, map[string]any{
-				"action":       domain.SubAuditCollectionResumed,
-				"customer_id":  cleared.CustomerID,
-				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": triggeredBy,
-			})
-		}
-		if s.events != nil {
-			s.dispatchEvent(ctx, sub.TenantID, domain.EventSubscriptionCollectionResumed, domain.SubscriptionWebhookData(cleared, map[string]any{
-				"resumed_at":   resumeAt.UTC(),
-				"triggered_by": triggeredBy,
-			}))
 		}
 		processed++
 	}
 	return processed, batchErrs
+}
+
+// resumeAudit writes the "Collection resumed" audit row of a lifted pause
+// in the store's clearing transaction. Nil without an audit logger.
+func (s *Service) resumeAudit() ResumeAudit {
+	if s.audit == nil {
+		return nil
+	}
+	return func(ctx context.Context, tx *sql.Tx, cleared domain.Subscription, r PauseResume) error {
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action:        domain.AuditActionUpdate,
+			ResourceType:  "subscription",
+			ResourceID:    cleared.ID,
+			ResourceLabel: cleared.Code,
+			Metadata:      r.auditMetadata(cleared),
+		}); err != nil {
+			return fmt.Errorf("audit emission: %w", err)
+		}
+		return nil
+	}
 }
 
 // ExtendTrial pushes a trialing subscription's trial_end_at later. Used

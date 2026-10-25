@@ -106,10 +106,10 @@ func TestSetDunningPause_Rules(t *testing.T) {
 		resumes := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Microsecond)
 		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{
 			Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumes,
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("operator pause: %v", err)
 		}
-		_, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil)
+		_, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil)
 		if err != nil || outcome != DunningPauseAlreadyHeld {
 			t.Fatalf("SetDunningPause = %v, %v; want DunningPauseAlreadyHeld", outcome, err)
 		}
@@ -122,10 +122,10 @@ func TestSetDunningPause_Rules(t *testing.T) {
 	t.Run("dunning pause kept", func(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Rules Twice")
 		x := r.invoice("INV-A3-R2", 1000)
-		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil || outcome != DunningPauseWritten {
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseWritten {
 			t.Fatalf("first SetDunningPause = %v, %v; want written", outcome, err)
 		}
-		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil || outcome != DunningPauseAlreadyHeld {
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseAlreadyHeld {
 			t.Fatalf("second SetDunningPause = %v, %v; want DunningPauseAlreadyHeld", outcome, err)
 		}
 	})
@@ -136,14 +136,14 @@ func TestSetDunningPause_Rules(t *testing.T) {
 		resumes := time.Now().UTC().Add(time.Hour)
 		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{
 			Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumes,
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("operator pause: %v", err)
 		}
 		// The resumes_at passed; the resumer has not run yet.
 		if _, err := testutil.AdminPool(t).Exec(`UPDATE subscriptions SET pause_collection_resumes_at = now() - interval '1 minute' WHERE id = $1`, r.subID); err != nil {
 			t.Fatalf("lapse the pause: %v", err)
 		}
-		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil || outcome != DunningPauseWritten {
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseWritten {
 			t.Fatalf("SetDunningPause = %v, %v; want written", outcome, err)
 		}
 		if pc := r.pause(); pc == nil || pc.SetBy != domain.PauseSetByDunning || pc.ResumesAt != nil {
@@ -157,7 +157,7 @@ func TestSetDunningPause_Rules(t *testing.T) {
 		if _, err := testutil.AdminPool(t).Exec(`UPDATE subscriptions SET status = 'canceled', canceled_at = now() WHERE id = $1`, r.subID); err != nil {
 			t.Fatalf("cancel: %v", err)
 		}
-		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); !errors.Is(err, errs.ErrInvalidState) {
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); !errors.Is(err, errs.ErrInvalidState) {
 			t.Fatalf("SetDunningPause on a canceled subscription: %v, want invalid state", err)
 		}
 	})
@@ -191,7 +191,7 @@ func TestSetDunningPause_PaymentCommitsFirst(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		_, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil)
+		_, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil)
 		done <- result{outcome, err}
 	}()
 	select {
@@ -219,7 +219,7 @@ func TestReleaseDunningPause_OnlyThePausingInvoice(t *testing.T) {
 	pausing := r.invoice("INV-A3-P1", 1000)
 	other := r.invoice("INV-A3-P2", 1000)
 	stillOwed := r.invoice("INV-A3-P3", 1000)
-	if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, pausing, nil); err != nil || outcome != DunningPauseWritten {
+	if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, pausing, nil, nil); err != nil || outcome != DunningPauseWritten {
 		t.Fatalf("dunning pause: %v, %v", outcome, err)
 	}
 
@@ -244,7 +244,7 @@ func TestReleaseDunningPause_Rules(t *testing.T) {
 	t.Run("operator pause", func(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Release Operator")
 		x := r.invoice("INV-A3-L1", 1000)
-		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
+		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
 			t.Fatalf("operator pause: %v", err)
 		}
 		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, x, "", time.Now().UTC()); err != nil {
@@ -258,10 +258,10 @@ func TestReleaseDunningPause_Rules(t *testing.T) {
 	t.Run("operator took over a dunning pause", func(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Release Takeover")
 		x := r.invoice("INV-A3-L2", 1000)
-		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil {
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil {
 			t.Fatalf("dunning pause: %v", err)
 		}
-		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
+		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
 			t.Fatalf("operator pause: %v", err)
 		}
 		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, x, "", time.Now().UTC()); err != nil {
@@ -275,7 +275,7 @@ func TestReleaseDunningPause_Rules(t *testing.T) {
 	t.Run("canceled subscription", func(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Release Canceled")
 		x := r.invoice("INV-A3-L4", 1000)
-		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil {
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil {
 			t.Fatalf("dunning pause: %v", err)
 		}
 		if _, err := testutil.AdminPool(t).Exec(`UPDATE subscriptions SET status = 'canceled', canceled_at = now() WHERE id = $1`, r.subID); err != nil {
@@ -348,7 +348,7 @@ func TestDunningPause_SubscriptionLockedBeforeInvoice(t *testing.T) {
 	t.Run("payment of the pausing invoice", func(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Lock Order Payment")
 		x := r.invoice("INV-A3-LO1", 1000)
-		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil {
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil {
 			t.Fatalf("dunning pause: %v", err)
 		}
 		holdSubscriptionThenInvoice(t, r, x, func() error {
@@ -364,7 +364,7 @@ func TestDunningPause_SubscriptionLockedBeforeInvoice(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Lock Order Pause")
 		x := r.invoice("INV-A3-LO2", 1000)
 		holdSubscriptionThenInvoice(t, r, x, func() error {
-			_, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil)
+			_, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil)
 			if err == nil && outcome != DunningPauseWritten {
 				return fmt.Errorf("outcome %v, want written", outcome)
 			}
@@ -429,11 +429,11 @@ func TestSetDunningPause_QueuesCollectionPausedInTheTx(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Paused Event")
 		r.subs.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
 		x := r.invoice("INV-A3-EV1", 1000)
-		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil || outcome != DunningPauseWritten {
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseWritten {
 			t.Fatalf("SetDunningPause = %v, %v; want written", outcome, err)
 		}
 		// A re-attempted exhaustion finds the pause in force: no second event.
-		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil || outcome != DunningPauseAlreadyHeld {
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseAlreadyHeld {
 			t.Fatalf("second SetDunningPause = %v, %v; want DunningPauseAlreadyHeld", outcome, err)
 		}
 		evs := r.collectionPausedEvents()
@@ -460,10 +460,10 @@ func TestSetDunningPause_QueuesCollectionPausedInTheTx(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Paused Event Held")
 		r.subs.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
 		x := r.invoice("INV-A3-EV2", 1000)
-		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
+		if _, err := r.subs.SetPauseCollection(r.ctx, r.tenantID, r.subID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
 			t.Fatalf("operator pause: %v", err)
 		}
-		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil || outcome != DunningPauseAlreadyHeld {
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseAlreadyHeld {
 			t.Fatalf("SetDunningPause = %v, %v; want DunningPauseAlreadyHeld", outcome, err)
 		}
 		if evs := r.collectionPausedEvents(); len(evs) != 0 {
@@ -478,7 +478,7 @@ func TestSetDunningPause_QueuesCollectionPausedInTheTx(t *testing.T) {
 		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, x, "", time.Now().UTC()); err != nil {
 			t.Fatalf("pay: %v", err)
 		}
-		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err != nil || outcome != DunningPauseInvoiceSettled {
+		if _, outcome, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err != nil || outcome != DunningPauseInvoiceSettled {
 			t.Fatalf("SetDunningPause = %v, %v; want DunningPauseInvoiceSettled", outcome, err)
 		}
 		if evs := r.collectionPausedEvents(); len(evs) != 0 {
@@ -490,7 +490,7 @@ func TestSetDunningPause_QueuesCollectionPausedInTheTx(t *testing.T) {
 		r := newDunningPauseRig(t, "A3 Paused Event Rollback")
 		r.subs.SetOutboxEnqueuer(failingOutbox{})
 		x := r.invoice("INV-A3-EV4", 1000)
-		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil); err == nil {
+		if _, _, err := r.subs.SetDunningPause(r.ctx, r.tenantID, r.subID, x, nil, nil); err == nil {
 			t.Fatal("SetDunningPause with the outbox down succeeded, want the error")
 		}
 		if pc := r.pause(); pc != nil {

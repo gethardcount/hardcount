@@ -198,6 +198,7 @@ original text.
 
 ### Fixed
 
+- **Every collection pause that ends sends one `subscription.collection_resumed`, with its own trigger (2026-10-25, [#1384](https://github.com/getvelox/velox/pull/1384)).** A pause can end before Velox clears it: its date comes, or its invoice is paid. A new pause or a resume call that reached it first sent no resume, or sent `triggered_by: operator`. And the scheduled resume could clear a pause dunning set a moment earlier, sending `triggered_by: payment` for an invoice nobody paid. The scheduled resume's event and audit row are now saved with the change.
 - **On a test clock, a cancel by dunning says `canceled_by: dunning` in `subscription.canceled` and in its audit row (2026-10-25, [#1384](https://github.com/getvelox/velox/pull/1384)).** It said `operator`, taken from the API key of the clock advance that ran dunning.
 - **An event's `after_close` flag, its counter and its WARN follow the aggregation the event is counted under, even when the meter's aggregation changes during the ingest (2026-10-25, [#1382](https://github.com/getvelox/velox/pull/1382)).** Before, they could follow the old one. Billed amounts were not affected.
 - **Manual tax is exact on any invoice amount, and an invoice too large for 64-bit cents fails instead of carrying wrong amounts (2026-10-24, [#1378](https://github.com/getvelox/velox/pull/1378)).** At 20%, a 1e14-cent invoice was taxed 1553255926290 cents; it is now taxed 2e13. An invoice whose sum or total with tax does not fit fails to bill with an overflow error.

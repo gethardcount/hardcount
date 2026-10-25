@@ -20,7 +20,7 @@ import (
 // does — it covers just the behaviour the service layer depends on (item CRUD,
 // atomic transitions, and pending-item bookkeeping).
 type memStore struct {
-	// clearPauseOverride, when set, is what ClearPauseCollection returns —
+	// clearPauseOverride, when set, is what ResumeLiftedPause returns —
 	// simulates a sibling leader having cleared the pause between the list
 	// and the clear (HA hazard 5).
 	clearPauseOverride error
@@ -331,7 +331,61 @@ func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenant
 	return m.retireLiveOnlyState(id), nil
 }
 
-func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error) {
+// resumeLifted mirrors PostgresStore.clearLiftedPauseTx: a CAS on listed's
+// pause (its resumes_at and setter), then the resume's audit hook.
+func (m *memStore) resumeLifted(ctx context.Context, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, bool, error) {
+	s, ok := m.subs[listed.ID]
+	pc := listed.PauseCollection
+	if !ok || pc == nil || pc.ResumesAt == nil || s.PauseCollection == nil || s.PauseCollection.ResumesAt == nil ||
+		!s.PauseCollection.ResumesAt.Equal(*pc.ResumesAt) || s.PauseCollection.SetBy != pc.SetBy {
+		return domain.Subscription{}, false, nil
+	}
+	r := liftedPauseResume(*pc)
+	ctx = r.bind(ctx, listed)
+	if pc.ResumesAt.After(clock.Now(ctx)) {
+		return domain.Subscription{}, false, nil
+	}
+	s.PauseCollection = nil
+	s.UpdatedAt = clock.Now(ctx)
+	out := s
+	out.Items = m.hydrateItems(s.ID)
+	if onResume != nil {
+		if err := onResume(ctx, nil, out, r); err != nil {
+			return domain.Subscription{}, false, err
+		}
+	}
+	m.subs[s.ID] = s
+	return out, true, nil
+}
+
+// resumeIfLifted mirrors PostgresStore.resumeIfLiftedTx.
+func (m *memStore) resumeIfLifted(ctx context.Context, id string, onResume ResumeAudit) error {
+	s := m.subs[id]
+	if s.PauseCollection == nil || s.PauseCollection.InForceAt(clock.Now(ctx)) {
+		return nil
+	}
+	_, _, err := m.resumeLifted(ctx, s, onResume)
+	return err
+}
+
+func (m *memStore) ResumeLiftedPause(ctx context.Context, tenantID string, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, error) {
+	if m.clearPauseOverride != nil {
+		return domain.Subscription{}, m.clearPauseOverride
+	}
+	if s, ok := m.subs[listed.ID]; !ok || s.TenantID != tenantID {
+		return domain.Subscription{}, ErrNotPaused
+	}
+	out, ok, err := m.resumeLifted(ctx, listed, onResume)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if !ok {
+		return domain.Subscription{}, ErrNotPaused
+	}
+	return out, nil
+}
+
+func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
@@ -339,6 +393,10 @@ func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, 
 	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, fmt.Errorf("Collection can't be paused on a %s subscription.", s.Status)
 	}
+	if err := m.resumeIfLifted(ctx, id, onResume); err != nil {
+		return domain.Subscription{}, err
+	}
+	s = m.subs[id]
 	pcCopy := pc
 	if pc.ResumesAt != nil {
 		t := *pc.ResumesAt
@@ -354,7 +412,7 @@ func (m *memStore) SetPauseCollection(ctx context.Context, tenantID, id string, 
 
 // SetDunningPause mirrors the real store's write rule (the invoice gate is
 // the real store's alone: memStore has no invoices).
-func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ string, inTx func(tx *sql.Tx, sub domain.Subscription) error) (domain.Subscription, DunningPauseOutcome, error) {
+func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ string, inTx func(tx *sql.Tx, sub domain.Subscription) error, onResume ResumeAudit) (domain.Subscription, DunningPauseOutcome, error) {
 	s, ok := m.subs[subID]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, 0, errs.ErrNotFound
@@ -365,6 +423,10 @@ func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ strin
 	if s.PauseCollection.InForceAt(clock.Now(ctx)) {
 		return domain.Subscription{}, DunningPauseAlreadyHeld, nil
 	}
+	if err := m.resumeIfLifted(ctx, subID, onResume); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	s = m.subs[subID]
 	s.PauseCollection = &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, SetBy: domain.PauseSetByDunning}
 	s.UpdatedAt = clock.Now(ctx)
 	out := s
@@ -378,16 +440,19 @@ func (m *memStore) SetDunningPause(ctx context.Context, tenantID, subID, _ strin
 	return out, DunningPauseWritten, nil
 }
 
-func (m *memStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	if m.clearPauseOverride != nil {
-		return domain.Subscription{}, m.clearPauseOverride
-	}
+func (m *memStore) ClearPauseCollection(ctx context.Context, tenantID, id string, onResume ResumeAudit) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if s.PauseCollection == nil {
 		return domain.Subscription{}, ErrNotPaused // mirrors the real store's CAS
+	}
+	if !s.PauseCollection.InForceAt(clock.Now(ctx)) {
+		if err := m.resumeIfLifted(ctx, id, onResume); err != nil {
+			return domain.Subscription{}, err
+		}
+		return domain.Subscription{}, ErrPauseLifted
 	}
 	s.PauseCollection = nil
 	s.UpdatedAt = clock.Now(ctx)
@@ -1383,24 +1448,6 @@ func (f *fakeBiller) FinalizeOnCreateInvoice(ctx context.Context, _ domain.Subsc
 	f.postCommitCtxErr = append(f.postCommitCtxErr, ctx.Err())
 }
 
-// fakeDispatcher captures outbound-webhook Dispatch calls so tests
-// can assert on the event type + payload without standing up the
-// webhook outbox.
-type fakeDispatcher struct {
-	events []struct {
-		eventType string
-		payload   map[string]any
-	}
-}
-
-func (f *fakeDispatcher) Dispatch(_ context.Context, _ string, eventType string, payload map[string]any) error {
-	f.events = append(f.events, struct {
-		eventType string
-		payload   map[string]any
-	}{eventType, payload})
-	return nil
-}
-
 // fakePlanReader returns plans by id — lets tests stub plan intervals
 // for the yearly-vs-monthly period-anchoring branches without standing
 // up the full pricing package.
@@ -2103,7 +2150,10 @@ func TestPauseCollection(t *testing.T) {
 
 	t.Run("resume clears the pause", func(t *testing.T) {
 		svc, sub := mkSvc()
-		future := now.Add(time.Hour)
+		// In force on the store's clock too (the ctx clock, wall time here):
+		// a pause lifted by then resumes with its own trigger, not the
+		// operator's (TestLiftedPause_AResumeCallAnnouncesTheLift).
+		future := time.Now().Add(time.Hour)
 		if _, err := svc.PauseCollection(context.Background(), "t1", sub.ID, PauseCollectionInput{
 			Behavior:  domain.PauseCollectionKeepAsDraft,
 			ResumesAt: &future,
@@ -2414,37 +2464,6 @@ func TestProcessExpiredTrialsForClock(t *testing.T) {
 		processed, _ := svc.ProcessExpiredTrialsForClock(ctx, "t1", "tclk_1", frozen)
 		if processed != 0 {
 			t.Errorf("processed: got %d, want 0 (different clock)", processed)
-		}
-	})
-
-	t.Run("fires subscription.trial_ended webhook on activation", func(t *testing.T) {
-		// Mirrors the engine auto-flip path's webhook dispatch so
-		// consumers see one event per trial transition regardless of
-		// which path activated the sub.
-		svc := NewService(newMemStore(), clock.NewFake(createdAt))
-		svc.SetBiller(&fakeBiller{})
-		fd := &fakeDispatcher{}
-		svc.SetEventDispatcher(fd)
-		sub, _ := svc.Create(ctx, "t1", CreateInput{
-			Code: "sub-webhook", DisplayName: "Webhook", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, TrialDays: 14,
-		})
-		mem := svc.store.(*memStore)
-		seeded := mem.subs[sub.ID]
-		seeded.TestClockID = "tclk_1"
-		mem.subs[sub.ID] = seeded
-		frozen := sub.TrialEndAt.Add(24 * time.Hour)
-		if _, errs := svc.ProcessExpiredTrialsForClock(ctx, "t1", "tclk_1", frozen); len(errs) != 0 {
-			t.Fatalf("unexpected errors: %v", errs)
-		}
-		// subscription.trial_ended moved IN-TX to the store's
-		// ActivateAfterTrial writer (DispatchTx subscription subset,
-		// 2026-07-05) — the service must NOT also dispatch it. In-tx
-		// enqueue + payload proven by lifecycle_outbox_integration_test.go.
-		for _, ev := range fd.events {
-			if ev.eventType == domain.EventSubscriptionTrialEnded {
-				t.Fatalf("%s must not be dispatched post-commit — it is enqueued in the activation tx", domain.EventSubscriptionTrialEnded)
-			}
 		}
 	})
 
@@ -3793,10 +3812,13 @@ type captureAudit struct {
 	entries []capturedAuditEntry
 }
 
-// LogInTx captures like Log (nil tx fine for content-level unit tests).
-func (c *captureAudit) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) error {
+// LogInTx captures like Log, ctx clock binding included (nil tx fine for
+// content-level unit tests).
+func (c *captureAudit) LogInTx(ctx context.Context, _ *sql.Tx, e audit.Entry) error {
+	sim, bound := clock.SimOf(ctx)
 	c.entries = append(c.entries, capturedAuditEntry{
 		action: e.Action, resourceID: e.ResourceID, resourceType: e.ResourceType, metadata: e.Metadata,
+		sim: sim, bound: bound,
 	})
 	return nil
 }
@@ -3981,20 +4003,20 @@ func (m *memStore) CustomerSubPlanCurrencies(_ context.Context, _, _, _ string) 
 
 // TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing pins the
 // hazard-5 root fix at the service seam: when the store reports the pause was
-// already cleared (a sibling leader won the CAS), the cron must fire NO
-// `subscription.collection_resumed` and write NO audit row. Mutation-verify:
-// remove the ErrNotPaused branch in ProcessExpiredPauseCollections → the
-// batch reports an error and, with the branch turned into a fall-through, the
-// event fires.
+// already cleared (a sibling leader won the CAS), the cron counts nothing and
+// reports no error. The event and the audit row are the store's, written only
+// when its clear wins (TestClearPauseCollection_CASOneWinner). Mutation-verify:
+// remove the ErrNotPaused branch in resumeListedPauses → the batch reports an
+// error.
 func TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing(t *testing.T) {
 	store := newMemStore()
 	resumes := time.Now().Add(-time.Hour)
 	store.subs["sub_paused"] = domain.Subscription{ID: "sub_paused", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
 		PauseCollection: &domain.PauseCollection{Behavior: "keep_as_draft", ResumesAt: &resumes}}
 	store.clearPauseOverride = ErrNotPaused // the sibling got there first
-	events := &fakeDispatcher{}
 	svc := NewService(store, nil)
-	svc.SetEventDispatcher(events)
+	audit := &captureAudit{}
+	svc.SetAuditLogger(audit)
 
 	processed, errsOut := svc.ProcessExpiredPauseCollections(context.Background(), 10)
 	if len(errsOut) != 0 {
@@ -4003,7 +4025,7 @@ func TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing(t *testin
 	if processed != 0 {
 		t.Fatalf("processed=%d, want 0 — nothing was resumed by this leader", processed)
 	}
-	if len(events.events) != 0 {
-		t.Fatalf("dispatched %d events, want 0 — a second collection_resumed is the hazard-5 duplicate", len(events.events))
+	if len(audit.entries) != 0 {
+		t.Fatalf("wrote %d audit rows, want 0", len(audit.entries))
 	}
 }

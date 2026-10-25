@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/webhook"
 )
@@ -19,8 +20,7 @@ import (
 // trigger: the resumer, a new pause, or an operator's resume call.
 
 // pauseService is the service as the server wires it, on the rig's store:
-// the outbox on the store, the outbox behind the dispatcher, the real
-// audit log.
+// the outbox on the store, the real audit log.
 func (r *dunningPauseRig) pauseService(store Store) (*Service, *audit.Logger) {
 	r.t.Helper()
 	outbox := webhook.NewOutboxStore(r.db)
@@ -28,7 +28,6 @@ func (r *dunningPauseRig) pauseService(store Store) (*Service, *audit.Logger) {
 	logger := audit.NewLogger(r.db)
 	svc := NewService(store, nil)
 	svc.SetAuditLogger(logger)
-	svc.SetEventDispatcher(webhook.NewOutboxDispatcher(outbox))
 	return svc, logger
 }
 
@@ -137,7 +136,7 @@ func wantResumedAt(t *testing.T, ev pauseEvent, row domain.AuditEntry, lifted ti
 	if got, err := time.Parse(time.RFC3339Nano, row.Metadata["resumed_at"].(string)); err != nil || !got.Equal(lifted) {
 		t.Errorf("audit resumed_at = %v (%v), want %v", row.Metadata["resumed_at"], err, lifted)
 	}
-	if ev.pause != "null" {
+	if ev.pause != "" && ev.pause != "null" {
 		t.Errorf("resumed event pause_collection = %v, want null: the resume's row has no pause", ev.pause)
 	}
 }
@@ -153,9 +152,18 @@ const (
 	auditResumedSchedule = domain.SubAuditCollectionResumed + "/schedule"
 )
 
-// paidAt is a payment instant in the past, at Postgres's precision.
-func paidAt(ago time.Duration) time.Time {
-	return time.Now().UTC().Add(-ago).Truncate(time.Microsecond)
+// pay marks inv paid and returns when the pause lifted: the resumes_at
+// the payment stamped (the instant it recorded the payment).
+func (r *dunningPauseRig) pay(ctx context.Context, inv string) time.Time {
+	r.t.Helper()
+	if _, err := r.invs.MarkPaid(ctx, r.tenantID, inv, "", clock.Now(ctx)); err != nil {
+		r.t.Fatalf("pay %s: %v", inv, err)
+	}
+	pc := r.pause()
+	if pc == nil || pc.ResumesAt == nil {
+		r.t.Fatalf("pause = %+v after paying %s, want it lifted", pc, inv)
+	}
+	return *pc.ResumesAt
 }
 
 // Review round 2, finding 1. Dunning pauses for invoice A, A is paid (the
@@ -171,10 +179,7 @@ func TestLiftedPause_ANewPauseAnnouncesItsResume(t *testing.T) {
 		if applied, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, a); err != nil || !applied {
 			t.Fatalf("pause for A = %v, %v; want applied", applied, err)
 		}
-		paid := paidAt(time.Minute)
-		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, a, "", paid); err != nil {
-			t.Fatalf("pay A: %v", err)
-		}
+		paid := r.pay(r.ctx, a)
 		if applied, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, b); err != nil || !applied {
 			t.Fatalf("pause for B = %v, %v; want applied", applied, err)
 		}
@@ -197,10 +202,7 @@ func TestLiftedPause_ANewPauseAnnouncesItsResume(t *testing.T) {
 		if applied, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, a); err != nil || !applied {
 			t.Fatalf("pause for A = %v, %v; want applied", applied, err)
 		}
-		paid := paidAt(time.Minute)
-		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, a, "", paid); err != nil {
-			t.Fatalf("pay A: %v", err)
-		}
+		paid := r.pay(r.ctx, a)
 		if _, err := svc.PauseCollection(r.ctx, r.tenantID, r.subID, PauseCollectionInput{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
 			t.Fatalf("operator pause: %v", err)
 		}
@@ -221,10 +223,7 @@ func TestLiftedPause_AResumeCallAnnouncesTheLift(t *testing.T) {
 	if applied, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, a); err != nil || !applied {
 		t.Fatalf("pause for A = %v, %v; want applied", applied, err)
 	}
-	paid := paidAt(time.Minute)
-	if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, a, "", paid); err != nil {
-		t.Fatalf("pay A: %v", err)
-	}
+	paid := r.pay(r.ctx, a)
 	sub, resumed, err := svc.ResumeCollection(r.ctx, r.tenantID, r.subID)
 	if err != nil {
 		t.Fatalf("resume call: %v", err)
@@ -271,10 +270,7 @@ func TestScheduledResumer_ClearsOnlyThePauseItListed(t *testing.T) {
 		if _, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, a); err != nil {
 			t.Fatalf("pause for A: %v", err)
 		}
-		paid := paidAt(time.Minute)
-		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, a, "", paid); err != nil {
-			t.Fatalf("pay A: %v", err)
-		}
+		paid := r.pay(r.ctx, a)
 		race.race = func() {
 			if applied, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, b); err != nil || !applied {
 				t.Fatalf("pause for B = %v, %v; want applied", applied, err)
@@ -301,17 +297,13 @@ func TestScheduledResumer_ClearsOnlyThePauseItListed(t *testing.T) {
 		if _, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, a); err != nil {
 			t.Fatalf("pause for A: %v", err)
 		}
-		paidA, paidB := paidAt(2*time.Minute), paidAt(time.Minute)
-		if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, a, "", paidA); err != nil {
-			t.Fatalf("pay A: %v", err)
-		}
+		paidA := r.pay(r.ctx, a)
+		var paidB time.Time
 		race.race = func() {
 			if _, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, b); err != nil {
 				t.Fatalf("pause for B: %v", err)
 			}
-			if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, b, "", paidB); err != nil {
-				t.Fatalf("pay B: %v", err)
-			}
+			paidB = r.pay(r.ctx, b)
 		}
 		if _, errs := resumer.ProcessExpiredPauseCollections(r.ctx, 100); len(errs) > 0 {
 			t.Fatalf("resumer: %v", errs)
@@ -344,7 +336,7 @@ func TestScheduledResumer_ClearsOnlyThePauseItListed(t *testing.T) {
 		svc, logger := r.pauseService(r.subs)
 		resumer, _ := r.pauseService(race)
 		b := r.invoice("INV-RR-B3", 1000)
-		lifted := paidAt(time.Minute)
+		lifted := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 		// The store takes a past resumes_at (the API refuses one): the
 		// operator's pause has reached its date.
 		if _, err := testutil.AdminPool(t).Exec(`UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft',
@@ -355,8 +347,10 @@ func TestScheduledResumer_ClearsOnlyThePauseItListed(t *testing.T) {
 			if _, err := svc.PauseCollectionForDunning(r.ctx, r.tenantID, r.subID, b); err != nil {
 				t.Fatalf("pause for B: %v", err)
 			}
-			if _, err := r.invs.MarkPaid(r.ctx, r.tenantID, b, "", lifted); err != nil {
-				t.Fatalf("pay B: %v", err)
+			// The payment is recorded at the instant the operator's pause
+			// reached its date, as a test-clock advance can do.
+			if got := r.pay(clock.WithEffectiveNow(r.ctx, lifted), b); !got.Equal(lifted) {
+				t.Fatalf("B lifted at %v, want %v", got, lifted)
 			}
 		}
 		if _, errs := resumer.ProcessExpiredPauseCollections(r.ctx, 100); len(errs) > 0 {

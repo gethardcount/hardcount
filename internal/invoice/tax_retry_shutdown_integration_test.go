@@ -59,7 +59,7 @@ func (r *snapRig) subTaxPendingDraft(t *testing.T, num string, paused bool) stri
 		t.Fatalf("create subscription: %v", err)
 	}
 	if paused {
-		if _, err := subs.SetPauseCollection(r.ctx, r.tenantID, sub.ID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
+		if _, err := subs.SetPauseCollection(r.ctx, r.tenantID, sub.ID, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
 			t.Fatalf("pause collection: %v", err)
 		}
 	}

@@ -73,7 +73,7 @@ func (a *subStoreAdapter) FireScheduledCancellationTx(ctx context.Context, tx *s
 }
 
 func (a *subStoreAdapter) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	return a.store.ClearPauseCollection(ctx, tenantID, id)
+	return a.store.ClearPauseCollection(ctx, tenantID, id, nil)
 }
 
 func (a *subStoreAdapter) ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error) {
