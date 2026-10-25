@@ -308,9 +308,10 @@ threshold-invoice read); a 1,000-event batch for one customer was
 unchanged (about 240 ms).
 
 The held-usage release (ADR-122) uses the same rule. It reads the open
-periods before it writes, and each meter's aggregation on its own
-transaction after its inserts: a release can write a meter's first events, and the
-aggregation can change until then (ADR-130 §2, amended 2026-10-24). A released row at or after the period end, before
+periods before it writes, and each meter's aggregation on the release's
+transaction, after its inserts: a release can write a meter's first
+events, and the aggregation can change until then (ADR-130 §2, amended
+2026-10-24). A released row at or after the period end, before
 that period's invoice, belongs to the next period: `in_open_period` when
 the subscription continues past the end and its plan from then on prices
 the meter. A row the rule calls after_close counts as

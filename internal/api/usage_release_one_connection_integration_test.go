@@ -7,6 +7,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -38,7 +39,8 @@ func (r releaseThresholds) ThresholdWatermarks(context.Context, string, string, 
 }
 
 // A held-usage release reads its meters' aggregation on its own
-// transaction's connection, through the production OpenPeriodReader. Read on
+// transaction's connection, through the production OpenPeriodReader and with
+// the audit logger wired as the router wires it. Read on
 // a second connection while the release's transaction holds one, a pool of
 // one connection (or N releases on a pool of N) waits for a connection that
 // is never freed.
@@ -53,6 +55,7 @@ func TestRelease_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	defer cancel()
 
 	usageSvc := usage.NewService(usage.NewPostgresStore(db))
+	usageSvc.SetAuditLogger(audit.NewLogger(db))
 	pricingStore := pricing.NewPostgresStore(db)
 	const ext, eventName = "ext_one_conn", "tokens_one_conn"
 	now := time.Now().UTC()
