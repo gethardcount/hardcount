@@ -34,7 +34,8 @@ INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, paymen
 func TestPriceShapes_UpAndDown(t *testing.T) {
 	dsn, db := scratchDB(t, "velox_test_price_shapes")
 	ctx := context.Background()
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	// Up to 00211: 00212 drops the rating rule table this test reads.
+	if err := up(ctx, dsn, filesBefore(t, planPricesVersion)); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	for _, c := range []struct{ table, column string }{
@@ -119,13 +120,13 @@ INSERT INTO invoice_line_items (id, tenant_id, invoice_id, line_type, descriptio
 	}
 
 	// The rows are the old shape now, so the next up refuses them.
-	if err := up(ctx, dsn, migrationFiles()); err == nil || !strings.Contains(err.Error(), "migration 00210") {
+	if err := up(ctx, dsn, filesBefore(t, planPricesVersion)); err == nil || !strings.Contains(err.Error(), "migration 00210") {
 		t.Fatalf("up over the rolled-back rows: err %v, want 00210 to refuse them", err)
 	}
 	if err := deadContractExec(ctx, db, `DELETE FROM invoice_line_items; DELETE FROM customer_price_overrides; DELETE FROM rating_rule_versions; DELETE FROM provider_cost_rates;`); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, planPricesVersion)); err != nil {
 		t.Fatalf("up again: %v", err)
 	}
 	if columnExists(t, db, "rating_rule_versions", "flat_amount_cents") || !columnExists(t, db, "provider_cost_rates", "unit_cost_cents") {

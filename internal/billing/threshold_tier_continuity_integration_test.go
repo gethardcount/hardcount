@@ -2,6 +2,7 @@ package billing_test
 
 import (
 	"context"
+	"github.com/sagarsuperuser/velox/internal/usage"
 	"testing"
 	"time"
 
@@ -156,19 +157,27 @@ func TestImmediateCancel_GraduatedTiersContinueAcrossFire_RealStore(t *testing.T
 	}
 }
 
-// A meter with several prices is read per price (AggregateClaims); the
-// catch-all price's ladder continues there too. The ladder is keyed by price
-// id (ADR-130 §9), so a second graduated price on the meter, for model=gpt,
-// leaves no doubt whose tiers the fire's line seeds: the catch-all bucket (no
-// labels) continues from the fire's 700 units.
+// A meter with several prices is read per price (AggregateClaims); each
+// price's ladder continues there. The ladder is keyed by price id (ADR-130
+// §9): the fire bills two lines on the meter, the catch-all's 700 units and
+// a graduated model=gpt price's 50, and the close seeds each price from its
+// own line. Keyed by meter, the close could not tell the two lines apart.
 func TestThresholdCycle_MultiPriceBucketContinuesAcrossFire_RealStore(t *testing.T) {
 	p := p21FireAt700(t, "P21 Multi-price", func(p *p21Fire) {
 		other := addPrice(t, p.f.db, p.ctx, p.f.tenantID, p.f.planID, priceOn{meterID: p.f.meterID, match: map[string]string{"model": "gpt"},
 			shape: domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)}, {UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)}}}})
 		backdatePriceVersions(t, p.f.db, p.ctx, other.ID, p.f.cycleStart.Add(-2*time.Hour))
+		// 50 gpt units: 50 × 50 = 2500, inside the first tier.
+		ts := p.f.cycleStart.Add(30 * time.Second)
+		if _, err := p.f.usageSvc.Ingest(p.ctx, p.f.tenantID, usage.IngestInput{
+			CustomerID: p.f.customerID, MeterID: p.f.meterID, Quantity: decimal.NewFromInt(50),
+			Timestamp: &ts, Dimensions: map[string]any{"model": "gpt"},
+		}); err != nil {
+			t.Fatalf("ingest gpt usage: %v", err)
+		}
 	})
-	if p.fireTotal != 7000 {
-		t.Fatalf("fire usage = %d, want 7000 (the catch-all bucket)", p.fireTotal)
+	if p.fireTotal != 9500 {
+		t.Fatalf("fire usage = %d, want 9500 (7000 for the catch-all bucket, 2500 for gpt)", p.fireTotal)
 	}
 	newEnd := p.fireUpper.Add(2 * time.Second).Truncate(time.Microsecond)
 	p.seedAfterFire(t, 600, &newEnd)
@@ -184,7 +193,7 @@ func TestThresholdCycle_MultiPriceBucketContinuesAcrossFire_RealStore(t *testing
 			continue
 		}
 		if got, _ := usageLineTotal(t, p.f, p.ctx, inv.ID); got != 3600 {
-			t.Errorf("multi-price close usage = %d, want 3600 (continuing the ladder); 6000 is the restarted ladder", got)
+			t.Errorf("multi-price close usage = %d, want 3600 (the catch-all continuing its ladder, gpt adding nothing); 6000 is the restarted ladder", got)
 		}
 	}
 }

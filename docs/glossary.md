@@ -49,10 +49,11 @@ Words used in the Velox docs and dashboard. For the big picture, read
   meter can be priced at many rates. Up to 16 keys, and each value is
   a single value (text, number, true/false or null), never a list or an
   object. [More](ai-pricing.md#how-velox-picks-the-price-for-an-event)
-- **price**: One usage rate of a plan: a meter, the labels an event must
-  carry for the price to take it (`dimension_match`; none takes every event),
-  and a rate: a price per unit (`per_unit`), graduated tiers (`graduated`),
-  or fixed-size packages (`package`; a part package bills as a whole one). It
+- **price**: One usage rate of a plan. It names a meter and the labels an
+  event must carry for the price to take it (`dimension_match`; none takes
+  every event). Its rate is a price per unit (`per_unit`), graduated tiers
+  (`graduated`), or fixed-size packages (`package`; a part package bills as
+  a whole one). It
   takes the plan's currency. When an event fits more than one price of the
   plan, the price with the most labels takes it, so nothing counts twice. A
   billing period is priced as the plan's prices were when it started.
