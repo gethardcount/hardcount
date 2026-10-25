@@ -6710,7 +6710,10 @@ type WebhookSecretRotation struct {
 type WebhookStreamFrame struct {
 	CreatedAt time.Time `json:"created_at"`
 
-	// CustomerId The payload's `customer_id`, or empty.
+	// CustomerId The customer the event is about: the `customer_id` of the
+	// resource in `data` (its `id` for a `customer.*` event), or empty.
+	// For an event queued before `data` held the resource, its
+	// `data.customer_id`.
 	CustomerId      string    `json:"customer_id"`
 	EventId         string    `json:"event_id"`
 	EventType       string    `json:"event_type"`

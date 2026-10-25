@@ -106,8 +106,8 @@ retries on the schedule below.
    events in the [catalog](#event-catalog) are saved together with the
    change that caused them. If the change is saved, the event will be sent,
    even after a crash. Other events, including `invoice.finalized`, are
-   queued just after the change is saved, and a crash at that moment can
-   drop one.
+   queued just after the change is saved, and a crash or a database error
+   at that moment can drop one.
 
 ## What a message looks like
 
@@ -136,6 +136,11 @@ Every message is an HTTP `POST` to your URL with
 - A few events also carry facts the resource does not hold, such as who
   canceled a subscription. They sit beside the resource in `data`. The
   [catalog](#event-catalog) lists them for each event.
+- This shape is new in the next release. An event queued before you
+  upgrade is always sent with its old `data`: on its retries, which run up
+  to about 26.5 hours, and on any replay. So accept both shapes for that
+  long after you upgrade, and on a replay of an older event
+  ([old key → new key](../CHANGELOG.md#unreleased)).
 
 Headers:
 
@@ -263,8 +268,10 @@ lists the newest 50 events; it has no filters.
 
 Each family of events carries one resource in `data`, named in the family's
 heading below. The **Also in `data`** column lists the other keys an event
-carries, and `—` means none. A key with nothing to say is left out, such as
-`reason` on most cancels. A full example of each event's `data` is in
+carries, and `—` means none. Two keys are sent only when they apply, and
+their rows say when: `reason` on `subscription.canceled` and `resumed_at` on
+`subscription.collection_resumed`. Every other key is always sent, even
+when it is empty, such as `applied` on `dunning.escalated`. A full example of each event's `data` is in
 [internal/domain/testdata/webhook_payloads](../internal/domain/testdata/webhook_payloads/).
 
 *(always sent)*: see [rule 3](#three-rules-for-your-receiver). Terms:
@@ -280,7 +287,7 @@ returns them.
 
 | Event | Sent when | Also in `data` |
 |---|---|---|
-| `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized. Its `amount_due_cents` is before credit ([more](#invoicefinalized-shows-the-amount-before-credit)) | — |
+| `invoice.finalized` | An invoice is final and ready to pay. Sent once per invoice, including the invoice for a mid-period upgrade, seat increase or added item. A draft sends it when it is finalized. Its `amount_due_cents` is before credit ([more](#invoicefinalized-shows-the-amount-before-credit)). Under Stripe Tax, `tax_transaction_id` can be recorded after this event; `GET /v1/invoices/{id}` shows it | — |
 | `invoice.paid` | An invoice is fully paid, by card, credit or an offline payment, or a credit note left nothing due. Its `amount_paid_cents` is what was paid at that moment, 0 when credit or a credit note covered the rest *(always sent)* | — |
 | `invoice.payment_recorded` | Someone recorded a payment made outside Velox, such as a bank transfer or cheque. `recovered_from` is the status it was paid from: `finalized` or `uncollectible` | `recovered_from` |
 | `invoice.marked_uncollectible` | An invoice was written off as bad debt | — |
@@ -377,7 +384,7 @@ schedule's is its `cancel_at` and `cancel_effective_at`.
 | `subscription.trial_extended` | A trial's end date moved later. The new end is the subscription's `trial_end_at`. `triggered_by` is `operator` | `triggered_by` |
 | `subscription.cancel_scheduled` / `.cancel_cleared` | A cancel at period end was scheduled, or the schedule was removed | — |
 | `subscription.collection_paused` | Collection was paused: invoices stay drafts. The subscription's `pause_collection` says how and until when | — |
-| `subscription.collection_resumed` | Collection resumed. `triggered_by` is `operator`, `schedule` (its resume date came) or `payment` (a payment ended a pause that dunning set). A resume by date carries `resumed_at` | `triggered_by`, `resumed_at` |
+| `subscription.collection_resumed` | Collection resumed. `triggered_by` is `operator`, `schedule` (its resume date came) or `payment` (a payment ended a pause that dunning set). A `schedule` or `payment` resume carries `resumed_at` | `triggered_by`, `resumed_at` |
 | `subscription.item.added` / `.updated` / `.removed` | A plan or quantity on the subscription was added, changed or removed. `item_id` names the item; a removed item is no longer in `items` | `item_id` |
 | `subscription.pending_change.scheduled` / `.canceled` | A plan change for the next billing period was scheduled or canceled. The item's `pending_plan_id` and `pending_plan_effective_at` show it | `item_id` |
 | `subscription.pending_change.applied` | A scheduled plan change was applied at the period end. The item's `plan_id` is the new plan, `old_plan_id` the one it left, and `applied_at` when. The subscription is as it was before the close that starts the next period | `item_id`, `old_plan_id`, `applied_at` |
@@ -442,9 +449,10 @@ an adjustment or an expiry moves that balance. They do not follow usage.
 
 Each currency has its own balance, and each event is about one of them: a
 customer whose EUR credit runs out gets `credit.balance_depleted` with
-`currency` `EUR` even while it holds USD credit. Credit pays only invoices in
-its own currency. The low threshold is one number applied in each currency's
-own units: 1000 means $10.00 for USD credit and €10.00 for EUR credit.
+`credit_balance.currency` `EUR` even while it holds USD credit. Credit pays
+only invoices in its own currency. The low threshold is one number applied
+in each currency's own units: 1000 means $10.00 for USD credit and €10.00
+for EUR credit.
 
 Usage draws on credit only when it is invoiced. A customer billed at the end
 of the period can use up all their credit in the first week, and

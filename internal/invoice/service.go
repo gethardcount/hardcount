@@ -1601,6 +1601,19 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 			"currency":           finalized.Currency,
 		})
 	}
+	// The token and tax writes above changed the row after the finalize
+	// write returned it: the token moved updated_at, and the tax commit
+	// recorded tax_transaction_id. Read it again, so the event and the caller
+	// get the row as it is now (ADR-131), not the finalize's copy with only
+	// the token patched in, a state the row never had. If the read fails,
+	// the event is not sent and an error is logged (ADR-131 rule 5).
+	fresh, readErr := s.store.Get(ctx, tenantID, id)
+	if readErr != nil {
+		slog.Error("invoice: invoice.finalized not sent: the invoice could not be read after the finalize",
+			"error", readErr, "tenant_id", tenantID, "invoice_id", finalized.ID)
+	} else {
+		finalized = fresh
+	}
 	// invoice.finalized webhook — emitted HERE for the same single-writer
 	// reason as the audit row above: pre-fix the handler fired it, so the
 	// tax-retry auto-finalize chain (RetryTax → Finalize) silently never
@@ -1608,7 +1621,7 @@ func (s *Service) finalize(ctx context.Context, tenantID, id string, checkTaxExp
 	// It carries the finalized invoice (ADR-131), as the engine's sender does
 	// (billing.DispatchInvoiceFinalized). The collector applies credit after
 	// this (ADR-116), so its amount_due_cents is before that credit.
-	if s.events != nil {
+	if s.events != nil && readErr == nil {
 		s.dispatchEvent(ctx, tenantID, domain.EventInvoiceFinalized, domain.InvoiceWebhookData(finalized, nil))
 	}
 	return finalized, nil

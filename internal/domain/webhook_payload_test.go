@@ -213,7 +213,7 @@ func goldenWebhookData(t *testing.T, eventType string) map[string]any {
 	case EventDunningEscalated:
 		return DunningRunWebhookData(goldenDunningRun(), map[string]any{
 			"final_subscription_action": "cancel", "final_invoice_action": "mark_uncollectible",
-			"applied": "canceled_and_written_off",
+			"applied": "subscription_canceled+invoice_marked_uncollectible",
 		})
 	case EventCreditBalanceDepleted, EventCreditBalanceRecovered:
 		return CreditBalanceWebhookData(goldenCreditBalance(), nil)
