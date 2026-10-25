@@ -30,10 +30,14 @@ export interface DunningPolicyInput {
   retry_days: number[];
   /**
      * What happens to the subscription when retries run out. `pause`
-     * pauses collection, unless it is already paused, and sends
-     * `subscription.collection_paused` with `triggered_by: dunning`.
-     * `cancel` cancels it and sends `subscription.canceled` with
-     * `canceled_by: dunning`.
+     * pauses collection and sends `subscription.collection_paused`
+     * with `triggered_by: dunning`. It does nothing if collection is
+     * already paused, the subscription is canceled, or the invoice
+     * was paid first. `cancel` cancels the subscription and sends
+     * `subscription.canceled` with `canceled_by: dunning`. It does
+     * nothing if the subscription is already canceled. If a scheduled
+     * cancel was already due, that cancel happens instead, and its
+     * event says `canceled_by: schedule`.
      */
   final_subscription_action?: DunningPolicyInputFinalSubscriptionAction;
   /** What happens to the invoice when retries run out. */

@@ -68,4 +68,10 @@ func (r PauseResume) auditMetadata(cleared domain.Subscription) map[string]any {
 // ResumeAudit writes the "Collection resumed" audit row for a lifted
 // pause the store clears, in the clearing transaction. Its error rolls the
 // clear back. Nil writes no row.
+//
+// The row's actor is the request that runs the clear, as for every audit
+// row (audit.ResolveActor): system on the wall-clock resumer, and the
+// operator's key or user when their pause or resume call clears it, or
+// when their test-clock advance runs the resumer. TriggeredBy says what
+// ended the pause.
 type ResumeAudit func(ctx context.Context, tx *sql.Tx, cleared domain.Subscription, r PauseResume) error

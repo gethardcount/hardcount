@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/audit"
+	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/testutil"
@@ -224,7 +225,11 @@ func TestLiftedPause_AResumeCallAnnouncesTheLift(t *testing.T) {
 		t.Fatalf("pause for A = %v, %v; want applied", applied, err)
 	}
 	paid := r.pay(r.ctx, a)
-	sub, resumed, err := svc.ResumeCollection(r.ctx, r.tenantID, r.subID)
+	// The operator's request writes the resume's row, so the row names the
+	// request's actor, as every audit row does (audit.ResolveActor). Its
+	// cause is the payment (triggered_by), as for a test-clock cancel.
+	opCtx := auth.WithKeyID(r.ctx, "vlx_key_operator")
+	sub, resumed, err := svc.ResumeCollection(opCtx, r.tenantID, r.subID)
 	if err != nil {
 		t.Fatalf("resume call: %v", err)
 	}
@@ -237,6 +242,9 @@ func TestLiftedPause_AResumeCallAnnouncesTheLift(t *testing.T) {
 	evs := r.wantPauseEvents(pausedDunning, resumedPayment)
 	rows := r.wantPauseAudit(logger, auditPausedDunning, auditResumedPayment)
 	wantResumedAt(t, evs[1], rows[1], paid)
+	if got := rows[1].ActorType + "/" + rows[1].ActorID; got != "api_key/vlx_key_operator" {
+		t.Errorf("resume row actor = %s, want api_key/vlx_key_operator: the request that wrote it", got)
+	}
 }
 
 // raceAfterList is the concurrent-resolver fake for the scheduled resumer:
