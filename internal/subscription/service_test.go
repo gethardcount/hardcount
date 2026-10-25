@@ -13,6 +13,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // memStore is an in-memory Store implementation used across the subscription
@@ -2511,7 +2512,7 @@ func TestProcessExpiredTrialsForClock(t *testing.T) {
 // (no test_clock_id) path.
 func TestProcessExpiredTrials(t *testing.T) {
 	createdAt := time.Date(2025, 11, 29, 12, 0, 0, 0, time.UTC)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	t.Run("wall-clock: flips trialing → active at trial_end_at past now", func(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(createdAt))

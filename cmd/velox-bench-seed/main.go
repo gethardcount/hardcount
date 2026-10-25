@@ -205,7 +205,7 @@ func mintBenchAPIKey(ctx context.Context, db *postgres.DB, live bool) string {
 	svc := auth.NewService(auth.NewPostgresStore(db))
 	// The key MUST be minted in the same mode as the fixtures, or it
 	// authenticates into the other partition and sees no bench data.
-	res, err := svc.CreateKey(auth.WithLivemode(ctx, live), benchTenant, auth.CreateKeyInput{
+	res, err := svc.CreateKey(postgres.WithLivemode(ctx, live), benchTenant, auth.CreateKeyInput{
 		Name: "velox-bench", KeyType: auth.KeyTypeSecret,
 	})
 	if err != nil {

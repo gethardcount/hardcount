@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/payment/breaker"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // A charge that sends nothing to Stripe releases its hold (ADR-127). The
@@ -60,7 +61,7 @@ func TestChargeInvoice_NothingSent_ReleasesTheHold(t *testing.T) {
 		invoices.invoices[inv.ID] = inv
 		s := NewStripe(NewLiveStripeClient(NewStripeClients(creds)), invoices, newMockWebhookStore(), nil)
 
-		_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
+		_, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
 		if !errors.Is(err, ErrPaymentTransient) {
 			t.Fatalf("err = %v, want ErrPaymentTransient", err)
 		}
@@ -79,7 +80,7 @@ func TestChargeInvoice_NothingSent_ReleasesTheHold(t *testing.T) {
 		invoices.invoices[inv.ID] = inv
 		s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil)
 
-		_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
+		_, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test")
 		if !errors.Is(err, ErrPaymentTransient) {
 			t.Fatalf("err = %v, want ErrPaymentTransient", err)
 		}

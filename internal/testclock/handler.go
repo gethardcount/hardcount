@@ -13,6 +13,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // AuditWriter is the narrow audit surface testclock uses.
@@ -59,7 +60,7 @@ func (h *Handler) Routes() chi.Router {
 // eventually fail anyway — this makes the failure immediate and explains why.
 func (h *Handler) requireTestMode(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if auth.Livemode(r.Context()) {
+		if postgres.Livemode(r.Context()) {
 			respond.Forbidden(w, r, "test clocks are only available in test mode — use a test-mode API key (vlx_secret_test_...)")
 			return
 		}

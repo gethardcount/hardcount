@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // retireFailStore fails the write that retires the old key, after the
@@ -28,7 +29,7 @@ func (s *retireFailStore) Revoke(context.Context, string, string) (domain.APIKey
 func TestRotateHandler_RetireStoreFailureIs500Generic(t *testing.T) {
 	store := &retireFailStore{memStore: newMemStore(), err: errors.New("pq: connection refused")}
 	svc := NewService(store)
-	ctx := WithTenantID(context.Background(), "t1")
+	ctx := WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 
 	original, err := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "rotate-me"})
 	if err != nil {

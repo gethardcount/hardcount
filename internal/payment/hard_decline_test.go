@@ -14,6 +14,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // #966: when the bank refuses a card for good (lost, stolen, pick up …), every
@@ -88,7 +89,7 @@ func TestChargeDecline_RecordsDeclineCodeAndCard(t *testing.T) {
 			s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, dunning)
 			s.SetEmailPaymentFailed(email, staticCustomerEmail{})
 
-			_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
+			_, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 			var pe *PaymentError
 			if !errors.As(err, &pe) || pe.Unknown || pe.DeclineCode != tc.code || pe.PaymentIntentID != "pi_decl" {
 				t.Fatalf("charge error = %#v, want a definite %s decline naming pi_decl", err, tc.code)

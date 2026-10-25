@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // The stale-hold sweep's read (ADR-127), decoded by stripe-go itself through
@@ -70,7 +71,7 @@ const (
 )
 
 func listClient() (*LiveStripeClient, context.Context) {
-	return NewLiveStripeClient(NewStripeClients(fixedCreds{})), auth.WithTenantID(context.Background(), "t1")
+	return NewLiveStripeClient(NewStripeClients(fixedCreds{})), auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 }
 
 // Every page is read; each PaymentIntent carries its invoice, purpose,

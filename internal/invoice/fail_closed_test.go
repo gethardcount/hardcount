@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 var errBlip = errors.New("connection reset")
@@ -39,7 +40,7 @@ func TestTaxReversal_CreditedTotalReadErrorFails(t *testing.T) {
 		TotalAmountCents: 1000, AmountDueCents: 600,
 	}
 
-	recovered, errs := svc.RetryPendingTaxReversal(context.Background(), 50)
+	recovered, errs := svc.RetryPendingTaxReversal(postgres.WithLivemode(context.Background(), true), 50)
 	if recovered != 0 || len(errs) != 1 {
 		t.Fatalf("recovered=%d errs=%d, want 0/1", recovered, len(errs))
 	}

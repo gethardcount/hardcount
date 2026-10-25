@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -250,7 +251,7 @@ func thresholdFixture(t *testing.T, settings SettingsReader, taxCalcs *recording
 func TestScanThresholds_EverySettingsReadFailsClosed(t *testing.T) {
 	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
 		engine, invoices := thresholdFixture(t, s, taxCalcs)
-		_, errs := engine.ScanThresholds(context.Background(), 50)
+		_, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 		if len(errs) > 0 {
 			return len(invoices.invoices), errs[0]
 		}
@@ -263,7 +264,7 @@ func TestScanThresholds_HonorsDueOnReceipt(t *testing.T) {
 	ts.NetPaymentTerms = 0
 	engine, invoices := thresholdFixture(t, &flakySettings{ts: ts}, nil)
 
-	if fired, errs := engine.ScanThresholds(context.Background(), 50); fired != 1 || len(errs) > 0 {
+	if fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50); fired != 1 || len(errs) > 0 {
 		t.Fatalf("ScanThresholds: fired=%d errs=%v, want one fire", fired, errs)
 	}
 	inv := invoices.invoices[0]

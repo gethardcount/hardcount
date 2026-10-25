@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // TestRetryPendingTaxReversal drives the recovery sweep for a void whose
@@ -15,7 +16,7 @@ import (
 // tax_reversed_at and falls out of the next scan; on failure it stays pending
 // for the next tick and the error is aggregated.
 func TestRetryPendingTaxReversal(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	seed := func() (*Service, *memStore, *fakeTaxReverser) {
 		store := newMemStore()

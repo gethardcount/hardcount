@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 func TestMiddleware_NoAuth(t *testing.T) {
@@ -42,7 +44,7 @@ func TestMiddleware_InvalidKey(t *testing.T) {
 
 func TestMiddleware_ValidSecretKey(t *testing.T) {
 	svc := NewService(newMemStore())
-	result, _ := svc.CreateKey(t.Context(), "tenant1", CreateKeyInput{Name: "Test", KeyType: KeyTypeSecret})
+	result, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "tenant1", CreateKeyInput{Name: "Test", KeyType: KeyTypeSecret})
 
 	mw := Middleware(svc)
 
@@ -72,7 +74,7 @@ func TestMiddleware_ValidSecretKey(t *testing.T) {
 
 func TestMiddleware_XAPIKeyFallback(t *testing.T) {
 	svc := NewService(newMemStore())
-	result, _ := svc.CreateKey(t.Context(), "t1", CreateKeyInput{Name: "Test", KeyType: KeyTypePublishable})
+	result, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Test", KeyType: KeyTypePublishable})
 
 	mw := Middleware(svc)
 	var gotKeyType KeyType
@@ -96,7 +98,7 @@ func TestMiddleware_XAPIKeyFallback(t *testing.T) {
 
 func TestRequire_SecretKeyHasFullAccess(t *testing.T) {
 	svc := NewService(newMemStore())
-	result, _ := svc.CreateKey(t.Context(), "t1", CreateKeyInput{Name: "Secret", KeyType: KeyTypeSecret})
+	result, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Secret", KeyType: KeyTypeSecret})
 
 	perms := []Permission{
 		PermCustomerRead, PermCustomerWrite, PermPricingRead, PermPricingWrite,
@@ -125,7 +127,7 @@ func TestRequire_SecretKeyHasFullAccess(t *testing.T) {
 
 func TestRequire_PublishableKeyRestricted(t *testing.T) {
 	svc := NewService(newMemStore())
-	result, _ := svc.CreateKey(t.Context(), "t1", CreateKeyInput{Name: "Pub", KeyType: KeyTypePublishable})
+	result, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Pub", KeyType: KeyTypePublishable})
 
 	// Publishable keys get NO tenant-wide scopes — authenticate-only. Every
 	// read AND write path is closed: tenant-wide reads in a browser key leak
@@ -212,7 +214,7 @@ func TestLivemodeFromRequest(t *testing.T) {
 func TestRequire_PlatformKeyOnlyTenants(t *testing.T) {
 	svc := NewService(newMemStore())
 	// Platform keys can only be minted by an existing platform principal.
-	result, _ := svc.CreateKey(WithKeyType(t.Context(), KeyTypePlatform), "t1", CreateKeyInput{Name: "Platform", KeyType: KeyTypePlatform})
+	result, _ := svc.CreateKey(WithKeyType(postgres.WithLivemode(t.Context(), true), KeyTypePlatform), "t1", CreateKeyInput{Name: "Platform", KeyType: KeyTypePlatform})
 
 	// Should have tenant access
 	handler := Middleware(svc)(Require(PermTenantWrite)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +252,7 @@ func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
 	// methods (arg0 held) and 403s write methods (arg1 absent) — isolating
 	// GET/HEAD/OPTIONS→arg0 and POST/PUT/PATCH/DELETE→arg1. (Publishable keys,
 	// formerly the read-only fixture here, now carry no scopes at all.)
-	sec, _ := svc.CreateKey(t.Context(), "t1", CreateKeyInput{Name: "Sec", KeyType: KeyTypeSecret})
+	sec, _ := svc.CreateKey(postgres.WithLivemode(t.Context(), true), "t1", CreateKeyInput{Name: "Sec", KeyType: KeyTypeSecret})
 
 	mw := Middleware(svc)(RequireMethod(PermCustomerRead, PermTenantWrite)(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }),

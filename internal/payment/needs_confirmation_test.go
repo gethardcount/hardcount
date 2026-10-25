@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // An off-session charge the customer's bank wants them to confirm (3-D
@@ -47,7 +48,7 @@ func TestChargeDecline_AuthenticationRequired_AsksTheCustomerToConfirm(t *testin
 		s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 		s.SetEmailPaymentFailed(email, staticCustomerEmail{})
 
-		_, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
+		_, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 		var pe *PaymentError
 		if !errors.As(err, &pe) || pe.Unknown || pe.PaymentIntentID != "pi_3ds" {
 			t.Fatalf("decline_code=%v: charge error = %#v, want a definite decline naming pi_3ds", withDeclineCode, err)

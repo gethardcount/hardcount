@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // Tests for the last_used_at debounce (#818).
@@ -58,7 +60,7 @@ func newDebounceFixture(t *testing.T) (*Service, *countingStore, string, *time.T
 	// Injected clock so the interval can be crossed without sleeping a minute.
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return now }
-	res, err := svc.CreateKey(context.Background(), "t1", CreateKeyInput{Name: "k", KeyType: KeyTypeSecret})
+	res, err := svc.CreateKey(postgres.WithLivemode(context.Background(), true), "t1", CreateKeyInput{Name: "k", KeyType: KeyTypeSecret})
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}
@@ -171,7 +173,7 @@ func TestLastUsed_TouchPrimitiveIsExactlyOnceUnderRace(t *testing.T) {
 // suppress another's.
 func TestLastUsed_PerKeyNotGlobal(t *testing.T) {
 	svc, store, rawA, _ := newDebounceFixture(t)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 	resB, err := svc.CreateKey(ctx, "t1", CreateKeyInput{Name: "k2", KeyType: KeyTypeSecret})
 	if err != nil {
 		t.Fatal(err)

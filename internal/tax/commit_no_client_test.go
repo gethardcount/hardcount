@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/stripe/stripe-go/v82"
 )
 
@@ -16,7 +17,7 @@ func (nilClients) ForCtx(context.Context) *stripe.Client { return nil }
 // the commit-retry sweep counted it as recovered.
 func TestCommit_NoClientIsAnError(t *testing.T) {
 	p := NewStripeTaxProvider(nilClients{})
-	if _, err := p.Commit(context.Background(), "taxcalc_1", "inv_1"); err == nil {
+	if _, err := p.Commit(postgres.WithLivemode(context.Background(), true), "taxcalc_1", "inv_1"); err == nil {
 		t.Fatal("Commit with no client = nil error, want an error")
 	}
 }

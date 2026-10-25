@@ -1705,7 +1705,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 			ctx := req.Context()
 			out := map[string]any{
 				"tenant_id":             auth.TenantID(ctx),
-				"livemode":              auth.Livemode(ctx),
+				"livemode":              postgres.Livemode(ctx),
 				"can_email_setup_links": setupLinksEmailable,
 				"can_send_invites":      membersSvc.CanInvite(),
 				// smtp_configured lets any page show one global "email is

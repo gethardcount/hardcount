@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // fakeNoPMNotifier records NotifyNoPaymentMethod calls so tests can assert
@@ -75,7 +76,7 @@ func thresholdNoPMFixture() (*Engine, *mockInvoices, *recordingCharger, *fakeNoP
 func TestThresholdScan_NoPM_QueuesAndNotifies(t *testing.T) {
 	engine, invoices, charger, notifier := thresholdNoPMFixture()
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 || fired != 1 {
 		t.Fatalf("fired/errs: %d/%v", fired, errs)
 	}
@@ -118,7 +119,7 @@ func TestThresholdScan_NoPM_DraftInvoiceStaysQuiet(t *testing.T) {
 	// Force a tax defer -> the threshold invoice lands tax_status=pending, draft.
 	engine.SetTaxProviderResolver(stubResolver(&stubProvider{err: fmt.Errorf("stripe tax down")}))
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 || fired != 1 {
 		t.Fatalf("fired/errs: %d/%v", fired, errs)
 	}

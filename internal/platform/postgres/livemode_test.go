@@ -9,16 +9,56 @@ import (
 	"testing"
 )
 
-// TestLivemode_DefaultsToLive documents the public API's fallback semantics:
-// without any WithLivemode on the chain, Livemode(ctx) returns true. Callers
-// must not rely on this to *detect* unset — use livemodeSet for that.
-func TestLivemode_DefaultsToLive(t *testing.T) {
-	t.Parallel()
-	if !Livemode(context.Background()) {
-		t.Fatal("Livemode of bare ctx should default to true")
+// An unset livemode is a bug at the entry point. Under strict mode (tests and
+// CI) reading it panics, so the bug fails the suite instead of silently
+// reading as live.
+func TestLivemode_UnsetPanicsUnderStrict(t *testing.T) {
+	// Not t.Parallel — mutates env.
+	t.Setenv("VELOX_LIVEMODE_STRICT", "true")
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("Livemode of a bare ctx should panic under VELOX_LIVEMODE_STRICT")
+		}
+		msg, _ := r.(string)
+		if !strings.Contains(msg, "livemode was never set") {
+			t.Fatalf("panic message should name the issue; got %q", msg)
+		}
+	}()
+	Livemode(context.Background())
+}
+
+// In production an unset livemode reads as live, as the database does, and
+// logs one warning per call site naming the code that read it.
+func TestLivemode_UnsetWarnsOnceAndNamesCaller(t *testing.T) {
+	// Not t.Parallel — mutates env, the slog default and the dedup map.
+	t.Setenv("VELOX_LIVEMODE_STRICT", "")
+	resetLivemodeSeen()
+
+	var buf bytes.Buffer
+	var bufMu sync.Mutex
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&syncBuf{Buffer: &buf, mu: &bufMu}, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	for range 3 {
+		if !Livemode(context.Background()) {
+			t.Fatal("unset livemode should read as live outside strict mode")
+		}
 	}
 	if livemodeSet(context.Background()) {
 		t.Fatal("livemodeSet of bare ctx should be false")
+	}
+
+	bufMu.Lock()
+	output := buf.String()
+	bufMu.Unlock()
+	if n := strings.Count(output, "velox: livemode propagation missing"); n != 1 {
+		t.Fatalf("expected exactly 1 warning, got %d:\n%s", n, output)
+	}
+	if !strings.Contains(output, "livemode_test.go:") {
+		t.Fatalf("warning should name the test as the caller, not a frame inside postgres.go:\n%s", output)
 	}
 }
 

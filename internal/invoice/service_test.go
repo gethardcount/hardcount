@@ -13,6 +13,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -1716,7 +1717,7 @@ func TestRetryPendingTaxCommit(t *testing.T) {
 	svc := NewService(store, nil, nil)
 	committer := &recordingTaxCommitter{}
 	svc.SetTaxCommitter(committer)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// The orphan: commit succeeded at Stripe, local tax_transaction_id lost.
 	store.invoices["orphan"] = domain.Invoice{

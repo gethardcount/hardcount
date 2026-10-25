@@ -48,29 +48,28 @@ const (
 // Context key for livemode propagation. Owned by the postgres package because
 // BeginTx is the single choke point that needs to read it — having the key
 // live here avoids circular imports between auth and postgres.
+// The value is stored as *bool so an explicit false can be told apart from
+// "never set".
 type livemodeCtxKey struct{}
 
-// Stored as *bool so BeginTx can distinguish "caller explicitly chose live"
-// from "nobody set this, defaulting to live". The public Livemode() still
-// returns a plain bool and keeps the default-to-live fallback — only BeginTx
-// and WithRequiredLivemode need to care about the set/unset distinction.
-
-// WithLivemode returns a derived context carrying the mode flag. BeginTx
-// reads this to set app.livemode on the tx session, which the RLS policy
-// uses to filter rows by mode alongside tenant.
+// WithLivemode returns a derived context carrying the mode flag. Every entry
+// point sets it: the auth middleware from the key or session, public links
+// from their token's row, and background workers per row or per mode. BeginTx
+// reads it to set app.livemode, which the RLS policy filters on alongside
+// tenant.
 func WithLivemode(ctx context.Context, live bool) context.Context {
 	return context.WithValue(ctx, livemodeCtxKey{}, &live)
 }
 
-// Livemode reads the livemode flag from ctx. Absent a value, defaults to
-// true — the RLS policy interprets unset as "live mode" so background
-// workers and bootstrap tooling that don't propagate mode operate safely
-// against production data by default. Callers that need to know whether
-// the value was set explicitly should use WithRequiredLivemode at their
-// entry point instead of inspecting the return value here.
+// Livemode reads the livemode flag from ctx. An unset flag is a bug at the
+// entry point, so it is reported (see reportUnsetLivemode): tests panic, and
+// production logs a warning and returns true. True matches the database,
+// which also reads an unset app.livemode as live.
 func Livemode(ctx context.Context) bool {
 	p, ok := ctx.Value(livemodeCtxKey{}).(*bool)
 	if !ok || p == nil {
+		// skip=2: reportUnsetLivemode → Livemode → the caller.
+		reportUnsetLivemode(2)
 		return true
 	}
 	return *p
@@ -96,34 +95,30 @@ func WithRequiredLivemode(ctx context.Context) context.Context {
 	return ctx
 }
 
-// livemodeStrict reports whether the process should escalate unset-livemode
-// warnings to panics. Enabled in tests (via VELOX_LIVEMODE_STRICT=true) so
-// any test that opens a TxTenant without setting a mode fails loudly
-// instead of silently routing to live. Default off in production — the
-// warning is the signal, crashing a live install over a forgotten
-// propagation is not.
+// livemodeStrict reports whether an unset livemode panics instead of
+// logging. `make test*` and CI set VELOX_LIVEMODE_STRICT=true, so a missing
+// WithLivemode fails the suite at PR time. Production leaves it off: there
+// the missing flag is still caught (BeginTx refuses a TxTenant, Livemode
+// logs), but it does not crash the process.
 func livemodeStrict() bool {
 	return strings.EqualFold(os.Getenv("VELOX_LIVEMODE_STRICT"), "true")
 }
 
-// unsetLivemodeSeen tracks call sites that have already logged the
-// "TxTenant opened without ctx livemode" warning. The warning is valuable
-// the first time per site but noisy if fired for every tick of a long-
-// running scheduler — dedup on caller file:line so operators get one log
-// line per forgotten propagation, not one per request.
+// unsetLivemodeSeen tracks call sites that have already logged the unset-
+// livemode warning. Dedup on caller file:line so a scheduler that ticks every
+// minute logs one line per forgotten propagation, not one per tick.
 var unsetLivemodeSeen sync.Map // map[string]struct{}
 
-// reportUnsetLivemode logs (or panics under strict mode) when a TxTenant
-// opens without ctx livemode. Skip is the number of stack frames above
-// this function to attribute the warning to — 2 lands on the caller of
-// BeginTx, which is the interesting site.
+// reportUnsetLivemode panics under strict mode, and otherwise logs once per
+// call site, when ctx has no livemode. Skip is passed to runtime.Caller: 0 is
+// this function, 1 its caller, 2 the caller's caller.
 func reportUnsetLivemode(skip int) {
 	_, file, line, ok := runtime.Caller(skip)
 	site := "unknown"
 	if ok {
 		site = fmt.Sprintf("%s:%d", file, line)
 	}
-	msg := "TxTenant opened without ctx livemode; defaulting to live. Wrap ctx with postgres.WithLivemode(ctx, true/false) at the entry point."
+	msg := "livemode was never set on ctx; wrap ctx with postgres.WithLivemode(ctx, true/false) at the entry point"
 	if livemodeStrict() {
 		panic(fmt.Sprintf("velox (VELOX_LIVEMODE_STRICT): %s caller=%s", msg, site))
 	}
@@ -157,9 +152,9 @@ func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.T
 		// fixed every known site, so a regression here means a NEW
 		// missed propagation that bypassed tests.
 		//
-		// skip=3: runtime.Caller → reportUnsetLivemode → BeginTx → caller.
+		// skip=2: reportUnsetLivemode → BeginTx → the caller.
 		if !livemodeSet(ctx) {
-			reportUnsetLivemode(3)
+			reportUnsetLivemode(2)
 			_ = tx.Rollback()
 			return nil, fmt.Errorf("postgres: TxTenant opened without ctx livemode (set postgres.WithLivemode at the entry point)")
 		}

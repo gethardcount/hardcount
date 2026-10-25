@@ -98,7 +98,7 @@ func TestRateLimitKey_KeysOnResolvedClientIPBehindProxy(t *testing.T) {
 func TestRateLimitKey_TenantBucketsAreDistinctAcrossTenants(t *testing.T) {
 	key := func(tenantID string) string {
 		r := httptest.NewRequest("GET", "/v1/invoices", nil)
-		return rateLimitKey(r.WithContext(auth.WithTenantID(r.Context(), tenantID)))
+		return rateLimitKey(r.WithContext(auth.WithTenantID(postgres.WithLivemode(r.Context(), true), tenantID)))
 	}
 	if key("ten_a") == key("ten_b") {
 		t.Fatal("two tenants share a bucket — one tenant's load throttles another")

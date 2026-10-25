@@ -486,7 +486,7 @@ func TestEndpointSuccessRate(t *testing.T) {
 
 func TestCreateEndpoint(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	t.Run("valid localhost", func(t *testing.T) {
 		result, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -557,7 +557,7 @@ func TestDispatch(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Register an endpoint (localhost to bypass SSRF DNS check in tests)
 	result, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -652,7 +652,7 @@ func TestDispatch(t *testing.T) {
 func TestInactiveEndpoint_ListedButNeverDispatched(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	if _, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9901/hook", Events: []string{"*"},
@@ -708,7 +708,7 @@ func TestDispatch_NonMatchingEvent(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Register endpoint for invoice events only
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -730,7 +730,7 @@ func TestDispatch_WildcardEndpoint(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Register endpoint for all events
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -774,7 +774,7 @@ func TestDelivery_FailedHTTP(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 500}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "http://localhost:9999/hook"})
 	before := time.Now()
@@ -887,7 +887,7 @@ func TestReplay(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	// Setup: create endpoint + dispatch event
 	_, _ = svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -981,7 +981,7 @@ func TestReplay_PinsLivemodeOnDelivery(t *testing.T) {
 func TestReplayDelivery_ScopedToOneEndpoint(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	epA, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/a", Events: []string{"invoice.finalized"},
@@ -1039,7 +1039,7 @@ func TestReplayDelivery_ScopedToOneEndpoint(t *testing.T) {
 func TestReplayDelivery_PausedEndpointRejected_NoOrphanClone(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/hook", Events: []string{"invoice.finalized"},
@@ -1079,7 +1079,7 @@ func TestReplayDelivery_PausedEndpointRejected_NoOrphanClone(t *testing.T) {
 func TestRetryPending_DeletedEndpointResolvesDelivery(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 500})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/hook", Events: []string{"invoice.finalized"},
@@ -1120,7 +1120,7 @@ func TestRetryPending_DeletedEndpointResolvesDelivery(t *testing.T) {
 func TestReplayDelivery_WrongEndpointPath404s(t *testing.T) {
 	store := newMemStore()
 	svc := NewTestService(store, &mockHTTPClient{statusCode: 200})
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	epA, _ := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9999/a", Events: []string{"invoice.finalized"},
@@ -1313,7 +1313,7 @@ func TestBuildSignatureHeader(t *testing.T) {
 // rotate returns a secondary_valid_until, a follow-up dispatch signs with
 // both secrets, and after the window the header drops back to one.
 func TestRotateSecret_GracePeriod(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
@@ -1380,7 +1380,7 @@ func TestRetryPendingDeliveries_OldEventResolvable(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL:    "http://localhost:9999/hook",
@@ -1459,7 +1459,7 @@ func TestRetryPendingDeliveries_DeletedEventFails(t *testing.T) {
 	store := newMemStore()
 	httpClient := &mockHTTPClient{statusCode: 200}
 	svc := NewTestService(store, httpClient)
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	ep, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL:    "http://localhost:9999/hook",
@@ -1748,7 +1748,7 @@ func TestValidateWebhookURL_JudgesAddressesLikeTheDialer(t *testing.T) {
 // A public IPv6 address is the negative control.
 func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	existing, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{URL: "https://[2606:4700:4700::1111]/hook"})
 	if err != nil {
@@ -1792,7 +1792,7 @@ func TestCreateAndUpdateEndpoint_RefuseIPv6PrivateAddresses(t *testing.T) {
 // shipped two phantom names: invoice.payment_failed, subscription.updated).
 func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	for _, bad := range []string{"invoice.payment_failed", "subscription.updated", "totally.made_up"} {
 		if _, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
@@ -1828,7 +1828,7 @@ func TestCreateEndpoint_RejectsUnknownEventNames(t *testing.T) {
 // URL) were permanently dead.
 func TestUpdateEndpoint(t *testing.T) {
 	svc := NewService(newMemStore(), nil, "local")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	created, err := svc.CreateEndpoint(ctx, "t1", CreateEndpointInput{
 		URL: "http://localhost:9099/old", Events: []string{"invoice.finalized"},

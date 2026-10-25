@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/sagarsuperuser/velox/internal/subscription"
 	"maps"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sagarsuperuser/velox/internal/subscription"
 
 	"github.com/shopspring/decimal"
 
@@ -151,7 +152,7 @@ func TestRetryPendingCharges_DispatchesToCorrectQuery(t *testing.T) {
 		// We don't have a charger wired so the loop short-circuits at
 		// the paymentSetups nil check — that's fine, the assertion
 		// here is structural, not behavioural.
-		_, _ = engine.RetryPendingCharges(context.Background(), 50, nil)
+		_, _ = engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	})
 
 	t.Run("catchup path uses ListAutoChargePendingForClock", func(t *testing.T) {
@@ -188,7 +189,7 @@ func TestRetryPendingCharges_CardDeclineDoesNotEscalate(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{}, pricing, inv, nil, &mockSettings{}, pms, charger, billingTestClock()))
 
-	charged, errs := engine.RetryPendingCharges(context.Background(), 50, nil)
+	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if charged != 0 {
 		t.Errorf("charged: got %d, want 0 (card declined)", charged)
 	}

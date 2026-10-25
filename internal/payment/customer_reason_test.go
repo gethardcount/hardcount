@@ -8,6 +8,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // The reason the payment-failed email shows the customer is Stripe's message
@@ -42,7 +43,7 @@ func TestPaymentFailedEmail_Reconciler_ShowsOnlyStripesCardMessage(t *testing.T)
 			r := NewReconciler(client, newMockReconcileStore(unknown), time.Second)
 			r.SetSettler(s)
 
-			if _, errs := r.Run(auth.WithTenantID(context.Background(), "t1"), 10); len(errs) != 0 {
+			if _, errs := r.Run(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), 10); len(errs) != 0 {
 				t.Fatalf("reconciler errors: %v", errs)
 			}
 			if len(email.reasons) != 1 || email.reasons[0] != tc.wantReason {
@@ -98,7 +99,7 @@ func TestPaymentFailedEmail_Charge_InvalidRequestShowsNoReason(t *testing.T) {
 	s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 	s.SetEmailPaymentFailed(email, staticCustomerEmail{})
 
-	if _, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file"); err == nil {
+	if _, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", snapshot, testHold, "cus_stripe", "pm_on_file"); err == nil {
 		t.Fatal("charge succeeded, want the invalid-request failure")
 	}
 	if len(email.reasons) != 1 || email.reasons[0] != "" {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
@@ -248,7 +249,7 @@ func TestHostedSweep_PanickingSessionRotatesAndTheRestGoesOn(t *testing.T) {
 
 	recovered := func() (p any) {
 		defer func() { p = recover() }()
-		_, _ = r.Run(context.Background(), 50)
+		_, _ = r.Run(postgres.WithLivemode(context.Background(), true), 50)
 		return nil
 	}()
 	if recovered != "hosted sweep: nil dereference on cs_panic" {
