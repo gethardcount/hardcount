@@ -91,7 +91,7 @@ func TestFinalize_WebhookShowsTheRowAtTheEvent(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("invoice.finalized data.invoice differs from the row when the event was created:\n got %v\nwant %v", got, want)
 	}
-	// Finalize's caller (the API answer) gets the same row.
+	// Finalize returns the same row to its callers.
 	if returned.TaxTransactionID != final.TaxTransactionID || !returned.UpdatedAt.Equal(final.UpdatedAt) {
 		t.Errorf("Finalize returned tax_transaction_id %q updated_at %v; the row has %q %v",
 			returned.TaxTransactionID, returned.UpdatedAt, final.TaxTransactionID, final.UpdatedAt)

@@ -3,8 +3,10 @@ package invoice
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
@@ -60,5 +62,54 @@ func TestFinalize_InvoiceFinalizedPayloadCarriesCreditsApplied(t *testing.T) {
 	}
 	if got["amount_due_cents"] != json.Number("7500") || got["total_amount_cents"] != json.Number("10000") {
 		t.Errorf("amounts: due %v total %v, want 7500 and 10000", got["amount_due_cents"], got["total_amount_cents"])
+	}
+}
+
+// getFailsAfterFinalize is memStore whose reads fail once the finalize write
+// has run.
+type getFailsAfterFinalize struct {
+	*memStore
+	finalized bool
+}
+
+func (s *getFailsAfterFinalize) FinalizeWithDates(ctx context.Context, tenantID, id string, issuedAt, dueAt time.Time) (domain.Invoice, error) {
+	s.finalized = true
+	return s.memStore.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt)
+}
+
+func (s *getFailsAfterFinalize) Get(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
+	if s.finalized {
+		return domain.Invoice{}, errors.New("connection reset")
+	}
+	return s.memStore.Get(ctx, tenantID, id)
+}
+
+// When Finalize cannot read the invoice after its writes, the finalize
+// stands and invoice.finalized is not sent: an event never carries a row
+// the database did not hold (ADR-131 rule 5).
+func TestFinalize_RereadFailsSendsNoEvent(t *testing.T) {
+	store := &getFailsAfterFinalize{memStore: newMemStore()}
+	svc := NewService(store, nil, newMemNumberer())
+	events := &captureEvents{}
+	svc.SetEventDispatcher(events)
+	ctx := context.Background()
+
+	inv, err := svc.Create(ctx, "t1", CreateInput{
+		CustomerID: "cus_1",
+		LineItems:  []AddLineItemInput{{Description: "Consulting", Quantity: 1, UnitAmountCents: 10000}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.Finalize(ctx, "t1", inv.ID); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if got := store.invoices[inv.ID].Status; got != domain.InvoiceFinalized {
+		t.Fatalf("status %s, want finalized", got)
+	}
+	for _, ev := range events.events {
+		if ev.eventType == domain.EventInvoiceFinalized {
+			t.Fatalf("invoice.finalized sent after the re-read failed: %v", ev.payload)
+		}
 	}
 }

@@ -196,9 +196,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 		}}).want(t, 201, "create invoice: "+desc).body, "id")
 		call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(t, 200, "finalize: "+desc)
 		got := events.next("finalize "+desc, domain.EventInvoiceFinalized, domain.EventDunningStarted)
-		// The collection that runs after the event touches the row.
-		checkEventResource(t, "invoice.finalized "+desc, got[domain.EventInvoiceFinalized], getInvoice(id),
-			"updated_at")
+		checkEventResource(t, "invoice.finalized "+desc, got[domain.EventInvoiceFinalized], getInvoice(id))
 		checkEventResource(t, "dunning.started "+desc, got[domain.EventDunningStarted], getRun(id))
 		return id
 	}
