@@ -208,7 +208,10 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		if plan.BaseAmountCents <= 0 {
 			continue
 		}
-		baseFee := plan.BaseAmountCents * it.Quantity
+		baseFee, err := baseFeeCents(plan, it.Quantity)
+		if err != nil {
+			return PreviewResult{}, fmt.Errorf("preview: %w", err)
+		}
 		desc := fmt.Sprintf("%s - base fee (qty %d)", plan.Name, it.Quantity)
 		if plan.BaseBillTiming == domain.BillInAdvance {
 			desc = fmt.Sprintf("%s - base fee (qty %d, in advance for upcoming period)", plan.Name, it.Quantity)
@@ -311,7 +314,9 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		}
 	}
 
-	result.Totals = computePreviewTotals(result.Lines)
+	if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
+		return PreviewResult{}, err
+	}
 	return result, nil
 }
 
@@ -335,7 +340,9 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	if sub.Status == domain.SubscriptionTrialing && trialCancelsFree(sub) {
 		// handleTrialState cancels free at trial end: no invoice.
 		result.Warnings = append(result.Warnings, "A cancel is scheduled for the end of the trial, so no invoice will be issued.")
-		result.Totals = computePreviewTotals(result.Lines)
+		if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
+			return PreviewResult{}, err
+		}
 		return result, nil
 	}
 	if sub.Status == domain.SubscriptionTrialing {
@@ -378,7 +385,11 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	// The close runs at periodEnd; a scheduled cancel firing there skips
 	// the upcoming in_advance base.
 	terminal := shouldFireScheduledCancel(sub, periodEnd, periodEnd)
-	for _, bl := range closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, terminal, wm.billedBase()) {
+	baseLines, err := closeBaseFeeLines(sub, segsByItem, plans, periodStart, periodEnd, currency, loc, terminal, wm.billedBase())
+	if err != nil {
+		return PreviewResult{}, fmt.Errorf("preview: %w", err)
+	}
+	for _, bl := range baseLines {
 		result.Lines = append(result.Lines, PreviewLine{
 			LineType:        "base_fee",
 			Description:     bl.line.Description,
@@ -439,7 +450,9 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 			wm.billedThrough.In(loc).Format("Jan 2, 2006 15:04 MST")))
 	}
 
-	result.Totals = computePreviewTotals(result.Lines)
+	if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
+		return PreviewResult{}, err
+	}
 	return result, nil
 }
 
@@ -483,7 +496,11 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, p
 	if err != nil {
 		return PreviewResult{}, true, err
 	}
-	for _, bl := range onCreateBaseLines(sub, plans, advanceItems, periodStart, periodEnd, currency, loc) {
+	baseLines, err := onCreateBaseLines(sub, plans, advanceItems, periodStart, periodEnd, currency, loc)
+	if err != nil {
+		return PreviewResult{}, true, fmt.Errorf("preview: %w", err)
+	}
+	for _, bl := range baseLines {
 		result.Lines = append(result.Lines, PreviewLine{
 			LineType:        "base_fee",
 			Description:     bl.line.Description,
@@ -502,15 +519,18 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, p
 		result.Warnings = append(result.Warnings,
 			"This is the invoice issued when the trial ends. Usage for this period is on the invoice at the end of the period.")
 	}
-	result.Totals = computePreviewTotals(result.Lines)
+	if result.Totals, err = computePreviewTotals(result.Lines); err != nil {
+		return PreviewResult{}, true, err
+	}
 	return result, true, nil
 }
 
 // computePreviewTotals groups each line's amount by currency and emits
 // one PreviewTotal per distinct currency. Order is insertion-stable
 // (first currency seen wins position 0) so the response is deterministic
-// across calls. Mirrors the customer-usage computeTotals helper.
-func computePreviewTotals(lines []PreviewLine) []PreviewTotal {
+// across calls. Mirrors the customer-usage computeTotals helper. A total
+// past int64 is an error, never a wrapped figure.
+func computePreviewTotals(lines []PreviewLine) ([]PreviewTotal, error) {
 	bucket := map[string]int64{}
 	var order []string
 	for _, line := range lines {
@@ -520,11 +540,15 @@ func computePreviewTotals(lines []PreviewLine) []PreviewTotal {
 		if _, ok := bucket[line.Currency]; !ok {
 			order = append(order, line.Currency)
 		}
-		bucket[line.Currency] += line.AmountCents
+		sum, err := addCents(bucket[line.Currency], line.AmountCents)
+		if err != nil {
+			return nil, fmt.Errorf("preview total in %s: %w", line.Currency, err)
+		}
+		bucket[line.Currency] = sum
 	}
 	out := make([]PreviewTotal, 0, len(order))
 	for _, cur := range order {
 		out = append(out, PreviewTotal{Currency: cur, AmountCents: bucket[cur]})
 	}
-	return out
+	return out, nil
 }

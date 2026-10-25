@@ -30,7 +30,7 @@ type closeBaseLine struct {
 // thresholdBilled skips the in_arrears base when this cycle's threshold
 // invoice carries one (thresholdWatermark.billedBase): only a fire made before
 // fires stopped billing the base.
-func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, terminalCycleClose, thresholdBilled bool) []closeBaseLine {
+func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, terminalCycleClose, thresholdBilled bool) ([]closeBaseLine, error) {
 	var out []closeBaseLine
 
 	// Detect partial period once — same across all items since they share the
@@ -41,13 +41,16 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 	// (or within ±1h of) a whole-day multiple — DST transitions
 	// account for the ±1h tolerance, which Round absorbs.
 	periodDays := roundDays(periodEnd.Sub(periodStart))
-	emitSeg := func(seg baseSegment, plan domain.Plan) {
+	emitSeg := func(seg baseSegment, plan domain.Plan) error {
 		var one []domain.InvoiceLineItem
 		var ignored int64
-		emitBaseSegmentLine(seg, plan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &one, &ignored)
+		if err := emitBaseSegmentLine(seg, plan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &one, &ignored); err != nil {
+			return err
+		}
 		for _, li := range one {
 			out = append(out, closeBaseLine{line: li, plan: plan})
 		}
+		return nil
 	}
 
 	// Base fee line item — segment-aware for in_arrears, single-line
@@ -90,7 +93,11 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 			// the calendar-aligned next period on the line item, not
 			// the day-of-month-preserved drifted period.
 			baseEnd := domain.NextBillingPeriodEnd(periodEnd, sub.BillingTime, plan.BillingInterval, billingLoc, sub.BillingAnchorDay)
-			baseFee := plan.BaseAmountCents * it.Quantity
+			fullFee, err := baseFeeCents(plan, it.Quantity)
+			if err != nil {
+				return nil, err
+			}
+			baseFee := fullFee
 			description := fmt.Sprintf("%s - base fee (qty %d)", plan.Name, it.Quantity)
 			// Prorate when the upcoming period is shorter than a full
 			// plan cycle — e.g. the calendar-snap stub produced after
@@ -130,7 +137,9 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 				fullCycleDays = roundDays(advanceBillingPeriod(baseStart, plan.BillingInterval, billingLoc, 0).Sub(baseStart))
 			}
 			if advanceDays > 0 && fullCycleDays > 0 && advanceDays < fullCycleDays {
-				baseFee = money.RoundHalfToEven(plan.BaseAmountCents*it.Quantity*int64(advanceDays), int64(fullCycleDays))
+				if baseFee, err = prorateCents(fullFee, advanceDays, fullCycleDays); err != nil {
+					return nil, err
+				}
 				description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, it.Quantity, advanceDays, fullCycleDays)
 			}
 			unitAmount := plan.BaseAmountCents
@@ -178,7 +187,9 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 			if segPlan.BaseBillTiming == domain.BillInAdvance {
 				continue
 			}
-			emitSeg(seg, segPlan)
+			if err := emitSeg(seg, segPlan); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -209,8 +220,10 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 			if segPlan.BaseBillTiming == domain.BillInAdvance {
 				continue
 			}
-			emitSeg(seg, segPlan)
+			if err := emitSeg(seg, segPlan); err != nil {
+				return nil, err
+			}
 		}
 	}
-	return out
+	return out, nil
 }

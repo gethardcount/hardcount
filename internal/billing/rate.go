@@ -514,7 +514,10 @@ func (e *Engine) rateCloseUsage(ctx context.Context, sub domain.Subscription, re
 		}
 		line := b.invoiceLine(currency, suffix)
 		lines = append(lines, line)
-		subtotal += line.AmountCents
+		var addErr error
+		if subtotal, addErr = addCents(subtotal, line.AmountCents); addErr != nil && err == nil {
+			err = fmt.Errorf("usage subtotal: %w", addErr)
+		}
 	}
 	if err != nil {
 		return nil, 0, err

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 )
 
@@ -42,5 +43,23 @@ func TestCreate_LinesPastInt64Refused(t *testing.T) {
 	}
 	if inv.SubtotalCents != 9_223_372_036_854_775_807 {
 		t.Errorf("subtotal = %d, want 9223372036854775807", inv.SubtotalCents)
+	}
+}
+
+// The PDF's per-jurisdiction tax rows are sums of line taxes. A row that
+// does not fit int64 cents leaves the breakdown out (the PDF then shows the
+// invoice's tax total alone) rather than print a wrapped amount.
+func TestAggregateTaxByJurisdiction_SumPastInt64LeavesBreakdownOut(t *testing.T) {
+	line := func(j string, cents int64) domain.InvoiceLineItem {
+		return domain.InvoiceLineItem{TaxJurisdiction: j, TaxRate: 20, TaxAmountCents: cents}
+	}
+	rows := aggregateTaxByJurisdiction([]domain.InvoiceLineItem{line("DE", 5), line("FR", 7), line("DE", 6)})
+	if len(rows) != 2 || rows[0].amount != 11 || rows[1].amount != 7 {
+		t.Fatalf("rows = %+v, want DE 11 then FR 7", rows)
+	}
+	if rows := aggregateTaxByJurisdiction([]domain.InvoiceLineItem{
+		line("DE", 5_000_000_000_000_000_000), line("FR", 1), line("DE", 5_000_000_000_000_000_000),
+	}); rows != nil {
+		t.Errorf("rows = %+v, want no breakdown", rows)
 	}
 }

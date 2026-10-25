@@ -319,3 +319,24 @@ func TestCheckedMath_OnCreateSubtotalPastInt64(t *testing.T) {
 		t.Errorf("%d invoices, want none", len(invs))
 	}
 }
+
+// The immediate cancel adds its usage lines and skips the final invoice when
+// the subtotal is 0 or less. A sum past int64 is refused instead: a wrapped,
+// negative subtotal would have skipped the bill with no error.
+func TestCheckedMath_CancelUsageSumPastInt64(t *testing.T) {
+	lf := newLiveFixture(t, "Checked Cancel Usage Sum", 0)
+	twoHugeBuckets(t, lf)
+	sub, err := lf.subStore.Get(lf.ctx, lf.tenantID, lf.subID)
+	if err != nil {
+		t.Fatalf("get sub: %v", err)
+	}
+	now := time.Now().UTC()
+	sub.Status, sub.CanceledAt = domain.SubscriptionCanceled, &now
+	inv, err := lf.engine.BillFinalOnImmediateCancel(lf.ctx, sub)
+	if !errors.Is(err, domain.ErrAmountOverflow) {
+		t.Errorf("cancel err = %v (invoice %q), want ErrAmountOverflow", err, inv.ID)
+	}
+	if invs := lf.listInvoices(t, lf.ctx); len(invs) != 0 {
+		t.Errorf("%d invoices, want none", len(invs))
+	}
+}

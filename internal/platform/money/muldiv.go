@@ -45,3 +45,65 @@ func MulDivRoundHalfToEven(a, b, d int64) (int64, bool) {
 	}
 	return q, true
 }
+
+// MulDivRoundHalfToEvenSigned is MulDivRoundHalfToEven for a and b of any
+// sign: |a×b| / d rounded half to even, with the sign of a×b put back, so
+// negatives round symmetrically as RoundHalfToEven's do. Wherever a×b fits
+// int64 the result is RoundHalfToEven(a*b, d). Requires d > 0; ok is false
+// when the result does not fit int64.
+func MulDivRoundHalfToEvenSigned(a, b, d int64) (int64, bool) {
+	if d <= 0 {
+		return 0, false
+	}
+	neg := (a < 0) != (b < 0)
+	hi, lo := bits.Mul64(abs64(a), abs64(b))
+	if hi >= uint64(d) {
+		return 0, false
+	}
+	uq, ur := bits.Div64(hi, lo, uint64(d))
+	if uq > math.MaxInt64 {
+		return 0, false
+	}
+	// ur < d <= MaxInt64, so 2ur fits uint64.
+	if doubled := 2 * ur; doubled > uint64(d) || (doubled == uint64(d) && uq%2 == 1) {
+		if uq == math.MaxInt64 {
+			return 0, false
+		}
+		uq++
+	}
+	if neg {
+		return -int64(uq), true
+	}
+	return int64(uq), true
+}
+
+// Add returns a + b for amounts of any sign; ok is false when the sum does
+// not fit int64.
+func Add(a, b int64) (int64, bool) {
+	c := a + b
+	if (a > 0 && b > 0 && c < 0) || (a < 0 && b < 0 && c >= 0) {
+		return 0, false
+	}
+	return c, true
+}
+
+// Mul returns a × b for amounts of any sign; ok is false when the product
+// does not fit int64.
+func Mul(a, b int64) (int64, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	c := a * b
+	if c/b != a || (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
+		return 0, false
+	}
+	return c, true
+}
+
+// abs64 is |a| as a uint64, which holds |MinInt64| too.
+func abs64(a int64) uint64 {
+	if a < 0 {
+		return uint64(-(a + 1)) + 1
+	}
+	return uint64(a)
+}

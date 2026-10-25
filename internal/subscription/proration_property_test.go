@@ -66,7 +66,7 @@ func TestProperty_ProrationCents_FullPeriodIsFullDelta(t *testing.T) {
 	for i := 0; i < propIters; i++ {
 		oldA, newA := genAmount(r), genAmount(r)
 		_, total := genPeriod(r)
-		if got, want := prorationCents(oldA, newA, total, total), newA-oldA; got != want {
+		if got, want := mustProrationCents(oldA, newA, total, total), newA-oldA; got != want {
 			t.Fatalf("remaining==total must yield the whole delta: old=%d new=%d total=%d got=%d want=%d",
 				oldA, newA, total, got, want)
 		}
@@ -80,7 +80,7 @@ func TestProperty_ProrationCents_NoTimeNoMoney(t *testing.T) {
 	for i := 0; i < propIters; i++ {
 		oldA, newA := genAmount(r), genAmount(r)
 		_, total := genPeriod(r)
-		if got := prorationCents(oldA, newA, 0, total); got != 0 {
+		if got := mustProrationCents(oldA, newA, 0, total); got != 0 {
 			t.Fatalf("zero remaining days must prorate to 0: old=%d new=%d total=%d got=%d",
 				oldA, newA, total, got)
 		}
@@ -95,7 +95,7 @@ func TestProperty_ProrationCents_SameAmountIsFree(t *testing.T) {
 	for i := 0; i < propIters; i++ {
 		amt := genAmount(r)
 		rem, total := genPeriod(r)
-		if got := prorationCents(amt, amt, rem, total); got != 0 {
+		if got := mustProrationCents(amt, amt, rem, total); got != 0 {
 			t.Fatalf("equal amounts must prorate to 0: amt=%d remaining=%d total=%d got=%d",
 				amt, rem, total, got)
 		}
@@ -110,8 +110,8 @@ func TestProperty_ProrationCents_Antisymmetric(t *testing.T) {
 	for i := 0; i < propIters; i++ {
 		a, b := genAmount(r), genAmount(r)
 		rem, total := genPeriod(r)
-		up := prorationCents(a, b, rem, total)
-		down := prorationCents(b, a, rem, total)
+		up := mustProrationCents(a, b, rem, total)
+		down := mustProrationCents(b, a, rem, total)
 		if up != -down {
 			t.Fatalf("A→B and B→A must be equal and opposite: a=%d b=%d remaining=%d total=%d up=%d down=%d",
 				a, b, rem, total, up, down)
@@ -127,7 +127,7 @@ func TestProperty_ProrationCents_SignAndBound(t *testing.T) {
 	for i := 0; i < propIters; i++ {
 		oldA, newA := genAmount(r), genAmount(r)
 		rem, total := genPeriod(r)
-		got := prorationCents(oldA, newA, rem, total)
+		got := mustProrationCents(oldA, newA, rem, total)
 		delta := newA - oldA
 		switch {
 		case delta > 0 && got < 0:
@@ -158,8 +158,8 @@ func TestProperty_ProrationCents_MonotoneInRemainingDays(t *testing.T) {
 		if r1 > r2 {
 			r1, r2 = r2, r1
 		}
-		a := prorationCents(oldA, newA, r1, total)
-		b := prorationCents(oldA, newA, r2, total)
+		a := mustProrationCents(oldA, newA, r1, total)
+		b := mustProrationCents(oldA, newA, r2, total)
 		if a > b {
 			t.Fatalf("fewer remaining days cost MORE: old=%d new=%d total=%d r1=%d->%d r2=%d->%d",
 				oldA, newA, total, r1, a, r2, b)
@@ -186,7 +186,7 @@ func TestProperty_SplitUpgradeProration_ConservesNetAndTax(t *testing.T) {
 		net := int64(r.IntN(10_000_000)) + 1 // callers pass net > 0 (upgrade branch)
 		tax := int64(r.IntN(3_000_000))      // 0 for none/manual/deferred
 
-		credit, charge, creditTax, chargeTax := splitUpgradeProration(oldAmount, rem, denom, net, tax)
+		credit, charge, creditTax, chargeTax := mustSplitUpgradeProration(oldAmount, rem, denom, net, tax)
 
 		if credit+charge != net {
 			t.Fatalf("net not conserved: old=%d rem=%d denom=%d net=%d tax=%d credit=%d charge=%d sum=%d",
@@ -208,7 +208,7 @@ func TestProperty_SplitUpgradeProration_CreditIsNeverPositive(t *testing.T) {
 		oldAmount := genAmount(r)
 		rem, denom := genPeriod(r)
 		net := int64(r.IntN(10_000_000)) + 1
-		credit, _, _, _ := splitUpgradeProration(oldAmount, rem, denom, net, 0)
+		credit, _, _, _ := mustSplitUpgradeProration(oldAmount, rem, denom, net, 0)
 		if credit > 0 {
 			t.Fatalf("credit line must not be positive: old=%d rem=%d denom=%d net=%d credit=%d",
 				oldAmount, rem, denom, net, credit)
@@ -249,7 +249,7 @@ func TestProperty_ProrationCents_RoundsToNearestNotToward0(t *testing.T) {
 	for i := 0; i < propIters; i++ {
 		oldA, newA := genAmount(r), genAmount(r)
 		rem, total := genPeriod(r)
-		got := prorationCents(oldA, newA, rem, total)
+		got := mustProrationCents(oldA, newA, rem, total)
 
 		// Compare 2*got*total against 2*numerator: staying in integers avoids
 		// introducing the float error we are trying to detect.
@@ -274,7 +274,7 @@ func TestProperty_ProrationCents_DegenerateAndOverRangePeriods(t *testing.T) {
 		// A zero or negative denominator means "no period to prorate over".
 		// It must return 0, not panic and not divide.
 		for _, total := range []int64{0, -1, -365} {
-			if got := prorationCents(oldA, newA, int64(r.IntN(400)), total); got != 0 {
+			if got := mustProrationCents(oldA, newA, int64(r.IntN(400)), total); got != 0 {
 				t.Fatalf("non-positive totalDays must prorate to 0: old=%d new=%d total=%d got=%d",
 					oldA, newA, total, got)
 			}

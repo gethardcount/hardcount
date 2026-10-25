@@ -49,12 +49,12 @@ func TestProration_StubPeriod_DividesByFullCycle(t *testing.T) {
 	}
 	const oldAmt, newAmt, remaining = int64(2000), int64(5000), int64(13)
 
-	got := prorationCents(oldAmt, newAmt, remaining, fullCycle)
+	got := mustProrationCents(oldAmt, newAmt, remaining, fullCycle)
 	if got != 1300 {
 		t.Errorf("stub upgrade proration = %d, want 1300 ((5000-2000)×13/30)", got)
 	}
 	// Document the bug being prevented: dividing by the 14-day stub gives $27.86.
-	if buggy := prorationCents(oldAmt, newAmt, remaining, 14); buggy != 2786 {
+	if buggy := mustProrationCents(oldAmt, newAmt, remaining, 14); buggy != 2786 {
 		t.Errorf("sanity: stub-denominator value = %d, want 2786 (the overcharge this fix removes)", buggy)
 	}
 }
@@ -93,8 +93,8 @@ func TestProrationCents_ExactCents(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := prorationCents(tc.oldAmount, tc.newAmount, tc.remaining, tc.total); got != tc.want {
-				t.Errorf("prorationCents(%d, %d, %d, %d) = %d, want %d",
+			if got := mustProrationCents(tc.oldAmount, tc.newAmount, tc.remaining, tc.total); got != tc.want {
+				t.Errorf("mustProrationCents(%d, %d, %d, %d) = %d, want %d",
 					tc.oldAmount, tc.newAmount, tc.remaining, tc.total, got, tc.want)
 			}
 		})
@@ -121,8 +121,8 @@ func TestProrationCents_BankersTiesFlowThrough(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := prorationCents(tc.oldAmount, tc.newAmount, tc.remaining, tc.total); got != tc.want {
-				t.Errorf("prorationCents(%d, %d, %d, %d) = %d, want %d (half-to-even)",
+			if got := mustProrationCents(tc.oldAmount, tc.newAmount, tc.remaining, tc.total); got != tc.want {
+				t.Errorf("mustProrationCents(%d, %d, %d, %d) = %d, want %d (half-to-even)",
 					tc.oldAmount, tc.newAmount, tc.remaining, tc.total, got, tc.want)
 			}
 		})
@@ -189,7 +189,7 @@ func TestProrationCents_NoDriftAgainstBigIntOracle(t *testing.T) {
 		remaining, total := rt[0], rt[1]
 		for _, d := range deltas {
 			for _, delta := range []int64{d, -d} { // upgrades and downgrades
-				got := prorationCents(0, delta, remaining, total)
+				got := mustProrationCents(0, delta, remaining, total)
 				want := oracleProration(delta, remaining, total)
 				if got != want {
 					t.Fatalf("drift at delta=%d ratio=%d/%d: prorationCents=%d, big.Int oracle=%d",
@@ -266,7 +266,7 @@ func TestSplitUpgradeProration(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			credit, charge, ctax, chtax := splitUpgradeProration(c.oldAmount, c.remaining, c.denom, c.net, c.tax)
+			credit, charge, ctax, chtax := mustSplitUpgradeProration(c.oldAmount, c.remaining, c.denom, c.net, c.tax)
 			if credit != c.wantCredit || charge != c.wantCharge {
 				t.Errorf("amounts: got credit=%d charge=%d, want %d/%d", credit, charge, c.wantCredit, c.wantCharge)
 			}
@@ -306,7 +306,7 @@ func TestSplitUpgradeProration_PartitionInvariant(t *testing.T) {
 					continue
 				}
 				for _, tx := range taxes {
-					credit, charge, ctax, chtax := splitUpgradeProration(oldA, r, d, net, tx)
+					credit, charge, ctax, chtax := mustSplitUpgradeProration(oldA, r, d, net, tx)
 					if credit+charge != net {
 						t.Fatalf("partition leak: old=%d r=%d d=%d net=%d → credit=%d charge=%d (sum %d)", oldA, r, d, net, credit, charge, credit+charge)
 					}
@@ -349,4 +349,22 @@ func TestFullBillingCycleDays_TenantTZAnchored(t *testing.T) {
 	if got := fullBillingCycleDays(inst, domain.BillingMonthly, time.UTC, 0); got != 31 {
 		t.Errorf("UTC-tenant denom = %d, want 31 (May 31 UTC + 1mo overflow)", got)
 	}
+}
+
+// mustProrationCents and mustSplitUpgradeProration are the checked
+// functions for inputs that fit int64; an error fails the test.
+func mustProrationCents(oldAmount, newAmount, remainingDays, totalDays int64) int64 {
+	v, err := prorationCents(oldAmount, newAmount, remainingDays, totalDays)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func mustSplitUpgradeProration(oldAmount, remainingDays, denomDays, netCents, taxCents int64) (creditCents, chargeCents, creditTax, chargeTax int64) {
+	creditCents, chargeCents, creditTax, chargeTax, err := splitUpgradeProration(oldAmount, remainingDays, denomDays, netCents, taxCents)
+	if err != nil {
+		panic(err)
+	}
+	return creditCents, chargeCents, creditTax, chargeTax
 }

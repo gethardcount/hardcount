@@ -560,11 +560,17 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 		//
 		// Every bucket of a meter bills under the meter's one aggregation
 		// (ADR-130 §2), which the rater puts on the line.
-		capRunning += pl.AmountCents
+		// Checked: a wrapped running total would read below the cap and
+		// miss the fire.
+		if capRunning, err = addCents(capRunning, pl.AmountCents); err != nil {
+			return thresholdEval{}, fmt.Errorf("threshold running total: %w", err)
+		}
 		if pl.LineType == "usage" && nonAdditive(pl.Aggregation) {
 			continue
 		}
-		billedSubtotal += pl.AmountCents
+		if billedSubtotal, err = addCents(billedSubtotal, pl.AmountCents); err != nil {
+			return thresholdEval{}, fmt.Errorf("threshold invoice subtotal: %w", err)
+		}
 		if currency == "" {
 			currency = pl.Currency
 		}

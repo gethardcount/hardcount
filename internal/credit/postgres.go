@@ -194,7 +194,11 @@ func (s *PostgresStore) appendEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		return domain.CreditLedgerEntry{}, err
 	}
 
-	entry.BalanceAfter = currentBalance + entry.AmountCents
+	balanceAfter, serr := domain.SumCents(currentBalance, entry.AmountCents)
+	if serr != nil {
+		return domain.CreditLedgerEntry{}, fmt.Errorf("credit balance after entry: %w", serr)
+	}
+	entry.BalanceAfter = balanceAfter
 	entry.ID = postgres.NewID("vlx_ccl")
 
 	metaJSON, _ := json.Marshal(entry.Metadata)
@@ -480,7 +484,11 @@ func (s *PostgresStore) AdjustAtomicAudited(
 		return domain.CreditLedgerEntry{}, fmt.Errorf("read credit balance: %w", err)
 	}
 
-	if amountCents < 0 && currentBalance+amountCents < 0 {
+	balanceAfter, err := domain.SumCents(currentBalance, amountCents)
+	if err != nil {
+		return domain.CreditLedgerEntry{}, fmt.Errorf("credit balance after adjustment: %w", err)
+	}
+	if amountCents < 0 && balanceAfter < 0 {
 		// errs.Invalid so the API surfaces a 422 — this is operator input
 		// exceeding the available balance, not a server fault (was a plain
 		// fmt.Errorf that respond.FromError mapped to 500 internal_error).
@@ -523,7 +531,7 @@ func (s *PostgresStore) AdjustAtomicAudited(
 		EntryType:    domain.CreditAdjustment,
 		Currency:     currency,
 		AmountCents:  amountCents,
-		BalanceAfter: currentBalance + amountCents,
+		BalanceAfter: balanceAfter,
 		Description:  description,
 		CreatedAt:    now,
 	}
@@ -622,9 +630,13 @@ func (s *PostgresStore) drainPositiveBlocks(
 			_ = rows.Close()
 			return 0, 0, nil, fmt.Errorf("scan block: %w", err)
 		}
-		rem := amount - consumed
+		rem := amount - consumed // 0 < consumed < amount (the query's filter)
 		blocks = append(blocks, block{id: id, remaining: rem})
-		available += rem
+		var serr error
+		if available, serr = domain.SumCents(available, rem); serr != nil {
+			_ = rows.Close()
+			return 0, 0, nil, fmt.Errorf("credit available to drain: %w", serr)
+		}
 	}
 	if err := rows.Close(); err != nil {
 		return 0, 0, nil, fmt.Errorf("close blocks cursor: %w", err)
