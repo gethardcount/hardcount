@@ -272,6 +272,34 @@ Notes on three of them:
   the `//tz:ok` date rule) are described in
   [How we test](docs/testing.md#which-test-to-write).
 
+## What we accept
+
+Anyone can contribute. We judge the change, not the person. To keep review
+time for real work, every pull request meets this bar:
+
+1. **Start with an issue.** For anything bigger than a typo or a broken
+   link, open an issue first, or comment on an existing one. Wait until a
+   maintainer agrees with the approach, then link that issue in your pull
+   request. A pull request without an agreed issue is closed without review.
+2. **Some areas are maintainer-only.** A change in these areas needs an
+   agreed issue that says an outside pull request is welcome:
+   - money and state machines: invoices, payments, credits, dunning,
+     subscriptions and tax;
+   - database migrations;
+   - sign-in, sessions and API keys;
+   - CI and release files (`.github/`);
+   - dependencies (`go.mod`, `web-v2/package.json` and the lock files).
+3. **One change per pull request,** with its tests and docs, and CI green.
+   Unrelated edits, such as formatting sweeps, renames or bulk dependency
+   bumps, are closed.
+4. **Show that you ran it.** Say what you changed, why, and how you checked
+   it. A pull request that was not run or understood is closed.
+
+**What happens next:** CI on a pull request from outside the project waits
+until a maintainer has read the diff and approved the run. We answer within
+two days. A pull request below the bar gets one short comment and is
+closed; you are welcome to open an issue and try again.
+
 ## Pull requests
 
 1. Fork the repo and create a feature branch.

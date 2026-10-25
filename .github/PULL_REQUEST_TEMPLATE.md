@@ -1,10 +1,19 @@
 <!-- Thanks for contributing! The checklist mirrors what CI enforces plus
      the two house rules CI can't check. Delete lines that don't apply. -->
 
+## Linked issue
+
+<!-- Required for anything bigger than a typo or a broken link: an issue a
+     maintainer agreed to. See CONTRIBUTING's "What we accept". -->
+Closes #
+
 ## What & why
 
 ## Checklist
 
+- [ ] It links an issue a maintainer agreed to (not needed for a typo or a broken link)
+- [ ] It is one change, with no unrelated edits
+- [ ] I ran it myself, and the description says how I checked it
 - [ ] Tests cover the new behavior (unit; integration too if a store or money path changed)
 - [ ] `go test ./... -race -short -count=1` passes
 - [ ] `make lint` passes (golangci-lint; see CONTRIBUTING's "What CI runs on your PR" for the full gate list)
