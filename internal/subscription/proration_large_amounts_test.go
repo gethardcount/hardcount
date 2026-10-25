@@ -91,12 +91,16 @@ func TestUpdateItem_LargeSeatDecreaseCreditedExactly(t *testing.T) {
 }
 
 func TestUpdateItem_SeatChangePastInt64Refused(t *testing.T) {
-	// 1 → 10 seats of 1e18: the new base × quantity, 1e19, does not fit.
-	code, invoices, cn := changeSeats(t, 1_000_000_000_000_000_000, 1, 10)
-	if code < 400 {
-		t.Errorf("status %d, want an error", code)
-	}
-	if len(invoices.createdInvoices) != 0 || len(cn.calls) != 0 {
-		t.Errorf("wrote %d invoices and %d credit notes, want none", len(invoices.createdInvoices), len(cn.calls))
+	// 1 → 10 or 18 seats of 1e18: the new base × quantity (1e19, 1.8e19)
+	// does not fit. (1.8e19 wrapped to a small negative amount, so its
+	// delta fit and an increase was credited.)
+	for _, to := range []int64{10, 18} {
+		code, invoices, cn := changeSeats(t, 1_000_000_000_000_000_000, 1, to)
+		if code < 400 {
+			t.Errorf("1 → %d seats: status %d, want an error", to, code)
+		}
+		if len(invoices.createdInvoices) != 0 || len(cn.calls) != 0 {
+			t.Errorf("1 → %d seats: wrote %d invoices and %d credit notes, want none", to, len(invoices.createdInvoices), len(cn.calls))
+		}
 	}
 }

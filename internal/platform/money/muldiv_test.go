@@ -114,6 +114,9 @@ func TestMulDivSigned_MatchesExactMath(t *testing.T) {
 		{maxV, -1, 1}, {minV, 1, 1}, {minV, 1, 2}, {minV, -1, 1}, {minV, -1, 2}, {minV, minV, maxV},
 		{maxV, maxV, maxV}, {-maxV, maxV, maxV}, {maxV, -2, 2}, {maxV, -2, 1},
 		{-3, 5, 2}, {-1, 3, 2}, {maxV, -3, 2}, {-maxV, 3, 6}, {-1_000_000_000_000, 4_000_000_000_000, 3},
+		// 65535 × 281479271743489 = 2^64 − 1: halved, MaxInt64 with a tie
+		// that rounds up past it.
+		{65535, 281479271743489, 2}, {-65535, 281479271743489, 2},
 	} {
 		check(c[0], c[1], c[2])
 	}
