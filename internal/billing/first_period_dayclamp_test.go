@@ -23,6 +23,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // tzSettings is mockSettings with a tenant timezone, so tenantLocation
@@ -99,7 +100,7 @@ func TestRunCycle_FirstPeriod_CreationAddRow_BillsFullBase(t *testing.T) {
 		&tzSettings{tz: "Asia/Kolkata"}, nil, nil,
 		clock.NewFake(periodEnd.Add(time.Second))))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -187,7 +188,7 @@ func TestBillFinalOnImmediateCancel_FirstPeriod_SameDayCancel(t *testing.T) {
 		pricing, invoices, nil, &tzSettings{tz: "Asia/Kolkata"}, nil, nil,
 		clock.NewFake(cancelAt.Add(time.Minute))))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}

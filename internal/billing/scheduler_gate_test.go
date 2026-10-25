@@ -5,13 +5,14 @@ import (
 
 	"context"
 	"errors"
-	"github.com/sagarsuperuser/velox/internal/platform/leader"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
+	"github.com/sagarsuperuser/velox/internal/platform/leader"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
+
 	"github.com/sagarsuperuser/velox/internal/platform/scheduler"
 )
 
@@ -80,7 +81,7 @@ type countingDunning struct {
 func (c *countingDunning) ProcessDueRuns(ctx context.Context, _ string, _ int) (int, []error) {
 	c.calls.Add(1)
 	c.modesMu.Lock()
-	c.modes = append(c.modes, postgres.Livemode(ctx))
+	c.modes = append(c.modes, testutil.MustLivemode(ctx))
 	c.modesMu.Unlock()
 	return 0, nil
 }
@@ -134,32 +135,26 @@ func TestScheduler_DunningFansOutPerLivemode(t *testing.T) {
 	}
 }
 
-// TestScheduler_RunDunningForMode_PanicsWithoutLivemode is the regression
-// guard for #14: runDunningForMode is a mode-aware entry point and must
-// panic if its caller forgot to wrap ctx with WithLivemode. Without this
-// assertion the scheduler would silently route test-mode work into the
-// live partition via the default-to-live fallback.
-func TestScheduler_RunDunningForMode_PanicsWithoutLivemode(t *testing.T) {
+// TestScheduler_RunDunningForMode_CarriesItsMode: live is the only source of
+// the mode. runDunningForMode sets it on ctx itself, so a caller ctx holding
+// the other mode cannot move dunning into the wrong partition.
+// Mutation: drop the WithLivemode in runDunningForMode → each case runs in
+// the caller's mode and fails.
+func TestScheduler_RunDunningForMode_CarriesItsMode(t *testing.T) {
 	t.Parallel()
-
-	s := &Scheduler{
-		engine:  &Engine{},
-		dunning: &countingDunning{},
-		tenants: &fixedTenants{ids: []string{"t_1"}},
-		batch:   1,
+	for _, live := range []bool{true, false} {
+		dunning := &countingDunning{}
+		s := &Scheduler{
+			engine:  &Engine{},
+			dunning: dunning,
+			tenants: &fixedTenants{ids: []string{"t_1"}},
+			batch:   1,
+		}
+		s.runDunningForMode(postgres.WithLivemode(context.Background(), !live), live, []string{"t_1"}, &scheduler.Panics{})
+		if got := dunning.observedModes(); len(got) != 1 || got[0] != live {
+			t.Errorf("live=%v: dunning ran in modes %v, want [%v]", live, got, live)
+		}
 	}
-
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("runDunningForMode should panic on ctx without WithLivemode")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "without explicit livemode") {
-			t.Fatalf("panic should mention missing livemode; got %q", msg)
-		}
-	}()
-	s.runDunningForMode(context.Background(), true, []string{"t_1"}, &scheduler.Panics{})
 }
 
 // TestScheduler_Start_RefusesWithoutGate: an ungated scheduler at N>=2 is a

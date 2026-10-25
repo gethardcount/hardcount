@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // ---------------------------------------------------------------------------
@@ -414,7 +415,7 @@ func TestChargeInvoice_Success(t *testing.T) {
 	invoices.invoices["inv_1"] = inv
 
 	stripe := NewStripe(client, invoices, webhooks, nil)
-	result, err := stripe.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe_abc", "pm_test")
+	result, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", inv, testHold, "cus_stripe_abc", "pm_test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -505,7 +506,7 @@ func TestChargeInvoice_StripeFailure(t *testing.T) {
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
 	if err == nil {
 		t.Fatal("expected error when Stripe fails")
 	}
@@ -572,7 +573,7 @@ func TestChargeInvoice_DefiniteFailure_InlineStartsDunning(t *testing.T) {
 	dunning := &recordingDunningStarter{}
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 	if err == nil {
 		t.Fatal("expected definitive failure error")
 	}
@@ -640,7 +641,7 @@ func TestChargeInvoice_UnknownOutcome(t *testing.T) {
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
 	if err == nil {
 		t.Fatal("expected error on ambiguous Stripe outcome")
 	}
@@ -668,7 +669,7 @@ func TestChargeInvoice_PlainErrorTreatedAsUnknown(t *testing.T) {
 	}
 
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil)
-	_, err := stripe.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
+	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
 	if err == nil {
 		t.Fatal("expected error")
 	}

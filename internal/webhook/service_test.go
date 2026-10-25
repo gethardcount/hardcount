@@ -20,6 +20,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -30,7 +31,7 @@ type memStore struct {
 	endpoints  map[string]domain.WebhookEndpoint
 	events     []domain.WebhookEvent
 	deliveries []domain.WebhookDelivery
-	// deliveryLivemodes records postgres.Livemode(ctx) for each
+	// deliveryLivemodes records the mode on ctx (testutil.MustLivemode) for each
 	// CreateDelivery call so tests can assert the delivery write landed
 	// on the right RLS mode partition (H5: the Replay goroutine path
 	// used a bare ctx and wrote test-mode replays to the live partition).
@@ -52,7 +53,7 @@ func newMemStore() *memStore {
 func (m *memStore) CreateEndpoint(ctx context.Context, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
 	ep.ID = fmt.Sprintf("vlx_whe_%d", len(m.endpoints)+1)
 	ep.TenantID = tenantID
-	ep.Livemode = postgres.Livemode(ctx)
+	ep.Livemode = testutil.MustLivemode(ctx)
 	ep.CreatedAt = time.Now().UTC()
 	ep.UpdatedAt = ep.CreatedAt
 	ep.SecretLast4 = lastFour(ep.Secret)
@@ -89,7 +90,7 @@ func (m *memStore) UpdateEndpoint(_ context.Context, tenantID string, ep domain.
 // store since the FLOW W0 fix (dispatch filters ep.Active in its own match
 // loop; the list must show inactive rows or they're unreachable from the UI).
 func (m *memStore) ListEndpoints(ctx context.Context, tenantID string) ([]domain.WebhookEndpoint, error) {
-	live := postgres.Livemode(ctx)
+	live := testutil.MustLivemode(ctx)
 	var result []domain.WebhookEndpoint
 	for _, ep := range m.endpoints {
 		if ep.TenantID == tenantID && ep.Livemode == live {
@@ -133,7 +134,7 @@ func (m *memStore) RotateEndpointSecret(_ context.Context, tenantID, id, newSecr
 func (m *memStore) CreateEvent(ctx context.Context, tenantID string, event domain.WebhookEvent) (domain.WebhookEvent, error) {
 	event.ID = fmt.Sprintf("vlx_whevt_%d", len(m.events)+1)
 	event.TenantID = tenantID
-	event.Livemode = postgres.Livemode(ctx)
+	event.Livemode = testutil.MustLivemode(ctx)
 	event.CreatedAt = time.Now().UTC()
 	m.events = append(m.events, event)
 	return event, nil
@@ -245,7 +246,7 @@ func (m *memStore) CreateDelivery(ctx context.Context, tenantID string, d domain
 	d.ID = fmt.Sprintf("vlx_whd_%d", len(m.deliveries)+1)
 	d.TenantID = tenantID
 	d.CreatedAt = time.Now().UTC()
-	lm := postgres.Livemode(ctx)
+	lm := testutil.MustLivemode(ctx)
 	// Mirror the real store: the 0021 trigger stamps livemode from the
 	// session GUC and the INSERT hydrates it via RETURNING — a fake row
 	// frozen at the zero value would trip (or mask) livemode guards the

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // recordingSettler captures what the reconciler routes through the settlement
@@ -53,7 +54,7 @@ func TestReconciler_RecoveredFailureRoutesThroughSettler(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(rec)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
@@ -86,7 +87,7 @@ func TestReconciler_DunningRetryFailureSuppressesEmail(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(rec)
 
-	if _, errs := r.Run(context.Background(), 10); len(errs) != 0 {
+	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
 	if len(rec.failed) != 1 || !rec.failed[0].suppressEmail {
@@ -109,7 +110,7 @@ func TestReconciler_StaleProcessingSweptToSucceeded(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(rec)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
@@ -132,7 +133,7 @@ func TestReconciler_StillInFlightProcessingSkipped(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(rec)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
@@ -163,7 +164,7 @@ func TestReconciler_RaceGuardSkipsWebhookWinner(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(rec)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}

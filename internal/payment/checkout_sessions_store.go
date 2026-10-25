@@ -392,6 +392,10 @@ var ErrSessionCompleted = errors.New("checkout session already completed")
 // Cross-tenant (TxBypass) for the ctx's mode, least recently looked at first
 // so a session that keeps erroring cannot hold the head of the queue.
 func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, checkedBefore time.Time, limit int) ([]CheckoutClaim, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -419,7 +423,7 @@ func (s *CheckoutSessionStore) ListHostedToReconcile(ctx context.Context, checke
 		  )
 		ORDER BY cs.updated_at ASC
 		LIMIT $3
-	`, checkedBefore, postgres.Livemode(ctx), limit)
+	`, checkedBefore, live, limit)
 	if err != nil {
 		return nil, err
 	}

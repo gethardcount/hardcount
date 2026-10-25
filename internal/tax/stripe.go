@@ -51,7 +51,7 @@ func init() {
 // from ctx (tenant_id + livemode). Decoupled as an interface so the tax
 // package does not depend on the payment package.
 type StripeClientResolver interface {
-	ForCtx(ctx context.Context) *stripe.Client
+	ResolveCtx(ctx context.Context) (*stripe.Client, error)
 }
 
 // StripeTaxProvider calls the Stripe Tax API. Calculate creates a
@@ -75,20 +75,23 @@ type StripeTaxProvider struct {
 }
 
 // NewStripeTaxProvider wires a per-tenant Stripe client resolver. A nil
-// resolver or a resolver that returns nil for a given ctx causes Calculate
-// to defer the invoice — operator gets an actionable signal via the
-// invoice's Attention banner instead of a silent zero-tax invoice.
+// resolver, a tenant with no Stripe connected for the mode, or credentials
+// that cannot be read cause Calculate to defer the invoice — operator gets
+// an actionable signal via the invoice's Attention banner instead of a
+// silent zero-tax invoice.
 func NewStripeTaxProvider(clients StripeClientResolver) *StripeTaxProvider {
 	return &StripeTaxProvider{clients: clients}
 }
 
 func (*StripeTaxProvider) Name() string { return "stripe_tax" }
 
-func (p *StripeTaxProvider) clientForCtx(ctx context.Context) *stripe.Client {
+// clientForCtx returns (nil, nil) when Stripe is not wired or not connected
+// for the tenant and mode on ctx, and an error when the lookup failed.
+func (p *StripeTaxProvider) clientForCtx(ctx context.Context) (*stripe.Client, error) {
 	if p.clients == nil {
-		return nil
+		return nil, nil
 	}
-	return p.clients.ForCtx(ctx)
+	return p.clients.ResolveCtx(ctx)
 }
 
 func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result, error) {
@@ -111,15 +114,23 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 	// only fires because the client never got built. Also avoids any
 	// pretence of touching Stripe — clientForCtx returns nil from a
 	// pure local credential lookup when nothing is connected.
-	client := p.clientForCtx(ctx)
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
+	client, err := p.clientForCtx(ctx)
+	if err != nil {
+		return p.handleFailure(ctx, live, "credentials_unreadable",
+			fmt.Errorf("stripe tax: read Stripe credentials for livemode=%v: %w", live, err))
+	}
 	if client == nil {
-		return p.handleFailure(ctx, req, "no_client_for_mode",
-			fmt.Errorf("stripe tax: no Stripe credentials connected for livemode=%v — connect Stripe in Settings → Payments or change tax provider", postgres.Livemode(ctx)))
+		return p.handleFailure(ctx, live, "no_client_for_mode",
+			fmt.Errorf("stripe tax: no Stripe credentials connected for livemode=%v — connect Stripe in Settings → Payments or change tax provider", live))
 	}
 
 	// Stripe Tax needs at minimum a country to resolve jurisdiction.
 	if req.CustomerAddress.Country == "" {
-		return p.handleFailure(ctx, req, "no_country",
+		return p.handleFailure(ctx, live, "no_country",
 			fmt.Errorf("stripe tax: customer has no country on billing profile"))
 	}
 
@@ -143,7 +154,7 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 
 	calc, err := client.V1TaxCalculations.Create(ctx, params)
 	if err != nil {
-		return p.handleFailure(ctx, req, "api_error", fmt.Errorf("stripe tax: %w", err))
+		return p.handleFailure(ctx, live, "api_error", fmt.Errorf("stripe tax: %w", err))
 	}
 	// The expanded line_items is a paged list: an invoice with more lines
 	// than its first page comes back has_more=true. Page the rest from the
@@ -152,7 +163,7 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 		all := make([]*stripe.TaxCalculationLineItem, 0, len(req.LineItems))
 		for li, lerr := range client.V1TaxCalculations.ListLineItems(ctx, &stripe.TaxCalculationListLineItemsParams{Calculation: stripe.String(calc.ID)}) {
 			if lerr != nil {
-				return p.handleFailure(ctx, req, "api_error", fmt.Errorf("stripe tax: list calculation line items: %w", lerr))
+				return p.handleFailure(ctx, live, "api_error", fmt.Errorf("stripe tax: list calculation line items: %w", lerr))
 			}
 			all = append(all, li)
 		}
@@ -179,10 +190,10 @@ func (p *StripeTaxProvider) Calculate(ctx context.Context, req Request) (*Result
 // Operators who genuinely want manual-rate billing set
 // tax_provider=manual at the tenant level; mixed Stripe+manual is no
 // longer expressible.
-func (p *StripeTaxProvider) handleFailure(ctx context.Context, _ Request, reason string, failErr error) (*Result, error) {
-	slog.Warn("stripe tax failed, deferring invoice for retry",
+func (p *StripeTaxProvider) handleFailure(ctx context.Context, live bool, reason string, failErr error) (*Result, error) {
+	slog.WarnContext(ctx, "stripe tax failed, deferring invoice for retry",
 		"reason", reason, "error", failErr,
-		"livemode", postgres.Livemode(ctx),
+		"livemode", live,
 	)
 	stripeTaxOutcomes.WithLabelValues("deferred", reason).Inc()
 	return nil, failErr
@@ -208,15 +219,17 @@ func (p *StripeTaxProvider) Commit(ctx context.Context, calcRef, invoiceID strin
 	if calcRef == "" {
 		return "", nil
 	}
-	client := p.clientForCtx(ctx)
+	client, err := p.clientForCtx(ctx)
+	if err != nil {
+		return "", fmt.Errorf("stripe tax: commit calculation %s for invoice %s: read Stripe credentials: %w", calcRef, invoiceID, err)
+	}
 	if client == nil {
 		// A calculation exists, so Stripe WAS configured when it was made:
-		// no client now means the credentials are gone or could not be read.
-		// Either way nothing was committed — returning ("", nil) read as
-		// success and the commit-retry sweep counted it as recovered while
-		// the tax was never reported to Stripe.
-		return "", fmt.Errorf("stripe tax: commit calculation %s for invoice %s: no Stripe client for livemode=%t (credentials missing or unreadable)",
-			calcRef, invoiceID, postgres.Livemode(ctx))
+		// no client now means the credentials are gone. Nothing was
+		// committed — returning ("", nil) read as success and the
+		// commit-retry sweep counted it as recovered while the tax was
+		// never reported to Stripe.
+		return "", fmt.Errorf("stripe tax: commit calculation %s for invoice %s: no Stripe credentials connected for this mode", calcRef, invoiceID)
 	}
 	params := &stripe.TaxTransactionCreateFromCalculationParams{
 		Calculation: stripe.String(calcRef),
@@ -246,10 +259,12 @@ func (p *StripeTaxProvider) Reverse(ctx context.Context, req ReversalRequest) (*
 	if ref == "" {
 		return nil, fmt.Errorf("stripe tax: reverse: reference required")
 	}
-	client := p.clientForCtx(ctx)
+	client, err := p.clientForCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("stripe tax: reverse: read Stripe credentials: %w", err)
+	}
 	if client == nil {
-		return nil, fmt.Errorf("stripe tax: reverse: no client for context (livemode=%t)",
-			postgres.Livemode(ctx))
+		return nil, fmt.Errorf("stripe tax: reverse: no Stripe credentials connected for this mode")
 	}
 	mode := req.Mode
 	if mode == "" {

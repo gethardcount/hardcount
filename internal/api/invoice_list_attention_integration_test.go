@@ -35,7 +35,7 @@ func (c *tenantTxCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQue
 
 type stripeAlwaysConnected struct{}
 
-func (stripeAlwaysConnected) HasFor(context.Context, string, bool) bool { return true }
+func (stripeAlwaysConnected) HasFor(context.Context, string, bool) (bool, error) { return true, nil }
 
 // Issue #1142: GET /v1/invoices took ~110 ms for 25 rows because every row
 // read its own attention facts (payment setup, Stripe credentials, and for

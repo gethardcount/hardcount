@@ -49,7 +49,7 @@ func TestRunCycle_DrainsEveryDueSubInOneCall(t *testing.T) {
 	engine := tenantRunEngine(subs)
 
 	pages := 0
-	generated, errs := engine.RunCycle(context.Background(), 3, func() { pages++ })
+	generated, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 3, func() { pages++ })
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -74,10 +74,10 @@ func TestRunCycle_DrainsEveryDueSubInOneCall(t *testing.T) {
 func TestDrain_FailingSubsAtTheHeadDoNotBlockHealthyOnes(t *testing.T) {
 	runs := map[string]func(e *Engine) (int, []error){
 		"scheduled": func(e *Engine) (int, []error) {
-			return e.RunCycle(context.Background(), 2, nil)
+			return e.RunCycle(postgres.WithLivemode(context.Background(), true), 2, nil)
 		},
 		"manual": func(e *Engine) (int, []error) {
-			n, f := e.RunCycleForTenant(context.Background(), "t1", 2)
+			n, f := e.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 2)
 			return n, subBillErrors(f)
 		},
 	}
@@ -124,7 +124,7 @@ func TestDrain_SubStillDueAfterCleanAttemptIsReportedOnce(t *testing.T) {
 	var generated int
 	var errs []error
 	go func() {
-		generated, errs = engine.RunCycle(context.Background(), 50, nil)
+		generated, errs = engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 		close(done)
 	}()
 	select {
@@ -195,7 +195,7 @@ func TestScheduler_PauseResumeRunsAfterBillingRun(t *testing.T) {
 // next sub instead of failing every remaining sub with the same ctx error.
 func TestDrain_StopsAtTheNextSubWhenCtxEnds(t *testing.T) {
 	subs := subsMock(dueSubFixture("sub_1"), dueSubFixture("sub_2"), dueSubFixture("sub_3"), dueSubFixture("sub_4"))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(postgres.WithLivemode(context.Background(), true))
 	defer cancel()
 	subs.beforeCloserTx = func(*mockSubs) { cancel() } // ctx ends while sub_1 closes
 	engine := tenantRunEngine(subs)

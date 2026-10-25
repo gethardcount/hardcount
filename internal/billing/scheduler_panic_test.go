@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // A panic on one unusual row (the real trigger: a nil dereference, as in
@@ -17,7 +17,7 @@ import (
 // again once the tick has run, so the tick still ends as panicked and pages.
 
 func modeName(ctx context.Context) string {
-	if postgres.Livemode(ctx) {
+	if testutil.MustLivemode(ctx) {
 		return "live"
 	}
 	return "test"

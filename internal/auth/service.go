@@ -127,7 +127,10 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	// Mode inherits from caller ctx, matching Stripe: a test-mode key creates
 	// new test-mode keys, a live-mode key creates live. There is no cross-mode
 	// key creation path — caller must switch authenticators to switch mode.
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return CreateKeyResult{}, err
+	}
 
 	// Generate raw key: prefix + random hex
 	secret := make([]byte, keySecretLen)
@@ -326,11 +329,7 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	// ctx to match the old key's mode so a live key rotated from a test-mode
 	// session (unlikely but possible through platform keys) still produces a
 	// live replacement.
-	newCtx := ctx
-	if postgres.Livemode(ctx) != old.Livemode {
-		newCtx = postgres.WithLivemode(ctx, old.Livemode)
-	}
-	created, err := s.CreateKey(newCtx, tenantID, createInput)
+	created, err := s.CreateKey(postgres.WithLivemode(ctx, old.Livemode), tenantID, createInput)
 	if err != nil {
 		return RotateKeyResult{}, fmt.Errorf("mint replacement key: %w", err)
 	}

@@ -32,7 +32,7 @@ func TestChargeInvoice_NothingSent_ReleasesTheHold(t *testing.T) {
 		b := breaker.New(breaker.Config{Countable: IsUnknownPaymentFailure, FailureThreshold: 5, Cooldown: time.Hour})
 		s.SetBreaker(b)
 		for i := 0; i < 5; i++ {
-			if _, err := s.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe", "pm_test"); err == nil {
+			if _, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", inv, testHold, "cus_stripe", "pm_test"); err == nil {
 				t.Fatalf("setup: charge %d succeeded, want an unclear outcome", i+1)
 			}
 		}
@@ -41,7 +41,7 @@ func TestChargeInvoice_NothingSent_ReleasesTheHold(t *testing.T) {
 		}
 		creates, releases := client.createCalls, len(invoices.leaseReleases)
 
-		_, err := s.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe", "pm_test")
+		_, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", inv, testHold, "cus_stripe", "pm_test")
 		if !errors.Is(err, ErrPaymentTransient) {
 			t.Fatalf("err = %v, want ErrPaymentTransient", err)
 		}

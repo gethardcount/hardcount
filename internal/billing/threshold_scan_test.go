@@ -644,7 +644,7 @@ func TestScanOneThreshold_BoundarySkip(t *testing.T) {
 	// now == periodEnd: the window is closed.
 	engine.clock = clock.NewFake(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC))
 
-	didFire, err := engine.scanOneThreshold(context.Background(), subs.candidates[0])
+	didFire, err := engine.scanOneThreshold(postgres.WithLivemode(context.Background(), true), subs.candidates[0])
 	if err != nil {
 		t.Fatalf("scanOneThreshold: %v", err)
 	}

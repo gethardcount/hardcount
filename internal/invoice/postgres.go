@@ -2758,6 +2758,10 @@ const staleHoldRecheckAfter = 30 * time.Minute
 // run: it reads page after page and checks each hold once, even one it could
 // not stamp.
 func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, skip []string) ([]domain.StaleChargeHold, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -2781,7 +2785,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 		ORDER BY (i.status = 'finalized' AND i.payment_status IN ('pending', 'failed')) DESC,
 		         i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC, i.id ASC
 		LIMIT $4
-	`, domain.StaleChargeHoldWait.Seconds(), postgres.Livemode(ctx), staleHoldRecheckAfter.Seconds(), limit, postgres.StringArray(skip),
+	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, postgres.StringArray(skip),
 		domain.ParkedNothingWait.Seconds())
 	if err != nil {
 		return nil, err
@@ -3042,6 +3046,10 @@ func notPausedForCollection(alias, at string) string {
 // must never charge a clock-pinned invoice. The catchup worker uses
 // ListAutoChargePendingForClock as the disjoint per-clock entry point.
 func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3074,7 +3082,7 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 		  AND (i.created_at, i.id) > ($3, $4)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $2
-	`, postgres.Livemode(ctx), limit, after.CreatedAt, after.ID)
+	`, live, limit, after.CreatedAt, after.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -3110,6 +3118,10 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 // from ctx. olderThan is the cool-off so the inline SettleFailed path wins the
 // common case and this stays a pure backstop.
 func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderThan time.Time, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3133,7 +3145,7 @@ func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderTh
 		  AND i.is_simulated = false
 		ORDER BY i.updated_at ASC
 		LIMIT $3
-	`, postgres.Livemode(ctx), olderThan, limit)
+	`, live, olderThan, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3280,6 +3292,10 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // BindEffectiveNow + the velox_anchor_at PI anchor, so recovered outcomes
 // still stamp the simulated instant. See the ADR-030 wall-plane note.
 func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.InvoicePaymentStatus, olderThan time.Time, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3319,7 +3335,7 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 		-- hiding a row from the very code that would end its wait.
 		ORDER BY provider_synced_at ASC NULLS FIRST, updated_at ASC
 		LIMIT $4
-	`, string(status), olderThan, postgres.Livemode(ctx), limit)
+	`, string(status), olderThan, live, limit)
 	if err != nil {
 		return nil, err
 	}

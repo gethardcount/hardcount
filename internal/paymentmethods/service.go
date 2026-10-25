@@ -144,6 +144,10 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 	if tenantID == "" || customerID == "" {
 		return "", "", errs.Required("tenant_id, customer_id")
 	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", "", err
+	}
 	stripeCustomerID, err := s.stripe.EnsureStripeCustomer(ctx, tenantID, customerID)
 	if err != nil {
 		return "", "", fmt.Errorf("ensure stripe customer: %w", err)
@@ -169,7 +173,7 @@ func (s *Service) CreateSetupSession(ctx context.Context, tenantID, customerID, 
 	metadata := map[string]string{
 		"velox_tenant_id":   tenantID,
 		"velox_customer_id": customerID,
-		"velox_livemode":    livemodeLabel(ctx),
+		"velox_livemode":    livemodeLabel(live),
 		"velox_purpose":     "portal_add_payment_method",
 	}
 	checkoutURL, sessionID, err = s.stripe.CreateSetupCheckoutSession(ctx, stripeCustomerID, successURL, cancelURL, metadata)
@@ -459,8 +463,8 @@ func pmLabel(pm PaymentMethod) string {
 	return fmt.Sprintf("%s ····%s", pm.CardBrand, pm.CardLast4)
 }
 
-func livemodeLabel(ctx context.Context) string {
-	if postgres.Livemode(ctx) {
+func livemodeLabel(live bool) string {
+	if live {
 		return "true"
 	}
 	return "false"

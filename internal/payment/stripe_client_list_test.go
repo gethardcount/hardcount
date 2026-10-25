@@ -182,7 +182,7 @@ func TestChargeInvoice_RecheckRefused_SendsNothing(t *testing.T) {
 		PaymentStatus: domain.PaymentPending, AmountDueCents: 5000, Currency: "USD",
 	}
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil)
-	_, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
+	_, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe", "pm_test")
 	if !errors.Is(err, ErrPaymentTransient) {
 		t.Fatalf("err = %v, want ErrPaymentTransient", err)
 	}
@@ -198,7 +198,7 @@ func TestChargeInvoice_RecheckRefused_SendsNothing(t *testing.T) {
 
 	// No hold at all (a caller that never claimed) is refused the same way.
 	invoices.confirmRefused = false
-	if _, err := s.ChargeInvoice(context.Background(), "t1", invoices.invoices["inv_1"], domain.ChargeHold{}, "cus_stripe", "pm_test"); !errors.Is(err, ErrPaymentTransient) {
+	if _, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], domain.ChargeHold{}, "cus_stripe", "pm_test"); !errors.Is(err, ErrPaymentTransient) {
 		t.Fatalf("no hold: err = %v, want ErrPaymentTransient", err)
 	}
 	if client.createCalls != 0 {

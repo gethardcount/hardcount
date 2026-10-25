@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // livemodeCapturingStore embeds the package memStore and records the ctx
@@ -23,7 +23,7 @@ type livemodeCapturingStore struct {
 // (one tx); Go embedding doesn't virtual-dispatch, so the override must
 // sit on the method Dispatch actually calls.
 func (s *livemodeCapturingStore) CreateEventWithDeliveries(ctx context.Context, tenantID string, e domain.WebhookEvent, endpointIDs []string, birthLease time.Duration, outboxRowID string) (domain.WebhookEvent, []domain.WebhookDelivery, error) {
-	s.captured = postgres.Livemode(ctx)
+	s.captured = testutil.MustLivemode(ctx)
 	s.createCalled = true
 	return s.memStore.CreateEventWithDeliveries(ctx, tenantID, e, endpointIDs, birthLease, outboxRowID)
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -226,13 +227,13 @@ func TestRunCycle_CurrencyProfileReadErrorFails(t *testing.T) {
 	// before tax — so a later read (tax) succeeds and only the currency
 	// fix can stop the invoice.
 	engine.profiles = &blipFirstProfile{taxProfiles: &taxProfiles{profiles: map[string]domain.CustomerBillingProfile{}}}
-	if count, errs := engine.RunCycle(context.Background(), 50, nil); count != 0 || len(errs) == 0 || len(invoices.invoices) != 0 {
+	if count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); count != 0 || len(errs) == 0 || len(invoices.invoices) != 0 {
 		t.Fatalf("RunCycle = %d invoice(s), stored=%d, errs %v; want none and an error", count, len(invoices.invoices), errs)
 	}
 
 	engine, _, _, _, invoices = setupEngine()
 	engine.profiles = &taxProfiles{profiles: map[string]domain.CustomerBillingProfile{}}
-	if count, errs := engine.RunCycle(context.Background(), 50, nil); count != 1 || len(errs) != 0 {
+	if count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); count != 1 || len(errs) != 0 {
 		t.Fatalf("no profile: RunCycle = %d, %v; want 1 invoice", count, errs)
 	}
 	if got := invoices.invoices[0].Currency; got != "USD" {

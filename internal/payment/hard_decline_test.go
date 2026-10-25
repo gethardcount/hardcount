@@ -286,7 +286,7 @@ func TestReconciler_DeclinedPI_CarriesDeclineCodeAndCard(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(rec)
 
-	if _, errs := r.Run(context.Background(), 10); len(errs) != 0 {
+	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
 	if len(rec.failed) != 1 {

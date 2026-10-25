@@ -27,19 +27,12 @@ dev:
 # SetupTestDB truncate against another package's in-flight queries
 # and produces flaky e2e failures (visible specifically on
 # internal/api e2e tests).
-#
-# VELOX_LIVEMODE_STRICT=true escalates "TxTenant opened without ctx
-# livemode" warnings to panics — every test that opens a tenant-
-# scoped tx without setting postgres.WithLivemode(ctx, ...) on its
-# entry point fails immediately. The escalation lives in tests
-# because production logs the warning (loud-once-per-site, not
-# fatal); tests catch the bug at PR time, not in customer logs.
 test:
-	VELOX_LIVEMODE_STRICT=true go test -p 1 ./... -count=1
+	go test -p 1 ./... -count=1
 
 # Run the unit tests only (-short skips the ones that need Postgres)
 test-unit:
-	VELOX_LIVEMODE_STRICT=true go test ./... -short -count=1
+	go test ./... -short -count=1
 
 # Run linter. Velox code rules live in .golangci.yml (forbidigo: wall-clock
 # time in clock-pinned packages, single-invoice period lookups) and in Go tests

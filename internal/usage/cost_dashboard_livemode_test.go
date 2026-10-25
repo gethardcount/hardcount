@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/subscription"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // fakeTokenLookup resolves the cost-dashboard token to a fixed customer.
@@ -29,16 +29,15 @@ type recordingLister struct {
 
 func (r *recordingLister) List(ctx context.Context, _ subscription.ListFilter) ([]domain.Subscription, int, error) {
 	r.called = true
-	r.gotLivemode = postgres.Livemode(ctx)
+	r.gotLivemode = testutil.MustLivemode(ctx)
 	return nil, 0, nil
 }
 
 // TestCostDashboard_PinsCustomerLivemode is the regression test for the
 // public cost-dashboard route 500ing for test-mode customers. The route
 // arrives with no livemode on ctx; the assembler must pin the resolved
-// customer's mode before any TxTenant read. Without the pin,
-// postgres.Livemode(ctx) defaults to true (live) and every read for a
-// test-mode customer mismatches the RLS livemode predicate.
+// customer's mode before any TxTenant read. Without the pin, ctx has no mode
+// and every TxTenant read fails with postgres.ErrLivemodeUnset.
 func TestCostDashboard_PinsCustomerLivemode(t *testing.T) {
 	t.Parallel()
 

@@ -95,7 +95,7 @@ func TestRunCycle_EverySettingsReadFailsClosed(t *testing.T) {
 		engine, subs, _, _, invoices := setupEngine()
 		engine.settings = s
 		engine.SetTaxCalculationStore(taxCalcs)
-		_, runErrs := engine.RunCycle(context.Background(), 50, nil)
+		_, runErrs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 		if len(runErrs) > 0 {
 			if subs.cycleUpdated["sub_1"] {
 				t.Errorf("read %d failed but the billing period advanced", s.failOn)
@@ -112,7 +112,7 @@ func TestRunCycle_HonorsDueOnReceipt(t *testing.T) {
 	ts.NetPaymentTerms = 0
 	engine.settings = &flakySettings{ts: ts}
 
-	if _, runErrs := engine.RunCycle(context.Background(), 50, nil); len(runErrs) > 0 {
+	if _, runErrs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(runErrs) > 0 {
 		t.Fatalf("RunCycle: %v", runErrs)
 	}
 	if len(invoices.invoices) != 1 {
@@ -166,7 +166,7 @@ func TestBillFinalOnImmediateCancel_EverySettingsReadFailsClosed(t *testing.T) {
 	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
 		engine, sub, invoices := cancelFixture(s)
 		engine.SetTaxCalculationStore(taxCalcs)
-		_, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+		_, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 		return len(invoices.invoices), err
 	})
 }

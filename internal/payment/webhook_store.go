@@ -38,7 +38,13 @@ func (s *PostgresWebhookStore) WasProcessed(ctx context.Context, tenantID, strip
 	}
 	defer postgres.Rollback(tx)
 
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+
+	if err != nil {
+
+		return false, err
+
+	}
 
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `
@@ -74,7 +80,13 @@ func (s *PostgresWebhookStore) IngestEvent(ctx context.Context, tenantID string,
 		amountCents = event.AmountCents
 	}
 
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+
+	if err != nil {
+
+		return domain.StripeWebhookEvent{}, false, err
+
+	}
 
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO stripe_webhook_events (id, tenant_id, livemode, stripe_event_id, event_type, object_type,

@@ -267,7 +267,10 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 	if err != nil {
 		return ReleaseResult{}, err
 	}
-	sim := s.simNow(ctx, tenantID, in.CustomerID)
+	sim, err := s.simNow(ctx, tenantID, in.CustomerID)
+	if err != nil {
+		return ReleaseResult{}, err
+	}
 	auditEmit := s.releaseEmission(clock.WithSim(ctx, sim), in)
 	var buckets map[string]MeterBuckets
 	res, err := s.held.ReleaseHeld(ctx, tenantID, ReleaseHeldInput{

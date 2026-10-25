@@ -10,8 +10,8 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/session"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // capturingEmailSender records the context passed to SendPasswordReset so a
@@ -37,10 +37,9 @@ func (c *capturingEmailSender) SendPasswordReset(ctx context.Context, tenantID, 
 // own livemode) wrote fine, hiding the break: a token in the DB, an audit row,
 // and no email.
 //
-// postgres.Livemode(ctx) defaults to TRUE when unset, so asserting the send ctx
-// is explicitly FALSE (the account-plane canonical partition, same as the audit
-// row) fails on the old code — where the bare request ctx reads as live — and
-// passes only once the handler wraps it.
+// testutil.MustLivemode panics when the send ctx has no mode, and the assert
+// pins it to FALSE (the account-plane canonical partition, same as the audit
+// row), so the test passes only once the handler wraps the ctx.
 func TestRequestPasswordReset_SendsWithCanonicalLivemode(t *testing.T) {
 	u := domain.User{ID: "usr_1", Email: "op@acme.com"}
 	store := &fakeUserStore{
@@ -64,8 +63,8 @@ func TestRequestPasswordReset_SendsWithCanonicalLivemode(t *testing.T) {
 	if !email.called {
 		t.Fatal("SendPasswordReset was never called — the matched account got no reset email")
 	}
-	if postgres.Livemode(email.sendCtx) {
-		t.Error("reset email ctx has no explicit livemode (defaults to live) — the outbox " +
-			"TxTenant refuses to open and the email never sends; want the canonical partition (livemode=false)")
+	if testutil.MustLivemode(email.sendCtx) {
+		t.Error("reset email ctx is live — want the canonical partition (livemode=false), " +
+			"the same partition as the audit row")
 	}
 }

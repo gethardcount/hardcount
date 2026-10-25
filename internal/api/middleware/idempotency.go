@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -103,7 +104,11 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			// defaults to live mode and a test-mode response gets stamped
 			// with livemode=true on its cached row — corrupting future
 			// replays for the test partition.
-			livemode := postgres.Livemode(r.Context())
+			livemode, err := postgres.Livemode(r.Context())
+			if err != nil {
+				respond.FromError(w, r, err, "idempotency")
+				return
+			}
 
 			// Read the body so we can (a) hash it for the fingerprint and
 			// (b) hand a fresh reader to the downstream handler.

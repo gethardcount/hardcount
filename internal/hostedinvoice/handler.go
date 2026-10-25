@@ -94,7 +94,7 @@ type CheckoutSessionCreator interface {
 // when it is true: without keys the checkout create fails, and the customer
 // used to see a Pay button that answered "failed to create checkout session".
 type StripeReadiness interface {
-	HasFor(ctx context.Context, tenantID string, livemode bool) bool
+	HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error)
 }
 
 // PayUnavailableOnline is pay_unavailable_reason when the invoice is owed
@@ -348,7 +348,21 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	owed := payEnabled(inv)
-	online := owed && h.onlinePaymentReady(r.Context(), inv)
+	live, err := postgres.Livemode(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "hostedinvoice: view", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	online := false
+	if owed {
+		online, err = h.onlinePaymentReady(r.Context(), inv)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "hostedinvoice: read Stripe connection", "error", err)
+			respond.InternalError(w, r)
+			return
+		}
+	}
 	belowMinimum := inv.BelowStripeMinimum()
 	respond.JSON(w, r, http.StatusOK, hostedInvoicePayload{
 		Invoice:              toViewInvoice(inv),
@@ -358,7 +372,7 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 		PayEnabled:           owed && online && !belowMinimum,
 		PayUnavailableReason: payUnavailableReason(owed, online, belowMinimum),
 		// resolveToken pinned the row's livemode onto the request ctx.
-		Livemode: postgres.Livemode(r.Context()),
+		Livemode: live,
 	})
 }
 
@@ -397,7 +411,13 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 			"payment processing is not configured")
 		return
 	}
-	if !h.onlinePaymentReady(r.Context(), inv) {
+	online, err := h.onlinePaymentReady(r.Context(), inv)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "hostedinvoice: read Stripe connection", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	if !online {
 		// The tenant has no Stripe keys for this mode. The page hides Pay in
 		// this state; a direct POST gets the same answer as a 409 the page
 		// can explain, not a 502 "failed to create checkout session".
@@ -508,14 +528,18 @@ func payEnabled(inv domain.Invoice) bool {
 // onlinePaymentReady: the seller can take this invoice's payment online —
 // a Stripe adapter is wired and the tenant has keys for the invoice's mode
 // (pinned on ctx by resolveInvoice).
-func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) bool {
+func (h *Handler) onlinePaymentReady(ctx context.Context, inv domain.Invoice) (bool, error) {
 	if h.stripe == nil {
-		return false
+		return false, nil
 	}
 	if h.stripeReady == nil {
-		return true
+		return true, nil
 	}
-	return h.stripeReady.HasFor(ctx, inv.TenantID, postgres.Livemode(ctx))
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
+	return h.stripeReady.HasFor(ctx, inv.TenantID, live)
 }
 
 // payUnavailableReason is set only when money is owed but can't be paid

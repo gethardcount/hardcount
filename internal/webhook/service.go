@@ -580,7 +580,10 @@ func (s *Service) DispatchFromOutbox(ctx context.Context, outboxRowID, tenantID,
 	if err != nil {
 		return fmt.Errorf("list endpoints: %w", err)
 	}
-	evLivemode := postgres.Livemode(ctx)
+	evLivemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
 	var matched []domain.WebhookEndpoint
 	for _, ep := range endpoints {
 		if !ep.Active || ep.Livemode != evLivemode || !matchesEvent(ep.Events, eventType) {

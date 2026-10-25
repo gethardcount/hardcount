@@ -88,7 +88,7 @@ func TestChargeInvoice_CredentialReadErrorLeavesInvoiceUntouched(t *testing.T) {
 	transient := fmt.Errorf("%w: stripe credential lookup: %v", ErrPaymentTransient, errBlip)
 	s := NewStripe(&mockStripeClient{shouldFail: true, failErr: transient}, invoices, newMockWebhookStore(), nil, nil)
 
-	_, err := s.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+	_, err := s.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if !errors.Is(err, ErrPaymentTransient) {
 		t.Fatalf("err = %v, want ErrPaymentTransient", err)
 	}

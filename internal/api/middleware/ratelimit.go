@@ -123,7 +123,11 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 				return
 			}
 
-			key := rateLimitKey(r)
+			key, err := rateLimitKey(r)
+			if err != nil {
+				respond.FromError(w, r, err, "rate_limit")
+				return
+			}
 			remaining, resetAt, allowed := rl.allow(r.Context(), key)
 
 			// Set rate limit headers (Stripe convention)
@@ -222,18 +226,22 @@ func (rl *RateLimiter) bucketKey(key string) string {
 //     unauthenticated paths (bootstrap, login, public health probes that
 //     slipped past the skip-list) so an unauthenticated flood can't bypass
 //     the limiter entirely.
-func rateLimitKey(r *http.Request) string {
+func rateLimitKey(r *http.Request) (string, error) {
 	if keyID := auth.KeyID(r.Context()); keyID != "" {
-		return "key:" + keyID
+		return "key:" + keyID, nil
 	}
 	if tenantID := auth.TenantID(r.Context()); tenantID != "" {
+		live, err := postgres.Livemode(r.Context())
+		if err != nil {
+			return "", err
+		}
 		mode := "test"
-		if postgres.Livemode(r.Context()) {
+		if live {
 			mode = "live"
 		}
-		return "tenant:" + tenantID + ":" + mode
+		return "tenant:" + tenantID + ":" + mode, nil
 	}
-	return "ip:" + audit.ExtractClientIP(r)
+	return "ip:" + audit.ExtractClientIP(r), nil
 }
 
 // SplitRateLimit routes each request to one of two limiters: `special`

@@ -7,12 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
-	"os"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -61,76 +57,42 @@ func WithLivemode(ctx context.Context, live bool) context.Context {
 	return context.WithValue(ctx, livemodeCtxKey{}, &live)
 }
 
-// Livemode reads the livemode flag from ctx. An unset flag is a bug at the
-// entry point, so it is reported (see reportUnsetLivemode): tests panic, and
-// production logs a warning and returns true. True matches the RLS policies,
-// which also read an unset app.livemode as live. The livemode insert trigger
-// does not: it refuses an insert whose transaction left the mode unset
-// (migration 00212).
-func Livemode(ctx context.Context) bool {
+// ErrLivemodeUnset means ctx carries no livemode. Every entry point sets one
+// with WithLivemode, so this is a bug at the entry point. Nothing guesses a
+// mode in its place: the database refuses an insert, and shows no row, when
+// app.livemode is unset (migrations 00212 and 00213).
+var ErrLivemodeUnset = errors.New("postgres: livemode was never set on ctx (set postgres.WithLivemode at the entry point)")
+
+// ErrTenantUnset means a tenant-scoped transaction was asked for with no
+// tenant ID.
+var ErrTenantUnset = errors.New("postgres: TxTenant opened with no tenant ID")
+
+// Livemode reads the livemode flag from ctx, or returns ErrLivemodeUnset.
+func Livemode(ctx context.Context) (bool, error) {
 	p, ok := ctx.Value(livemodeCtxKey{}).(*bool)
 	if !ok || p == nil {
-		// skip=2: reportUnsetLivemode → Livemode → the caller.
-		reportUnsetLivemode(2)
-		return true
+		return false, ErrLivemodeUnset
 	}
-	return *p
-}
-
-// livemodeSet reports whether ctx had WithLivemode called on it anywhere up
-// the chain. Package-private because it's a diagnostic for BeginTx and
-// WithRequiredLivemode — callers that want the mode should use Livemode().
-func livemodeSet(ctx context.Context) bool {
-	p, ok := ctx.Value(livemodeCtxKey{}).(*bool)
-	return ok && p != nil
-}
-
-// WithRequiredLivemode asserts that ctx has an explicit livemode set, and
-// returns ctx unchanged if so. Panics otherwise. Call at the top of any
-// background worker or scheduler path that opens a TxTenant — it catches
-// "I forgot to fan out per mode" at the fan-out site instead of 30 frames
-// deeper, where the bug would surface as silent test-mode data loss.
-func WithRequiredLivemode(ctx context.Context) context.Context {
-	if !livemodeSet(ctx) {
-		panic("velox: background worker entered a mode-aware path without explicit livemode — wrap ctx with postgres.WithLivemode(ctx, true/false) at the fan-out site")
-	}
-	return ctx
-}
-
-// livemodeStrict reports whether an unset livemode panics instead of
-// logging. `make test*` and CI set VELOX_LIVEMODE_STRICT=true, so a missing
-// WithLivemode fails the suite at PR time. Production leaves it off: there
-// the missing flag is still caught (BeginTx refuses a TxTenant, Livemode
-// logs), but it does not crash the process.
-func livemodeStrict() bool {
-	return strings.EqualFold(os.Getenv("VELOX_LIVEMODE_STRICT"), "true")
-}
-
-// unsetLivemodeSeen tracks call sites that have already logged the unset-
-// livemode warning. Dedup on caller file:line so a scheduler that ticks every
-// minute logs one line per forgotten propagation, not one per tick.
-var unsetLivemodeSeen sync.Map // map[string]struct{}
-
-// reportUnsetLivemode panics under strict mode, and otherwise logs once per
-// call site, when ctx has no livemode. Skip is passed to runtime.Caller: 0 is
-// this function, 1 its caller, 2 the caller's caller.
-func reportUnsetLivemode(skip int) {
-	_, file, line, ok := runtime.Caller(skip)
-	site := "unknown"
-	if ok {
-		site = fmt.Sprintf("%s:%d", file, line)
-	}
-	msg := "livemode was never set on ctx; wrap ctx with postgres.WithLivemode(ctx, true/false) at the entry point"
-	if livemodeStrict() {
-		panic(fmt.Sprintf("velox (VELOX_LIVEMODE_STRICT): %s caller=%s", msg, site))
-	}
-	if _, loaded := unsetLivemodeSeen.LoadOrStore(site, struct{}{}); loaded {
-		return
-	}
-	slog.Warn("velox: livemode propagation missing", "caller", site, "detail", msg)
+	return *p, nil
 }
 
 func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.Tx, error) {
+	var tid, lm string
+	if mode == TxTenant {
+		tid = strings.TrimSpace(tenantID)
+		if tid == "" {
+			return nil, ErrTenantUnset
+		}
+		live, err := Livemode(ctx)
+		if err != nil {
+			return nil, err
+		}
+		lm = "off"
+		if live {
+			lm = "on"
+		}
+	}
+
 	tx, err := db.Pool.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -138,45 +100,15 @@ func (db *DB) BeginTx(ctx context.Context, mode TxMode, tenantID string) (*sql.T
 
 	switch mode {
 	case TxTenant:
-		// Every TxTenant MUST carry an explicit livemode. Silent default-
-		// to-live is exactly the no-silent-fallbacks rule's failure mode —
-		// a forgotten propagation in test-mode code would route the
-		// operation against live data and corrupt accounting.
-		//
-		// Test-mode escalation: under VELOX_LIVEMODE_STRICT (set by
-		// `make test*`) a missing propagation panics, so any new code
-		// without a WithLivemode wrap fails the suite at PR time.
-		//
-		// Production: refuse to open the transaction. The handler bubbles
-		// the error up as a 500 — loud and immediately visible to the
-		// operator, never silently corrupting data. The Makefile-strict
-		// test gate is what keeps this safe; the audit on 2026-05-07
-		// fixed every known site, so a regression here means a NEW
-		// missed propagation that bypassed tests.
-		//
-		// skip=2: reportUnsetLivemode → BeginTx → the caller.
-		if !livemodeSet(ctx) {
-			reportUnsetLivemode(2)
-			_ = tx.Rollback()
-			return nil, fmt.Errorf("postgres: TxTenant opened without ctx livemode (set postgres.WithLivemode at the entry point)")
-		}
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.bypass_rls', 'off', true)`); err != nil {
 			_ = tx.Rollback()
 			return nil, err
-		}
-		tid := strings.TrimSpace(tenantID)
-		if tid == "" {
-			tid = "default"
 		}
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tid); err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}
-		mode := "on"
-		if !Livemode(ctx) {
-			mode = "off"
-		}
-		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, lm); err != nil {
 			_ = tx.Rollback()
 			return nil, err
 		}

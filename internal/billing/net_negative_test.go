@@ -14,6 +14,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 const netNegativeAction = "subscription.net_negative_usage"
@@ -89,7 +90,7 @@ func TestRunCycle_NetNegativeMeter_BillsZeroAndRecordsIt(t *testing.T) {
 	pricing.meters["mtr_api"] = api
 	usage.totals["mtr_api"] = -50
 
-	n, errs := engine.RunCycle(context.Background(), 50, nil)
+	n, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("RunCycle errors: %v (a net-negative meter must not fail the close)", errs)
 	}
@@ -148,7 +149,7 @@ func TestRunCycle_NetNegativeBucket_MultiRuleMeter(t *testing.T) {
 	}
 	usage.totals["mtr_api"] = 700
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("RunCycle errors: %v", errs)
 	}
 	if len(invoices.invoices) != 1 {
@@ -184,7 +185,7 @@ func TestRunCycle_OnlyNetNegativeUsage_NoInvoice_StillRecorded(t *testing.T) {
 	delete(usage.totals, "mtr_storage")
 	usage.totals["mtr_api"] = -50
 
-	n, errs := engine.RunCycle(context.Background(), 50, nil)
+	n, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("RunCycle errors: %v", errs)
 	}
@@ -254,7 +255,7 @@ func TestBillFinalOnImmediateCancel_NetNegativeUsage(t *testing.T) {
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v (usage below zero must not fail the cancel)", err)
 	}
@@ -293,7 +294,7 @@ func TestCycleClose_AfterThresholdFire_NetNegativeRowNamesItsWindow(t *testing.T
 	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	usage.perInterval[mockIntervalKey("mtr_api", fireEnd, periodEnd)] = -40
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("RunCycle errors: %v", errs)
 	}
 	rows := netNegativeRows(t, aud)
@@ -352,7 +353,7 @@ func TestBillFinalOnImmediateCancel_AfterThresholdFire_NetNegativeRow(t *testing
 	aud := &fakeEngineAudit{}
 	engine.SetAuditLogger(aud)
 
-	if _, err := engine.BillFinalOnImmediateCancel(context.Background(), sub); err != nil {
+	if _, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub); err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}
 	rows := netNegativeRows(t, aud)

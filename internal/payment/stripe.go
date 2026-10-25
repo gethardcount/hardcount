@@ -637,6 +637,10 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	if stripePaymentMethodID == "" {
 		return domain.Invoice{}, fmt.Errorf("stripe payment method ID is required")
 	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
 
 	// Seed tenantID on ctx so the per-tenant Stripe client resolver
 	// (payment.StripeClients) can look it up. Scheduler / billing-engine
@@ -724,7 +728,6 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	defer cancelSend()
 
 	var result PaymentIntentResult
-	var err error
 	if s.breaker != nil {
 		var out any
 		out, err = s.breaker.Execute(sendCtx, func(ctx context.Context) (any, error) {
@@ -775,7 +778,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		var ke *StripeKeyError
 		if errors.As(err, &ke) {
 			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "stripe key unusable")
-			s.reportUnusableKey(ctx, tenantID, inv.ID, ke)
+			s.reportUnusableKey(ctx, tenantID, live, inv.ID, ke)
 			return domain.Invoice{}, err
 		}
 		return domain.Invoice{}, ErrPaymentTransient
@@ -785,7 +788,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		return domain.Invoice{}, s.recordBelowMinimum(ctx, tenantID, inv, hold, bm, trigger, stripePaymentMethodID)
 	}
 	if err == nil {
-		s.clearRejectedKey(ctx, tenantID)
+		s.clearRejectedKey(ctx, tenantID, live)
 	}
 	if err != nil {
 		// Categorise the error so ambiguous (5xx/timeout/network) outcomes are
@@ -1143,8 +1146,7 @@ func (s *Stripe) releaseUnsentHold(ctx context.Context, tenantID, invoiceID stri
 // Connect check writes; reconnecting, or a charge that goes through, clears
 // it). A key that is not connected
 // has no row to mark. A lost mark is written again by the next charge.
-func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID string, ke *StripeKeyError) {
-	livemode := postgres.Livemode(ctx)
+func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID string, livemode bool, invoiceID string, ke *StripeKeyError) {
 	mw.RecordStripeKeyUnusable(ke.Reason)
 	slog.ErrorContext(ctx, "charge not sent: Stripe refused this tenant's API key, or none is connected for this mode. Charges for this tenant and mode are paused (not failed) until the key is fixed under Settings → Payments",
 		"tenant_id", tenantID, "livemode", livemode, "invoice_id", invoiceID,
@@ -1172,11 +1174,10 @@ func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID, invoiceID stri
 // connected. Only a "rejected" mark is cleared; a row without one matches
 // nothing. A failed clear is logged; the next charge that goes through
 // clears it.
-func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string) {
+func (s *Stripe) clearRejectedKey(ctx context.Context, tenantID string, livemode bool) {
 	if s.keyHealth == nil {
 		return
 	}
-	livemode := postgres.Livemode(ctx)
 	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := s.keyHealth.ClearKeyRejected(clearCtx, tenantID, livemode); err != nil {

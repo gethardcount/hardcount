@@ -11,6 +11,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // cancelFailLoudFixture builds the minimal canceled sub used by both
@@ -57,7 +58,7 @@ func TestBillFinalOnImmediateCancel_IntervalReadFailsLoud(t *testing.T) {
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 	engine.SetIntervalReader(subs)
 
-	_, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	_, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err == nil {
 		t.Fatal("interval read failure must fail the cancel bill, not silently single-line it")
 	}
@@ -86,7 +87,7 @@ func TestBillFinalOnImmediateCancel_SegmentPlanLookupFailsLoud(t *testing.T) {
 	engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 	engine.SetIntervalReader(subs)
 
-	_, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	_, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err == nil {
 		t.Fatal("segment-plan lookup failure must fail the cancel bill, not silently drop the segment")
 	}
@@ -132,7 +133,7 @@ func TestBillFinalOnImmediateCancel_EndedPeriodIsRefused(t *testing.T) {
 			engine := wireBaseTax(NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 			engine.SetIntervalReader(subs)
 
-			inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+			inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 			if len(invoices.invoices) != 0 || inv.ID != "" {
 				t.Fatalf("an invoice was written (%d stored, returned %q), want none", len(invoices.invoices), inv.ID)
 			}

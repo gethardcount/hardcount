@@ -192,7 +192,7 @@ func TestBillOnePeriod_DeferredMaxBucket_BilledExactlyOnceAtClose(t *testing.T) 
 		MeterID: "mtr_api", RatingRuleVersionID: "rrv_api", AmountCents: 40000,
 	})
 
-	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("cycle failures: %v", failures)
 	}

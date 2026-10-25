@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,7 +21,7 @@ func TestRateLimitKey_PerModeTenantBuckets(t *testing.T) {
 		r := httptest.NewRequest("GET", "/v1/customers", nil)
 		ctx := auth.WithTenantID(r.Context(), tenantID)
 		ctx = postgres.WithLivemode(ctx, livemode)
-		return rateLimitKey(r.WithContext(ctx))
+		return mustRateLimitKey(t, r.WithContext(ctx))
 	}
 
 	testKey := tenantKey("ten_abc", false)
@@ -46,7 +47,7 @@ func TestRateLimitKey_APIKeyWinsOverTenant(t *testing.T) {
 	ctx = auth.WithKeyID(ctx, "vlx_key_123")
 	ctx = postgres.WithLivemode(ctx, true)
 
-	if got, want := rateLimitKey(r.WithContext(ctx)), "key:vlx_key_123"; got != want {
+	if got, want := mustRateLimitKey(t, r.WithContext(ctx)), "key:vlx_key_123"; got != want {
 		t.Errorf("bucket = %q, want %q", got, want)
 	}
 }
@@ -65,7 +66,7 @@ func TestRateLimitKey_UnauthenticatedFallsBackToIP(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest("POST", "/v1/auth/login", nil)
 			r.RemoteAddr = tc.remoteAddr
-			if got := rateLimitKey(r); got != tc.want {
+			if got := mustRateLimitKey(t, r); got != tc.want {
 				t.Errorf("bucket = %q, want %q", got, tc.want)
 			}
 		})
@@ -79,7 +80,7 @@ func TestRateLimitKey_KeysOnResolvedClientIPBehindProxy(t *testing.T) {
 	key := func(xff string) string {
 		var got string
 		h := TrustedClientIP(ParseTrustedProxies("10.0.0.0/8"))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-			got = rateLimitKey(r)
+			got = mustRateLimitKey(t, r)
 		}))
 		r := httptest.NewRequest("POST", "/v1/auth/login", nil)
 		r.RemoteAddr = "10.0.0.2:443"
@@ -98,9 +99,28 @@ func TestRateLimitKey_KeysOnResolvedClientIPBehindProxy(t *testing.T) {
 func TestRateLimitKey_TenantBucketsAreDistinctAcrossTenants(t *testing.T) {
 	key := func(tenantID string) string {
 		r := httptest.NewRequest("GET", "/v1/invoices", nil)
-		return rateLimitKey(r.WithContext(auth.WithTenantID(postgres.WithLivemode(r.Context(), true), tenantID)))
+		return mustRateLimitKey(t, r.WithContext(auth.WithTenantID(postgres.WithLivemode(r.Context(), true), tenantID)))
 	}
 	if key("ten_a") == key("ten_b") {
 		t.Fatal("two tenants share a bucket — one tenant's load throttles another")
+	}
+}
+
+func mustRateLimitKey(t *testing.T, r *http.Request) string {
+	t.Helper()
+	key, err := rateLimitKey(r)
+	if err != nil {
+		t.Fatalf("rateLimitKey: %v", err)
+	}
+	return key
+}
+
+// A tenant request whose ctx has no mode is a bug at its entry point. The key
+// is refused, never guessed into the live bucket.
+func TestRateLimitKey_TenantWithoutModeIsAnError(t *testing.T) {
+	r := httptest.NewRequest("GET", "/v1/customers", nil)
+	_, err := rateLimitKey(r.WithContext(auth.WithTenantID(r.Context(), "ten_abc")))
+	if !errors.Is(err, postgres.ErrLivemodeUnset) {
+		t.Fatalf("err = %v, want postgres.ErrLivemodeUnset", err)
 	}
 }

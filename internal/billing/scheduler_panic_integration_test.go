@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/billing"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // tickStep is a scheduler step double (trial expiry, pause resume, credit
@@ -22,7 +22,7 @@ type tickStep struct {
 
 func (s *tickStep) record(ctx context.Context) {
 	mode := "test"
-	if postgres.Livemode(ctx) {
+	if testutil.MustLivemode(ctx) {
 		mode = "live"
 	}
 	s.mu.Lock()

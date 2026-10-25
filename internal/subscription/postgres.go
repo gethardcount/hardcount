@@ -1649,6 +1649,10 @@ func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id strin
 // instant billSubscription's own checks use: an arm that admitted a row the
 // engine then declined would be saved as errStillDue on a healthy sub.
 func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Leader-only funnel (ADR-114): the claim proves the caller's lease token
 	// in its own snapshot. Outside a led tick this fails loud — never an
 	// unfenced fallback.
@@ -1706,7 +1710,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 		  AND NOT (s.id = ANY(COALESCE($6::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
-	`, postgres.Livemode(ctx), now, limit, string(leader.RoleBilling), token, postgres.StringArray(exclude), dueBy)
+	`, live, now, limit, string(leader.RoleBilling), token, postgres.StringArray(exclude), dueBy)
 	if err != nil {
 		return nil, err
 	}
@@ -1896,6 +1900,10 @@ func resumeNotWaitingOnCloseSQL(a string) string {
 // but whose next_billing_at was still in the future would stay
 // paused indefinitely. The new scan closes that gap.
 func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before time.Time, limit int) ([]domain.Subscription, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -1914,7 +1922,7 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 		  AND `+resumeNotWaitingOnCloseSQL("s")+`
 		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
-	`, postgres.Livemode(ctx), before, limit)
+	`, live, before, limit)
 	if err != nil {
 		return nil, err
 	}

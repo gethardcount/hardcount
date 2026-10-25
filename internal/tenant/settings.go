@@ -261,8 +261,12 @@ func (s *SettingsStore) NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, ten
 }
 
 func (s *SettingsStore) nextInvoiceNumberInTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
 	col := "invoice_next_seq_test"
-	if postgres.Livemode(ctx) {
+	if live {
 		col = "invoice_next_seq_live"
 	}
 	// SQL is built from a fixed allow-list of column names above —
@@ -289,13 +293,17 @@ func (s *SettingsStore) nextInvoiceNumberInTx(ctx context.Context, tx *sql.Tx, t
 // is 1 (the column default). Read-only, so a concurrent allocation can make it
 // stale by the time it is shown; it is a preview, not a reservation.
 func (s *SettingsStore) NextInvoiceSequence(ctx context.Context, tenantID string) (int, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return 0, err
 	}
 	defer postgres.Rollback(tx)
 	col := "invoice_next_seq_test"
-	if postgres.Livemode(ctx) {
+	if live {
 		col = "invoice_next_seq_live"
 	}
 	// col is one of the two fixed names above, never caller input.
@@ -317,8 +325,12 @@ func (s *SettingsStore) NextInvoiceSequence(ctx context.Context, tenantID string
 // NextInvoiceNumberTx keeps for invoices. Same per-mode-column rationale as
 // NextInvoiceNumber above.
 func (s *SettingsStore) NextCreditNoteNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
 	col := "credit_note_next_seq_test"
-	if postgres.Livemode(ctx) {
+	if live {
 		col = "credit_note_next_seq_live"
 	}
 	q := `

@@ -76,7 +76,11 @@ func (s *Service) meterEditGuard(ctx context.Context, meterID string, change fun
 			return err
 		}
 		if n > 0 {
-			return errs.InvalidState(meterInUseMessage(locked.EventName, n, r.newRule, !postgres.Livemode(ctx))).WithCode(errs.CodeMeterInUse)
+			live, err := postgres.Livemode(ctx)
+			if err != nil {
+				return err
+			}
+			return errs.InvalidState(meterInUseMessage(locked.EventName, n, r.newRule, !live)).WithCode(errs.CodeMeterInUse)
 		}
 		return nil
 	}

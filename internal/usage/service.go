@@ -74,28 +74,35 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // test-mode-only (DB CHECK on test_clocks.livemode), so a live
 // customer can never be pinned and the high-volume production ingest
 // path stays at zero extra queries.
-func (s *Service) simNow(ctx context.Context, tenantID, customerID string) clock.Sim {
+func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
 	if sim, ok := clock.SimOf(ctx); ok {
-		return sim
+		return sim, nil
 	}
 	if t, ok := clock.EffectiveNow(ctx); ok {
 		// Bound instant whose clock is unknown — keep the instant, claim no clock.
-		return clock.Sim{At: t}
+		return clock.Sim{At: t}, nil
 	}
-	if s.resolver != nil && !postgres.Livemode(ctx) && customerID != "" {
-		if sim, err := s.resolver.SimForCustomer(ctx, tenantID, customerID); err == nil {
-			return sim
+	if s.resolver != nil && customerID != "" {
+		live, err := postgres.Livemode(ctx)
+		if err != nil {
+			return clock.Sim{}, err
 		}
-		// Resolver errors mean the customer read failed — ingest's own
-		// store call will surface that; don't block on the clock here.
+		if !live {
+			if sim, err := s.resolver.SimForCustomer(ctx, tenantID, customerID); err == nil {
+				return sim, nil
+			}
+			// Resolver errors mean the customer read failed — ingest's own
+			// store call will surface that; don't block on the clock here.
+		}
 	}
-	return clock.Sim{At: time.Now().UTC()}
+	return clock.Sim{At: time.Now().UTC()}, nil
 }
 
 // effectiveNow is simNow's instant — the value the ingest gates and
 // timestamps use.
-func (s *Service) effectiveNow(ctx context.Context, tenantID, customerID string) time.Time {
-	return s.simNow(ctx, tenantID, customerID).At
+func (s *Service) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
+	sim, err := s.simNow(ctx, tenantID, customerID)
+	return sim.At, err
 }
 
 // IngestInput is the internal service input — uses resolved internal IDs only.
@@ -150,7 +157,10 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	// makes strict past-only brittle to verify, and the 'backfill' origin
 	// tag already distinguishes these rows from live POST traffic for
 	// audit purposes.
-	sim := s.simNow(ctx, tenantID, input.CustomerID)
+	sim, err := s.simNow(ctx, tenantID, input.CustomerID)
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
 	if input.Timestamp.After(sim.At) {
 		return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future for backfill — use POST /usage-events for real-time ingest")
 	}
@@ -375,7 +385,10 @@ func (s *Service) build(ctx context.Context, tenantID string, input IngestInput,
 	// compared against wall-clock, so on a clock advanced into the future
 	// every sim-timestamped event was rejected as "in the future" and the
 	// flagship advance-and-bill-usage demo broke at ingest.
-	now := s.effectiveNow(ctx, tenantID, input.CustomerID)
+	now, err := s.effectiveNow(ctx, tenantID, input.CustomerID)
+	if err != nil {
+		return domain.UsageEvent{}, false, err
+	}
 	ts := now
 	if input.Timestamp != nil {
 		// Reject future-dated live events (a small clock-skew tolerance keeps

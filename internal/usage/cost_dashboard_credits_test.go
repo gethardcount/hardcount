@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
+	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
 // fakeCredits answers the credit summary for one customer and records the
@@ -22,7 +22,7 @@ type fakeCredits struct {
 
 func (f *fakeCredits) CreditSummary(ctx context.Context, tenantID, customerID string) ([]CostDashboardCredits, error) {
 	f.calls++
-	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, postgres.Livemode(ctx)
+	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, testutil.MustLivemode(ctx)
 	return f.summary, f.err
 }
 
@@ -36,7 +36,7 @@ type fakeLive struct {
 }
 
 func (f *fakeLive) LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error) {
-	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, postgres.Livemode(ctx)
+	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, testutil.MustLivemode(ctx)
 	return f.live, f.err
 }
 

@@ -37,7 +37,7 @@ func ctxForTenant(tenantID string, livemode bool) context.Context {
 	return postgres.WithLivemode(ctx, livemode)
 }
 
-func TestStripeClients_ForCtx_ResolvesPerTenantMode(t *testing.T) {
+func TestStripeClients_ResolveCtx_ResolvesPerTenantMode(t *testing.T) {
 	fetcher := &stubCredentials{rows: map[string]tenantstripe.PlaintextSecrets{
 		"t1|live": {SecretKey: "sk_live_A"},
 		"t1|test": {SecretKey: "sk_test_A"},
@@ -47,22 +47,34 @@ func TestStripeClients_ForCtx_ResolvesPerTenantMode(t *testing.T) {
 	if c == nil {
 		t.Fatal("NewStripeClients returned nil with fetcher set")
 	}
-
-	if sc := c.ForCtx(ctxForTenant("t1", true)); sc == nil {
-		t.Error("ForCtx(t1 live) should return a client")
-	}
-	if sc := c.ForCtx(ctxForTenant("t1", false)); sc == nil {
-		t.Error("ForCtx(t1 test) should return a client")
-	}
-	if sc := c.ForCtx(ctxForTenant("t2", false)); sc != nil {
-		t.Error("ForCtx(t2 test) should be nil — not connected")
+	for _, tc := range []struct {
+		tenant string
+		live   bool
+		want   bool
+	}{{"t1", true, true}, {"t1", false, true}, {"t2", false, false}} {
+		sc, err := c.ResolveCtx(ctxForTenant(tc.tenant, tc.live))
+		if err != nil {
+			t.Fatalf("ResolveCtx(%s, live=%v): %v", tc.tenant, tc.live, err)
+		}
+		if (sc != nil) != tc.want {
+			t.Errorf("ResolveCtx(%s, live=%v) client = %v, want connected=%v", tc.tenant, tc.live, sc != nil, tc.want)
+		}
 	}
 }
 
-func TestStripeClients_ForCtx_NilWithoutTenant(t *testing.T) {
+// A ctx with no mode, or a lookup with no tenant, is a bug at the caller. It
+// is an error, never read as "Stripe not connected".
+func TestStripeClients_MissingModeOrTenantIsAnError(t *testing.T) {
 	c := NewStripeClients(&stubCredentials{})
-	if sc := c.ForCtx(context.Background()); sc != nil {
-		t.Error("ForCtx without tenant in ctx must return nil")
+	noMode := context.WithValue(context.Background(), auth.TestTenantIDKey(), "t1")
+	if _, err := c.ResolveCtx(noMode); !errors.Is(err, postgres.ErrLivemodeUnset) {
+		t.Errorf("ResolveCtx with no mode: err = %v, want postgres.ErrLivemodeUnset", err)
+	}
+	if _, err := c.ResolveCtx(postgres.WithLivemode(context.Background(), true)); err == nil {
+		t.Error("ResolveCtx with no tenant: err = nil, want an error")
+	}
+	if _, err := c.Resolve(context.Background(), "", true); err == nil {
+		t.Error("Resolve with no tenant: err = nil, want an error")
 	}
 }
 
@@ -74,15 +86,15 @@ func TestStripeClients_NilBundle(t *testing.T) {
 	if c.Has() {
 		t.Error("(*StripeClients)(nil).Has() must be false")
 	}
-	if c.ForCtx(context.Background()) != nil {
-		t.Error("(*StripeClients)(nil).ForCtx must be nil")
+	if sc, err := c.Resolve(context.Background(), "t1", true); sc != nil || err != nil {
+		t.Errorf("(*StripeClients)(nil).Resolve = (%v, %v), want (nil, nil): Stripe not wired", sc, err)
 	}
-	if c.For(context.Background(), "t1", true) != nil {
-		t.Error("(*StripeClients)(nil).For must be nil")
+	if ok, err := c.HasFor(context.Background(), "t1", true); ok || err != nil {
+		t.Errorf("(*StripeClients)(nil).HasFor = (%v, %v), want (false, nil)", ok, err)
 	}
 }
 
-func TestStripeClients_For_ExplicitTenantMode(t *testing.T) {
+func TestStripeClients_Resolve_ExplicitTenantMode(t *testing.T) {
 	// Background paths (reconciler) have no auth ctx — they pass tenant +
 	// mode explicitly from the invoice row. This must work regardless of
 	// what's in ctx.
@@ -90,24 +102,24 @@ func TestStripeClients_For_ExplicitTenantMode(t *testing.T) {
 		"t3|test": {SecretKey: "sk_test_X"},
 	}}
 	c := NewStripeClients(fetcher)
-	if sc := c.For(context.Background(), "t3", false); sc == nil {
-		t.Error("For(t3, test) should return a client")
+	if sc, err := c.Resolve(context.Background(), "t3", false); err != nil || sc == nil {
+		t.Errorf("Resolve(t3, test) = (%v, %v), want a client", sc, err)
 	}
-	if sc := c.For(context.Background(), "t3", true); sc != nil {
-		t.Error("For(t3, live) should be nil — not connected")
+	if sc, err := c.Resolve(context.Background(), "t3", true); err != nil || sc != nil {
+		t.Errorf("Resolve(t3, live) = (%v, %v), want (nil, nil): not connected", sc, err)
 	}
 }
 
-func TestStripeClients_For_LogsNonNotFoundErrors(t *testing.T) {
-	// Simulate a DB error during credential lookup — resolver returns nil
-	// (same as "not connected") but logs the underlying error. We can't
-	// easily assert the log output here, so just confirm no panic and
-	// nil return.
-	fetcher := &stubCredentials{err: map[string]error{
-		"t4|live": errors.New("boom"),
-	}}
-	c := NewStripeClients(fetcher)
-	if sc := c.For(context.Background(), "t4", true); sc != nil {
-		t.Error("For with DB error should return nil")
+// A credential read that fails is returned as an error from Resolve and
+// HasFor. Before, For logged it and returned nil, which every caller read
+// as "Stripe not connected".
+func TestStripeClients_ReadErrorIsReturned(t *testing.T) {
+	boom := errors.New("boom")
+	c := NewStripeClients(&stubCredentials{err: map[string]error{"t4|live": boom}})
+	if sc, err := c.Resolve(context.Background(), "t4", true); !errors.Is(err, boom) || sc != nil {
+		t.Errorf("Resolve with a read error = (%v, %v), want (nil, boom)", sc, err)
+	}
+	if ok, err := c.HasFor(context.Background(), "t4", true); !errors.Is(err, boom) || ok {
+		t.Errorf("HasFor with a read error = (%v, %v), want (false, boom)", ok, err)
 	}
 }

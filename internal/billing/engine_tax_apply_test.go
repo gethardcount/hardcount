@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 	"github.com/shopspring/decimal"
 )
@@ -474,7 +475,7 @@ func TestRunCycle_TaxErrorAbortsBeforeInvoiceAndCycleAdvance(t *testing.T) {
 	engine := NewEngine(subs, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, fakeClk)
 	engine.SetIntervalReader(subs)
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 
 	if len(errs) == 0 {
 		t.Fatal("expected a billing error when tax application fails, got none")

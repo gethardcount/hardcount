@@ -1377,6 +1377,10 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string) ([]do
 // retry ladder, or a draft whose tax is computed later, still pays its period
 // with the credit that was live when the period ended.
 func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -1406,7 +1410,7 @@ func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditL
 		      AND c.test_clock_id IS NOT NULL
 		  )
 		  AND NOT `+domain.CreditDrawOwedSQL("g")+`
-	`, postgres.Livemode(ctx))
+	`, live)
 	if err != nil {
 		return nil, err
 	}

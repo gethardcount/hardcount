@@ -60,7 +60,12 @@ func (h *Handler) Routes() chi.Router {
 // eventually fail anyway — this makes the failure immediate and explains why.
 func (h *Handler) requireTestMode(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if postgres.Livemode(r.Context()) {
+		live, err := postgres.Livemode(r.Context())
+		if err != nil {
+			respond.FromError(w, r, err, "test_clock")
+			return
+		}
+		if live {
 			respond.Forbidden(w, r, "test clocks are only available in test mode — use a test-mode API key (vlx_secret_test_...)")
 			return
 		}

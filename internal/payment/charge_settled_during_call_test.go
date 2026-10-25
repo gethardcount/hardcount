@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // paidMidCharge seeds a store whose row was paid offline while the charge was
@@ -82,7 +83,7 @@ func TestChargeInvoice_ProcessingAfterMidChargePayment_ReturnsPaidRow(t *testing
 	client := &mockStripeClient{piID: "pi_async", chargeStatus: "processing"}
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 
-	got, err := stripe.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+	got, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if err != nil {
 		t.Fatalf("ChargeInvoice: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestChargeInvoice_UnnamedTimeout_ParkAnnouncedOnlyWhenParked(t *testing.T) 
 		logs := captureLogs(t)
 		invoices, snapshot := paidMidCharge()
 		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
-		_, _ = stripe.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+		_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 		if strings.Contains(logs.String(), parked) {
 			t.Fatalf("park announced for an invoice that was paid, not parked:\n%s", logs)
 		}
@@ -141,7 +142,7 @@ func TestChargeInvoice_UnnamedTimeout_ParkAnnouncedOnlyWhenParked(t *testing.T) 
 		logs := captureLogs(t)
 		invoices, snapshot := declinedMidCharge()
 		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
-		_, _ = stripe.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+		_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 		if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentFailed || got.StripePaymentIntentID != "pi_X" {
 			t.Fatalf("recorded decline overwritten: %s/%q, want failed/pi_X (still retryable by dunning)", got.PaymentStatus, got.StripePaymentIntentID)
 		}
@@ -156,7 +157,7 @@ func TestChargeInvoice_UnnamedTimeout_ParkAnnouncedOnlyWhenParked(t *testing.T) 
 		snapshot := pendingSnapshot()
 		invoices.invoices["inv_1"] = snapshot
 		stripe := NewStripe(&mockStripeClient{shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
-		_, _ = stripe.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+		_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 		if !strings.Contains(logs.String(), parked) {
 			t.Fatalf("park not announced for an invoice that did park:\n%s", logs)
 		}
@@ -178,7 +179,7 @@ func TestChargeInvoice_RetryAfterEarlierAttempts_StampLands(t *testing.T) {
 	}}
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 
-	_, _ = stripe.ChargeInvoice(context.Background(), "t1", snapshot, testHold, "cus_stripe", "pm_test")
+	_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
 	if got := invoices.invoices["inv_1"]; got.StripePaymentIntentID != "pi_X" || got.ChargeAttemptSeq != 4 {
 		t.Fatalf("row %s/%q/seq %d, want failed/pi_X/seq 4 — the retry's decline was not recorded", got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq)
 	}

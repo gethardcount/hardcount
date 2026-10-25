@@ -11,6 +11,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenantstripe"
 )
 
@@ -45,7 +46,7 @@ func TestDecline_ChargeResponse_StartsDunningFromTheChargeInstant(t *testing.T) 
 	dunning := &recordingDunningStarter{}
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-	ctx := clock.WithSim(context.Background(), clock.Sim{At: simCharged, TestClockID: "clk_1"})
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), true), clock.Sim{At: simCharged, TestClockID: "clk_1"})
 	if _, err := s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test"); err == nil {
 		t.Fatal("expected the decline")
 	}
@@ -66,7 +67,7 @@ func TestDecline_NoPaymentIntent_StartsDunningFromTheChargeInstant(t *testing.T)
 	dunning := &recordingDunningStarter{}
 	s := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-	ctx := clock.WithSim(context.Background(), clock.Sim{At: simCharged, TestClockID: "clk_1"})
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), true), clock.Sim{At: simCharged, TestClockID: "clk_1"})
 	_, _ = s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 	if len(dunning.calls) != 1 {
 		t.Fatalf("StartDunning calls = %d, want 1", len(dunning.calls))
@@ -139,7 +140,7 @@ func TestDecline_Reconciler_CarriesThePIAnchor(t *testing.T) {
 	r := NewReconciler(client, store, time.Second)
 	r.SetSettler(settler)
 
-	if _, errs := r.Run(context.Background(), 10); len(errs) != 0 {
+	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
 	}
 	if settler.failCalls != 1 {
