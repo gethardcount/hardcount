@@ -141,8 +141,8 @@ func (rt *recipeTenant) spend(id, model string, prompt, cached, output int64) st
 func (rt *recipeTenant) priceRule(key, cents string, match map[string]any, priority int) {
 	rt.t.Helper()
 	rr, err := rt.pricingSvc.CreateRatingRule(rt.ctx, rt.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key, Name: key, Mode: domain.PricingFlat, Currency: "USD",
-		FlatAmountCents: decimal.RequireFromString(cents),
+		RuleKey: key, Name: key, Mode: domain.PricingPerUnit, Currency: "USD",
+		UnitAmountCents: decimal.RequireFromString(cents),
 	})
 	if err != nil {
 		rt.t.Fatalf("create rating rule %s: %v", key, err)
@@ -370,11 +370,11 @@ func TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule(t *testing.T) {
 func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	rt := newRecipeTenant(t, db, "Provider Cost Corp")
-	saveCost := func(model, tokenType, perToken string) {
+	saveCost := func(model, tokenType, centsPerToken string) {
 		t.Helper()
 		if _, err := rt.usageStore.UpsertProviderCostRate(rt.ctx, rt.tenantID, domain.ProviderCostRate{
 			Provider: "anthropic", Model: model, TokenType: tokenType,
-			CostPerToken: decimal.RequireFromString(perToken), Currency: "USD",
+			UnitCostCents: decimal.RequireFromString(centsPerToken), Currency: "USD",
 		}); err != nil {
 			t.Fatalf("save cost %s %s: %v", model, tokenType, err)
 		}
@@ -399,8 +399,8 @@ func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
 	}
 
 	// Costs saved before the upgrade, on the name Opus 5.5 used to arrive as.
-	saveCost("claude-opus-5", "input", "0.000004")
-	saveCost("claude-opus-5", "output", "0.00002")
+	saveCost("claude-opus-5", "input", "0.0004")
+	saveCost("claude-opus-5", "output", "0.002")
 	rt.spend("pc_opus55_before", "claude-opus-5-5", 1_000_000, 0, 100_000)
 	for _, e := range events("claude-opus-5-5") {
 		if e.ProviderCostMicros != nil || e.ProviderCostSource != "" {
@@ -412,8 +412,8 @@ func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
 	}
 
 	// A cost saved for the new name covers later calls only.
-	saveCost("claude-opus-5.5", "input", "0.000004")
-	saveCost("claude-opus-5.5", "output", "0.00002")
+	saveCost("claude-opus-5.5", "input", "0.0004")
+	saveCost("claude-opus-5.5", "output", "0.002")
 	rt.spend("pc_opus55_after", "anthropic/claude-opus-5-5", 1_000_000, 0, 100_000)
 	for _, e := range events("anthropic/claude-opus-5-5") {
 		if e.ProviderCostSource != "table" || e.ProviderCostMicros == nil {
@@ -426,7 +426,7 @@ func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
 
 	// One Haiku 5.5 cost, the standard tier's, is stamped on a long prompt
 	// too, which bills at the higher price.
-	saveCost("claude-haiku-5.5", "input", "0.0000001")
+	saveCost("claude-haiku-5.5", "input", "0.00001")
 	rt.spend("pc_haiku_long", "claude-haiku-5-5", 200_000, 0, 0)
 	for _, e := range events("claude-haiku-5-5") {
 		if e.Dimensions["token_type"] != "input" {

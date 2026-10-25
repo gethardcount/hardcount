@@ -57,8 +57,8 @@ func createBackdatedOverride(t *testing.T, f *thresholdFixture, ctx context.Cont
 	o, err := f.pricingSvc.CreateOverride(ctx, f.tenantID, pricing.CreateOverrideInput{
 		CustomerID:          f.customerID,
 		RatingRuleVersionID: ruleVersionID,
-		Mode:                domain.PricingFlat,
-		FlatAmountCents:     decimal.NewFromInt(flatCents),
+		Mode:                domain.PricingPerUnit,
+		UnitAmountCents:     decimal.NewFromInt(flatCents),
 		Reason:              "negotiated",
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestPriceChange_OverrideSurvivesPublish_SingleRule(t *testing.T) {
 	// Mid-period publish: v2 at 2c/call.
 	v2, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(2),
 	})
 	if err != nil {
 		t.Fatalf("publish v2: %v", err)
@@ -184,10 +184,10 @@ func TestPriceChange_OverrideSurvivesPublish_SingleRule(t *testing.T) {
 	// ADR-054 re-examination — the override trap: the stamped nominal rate is
 	// the OVERRIDE-applied rate (5c/call), NOT the list price at the persisted
 	// version id (v1 = 1c). The override preserves the version id, so a naive
-	// derive-on-read from rating_rule_versions.flat_amount_cents would
+	// derive-on-read from rating_rule_versions.unit_amount_cents would
 	// misdisplay list price on this negotiated line — which is exactly why the
 	// rate is stamped at build from the resolved (override-applied) rule.
-	// Mutation-verify: stamp rule.ID's list rate instead of rule.FlatAmountCents
+	// Mutation-verify: stamp rule.ID's list rate instead of rule.UnitAmountCents
 	// and this fails with got 1.
 	if len(usageLines) == 1 {
 		nom := usageLines[0].NominalUnitAmountDecimal
@@ -220,7 +220,7 @@ func TestPriceChange_OverrideSurvivesPublish_MultiDim(t *testing.T) {
 
 	if _, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(2),
 	}); err != nil {
 		t.Fatalf("publish v2: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestPriceChange_FireThenPublishThenClose(t *testing.T) {
 	// Mid-period publish at 5c/call.
 	if _, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
 	}); err != nil {
 		t.Fatalf("publish v2: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestPriceChange_PreviewMatchesCloseAcrossPublish(t *testing.T) {
 
 	if _, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "calls_flat", Name: "Calls Flat v2",
-		Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(7),
+		Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(7),
 	}); err != nil {
 		t.Fatalf("publish v2: %v", err)
 	}

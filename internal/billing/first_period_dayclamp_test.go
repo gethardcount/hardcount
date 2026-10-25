@@ -90,7 +90,7 @@ func TestRunCycle_FirstPeriod_CreationAddRow_BillsFullBase(t *testing.T) {
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_api": {ID: "rrv_api", RuleKey: "i1_api_rate", Version: 1,
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(1)},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)},
 		},
 	}
 	usage := &mockUsage{totals: map[string]int64{"mtr_api": 2000}}

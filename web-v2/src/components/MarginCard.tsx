@@ -95,9 +95,12 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   const currencyMismatch = !!rep && !!revenueCurrency && revenueCurrency !== costCurrency && rep.revenue_cents > 0
   const shownCurrency = revenueCurrency || currency
   const billed = (cents: number) => (mixedRevenue || !shownCurrency ? '—' : formatCents(cents, shownCurrency))
-  // micros (1e-6 of the currency unit) → display amount.
-  const cost = (micros: number) =>
-    `${getCurrencySymbol(costCurrency)}${(micros / 1_000_000).toFixed(micros >= 100_000 ? 2 : 4)}`
+  // cost_cents is a decimal string of cents → display amount, to the cent
+  // from $0.10 up and to 4 places below it.
+  const cost = (cents: string) => {
+    const dollars = Number(cents) / 100
+    return `${getCurrencySymbol(costCurrency)}${dollars.toFixed(dollars >= 0.1 ? 2 : 4)}`
+  }
   // No event carries a provider cost: the cost is unknown, not $0, and the
   // margin is not 100% (the server leaves margin_bps out).
   const costState = rep ? marginCostState(rep) : 'measured'
@@ -175,7 +178,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Provider cost</p>
-                <p className="text-lg font-semibold text-foreground mt-0.5">{costKnown ? cost(rep.cost_micros) : '—'}</p>
+                <p className="text-lg font-semibold text-foreground mt-0.5">{costKnown ? cost(rep.cost_cents) : '—'}</p>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">Margin</p>
@@ -228,7 +231,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
                           ? billed(m.revenue_cents ?? 0)
                           : <Badge variant="outline">not model-priced</Badge>}
                       </TableCell>
-                      <TableCell className="text-sm text-right">{cost(m.cost_micros)}</TableCell>
+                      <TableCell className="text-sm text-right">{cost(m.cost_cents)}</TableCell>
                       <TableCell className="text-sm text-right">{formatMarginBps(m.margin_bps)}</TableCell>
                     </TableRow>
                   ))}

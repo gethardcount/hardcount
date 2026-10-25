@@ -75,8 +75,8 @@ func noteFrom(t *testing.T, e domain.AuditEntry, meterKey string) string {
 func seatsMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key string) domain.Meter {
 	t.Helper()
 	rr, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key + "_flat", Name: key, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
+		RuleKey: key + "_flat", Name: key, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
 	})
 	if err != nil {
 		t.Fatalf("create rule: %v", err)

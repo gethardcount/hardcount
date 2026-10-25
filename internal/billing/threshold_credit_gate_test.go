@@ -43,8 +43,8 @@ func TestThresholdScan_CreditApplyFailure_FlagsAndSkipsCharge(t *testing.T) {
 		}},
 		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
 		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingFlat,
-			FlatAmountCents: decimal.NewFromInt(100),
+			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingPerUnit,
+			UnitAmountCents: decimal.NewFromInt(100),
 		}},
 	}
 	invoices := &mockInvoices{}
@@ -110,8 +110,8 @@ func TestThresholdScan_CreditsApplied_ChargesRemainder(t *testing.T) {
 		}},
 		meters: map[string]domain.Meter{"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"}},
 		rules: map[string]domain.RatingRuleVersion{"rrv_api": {
-			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingFlat,
-			FlatAmountCents: decimal.NewFromInt(100),
+			ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingPerUnit,
+			UnitAmountCents: decimal.NewFromInt(100),
 		}},
 	}
 	invoices := &mockInvoices{}

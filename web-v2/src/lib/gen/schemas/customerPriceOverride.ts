@@ -7,8 +7,8 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { CustomerPriceOverrideGraduatedTiersItem } from './customerPriceOverrideGraduatedTiersItem';
 import type { CustomerPriceOverrideMode } from './customerPriceOverrideMode';
+import type { PriceTier } from './priceTier';
 
 export interface CustomerPriceOverride {
   id: string;
@@ -18,15 +18,15 @@ export interface CustomerPriceOverride {
   customer_id: string;
   /** The rule version named when the override was created. For reference only. */
   rating_rule_version_id: string;
+  /** As on RatingRule. */
   mode: CustomerPriceOverrideMode;
-  /** Per-unit rate in cents, as a decimal string. */
-  flat_amount_cents?: string;
+  /** Price per unit in cents, as a decimal string. */
+  unit_amount_cents?: string;
   /** Empty (`[]`) unless `mode` is `graduated`. */
-  graduated_tiers?: CustomerPriceOverrideGraduatedTiersItem[];
+  tiers?: PriceTier[];
   package_size?: number;
-  package_amount_cents?: number;
-  /** Per-unit overage rate in cents, as a decimal string. */
-  overage_unit_amount_cents?: string;
+  /** Price of one package in cents, as a decimal string. */
+  package_amount_cents?: string;
   reason?: string;
   active: boolean;
   created_at: string;

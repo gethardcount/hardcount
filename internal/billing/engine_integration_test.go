@@ -244,9 +244,9 @@ func TestFullBillingCycle_E2E(t *testing.T) {
 		RuleKey: "api_calls", Name: "API Calls Pricing", Version: 1,
 		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingGraduated,
 		Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(10)}, // $0.10 per call up to 1000
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)},     // $0.05 per call after 1000
+		Tiers: []domain.RatingTier{
+			{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)}, // $0.10 per call up to 1000
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},               // $0.05 per call after 1000
 		},
 	})
 	if err != nil {
@@ -255,8 +255,8 @@ func TestFullBillingCycle_E2E(t *testing.T) {
 
 	storageRule, err := pricingStore.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
 		RuleKey: "storage_gb", Name: "Storage Pricing", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(2500), // $25 flat
+		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(2500), // $25 flat
 	})
 	if err != nil {
 		t.Fatalf("create storage rule: %v", err)

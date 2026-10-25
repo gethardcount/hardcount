@@ -16,7 +16,7 @@ import {
 import { dollarsToRateCents } from '@/lib/priceInput'
 import { Layout } from '@/components/Layout'
 import { LoadError } from '@/components/LoadError'
-import { priceRate, shiftDecimal } from '@/lib/priceDisplay'
+import { PRICING_MODES, priceRate, pricingModeLabel, shiftDecimal } from '@/lib/priceDisplay'
 import { latestPerKey } from '@/lib/rules'
 import { METER_AGGREGATIONS, meterAggregationHelp, meterAggregationLabel } from '@/lib/meterLabels'
 import { showApiError } from '@/lib/formErrors'
@@ -63,11 +63,7 @@ import { EmptyState } from '@/components/EmptyState'
 // Base UI's <SelectValue> renders the raw value in the trigger unless `items`
 // maps value→label — the app-wide cause of "trigger shows the code, dropdown
 // shows the name".
-const PRICING_MODE_OPTIONS = [
-  { value: 'flat', label: 'Flat Rate' },
-  { value: 'graduated', label: 'Graduated Tiers' },
-  { value: 'package', label: 'Package' },
-]
+const PRICING_MODE_OPTIONS = PRICING_MODES.map(value => ({ value, label: pricingModeLabel(value) }))
 const INTERVAL_OPTIONS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Yearly' },
@@ -82,7 +78,7 @@ function badgeVariant(val: string): 'success' | 'info' | 'secondary' | 'outline'
     case 'active': return 'success'
     case 'monthly': return 'info'
     case 'yearly': return 'info'
-    case 'flat': return 'info'
+    case 'per_unit': return 'info'
     case 'graduated': return 'info'
     case 'package': return 'info'
     default: return 'secondary'
@@ -383,7 +379,7 @@ export default function PricingPage() {
                               <TableRow>
                                 <TableCell className="font-medium text-foreground">{r.name}</TableCell>
                                 <TableCell className="font-mono text-muted-foreground">{r.rule_key}</TableCell>
-                                <TableCell><Badge variant={badgeVariant(r.mode)}>{r.mode}</Badge></TableCell>
+                                <TableCell><Badge variant={badgeVariant(r.mode)}>{pricingModeLabel(r.mode)}</Badge></TableCell>
                                 <TableCell className="text-muted-foreground">
                                   v{r.version}
                                   {r.lifecycle_state === 'archived' && <Badge variant="secondary" className="ml-1.5 text-xs">archived</Badge>}
@@ -514,18 +510,18 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
   // Prefill = "publish new version": every field seeds from the current
   // version (rates cents→dollars via exact decimal shift) and the key is
   // locked — repricing must not require re-typing a tier ladder.
-  const [mode, setMode] = useState(prefill?.mode ?? 'flat')
-  const [flatAmount, setFlatAmount] = useState(prefill ? shiftDecimal(prefill.flat_amount_cents || '0', -2) : '')
+  const [mode, setMode] = useState(prefill?.mode ?? 'per_unit')
+  const [unitAmount, setUnitAmount] = useState(prefill ? shiftDecimal(prefill.unit_amount_cents || '0', -2) : '')
   const [tiers, setTiers] = useState(
-    prefill?.graduated_tiers?.length
-      ? prefill.graduated_tiers.map(t => ({ upTo: t.up_to > 0 ? String(t.up_to) : '', price: shiftDecimal(t.unit_amount_cents || '0', -2) }))
+    prefill?.tiers?.length
+      ? prefill.tiers.map(t => ({ upTo: t.up_to != null ? String(t.up_to) : '', price: shiftDecimal(t.unit_amount_cents || '0', -2) }))
       : [
           { upTo: '100', price: '0.10' },
           { upTo: '', price: '0.05' },
         ],
   )
   const [packageSize, setPackageSize] = useState(prefill ? String(prefill.package_size || 100) : '100')
-  const [packageAmount, setPackageAmount] = useState(prefill ? (prefill.package_amount_cents / 100).toFixed(2) : '10.00')
+  const [packageAmount, setPackageAmount] = useState(prefill ? shiftDecimal(prefill.package_amount_cents || '0', -2) : '10.00')
   const [name, setName] = useState(prefill?.name ?? '')
   const [ruleKey, setRuleKey] = useState(prefill?.rule_key ?? '')
 
@@ -546,9 +542,9 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
   const [saving, setSaving] = useState(false)
 
   const modeDescriptions: Record<string, string> = {
-    flat: 'Fixed price per unit',
+    per_unit: 'Fixed price per unit',
     graduated: 'Price decreases as usage increases (tiered)',
-    package: 'Charge per block of units',
+    package: 'Charge per block of units. A part block is charged as a whole one.',
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -559,15 +555,15 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
       const payload: Record<string, unknown> = { rule_key: ruleKey, name, mode, currency: stampCurrency }
       // A blank or unreadable price is refused here: the server accepts 0 as
       // a deliberate free rate, so it cannot catch a price left empty.
-      if (mode === 'flat') {
-        const cents = dollarsToRateCents(flatAmount)
+      if (mode === 'per_unit') {
+        const cents = dollarsToRateCents(unitAmount)
         if (cents === null) { setFormError('Price per unit: enter a price as a plain number, for example 0.01. Use 0 for free.'); setSaving(false); return }
-        payload.flat_amount_cents = cents
+        payload.unit_amount_cents = cents
       }
       if (mode === 'graduated') {
         for (let i = 0; i < tiers.length - 1; i++) {
           const current = parseInt(tiers[i].upTo) || 0
-          const next = tiers[i + 1].upTo === '' ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
+          const next = i + 1 === tiers.length - 1 ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
           if (current <= 0) { setFormError(`Tier ${i + 1}: "Up to" must be greater than 0`); setSaving(false); return }
           if (next !== Infinity && next <= current) { setFormError(`Tier ${i + 2}: "Up to" must be greater than ${current}`); setSaving(false); return }
         }
@@ -577,15 +573,17 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
           if (cents === null) { setFormError(`Tier ${i + 1}: enter a price as a plain number, for example 0.01. Use 0 for free.`); setSaving(false); return }
           tierCents.push(cents)
         }
-        payload.graduated_tiers = tiers.map((t, i) => ({
-          up_to: t.upTo === '' ? 0 : parseInt(t.upTo) || 0,
+        // The last tier has no upper bound: up_to null.
+        payload.tiers = tiers.map((t, i) => ({
+          up_to: i === tiers.length - 1 ? null : parseInt(t.upTo) || 0,
           unit_amount_cents: tierCents[i],
         }))
       }
       if (mode === 'package') {
         payload.package_size = parseInt(packageSize) || 1
-        if (dollarsToRateCents(packageAmount) === null) { setFormError('Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.'); setSaving(false); return }
-        payload.package_amount_cents = Math.round(parseFloat(packageAmount) * 100)
+        const cents = dollarsToRateCents(packageAmount)
+        if (cents === null) { setFormError('Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.'); setSaving(false); return }
+        payload.package_amount_cents = cents
       }
       await api.createRatingRule(payload as Parameters<typeof api.createRatingRule>[0])
       onCreated()
@@ -627,7 +625,7 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
             <div>
               <Label>Pricing Model</Label>
               <Select items={PRICING_MODE_OPTIONS} value={mode} onValueChange={(v) => setMode(v ?? '')}>
-                <SelectTrigger className="w-full mt-1">
+                <SelectTrigger className="w-full mt-1" aria-label="Pricing model">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -640,11 +638,11 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
           </div>
           <p className="text-xs text-muted-foreground -mt-2">{modeDescriptions[mode]}</p>
 
-          {mode === 'flat' && (
+          {mode === 'per_unit' && (
             <div>
-              <Label htmlFor="rule-flat-price">Price per Unit ({getCurrencySymbol(stampCurrency)})</Label>
-              <Input id="rule-flat-price" type="number" step="any" min={0} max={999999.99} value={flatAmount}
-                onChange={e => setFlatAmount(e.target.value)} placeholder="0.01" className="mt-1" />
+              <Label htmlFor="rule-unit-price">Price per Unit ({getCurrencySymbol(stampCurrency)})</Label>
+              <Input id="rule-unit-price" type="number" step="any" min={0} max={999999.99} value={unitAmount}
+                onChange={e => setUnitAmount(e.target.value)} placeholder="0.01" className="mt-1" />
               <p className="text-xs text-muted-foreground mt-1">e.g. {getCurrencySymbol(stampCurrency)}0.01 per API call. Sub-cent rates allowed.</p>
             </div>
           )}
@@ -661,9 +659,12 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
                 {tiers.map((tier, idx) => (
                   <div key={idx} className="grid grid-cols-[1fr_1fr_36px] gap-0 px-3 py-2 border-b border-border last:border-b-0 items-center">
                     <div className="pr-2">
-                      <Input type="number" min={0} value={tier.upTo}
+                      {/* The last tier has no upper limit, so its box takes no number. */}
+                      <Input type="number" min={0} value={idx === tiers.length - 1 ? '' : tier.upTo}
+                        aria-label={`Tier ${idx + 1} up to`}
+                        disabled={idx === tiers.length - 1}
                         onChange={e => setTiers(t => t.map((r, i) => i === idx ? { ...r, upTo: e.target.value } : r))}
-                        placeholder={idx === tiers.length - 1 ? 'Unlimited' : '1000'} />
+                        placeholder={idx === tiers.length - 1 ? 'No limit' : '1000'} />
                     </div>
                     <div className="pr-2">
                       <Input type="number" step="any" min={0} value={tier.price}
@@ -686,21 +687,21 @@ function CreateRuleDialog({ rules, prefill, onClose, onCreated }: { rules: Ratin
                 className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
                 + Add tier
               </button>
-              <p className="text-xs text-muted-foreground">Leave "Up to" empty on the last tier for unlimited. Tiers are evaluated in order.</p>
+              <p className="text-xs text-muted-foreground">Each tier prices the units above the tier before it. The last tier has no upper limit.</p>
             </div>
           )}
 
           {mode === 'package' && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Units per Package</Label>
-                <Input type="number" min={1} value={packageSize} onChange={e => setPackageSize(e.target.value)}
+                <Label htmlFor="rule-pkg-size">Units per Package</Label>
+                <Input id="rule-pkg-size" type="number" min={1} value={packageSize} onChange={e => setPackageSize(e.target.value)}
                   placeholder="100" className="mt-1" />
                 <p className="text-xs text-muted-foreground mt-1">e.g. 100 API calls per package</p>
               </div>
               <div>
                 <Label htmlFor="rule-pkg-price">Price per Package ({getCurrencySymbol(stampCurrency)})</Label>
-                <Input id="rule-pkg-price" type="number" step="0.01" min={0} max={999999.99} value={packageAmount}
+                <Input id="rule-pkg-price" type="number" step="any" min={0} max={999999.99} value={packageAmount}
                   onChange={e => setPackageAmount(e.target.value)} placeholder="10.00" className="mt-1" />
                 <p className="text-xs text-muted-foreground mt-1">e.g. {getCurrencySymbol(stampCurrency)}10.00 per 100 calls</p>
               </div>

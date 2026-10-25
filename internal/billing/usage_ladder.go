@@ -12,13 +12,14 @@ import (
 // usageLadder prices a closer's usage slices so a bucket's tiers continue
 // from what a mid-period threshold fire already billed, instead of restarting
 // at tier 0 (P21, ADR-066 amendment 2026-10-11). Each slice bills
-// F(quantity so far + q) − F-billed so far, floored at 0: exact for graduated
-// rules (fire + close = F(total)); a non-monotone package rule can floor a
-// slice at 0, and a later slice of the same bucket recovers the difference.
+// F(quantity so far + q) − F-billed so far, so fire + close = F(total) for
+// graduated and package rules. F never decreases as the quantity grows (a
+// package bills ceil(q / size) packages, ADR-130 §3), so a slice is never
+// negative; one that would be is an error, not a clamp.
 //
 // It prices exactly as before (ComputeAmountCents(rule, qty)) when there is
-// no fire, for a non-additive bucket, and for a flat rule (linear: the seed
-// changes nothing).
+// no fire, for a non-additive bucket, and for a per_unit rule (linear: the
+// seed changes nothing).
 //
 // The seed amount is F(seed quantity) recomputed under the rule, never the
 // fire line's persisted AmountCents: in tax-inclusive mode that field holds
@@ -39,7 +40,7 @@ func newUsageLadder(wm thresholdWatermark) *usageLadder {
 
 // continues reports whether a bucket priced under rule continues a ladder.
 func (l *usageLadder) continues(rule domain.RatingRuleVersion, aggregation string) bool {
-	return l.on && !nonAdditive(aggregation) && rule.Mode != domain.PricingFlat
+	return l.on && !nonAdditive(aggregation) && rule.Mode != domain.PricingPerUnit
 }
 
 // price returns the amount for qty more units of the bucket under rule.
@@ -65,7 +66,10 @@ func (l *usageLadder) price(rule domain.RatingRuleVersion, meterID, bucketKey, a
 	if err != nil {
 		return 0, err
 	}
-	amount := max(total-l.amt[bucketKey], 0)
+	amount := total - l.amt[bucketKey]
+	if amount < 0 {
+		return 0, fmt.Errorf("meter %s rating rule %s: the price of %s units (%d) is below what this period already billed for fewer units (%d)", meterID, rule.ID, cumulative, total, l.amt[bucketKey])
+	}
 	l.qty[bucketKey] = cumulative
 	l.amt[bucketKey] += amount
 	return amount, nil
@@ -112,7 +116,7 @@ func (w thresholdWatermark) billsMeter(meterID string) bool {
 // pricing rule), not which buckets have usage, because a bucket with no
 // post-fire usage would otherwise silently hand its seed to the other.
 // A no-op when the ladder is off, the fire billed nothing on this meter, or
-// the meter has no pricing rules; flat versions are skipped (the ladder never
+// the meter has no pricing rules; per_unit versions are skipped (the ladder never
 // continues them, so a shared seed changes nothing).
 func checkLadderSeeds(ctx context.Context, prices PriceSource, tenantID, customerID, meterID string, meter domain.Meter, pricingRules []domain.MeterPricingRule, pin ratePin, ladder *usageLadder) error {
 	wm := ladder.wm
@@ -132,7 +136,7 @@ func checkLadderSeeds(ctx context.Context, prices PriceSource, tenantID, custome
 		if err != nil {
 			return fmt.Errorf("resolve pricing for meter %s rule %s: %w", meterID, id, err)
 		}
-		if rule.Mode == domain.PricingFlat {
+		if rule.Mode == domain.PricingPerUnit {
 			continue
 		}
 		seen[rule.ID]++

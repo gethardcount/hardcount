@@ -90,8 +90,8 @@ func (f pricingFixture) rows(t *testing.T, resourceType, resourceID string) []do
 func (f pricingFixture) seedRatingRule(t *testing.T, key string) domain.RatingRuleVersion {
 	t.Helper()
 	rule, err := pricing.NewService(f.store).CreateRatingRule(f.ctx, f.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key, Name: key, Mode: domain.PricingFlat,
-		Currency: "USD", FlatAmountCents: decimal.NewFromInt(2),
+		RuleKey: key, Name: key, Mode: domain.PricingPerUnit,
+		Currency: "USD", UnitAmountCents: decimal.NewFromInt(2),
 	})
 	if err != nil {
 		t.Fatalf("seed rating rule: %v", err)

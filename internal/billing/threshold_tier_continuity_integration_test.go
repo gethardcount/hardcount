@@ -45,9 +45,9 @@ func p21FireAt700(t *testing.T, name string, beforeFire func(p *p21Fire)) *p21Fi
 	backdateRuleVersion(t, f, ctx, p.v1.ID, f.cycleStart.Add(-3*time.Hour))
 	v2, err := f.pricingSvc.CreateRatingRule(ctx, f.tenantID, pricing.CreateRatingRuleInput{
 		RuleKey: "calls_flat", Name: "Calls Graduated", Mode: domain.PricingGraduated, Currency: "USD",
-		GraduatedTiers: []domain.RatingTier{
-			{UpTo: 1000, UnitAmountCents: decimal.NewFromInt(10)},
-			{UpTo: 0, UnitAmountCents: decimal.NewFromInt(2)},
+		Tiers: []domain.RatingTier{
+			{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
+			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(2)},
 		},
 	})
 	if err != nil {
@@ -218,7 +218,7 @@ func TestThresholdCycle_MultiDimBucketContinuesAcrossFire_RealStore(t *testing.T
 	p := p21FireAt700(t, "P21 Multi-dim", func(p *p21Fire) {
 		other, err := p.f.pricingSvc.CreateRatingRule(p.ctx, p.f.tenantID, pricing.CreateRatingRuleInput{
 			RuleKey: "gpt_calls", Name: "GPT Calls", Mode: domain.PricingGraduated, Currency: "USD",
-			GraduatedTiers: []domain.RatingTier{{UpTo: 100, UnitAmountCents: decimal.NewFromInt(50)}, {UpTo: 0, UnitAmountCents: decimal.NewFromInt(5)}},
+			Tiers: []domain.RatingTier{{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(50)}, {UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)}},
 		})
 		if err != nil {
 			t.Fatalf("other rule: %v", err)

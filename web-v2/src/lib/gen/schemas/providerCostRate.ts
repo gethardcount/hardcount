@@ -15,9 +15,9 @@ export interface ProviderCostRate {
   provider: string;
   model: string;
   token_type: string;
-  /** Decimal dollars per token. */
-  cost_per_token: string;
-  /** Always USD. Cost and margin count every rate in dollars. */
+  /** US cents per token, as a decimal string (e.g. "0.0003" = $3.00 per 1,000,000 tokens). */
+  unit_cost_cents: string;
+  /** Always USD. Cost and margin count every rate in US cents. */
   currency: ProviderCostRateCurrency;
   created_at?: string;
   updated_at?: string;

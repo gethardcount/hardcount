@@ -65,7 +65,8 @@ export function rangeIncluding(latestISO: string, nowMs: number, timezone?: stri
 // had any usage at all.
 export interface MarginTotals {
   revenue_cents: number
-  cost_micros: number
+  // A decimal string of cents.
+  cost_cents: string
   unresolved_events: number
   by_model: unknown[]
 }
@@ -77,7 +78,7 @@ export const MARGIN_EMPTY_NOTE = 'No usage in this window yet.'
 // marginWindowIsEmpty is true when the window holds no usage: no revenue, no
 // provider cost, no uncosted events and no model rows.
 export function marginWindowIsEmpty(rep: MarginTotals): boolean {
-  return rep.revenue_cents === 0 && rep.cost_micros === 0 && rep.unresolved_events === 0 && rep.by_model.length === 0
+  return rep.revenue_cents === 0 && Number(rep.cost_cents) === 0 && rep.unresolved_events === 0 && rep.by_model.length === 0
 }
 
 // usageWindowIsEmpty is true when no event at all fell in the Activity

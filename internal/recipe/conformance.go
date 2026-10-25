@@ -127,20 +127,17 @@ func ruleConformanceDiff(existing domain.RatingRuleVersion, rr domain.RecipeRati
 	if existing.Currency != rr.Currency {
 		diffs = append(diffs, fieldDiff{"currency", rr.Currency, existing.Currency})
 	}
-	if !existing.FlatAmountCents.Equal(rr.FlatAmountCents) {
-		diffs = append(diffs, fieldDiff{"per-unit rate (cents)", rr.FlatAmountCents.String(), existing.FlatAmountCents.String()})
+	if !existing.UnitAmountCents.Equal(rr.UnitAmountCents) {
+		diffs = append(diffs, fieldDiff{"per-unit rate (cents)", rr.UnitAmountCents.String(), existing.UnitAmountCents.String()})
 	}
-	if !tiersEqual(existing.GraduatedTiers, rr.GraduatedTiers) {
-		diffs = append(diffs, fieldDiff{"graduated tiers", describeTiers(rr.GraduatedTiers), describeTiers(existing.GraduatedTiers)})
+	if !tiersEqual(existing.Tiers, rr.Tiers) {
+		diffs = append(diffs, fieldDiff{"graduated tiers", describeTiers(rr.Tiers), describeTiers(existing.Tiers)})
 	}
 	if existing.PackageSize != rr.PackageSize {
 		diffs = append(diffs, fieldDiff{"package size", fmt.Sprintf("%d", rr.PackageSize), fmt.Sprintf("%d", existing.PackageSize)})
 	}
-	if existing.PackageAmountCents != rr.PackageAmountCents {
-		diffs = append(diffs, fieldDiff{"package amount (cents)", fmt.Sprintf("%d", rr.PackageAmountCents), fmt.Sprintf("%d", existing.PackageAmountCents)})
-	}
-	if !existing.OverageUnitAmountCents.Equal(rr.OverageUnitAmountCents) {
-		diffs = append(diffs, fieldDiff{"overage per-unit rate (cents)", rr.OverageUnitAmountCents.String(), existing.OverageUnitAmountCents.String()})
+	if !existing.PackageAmountCents.Equal(rr.PackageAmountCents) {
+		diffs = append(diffs, fieldDiff{"package amount (cents)", rr.PackageAmountCents.String(), existing.PackageAmountCents.String()})
 	}
 	return diffs
 }
@@ -152,11 +149,19 @@ func tiersEqual(a, b []domain.RatingTier) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].UpTo != b[i].UpTo || !a[i].UnitAmountCents.Equal(b[i].UnitAmountCents) {
+		if !upToEqual(a[i].UpTo, b[i].UpTo) || !a[i].UnitAmountCents.Equal(b[i].UnitAmountCents) {
 			return false
 		}
 	}
 	return true
+}
+
+// upToEqual compares two tier bounds; nil is the open last tier.
+func upToEqual(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // describeTiers renders a tier ladder compactly for the 409 message, e.g.
@@ -167,10 +172,10 @@ func describeTiers(ts []domain.RatingTier) string {
 	}
 	parts := make([]string, 0, len(ts))
 	for _, t := range ts {
-		if t.UpTo == 0 {
+		if t.UpTo == nil {
 			parts = append(parts, "rest @"+t.UnitAmountCents.String())
 		} else {
-			parts = append(parts, fmt.Sprintf("up_to %d @%s", t.UpTo, t.UnitAmountCents.String()))
+			parts = append(parts, fmt.Sprintf("up_to %d @%s", *t.UpTo, t.UnitAmountCents.String()))
 		}
 	}
 	return fmt.Sprintf("%d tiers (%s)", len(ts), strings.Join(parts, ", "))

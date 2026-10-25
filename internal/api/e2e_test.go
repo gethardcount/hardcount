@@ -69,9 +69,9 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		resp := doPost(t, ts, "/v1/rating-rules", auth, map[string]any{
 			"rule_key":          "api_calls",
 			"name":              "API Call Pricing",
-			"mode":              "flat",
+			"mode":              "per_unit",
 			"currency":          "USD",
-			"flat_amount_cents": 1000,
+			"unit_amount_cents": 1000,
 		})
 		assertStatus(t, resp, 201)
 		body := readJSON(t, resp)

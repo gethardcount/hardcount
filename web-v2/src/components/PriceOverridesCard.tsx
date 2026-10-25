@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Trash2 } from 'lucide-react'
-import { api, formatRate, formatRateBare, formatDate, type PriceOverride, type RatingRule } from '@/lib/api'
+import { api, formatRate, formatRateBare, formatDate, type PriceOverride, type PriceTier, type RatingRule } from '@/lib/api'
 import { dollarsToRateCents } from '@/lib/priceInput'
+import { PRICING_MODES, pricingModeLabel } from '@/lib/priceDisplay'
 import { showApiError } from '@/lib/formErrors'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -24,25 +25,21 @@ import {
 // facts operators must not be surprised by: deals follow the rule across
 // republishes, and every rate change lands at the NEXT period open.
 
-const MODE_OPTIONS = [
-  { value: 'flat', label: 'Flat per-unit' },
-  { value: 'graduated', label: 'Graduated tiers' },
-  { value: 'package', label: 'Package' },
-]
+const MODE_OPTIONS = PRICING_MODES.map(value => ({ value, label: pricingModeLabel(value) }))
 
 // priceSummary renders a rule's or override's pricing block in operator
 // language, e.g. "$0.01/unit", "3 tiers", "$10.00 per 100 units".
-function priceSummary(p: { mode: string; flat_amount_cents: string; graduated_tiers?: { up_to: number; unit_amount_cents: string }[]; package_size: number; package_amount_cents: number }, currency: string | undefined): string {
+function priceSummary(p: { mode: string; unit_amount_cents: string; tiers?: PriceTier[]; package_size: number; package_amount_cents: string }, currency: string | undefined): string {
   // An override whose list price is gone has no currency to show: no symbol,
   // never the workspace's.
   const rate = (cents: string) => (currency ? formatRate(cents, currency) : formatRateBare(cents))
   switch (p.mode) {
-    case 'flat':
-      return `${rate(p.flat_amount_cents)}/unit`
+    case 'per_unit':
+      return `${rate(p.unit_amount_cents)}/unit`
     case 'graduated':
-      return `${p.graduated_tiers?.length ?? 0} tiers`
+      return `${p.tiers?.length ?? 0} tiers`
     case 'package':
-      return `${rate(String(p.package_amount_cents))} per ${p.package_size} units`
+      return `${rate(p.package_amount_cents)} per ${p.package_size} units`
     default:
       return p.mode
   }
@@ -177,8 +174,8 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
 }) {
   const latest = useMemo(() => latestByKey(rules), [rules])
   const [versionId, setVersionId] = useState('')
-  const [mode, setMode] = useState('flat')
-  const [flatAmount, setFlatAmount] = useState('')
+  const [mode, setMode] = useState('per_unit')
+  const [unitAmount, setUnitAmount] = useState('')
   const [tiers, setTiers] = useState<{ upTo: string; price: string }[]>([
     { upTo: '1000', price: '0.10' },
     { upTo: '', price: '0.05' },
@@ -215,15 +212,15 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
       }
       // A blank or unreadable price is refused here: the server accepts 0 as
       // a deliberate free rate, so it cannot catch a price left empty.
-      if (mode === 'flat') {
-        const cents = dollarsToRateCents(flatAmount)
+      if (mode === 'per_unit') {
+        const cents = dollarsToRateCents(unitAmount)
         if (cents === null) { setFormError('Price per unit: enter a price as a plain number, for example 0.01. Use 0 for free.'); setSaving(false); return }
-        payload.flat_amount_cents = cents
+        payload.unit_amount_cents = cents
       }
       if (mode === 'graduated') {
         for (let i = 0; i < tiers.length - 1; i++) {
           const current = parseInt(tiers[i].upTo) || 0
-          const next = tiers[i + 1].upTo === '' ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
+          const next = i + 1 === tiers.length - 1 ? Infinity : (parseInt(tiers[i + 1].upTo) || 0)
           if (current <= 0) { setFormError(`Tier ${i + 1}: "Up to" must be greater than 0`); setSaving(false); return }
           if (next !== Infinity && next <= current) { setFormError(`Tier ${i + 2}: "Up to" must be greater than ${current}`); setSaving(false); return }
         }
@@ -233,15 +230,17 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
           if (cents === null) { setFormError(`Tier ${i + 1}: enter a price as a plain number, for example 0.01. Use 0 for free.`); setSaving(false); return }
           tierCents.push(cents)
         }
-        payload.graduated_tiers = tiers.map((t, i) => ({
-          up_to: t.upTo === '' ? 0 : parseInt(t.upTo) || 0,
+        // The last tier has no upper bound: up_to null.
+        payload.tiers = tiers.map((t, i) => ({
+          up_to: i === tiers.length - 1 ? null : parseInt(t.upTo) || 0,
           unit_amount_cents: tierCents[i],
         }))
       }
       if (mode === 'package') {
         payload.package_size = parseInt(packageSize) || 1
-        if (dollarsToRateCents(packageAmount) === null) { setFormError('Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.'); setSaving(false); return }
-        payload.package_amount_cents = Math.round(parseFloat(packageAmount) * 100)
+        const cents = dollarsToRateCents(packageAmount)
+        if (cents === null) { setFormError('Price per package: enter a price as a plain number, for example 10.00. Use 0 for free.'); setSaving(false); return }
+        payload.package_amount_cents = cents
       }
       await api.createPriceOverride(payload)
       onCreated()
@@ -282,7 +281,7 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
 
           <div>
             <Label>Pricing model</Label>
-            <Select items={MODE_OPTIONS} value={mode} onValueChange={(v) => setMode(v ?? 'flat')}>
+            <Select items={MODE_OPTIONS} value={mode} onValueChange={(v) => setMode(v ?? 'per_unit')}>
               <SelectTrigger className="w-full mt-1">
                 <SelectValue />
               </SelectTrigger>
@@ -294,11 +293,11 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
             </Select>
           </div>
 
-          {mode === 'flat' && (
+          {mode === 'per_unit' && (
             <div>
               <Label>Negotiated price per unit ($)</Label>
-              <Input type="number" step="any" min={0} value={flatAmount}
-                onChange={e => setFlatAmount(e.target.value)} placeholder="0.01" className="mt-1" />
+              <Input type="number" step="any" min={0} value={unitAmount}
+                onChange={e => setUnitAmount(e.target.value)} placeholder="0.01" className="mt-1" />
               {selectedRule && (
                 <p className="text-xs text-muted-foreground mt-1">
                   List price: {priceSummary(selectedRule, selectedRule.currency)}. Sub-cent rates allowed.
@@ -319,9 +318,12 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
                 {tiers.map((tier, idx) => (
                   <div key={idx} className="grid grid-cols-[1fr_1fr_36px] gap-0 px-3 py-2 border-b border-border last:border-b-0 items-center">
                     <div className="pr-2">
-                      <Input type="number" min={0} value={tier.upTo}
+                      {/* The last tier has no upper limit, so its box takes no number. */}
+                      <Input type="number" min={0} value={idx === tiers.length - 1 ? '' : tier.upTo}
+                        aria-label={`Tier ${idx + 1} up to`}
+                        disabled={idx === tiers.length - 1}
                         onChange={e => setTiers(t => t.map((r, i) => i === idx ? { ...r, upTo: e.target.value } : r))}
-                        placeholder={idx === tiers.length - 1 ? 'Unlimited' : '1000'} />
+                        placeholder={idx === tiers.length - 1 ? 'No limit' : '1000'} />
                     </div>
                     <div className="pr-2">
                       <Input type="number" step="any" min={0} value={tier.price}
@@ -344,7 +346,7 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
                 className="text-sm font-medium text-primary hover:text-primary/80 transition-colors">
                 + Add tier
               </button>
-              <p className="text-xs text-muted-foreground">Leave "Up to" empty on the last tier for unlimited. Tiers are evaluated in order.</p>
+              <p className="text-xs text-muted-foreground">Each tier prices the units above the tier before it. The last tier has no upper limit.</p>
             </div>
           )}
 
@@ -357,7 +359,7 @@ function CreateOverrideDialog({ customerId, clockPinned, rules, existing, onClos
               </div>
               <div>
                 <Label>Price per package ($)</Label>
-                <Input type="number" step="0.01" min={0} value={packageAmount}
+                <Input type="number" step="any" min={0} value={packageAmount}
                   onChange={e => setPackageAmount(e.target.value)} placeholder="10.00" className="mt-1" />
               </div>
             </div>

@@ -2021,7 +2021,7 @@ func newLegacyUsageLadder(wm thresholdWatermark) *legacyUsageLadder {
 
 // continues reports whether a bucket priced under rule continues a ladder.
 func (l *legacyUsageLadder) continues(rule domain.RatingRuleVersion, aggregation string) bool {
-	return l.on && !nonAdditive(aggregation) && rule.Mode != domain.PricingFlat
+	return l.on && !nonAdditive(aggregation) && rule.Mode != domain.PricingPerUnit
 }
 
 // price returns the amount for qty more units of the bucket under rule.
@@ -2096,7 +2096,7 @@ func (e *Engine) legacyCheckLadderSeeds(ctx context.Context, sub domain.Subscrip
 		if err != nil {
 			return fmt.Errorf("resolve pricing for meter %s rule %s: %w", meterID, id, err)
 		}
-		if rule.Mode == domain.PricingFlat {
+		if rule.Mode == domain.PricingPerUnit {
 			continue
 		}
 		seen[rule.ID]++

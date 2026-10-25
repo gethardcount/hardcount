@@ -72,7 +72,7 @@ func TestAnthropicStyle_PricesMatchThePricingPage(t *testing.T) {
 	var doc struct {
 		RatingRules []struct {
 			Key             string `yaml:"key"`
-			FlatAmountCents string `yaml:"flat_amount_cents"`
+			UnitAmountCents string `yaml:"unit_amount_cents"`
 		} `yaml:"rating_rules"`
 		PricingRules []struct {
 			RatingRule     string            `yaml:"rating_rule"`
@@ -84,7 +84,7 @@ func TestAnthropicStyle_PricesMatchThePricingPage(t *testing.T) {
 	}
 	rates := map[string]string{}
 	for _, r := range doc.RatingRules {
-		rates[r.Key] = r.FlatAmountCents
+		rates[r.Key] = r.UnitAmountCents
 	}
 
 	perMTokToCents := decimal.RequireFromString("0.0001")

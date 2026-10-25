@@ -112,7 +112,7 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 	r.auth = "Bearer " + createTestAPIKey(t, db, tenantID)
 
 	rule := r.must(http.MethodPost, "/v1/rating-rules", lagP0, map[string]any{
-		"rule_key": "calls", "name": "Calls", "mode": "flat", "currency": "USD", "flat_amount_cents": 1,
+		"rule_key": "calls", "name": "Calls", "mode": "per_unit", "currency": "USD", "unit_amount_cents": 1,
 	}, http.StatusCreated)
 	meter := r.must(http.MethodPost, "/v1/meters", lagP0, map[string]any{
 		"event_name": "calls", "name": "Calls", "unit": "calls", "aggregation": "sum", "rating_rule_version_id": rule["id"],

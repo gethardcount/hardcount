@@ -350,8 +350,8 @@ func TestCustomerUsageService_Get_SingleMeterFlat(t *testing.T) {
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_1": {
-				ID: "rrv_1", RuleKey: "tokens_flat", Mode: domain.PricingFlat,
-				Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+				ID: "rrv_1", RuleKey: "tokens_flat", Mode: domain.PricingPerUnit,
+				Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 			},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{},
@@ -467,8 +467,8 @@ func TestCustomerUsageService_Get_RuleRowShowsNominalUnitRate(t *testing.T) {
 		},
 		rules: map[string]domain.RatingRuleVersion{
 			"rrv_1": {
-				ID: "rrv_1", RuleKey: "tokens_out", Mode: domain.PricingFlat,
-				Currency: "USD", FlatAmountCents: decimal.RequireFromString("0.0015"),
+				ID: "rrv_1", RuleKey: "tokens_out", Mode: domain.PricingPerUnit,
+				Currency: "USD", UnitAmountCents: decimal.RequireFromString("0.0015"),
 			},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{},
@@ -529,8 +529,8 @@ func TestCustomerUsageService_Get_MultiCurrencyTotals(t *testing.T) {
 			"mtr_eur": {ID: "mtr_eur", EventName: "tokens_eur", Aggregation: "sum", RatingRuleVersionID: "rrv_eur"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
-			"rrv_usd": {ID: "rrv_usd", RuleKey: "u", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1)},
-			"rrv_eur": {ID: "rrv_eur", RuleKey: "e", Mode: domain.PricingFlat, Currency: "EUR", FlatAmountCents: decimal.NewFromInt(2)},
+			"rrv_usd": {ID: "rrv_usd", RuleKey: "u", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1)},
+			"rrv_eur": {ID: "rrv_eur", RuleKey: "e", Mode: domain.PricingPerUnit, Currency: "EUR", UnitAmountCents: decimal.NewFromInt(2)},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{},
 	}
@@ -618,8 +618,8 @@ func TestCustomerUsageService_Get_MultiDimRulesEchoDimensionMatch(t *testing.T) 
 			"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Aggregation: "sum"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
-			"rrv_in":  {ID: "rrv_in", RuleKey: "input", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(3)},
-			"rrv_out": {ID: "rrv_out", RuleKey: "output", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(5)},
+			"rrv_in":  {ID: "rrv_in", RuleKey: "input", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(3)},
+			"rrv_out": {ID: "rrv_out", RuleKey: "output", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5)},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{
 			"mtr_tokens": {
@@ -674,7 +674,7 @@ func TestCustomerUsageService_Get_FlatMeterOmitsDimensionMatch(t *testing.T) {
 		plans:  map[string]domain.Plan{"pln_1": {ID: "pln_1", Name: "Flat", Currency: "USD", MeterIDs: []string{"mtr_1"}}},
 		meters: map[string]domain.Meter{"mtr_1": {ID: "mtr_1", EventName: "k", Aggregation: "sum", RatingRuleVersionID: "rrv_1"}},
 		rules: map[string]domain.RatingRuleVersion{
-			"rrv_1": {ID: "rrv_1", RuleKey: "rk", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(7)},
+			"rrv_1": {ID: "rrv_1", RuleKey: "rk", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(7)},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{},
 	}
@@ -755,16 +755,16 @@ func TestCustomerUsageService_Get_HonorsOverridesAndPeriodPin(t *testing.T) {
 			// v1 in force at period open (list 1c); v2 published MID-period
 			// (5c) must NOT price this window (pin-at-period-open).
 			"rrv_1": {ID: "rrv_1", RuleKey: "tokens_flat", Version: 1, LifecycleState: domain.RatingRuleActive,
-				Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1),
+				Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
 				CreatedAt: apr1.Add(-24 * time.Hour)},
 			"rrv_2": {ID: "rrv_2", RuleKey: "tokens_flat", Version: 2, LifecycleState: domain.RatingRuleActive,
-				Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(5),
+				Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
 				CreatedAt: apr1.Add(10 * 24 * time.Hour)},
 		},
 		overrides: map[string]domain.CustomerPriceOverride{
 			// Negotiated 3c/token for cus_neg only.
 			"cus_neg:tokens_flat": {ID: "cpo_1", CustomerID: "cus_neg", RuleKey: "tokens_flat",
-				Mode: domain.PricingFlat, FlatAmountCents: decimal.NewFromInt(3), Active: true},
+				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(3), Active: true},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{},
 	}
@@ -822,8 +822,8 @@ func TestCustomerUsageService_Get_NetNegativeBucketCountsAsZero(t *testing.T) {
 			"mtr_seats": {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seats"},
 		},
 		rules: map[string]domain.RatingRuleVersion{
-			"rrv_calls": {ID: "rrv_calls", RuleKey: "calls_flat", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(1)},
-			"rrv_seats": {ID: "rrv_seats", RuleKey: "seats_flat", Mode: domain.PricingFlat, Currency: "USD", FlatAmountCents: decimal.NewFromInt(5)},
+			"rrv_calls": {ID: "rrv_calls", RuleKey: "calls_flat", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1)},
+			"rrv_seats": {ID: "rrv_seats", RuleKey: "seats_flat", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5)},
 		},
 		pricingMap: map[string][]domain.MeterPricingRule{},
 	}

@@ -38,7 +38,8 @@ INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id, mete
 // validates. The down puts each rule's mode back from its meter's
 // aggregation and the old names back, so a rollback and a second up work.
 // The down goes to the version before, not one step, so a later migration
-// does not take this one's place.
+// does not take this one's place. The test stops before 00210, which
+// refuses a database that holds rating rules (TestPriceShapes_*).
 //
 // Mutation: an up that keeps aggregation_mode, or a down that does not
 // restore the rule modes, turns this red.
@@ -52,7 +53,7 @@ func TestMeterOneAggregation_UpAndDown(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, priceShapesVersion)); err != nil {
 		t.Fatalf("up: %v", err)
 	}
 	for _, c := range []struct{ table, column string }{
@@ -87,7 +88,7 @@ func TestMeterOneAggregation_UpAndDown(t *testing.T) {
 		t.Errorf("a second meter named calls: err %v, want the renamed unique constraint to refuse it", err)
 	}
 
-	if _, err := down(ctx, dsn, migrationFiles(), meterOneAggregationVersion-1); err != nil {
+	if _, err := down(ctx, dsn, filesBefore(t, priceShapesVersion), meterOneAggregationVersion-1); err != nil {
 		t.Fatalf("down to %d: %v", meterOneAggregationVersion-1, err)
 	}
 	for _, c := range []struct{ table, column string }{
@@ -107,7 +108,7 @@ func TestMeterOneAggregation_UpAndDown(t *testing.T) {
 		t.Errorf("after the down, constraints = %q", got)
 	}
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	if err := up(ctx, dsn, filesBefore(t, priceShapesVersion)); err != nil {
 		t.Fatalf("up again: %v", err)
 	}
 	if columnExists(t, db, "meter_pricing_rules", "aggregation_mode") || !columnExists(t, db, "meters", "event_name") {

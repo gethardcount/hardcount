@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -12,15 +13,22 @@ import (
 
 type PricingMode string
 
+// The price shapes (ADR-130 §3). per_unit bills quantity × unit_amount_cents;
+// graduated bills each tier's part of the quantity at the tier's rate;
+// package bills ceil(quantity / package_size) × package_amount_cents, so a
+// part package bills as a whole one.
 const (
-	PricingFlat      PricingMode = "flat"
+	PricingPerUnit   PricingMode = "per_unit"
 	PricingGraduated PricingMode = "graduated"
 	PricingPackage   PricingMode = "package"
 )
 
 type RatingTier struct {
-	// UpTo is a tier boundary in whole meter units (never fractional).
-	UpTo int64 `json:"up_to"`
+	// UpTo is the tier's upper bound in whole meter units: the tier prices
+	// the quantity above the previous tier's bound up to this one. Nil is
+	// the open last tier (`"up_to": null`), which prices everything above
+	// the previous bound. Only the last tier is open, and it must be.
+	UpTo *int64 `json:"up_to"`
 	// UnitAmountCents is the per-unit price in cents, carried as a decimal
 	// (RateLimits: at most 12 places on write) so sub-cent unit prices (e.g. $3.00 per
 	// 1,000,000 tokens = 0.0003 cents/token) bill linearly and exactly. This
@@ -31,7 +39,7 @@ type RatingTier struct {
 }
 
 // RatingTiers is a rule's graduated tiers. It marshals as [] when there are
-// none: a flat or package rule, whose stored tiers read back as nil, sent
+// none: a per_unit or package rule, whose stored tiers read back as nil, sent
 // null, and strict clients type the field as an array.
 type RatingTiers []RatingTier
 
@@ -59,17 +67,16 @@ type RatingRuleVersion struct {
 	LifecycleState RatingRuleLifecycle `json:"lifecycle_state,omitempty"`
 	Mode           PricingMode         `json:"mode"`
 	Currency       string              `json:"currency"`
-	// FlatAmountCents and OverageUnitAmountCents are PER-UNIT rates (multiplied
-	// by a decimal quantity), so they carry decimals (RateLimits on write) for
-	// sub-cent linear pricing (Stripe unit_amount_decimal model). PackageSize
-	// and PackageAmountCents stay whole int64 — a package is a fixed fee for a
-	// whole block, not a per-unit rate.
-	FlatAmountCents        decimal.Decimal `json:"flat_amount_cents"`
-	GraduatedTiers         RatingTiers     `json:"graduated_tiers"`
-	PackageSize            int64           `json:"package_size"`
-	PackageAmountCents     int64           `json:"package_amount_cents"`
-	OverageUnitAmountCents decimal.Decimal `json:"overage_unit_amount_cents"`
-	CreatedAt              time.Time       `json:"created_at"`
+	// UnitAmountCents (per_unit) and PackageAmountCents (package) are in the
+	// currency's minor unit and carry decimals (RateLimits on write), so a
+	// sub-cent price bills exactly: $0.002 per 1,000 tokens is a package of
+	// 1000 at "0.2" (Stripe's unit_amount_decimal model). PackageSize is a
+	// whole number of meter units.
+	UnitAmountCents    decimal.Decimal `json:"unit_amount_cents"`
+	Tiers              RatingTiers     `json:"tiers"`
+	PackageSize        int64           `json:"package_size"`
+	PackageAmountCents decimal.Decimal `json:"package_amount_cents"`
+	CreatedAt          time.Time       `json:"created_at"`
 }
 
 type Meter struct {
@@ -260,16 +267,16 @@ var ErrAmountOverflow = errors.New("amount overflow: exceeds int64 range")
 var maxInt64Decimal = decimal.NewFromInt(math.MaxInt64)
 
 // NominalUnitAmountDecimal is the configured per-unit rate to DISPLAY for a
-// rule, in DECIMAL CENTS: the flat rate for flat rules, nil for graduated /
+// rule, in DECIMAL CENTS: the unit rate for per_unit rules, nil for graduated /
 // package rules (which have no single unit rate — callers fall back to the
 // effective amount÷quantity). This is the SINGLE source the invoice line stamp
 // (billing.nominalRate) and the usage / cost-dashboard rule rows both use, so
 // every surface renders the same unit price (ADR-054).
 func NominalUnitAmountDecimal(rule RatingRuleVersion) *decimal.Decimal {
-	if rule.Mode != PricingFlat {
+	if rule.Mode != PricingPerUnit {
 		return nil
 	}
-	r := rule.FlatAmountCents
+	r := rule.UnitAmountCents
 	return &r
 }
 
@@ -278,7 +285,8 @@ func NominalUnitAmountDecimal(rule RatingRuleVersion) *decimal.Decimal {
 // fractional usage primitives (GPU-hours, cached-token ratios) round-trip
 // without precision loss. Tier boundaries (`up_to`, `package_size`) stay
 // integer because pricing config is authored that way; the math walks tiers
-// in decimal space and converts to int64 cents only at the final round.
+// in decimal space and converts to int64 cents only at the final round, so
+// a line is rounded once.
 //
 // Rounding: half-to-even (banker's rounding) at the cent boundary. This is
 // the same convention used elsewhere in the engine (money.RoundHalfToEven)
@@ -289,85 +297,146 @@ func ComputeAmountCents(rule RatingRuleVersion, quantity decimal.Decimal) (int64
 	}
 
 	switch rule.Mode {
-	case PricingFlat:
-		if rule.FlatAmountCents.IsNegative() {
+	case PricingPerUnit:
+		if rule.UnitAmountCents.IsNegative() {
 			return 0, ErrInvalidPricingConfig
 		}
 		if quantity.IsZero() {
 			return 0, nil
 		}
-		total := quantity.Mul(rule.FlatAmountCents)
+		total := quantity.Mul(rule.UnitAmountCents)
 		return decimalToCents(total)
 
 	case PricingGraduated:
-		if len(rule.GraduatedTiers) == 0 {
+		if err := CheckTiers(rule.Tiers); err != nil {
 			return 0, ErrInvalidPricingConfig
-		}
-		// A catch-all tier (UpTo==0) consumes all remaining quantity and ends
-		// rating, so it must be LAST and unique. A catch-all followed by more
-		// tiers (incl. a second catch-all) makes those tiers dead config and
-		// would silently price overflow quantity at the wrong rate — reject it.
-		for i, t := range rule.GraduatedTiers {
-			if t.UpTo == 0 && i != len(rule.GraduatedTiers)-1 {
-				return 0, ErrInvalidPricingConfig
-			}
 		}
 		remaining := quantity
 		lastUpper := int64(0)
 		amount := decimal.Zero
-		for i, tier := range rule.GraduatedTiers {
-			if tier.UnitAmountCents.IsNegative() || tier.UpTo < 0 {
+		for _, tier := range rule.Tiers {
+			if tier.UnitAmountCents.IsNegative() {
 				return 0, ErrInvalidPricingConfig
 			}
 			if remaining.IsZero() {
 				break
 			}
-			if tier.UpTo == 0 {
-				amount = amount.Add(remaining.Mul(tier.UnitAmountCents))
-				remaining = decimal.Zero
-				break
-			}
-			if tier.UpTo < lastUpper {
-				return 0, ErrInvalidPricingConfig
-			}
-			tierCapacity := tier.UpTo - lastUpper
-			if i == 0 {
-				tierCapacity = tier.UpTo
-			}
-			if tierCapacity < 0 {
-				return 0, ErrInvalidPricingConfig
-			}
-			capDec := decimal.NewFromInt(tierCapacity)
 			consumed := remaining
-			if consumed.GreaterThan(capDec) {
-				consumed = capDec
+			if tier.UpTo != nil {
+				if capDec := decimal.NewFromInt(*tier.UpTo - lastUpper); consumed.GreaterThan(capDec) {
+					consumed = capDec
+				}
+				lastUpper = *tier.UpTo
 			}
 			amount = amount.Add(consumed.Mul(tier.UnitAmountCents))
 			remaining = remaining.Sub(consumed)
-			lastUpper = tier.UpTo
-		}
-		if remaining.IsPositive() {
-			return 0, ErrInvalidPricingConfig
 		}
 		return decimalToCents(amount)
 
 	case PricingPackage:
-		if rule.PackageSize <= 0 || rule.PackageAmountCents < 0 || rule.OverageUnitAmountCents.IsNegative() {
+		if rule.PackageSize <= 0 || rule.PackageAmountCents.IsNegative() {
 			return 0, ErrInvalidPricingConfig
 		}
-		if quantity.IsZero() {
-			return 0, nil
+		// A part package bills as a whole one: ceil(quantity / size).
+		// QuoRem counts the whole packages exactly; Div would round the
+		// quotient to 16 places first and could drop a small part.
+		packages, part := quantity.QuoRem(decimal.NewFromInt(rule.PackageSize), 0)
+		if part.IsPositive() {
+			packages = packages.Add(decimal.NewFromInt(1))
 		}
-		pkgSize := decimal.NewFromInt(rule.PackageSize)
-		fullPackages := quantity.Div(pkgSize).Floor()
-		remainder := quantity.Sub(fullPackages.Mul(pkgSize))
-		total := fullPackages.Mul(decimal.NewFromInt(rule.PackageAmountCents)).
-			Add(remainder.Mul(rule.OverageUnitAmountCents))
-		return decimalToCents(total)
+		return decimalToCents(packages.Mul(rule.PackageAmountCents))
 
 	default:
 		return 0, ErrInvalidPricingConfig
 	}
+}
+
+// PriceFieldError names the price field CheckPriceShape refused and why.
+type PriceFieldError struct {
+	Field  string
+	Reason string
+}
+
+func (e *PriceFieldError) Error() string { return e.Field + ": " + e.Reason }
+
+// CheckPriceShape checks that a price has its mode's fields and only those.
+// per_unit uses unit_amount_cents. graduated uses tiers, which must pass
+// CheckTiers. package uses package_size, above 0, and package_amount_cents.
+// A field the mode does not use must be zero, and tiers empty, so a stored
+// price holds only what bills it. Every authoring path runs this one check:
+// both API routes, the recipe parser and the recipe save path. The amounts'
+// limits are CheckRate's.
+func CheckPriceShape(mode PricingMode, unit decimal.Decimal, tiers []RatingTier, pkgSize int64, pkgAmount decimal.Decimal) error {
+	switch mode {
+	case PricingPerUnit, PricingGraduated, PricingPackage:
+	default:
+		return &PriceFieldError{Field: "mode", Reason: "must be one of: per_unit, graduated, package"}
+	}
+	if mode != PricingPerUnit && !unit.IsZero() {
+		return &PriceFieldError{Field: "unit_amount_cents", Reason: "used only when mode is per_unit; send 0 or leave it out"}
+	}
+	if mode != PricingGraduated && len(tiers) != 0 {
+		return &PriceFieldError{Field: "tiers", Reason: "used only when mode is graduated; send [] or leave it out"}
+	}
+	if mode != PricingPackage {
+		if pkgSize != 0 {
+			return &PriceFieldError{Field: "package_size", Reason: "used only when mode is package; send 0 or leave it out"}
+		}
+		if !pkgAmount.IsZero() {
+			return &PriceFieldError{Field: "package_amount_cents", Reason: "used only when mode is package; send 0 or leave it out"}
+		}
+	}
+	switch mode {
+	case PricingGraduated:
+		if err := CheckTiers(tiers); err != nil {
+			return &PriceFieldError{Field: "tiers", Reason: err.Error()}
+		}
+	case PricingPackage:
+		if pkgSize <= 0 {
+			return &PriceFieldError{Field: "package_size", Reason: "package size must be greater than 0"}
+		}
+	}
+	return nil
+}
+
+// TierShapeError says what is wrong with a tier table. Index is the tier's
+// position, from 0.
+type TierShapeError struct {
+	Index  int
+	Reason string
+}
+
+func (e *TierShapeError) Error() string { return e.Reason }
+
+// CheckTiers checks a graduated tier table's shape: at least one tier, each
+// bound a whole number above the one before it (the first above 0), and
+// only the last tier open (`up_to: null`), which it must be. An open last
+// tier is what makes every quantity priceable; a bounded one would leave
+// the usage past it with no price and stop the invoice. The rates are
+// CheckRate's. Authoring and rating run this one check, so a table the API
+// accepts always rates.
+func CheckTiers(tiers []RatingTier) error {
+	if len(tiers) == 0 {
+		return &TierShapeError{Index: -1, Reason: "at least one pricing tier is required"}
+	}
+	last := len(tiers) - 1
+	lastUpper := int64(0)
+	for i, t := range tiers {
+		if t.UpTo == nil {
+			if i != last {
+				return &TierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: only the last tier is open (up_to: null); give it an up_to above %d", i+1, lastUpper)}
+			}
+			continue
+		}
+		if i == last {
+			return &TierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: the last tier must be open (up_to: null), so usage above %d still has a price; to invoice early when usage runs high, set a spend threshold on the subscription", i+1, *t.UpTo)}
+		}
+		if *t.UpTo <= lastUpper {
+			return &TierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: up_to (%d) must be greater than %d", i+1, *t.UpTo, lastUpper)}
+		}
+		lastUpper = *t.UpTo
+	}
+	return nil
 }
 
 // decimalToCents rounds a decimal cents value (potentially fractional after

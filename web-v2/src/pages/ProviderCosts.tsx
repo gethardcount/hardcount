@@ -20,11 +20,18 @@ import {
   usePutV1ProviderCosts,
 } from '@/lib/gen/queries.gen'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { money, shiftDecimal } from '@/lib/priceDisplay'
+import { dollarsToRateCents } from '@/lib/priceInput'
 
 // Provider costs (ADR-079): the operator's COGS table — what THEY pay LLM
 // providers per token. Feeds the per-event cost stamp at ingest and the
 // customer margin card. Current-rate semantics: editing a rate only affects
 // NEW events; history keeps its stamp.
+//
+// The API takes unit_cost_cents, US cents per token. Providers publish token
+// prices per 1M tokens, so the page takes and shows dollars per 1M tokens and
+// converts by moving the decimal point (no float math): $3.00 per 1M tokens
+// is 300 cents per 1M, 0.0003 cents per token.
 export default function ProviderCostsPage() {
   usePageTitle('Provider costs')
   const queryClient = useQueryClient()
@@ -35,7 +42,7 @@ export default function ProviderCostsPage() {
   const [provider, setProvider] = useState('')
   const [model, setModel] = useState('')
   const [tokenType, setTokenType] = useState('input')
-  const [costPerToken, setCostPerToken] = useState('')
+  const [costPerMillion, setCostPerMillion] = useState('')
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: getGetV1ProviderCostsQueryKey() })
@@ -44,7 +51,7 @@ export default function ProviderCostsPage() {
     mutation: {
       onSuccess: () => {
         invalidate()
-        setCostPerToken('')
+        setCostPerMillion('')
         toast.success('Rate saved — new usage events pick it up automatically')
       },
       onError: (err) => showApiError(err, 'Failed to save rate'),
@@ -60,18 +67,20 @@ export default function ProviderCostsPage() {
     },
   })
 
+  // Cents per 1M tokens, or null when the box does not hold a plain number.
+  const centsPerMillion = dollarsToRateCents(costPerMillion)
   const canSave =
     provider.trim() !== '' && model.trim() !== '' && tokenType.trim() !== '' &&
-    costPerToken !== '' && Number(costPerToken) >= 0 && Number.isFinite(Number(costPerToken))
+    centsPerMillion !== null && !centsPerMillion.startsWith('-')
 
   const save = () => {
-    if (!canSave) return
+    if (!canSave || centsPerMillion === null) return
     upsert.mutate({
       data: {
         provider: provider.trim().toLowerCase(),
         model: model.trim(),
         token_type: tokenType.trim().toLowerCase(),
-        cost_per_token: costPerToken,
+        unit_cost_cents: shiftDecimal(centsPerMillion, -6),
       },
     })
   }
@@ -82,7 +91,7 @@ export default function ProviderCostsPage() {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Provider costs</h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Enter what each AI provider charges you per token, and Velox shows your
+            Enter what each AI provider charges you per 1M tokens, and Velox shows your
             margin on each customer. Add rates before you send usage: Velox works
             out each event's cost when it arrives and never goes back to older events.
           </p>
@@ -117,9 +126,9 @@ export default function ProviderCostsPage() {
                 value={tokenType} onChange={e => setTokenType(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="pc-cost">$ per token</Label>
-              <Input id="pc-cost" placeholder="0.000003" inputMode="decimal" className="w-[150px]"
-                value={costPerToken} onChange={e => setCostPerToken(e.target.value)} />
+              <Label htmlFor="pc-cost">$ per 1M tokens</Label>
+              <Input id="pc-cost" placeholder="3.00" inputMode="decimal" className="w-[150px]"
+                value={costPerMillion} onChange={e => setCostPerMillion(e.target.value)} />
             </div>
             <Button onClick={save} disabled={!canSave || upsert.isPending}>
               {upsert.isPending
@@ -150,7 +159,7 @@ export default function ProviderCostsPage() {
             <div className="text-center py-10">
               <p className="text-sm font-medium text-foreground">No rates yet</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Add what you pay per token above — margin reporting starts with the
+                Add what you pay per 1M tokens above — margin reporting starts with the
                 first rate.
               </p>
             </div>
@@ -161,7 +170,7 @@ export default function ProviderCostsPage() {
                   <TableHead>Provider</TableHead>
                   <TableHead>Model</TableHead>
                   <TableHead>Token type</TableHead>
-                  <TableHead className="text-right">$ / token</TableHead>
+                  <TableHead className="text-right">$ / 1M tokens</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -171,7 +180,7 @@ export default function ProviderCostsPage() {
                     <TableCell className="text-sm">{r.provider}</TableCell>
                     <TableCell className="text-sm font-mono">{r.model}</TableCell>
                     <TableCell className="text-sm">{r.token_type}</TableCell>
-                    <TableCell className="text-sm font-mono text-right">{r.cost_per_token}</TableCell>
+                    <TableCell className="text-sm font-mono text-right">{money(r.unit_cost_cents, 6, r.currency)}</TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" aria-label={`Delete ${r.model} ${r.token_type} rate`}
                         onClick={() => remove.mutate({ id: r.id })} disabled={remove.isPending}>

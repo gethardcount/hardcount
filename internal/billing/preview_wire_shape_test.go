@@ -52,7 +52,7 @@ func TestWireShape_SnakeCase(t *testing.T) {
 					Quantity:            decimal.RequireFromString("1234567.891234"),
 					UnitAmountCents:     0,
 					AmountCents:         3000,
-					PricingMode:         "flat",
+					PricingMode:         "per_unit",
 				},
 			},
 			Totals: []PreviewTotal{

@@ -1,6 +1,6 @@
 # ADR-079: Provider cost tables + per-customer margin (COGS)
 
-**Status:** Accepted (2026-07-05; amended 2026-10-14, 2026-10-22)
+**Status:** Accepted (2026-07-05; amended 2026-10-14, 2026-10-22; units amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) §3, #1381: a rate is `unit_cost_cents`, US cents per token, and the API sends costs as `provider_cost_cents` and `cost_cents`, decimal strings of cents. The stored stamp `provider_cost_micros` is unchanged.)
 **Context:** `docs/dev/design/cost-tables.md` (locked design — 4-platform
 quote-verified sweep + 5-lens adversarial panel; this ADR records the
 decisions, the design doc holds the evidence).
