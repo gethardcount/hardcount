@@ -195,6 +195,38 @@ func TestProperty_Pricing_PackageChargesWholePackages(t *testing.T) {
 	}
 }
 
+// TestProperty_Pricing_PackageCountsAnyPart: a quantity of k whole packages
+// plus any part, down to 10^-12 of a unit (the finest a quantity holds),
+// bills k+1 packages, at any package size. The count is exact: it does not
+// depend on how finely a quotient is rounded.
+func TestProperty_Pricing_PackageCountsAnyPart(t *testing.T) {
+	r := pricingRand()
+	tiny := decimal.New(1, -12)
+	for i := 0; i < pricingIters; i++ {
+		size := r.Int64N(1_000_000_000_000) + 1
+		pkgCents := int64(r.IntN(10000))
+		rule := RatingRuleVersion{
+			Mode: PricingPackage, PackageSize: size,
+			PackageAmountCents: decimal.NewFromInt(pkgCents),
+		}
+		k := int64(r.IntN(1000))
+		// A part from 10^-12 up to just under one package.
+		part := tiny.Mul(decimal.NewFromInt(r.Int64N(1_000_000) + 1))
+		if lim := decimal.NewFromInt(size); part.GreaterThanOrEqual(lim) {
+			part = lim.Sub(tiny)
+		}
+		q := decimal.NewFromInt(k * size).Add(part)
+		got, err := ComputeAmountCents(rule, q)
+		if err != nil {
+			t.Fatalf("q=%s size=%d: %v", q, size, err)
+		}
+		if want := (k + 1) * pkgCents; got != want {
+			t.Fatalf("a part package was not billed: q=%s size=%d pkg=%dc got=%dc want=%dc",
+				q, size, pkgCents, got, want)
+		}
+	}
+}
+
 // TestProperty_Pricing_RejectsNegativeQuantity: metered usage cannot be
 // negative, and a silently-accepted negative quantity would emit a credit line.
 func TestProperty_Pricing_RejectsNegativeQuantity(t *testing.T) {

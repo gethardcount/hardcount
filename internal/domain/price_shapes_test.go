@@ -110,6 +110,28 @@ func TestPriceShapes_EachShapeBillsItsGolden(t *testing.T) {
 				{"1000001", 200}, // 1,001 packages: 200.2
 			},
 		},
+		{
+			// The smallest part a quantity can hold (12 decimal places)
+			// still starts a package, however large the package.
+			name:  "package, a part package of 10^-12 at a large size",
+			price: `{"mode":"package","package_size":100000,"package_amount_cents":"100"}`,
+			bills: []bill{
+				{"99999.999999999999", 100},  // one package
+				{"100000", 100},              // one package
+				{"100000.000000000001", 200}, // two packages
+				{"200000.000000000002", 300}, // three packages
+				{"30000000.000000000001", 30100},
+			},
+		},
+		{
+			name:  "package of 10^18 units",
+			price: `{"mode":"package","package_size":1000000000000000000,"package_amount_cents":"1"}`,
+			bills: []bill{
+				{"1000000000000000000", 1}, // one package
+				{"1000000000000000049", 2}, // two packages
+				{"1000000000000000000.000000000001", 2},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

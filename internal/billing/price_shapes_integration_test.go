@@ -365,6 +365,36 @@ invoice subscription_cycle: subtotal=121 tax=0 total=121
 `,
 		},
 		{
+			// Packages of 100,000 at 100 cents, and a part package of
+			// 10^-12 units (the finest a quantity holds). 100000.000000000001
+			// units: 2 packages = 200. 200000.000000000002 units: 3
+			// packages = 300; the close bills 300 − 200 = 100.
+			name:   "package, a part package of 10^-12 at a large size",
+			rule:   `{"rule_key":"calls_flat","name":"calls_flat","mode":"package","currency":"USD","package_size":100000,"package_amount_cents":"100"}`,
+			events: []shapeEvent{{"100000.000000000001", ""}},
+			want: `open preview:
+  line usage "Calls (calls)" qty=100000.000000000001 unit=0 amount=200 mode=package rule=calls_flat match=
+  total {Currency:USD AmountCents:200}
+open window preview:
+  line usage "Calls (calls)" qty=100000.000000000001 unit=0 amount=200 mode=package rule=calls_flat match=
+  total {Currency:USD AmountCents:200}
+open live: unbilled=200
+threshold invoices: 1
+after fire preview:
+  line usage "Calls (calls)" qty=100000.000000000001 unit=0 amount=100 mode=package rule=calls_flat match=
+  total {Currency:USD AmountCents:100}
+  warning A spend-threshold invoice already billed this period through <the threshold invoice's end>; this estimate shows only what is left. Tiered prices and max or last-value meters may differ on the actual invoice.
+after fire window preview:
+  line usage "Calls (calls)" qty=200000.000000000002 unit=0 amount=300 mode=package rule=calls_flat match=
+  total {Currency:USD AmountCents:300}
+after fire live: unbilled=100
+invoice threshold: subtotal=200 tax=0 total=200
+  line usage "Calls (calls)" qty=100000.000000000001 unit=0 amount=200 mode=package rule=calls_flat
+invoice subscription_cycle: subtotal=100 tax=0 total=100
+  line usage "Calls (calls)" qty=100000.000000000001 unit=0 amount=100 mode=package rule=calls_flat
+`,
+		},
+		{
 			// The list price is 1 cent a unit; the customer's override is
 			// packages of 50 at 33.3 cents. 60 units: 2 packages = 66.6 →
 			// 67. 120 units: 3 packages = 99.9 → 100; the cancel bills

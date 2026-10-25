@@ -43,10 +43,16 @@ func TestProviderCost_InCents(t *testing.T) {
 		t.Errorf("the rate still carries cost_per_token: %s", rec.Body.String())
 	}
 
-	// The old word is refused by name, and nothing is written.
-	rec, _ = f.serve(t, nil, http.MethodPut, "/", `{"provider":"anthropic","model":"claude-sonnet-4.5","token_type":"output","cost_per_token":"0.000015"}`)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"param":"unit_cost_cents"`) {
-		t.Errorf("cost_per_token: status %d body %s, want 422 naming unit_cost_cents", rec.Code, rec.Body.String())
+	// The old word is refused by name, alone or beside the new one, and
+	// nothing is written.
+	for _, body := range []string{
+		`{"provider":"anthropic","model":"claude-sonnet-4.5","token_type":"output","cost_per_token":"0.000015"}`,
+		`{"provider":"anthropic","model":"claude-sonnet-4.5","token_type":"output","cost_per_token":"0.000015","unit_cost_cents":"0.000015"}`,
+	} {
+		rec, _ = f.serve(t, nil, http.MethodPut, "/", body)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"param":"cost_per_token"`) {
+			t.Errorf("%s: status %d body %s, want 422 naming cost_per_token", body, rec.Code, rec.Body.String())
+		}
 	}
 	if n := f.rateCount(t); n != 1 {
 		t.Errorf("%d rates stored, want 1", n)
