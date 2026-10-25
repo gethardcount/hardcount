@@ -641,8 +641,8 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// Seed tenantID on ctx so the per-tenant Stripe client resolver
 	// (payment.StripeClients) can look it up. Scheduler / billing-engine
 	// driven charges arrive on background ctx without tenant stamped.
-	// Livemode is already carried on ctx by authenticated callers; for
-	// background workers it defaults to live (postgres.Livemode default).
+	// Livemode is already carried on ctx: authenticated callers set it from
+	// the key, and background workers per row or per mode.
 	ctx = veloxauth.WithTenantID(ctx, tenantID)
 
 	// Stable business metadata only — nothing per-HTTP-request. The

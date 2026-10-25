@@ -330,6 +330,9 @@ func createTestAPIKey(t *testing.T, db *postgres.DB, tenantID string) string {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
+	if _, err := tx.ExecContext(context.Background(), `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		t.Fatalf("set livemode: %v", err)
+	}
 	_, err = tx.ExecContext(context.Background(),
 		`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
 		VALUES ($1, $2, $3, 'secret', 'E2E Test Key', $4)`,

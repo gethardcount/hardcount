@@ -42,6 +42,9 @@ func TestCustomersEmail_NotNull(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		t.Fatalf("set livemode: %v", err)
+	}
 	defer postgres.Rollback(tx)
 
 	_, err = tx.ExecContext(ctx,

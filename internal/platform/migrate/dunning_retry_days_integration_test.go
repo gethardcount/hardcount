@@ -23,7 +23,7 @@ func retryDaysExec(ctx context.Context, db *sql.DB, q string) error {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.Exec(`SELECT set_config('app.bypass_rls', 'on', true)`); err != nil {
+	if _, err := tx.Exec(`SELECT set_config('app.bypass_rls', 'on', true), set_config('app.livemode', 'on', true)`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(q); err != nil {

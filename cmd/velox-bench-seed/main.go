@@ -141,19 +141,17 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 	// app.livemode MUST be set on this transaction explicitly.
 	//
 	// `customers` and `meters` carry the same BEFORE INSERT set_livemode
-	// trigger as usage_events: it overwrites whatever the INSERT supplied,
-	// reading the app.livemode GUC, which defaults to LIVE when unset. And
-	// BeginTx sets that GUC only for TxTenant — the TxBypass branch sets
-	// app.bypass_rls and nothing else. So postgres.WithLivemode on the context
-	// is silently INERT here, and the fixtures land live-mode next to a
-	// test-mode key, after which every ingest answers 422
-	// `customer "bench-customer" not found`.
+	// trigger as usage_events: it overwrites whatever the INSERT supplied
+	// with the app.livemode GUC, and refuses the insert when the GUC is unset
+	// (migration 00212). BeginTx sets that GUC only for TxTenant — the
+	// TxBypass branch sets app.bypass_rls and nothing else. So
+	// postgres.WithLivemode on the context is INERT here.
 	//
-	// Two things conspire to hide it. The trigger is INSERT-only, so the
-	// ON CONFLICT DO UPDATE path below writes livemode=false correctly — which
-	// means a SECOND run against the same database repairs it and looks fine.
-	// A fresh database is the only one that shows the bug, and a fresh database
-	// is exactly what a benchmark rig provisions.
+	// Before 00212 an unset GUC meant LIVE, and this seeder once wrote its
+	// fixtures live next to a test-mode key; every ingest then answered 422
+	// `customer "bench-customer" not found`. The ON CONFLICT DO UPDATE path
+	// below hid it on a reused database: the trigger is INSERT-only, so a
+	// second run wrote livemode=false and looked fine.
 	mode := "off"
 	if live {
 		mode = "on"

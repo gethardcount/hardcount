@@ -236,6 +236,10 @@ while Velox keeps serving: installs upgrade with their data in place.
   CHECK constraint in the same PR. A value the CHECK does not list fails
   every insert that uses it. Drop the old constraint and add the new one
   `NOT VALID`, then `VALIDATE` it in the next file.
+- **Insert rows into a table with a `livemode` column.** Run
+  `SET LOCAL app.livemode = 'on'` (live rows) or `'off'` (test rows) first.
+  The table's `set_livemode` trigger stamps each new row's mode from that
+  setting, and refuses the insert when it is unset.
 
 **Never edit a file once it is merged.** A database that already ran it
 has recorded its number and never runs it again, so an edit reaches only
