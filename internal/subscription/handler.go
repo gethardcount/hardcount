@@ -709,7 +709,11 @@ func (h *Handler) pauseCollection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The subscription's pause_collection holds behavior and resumes_at.
-	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionPaused, sub, nil)
+	// Dunning's pause sends the same event from its own transaction
+	// (PostgresStore.SetDunningPause), with triggered_by dunning.
+	h.fireEvent(r.Context(), tenantID, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
+		"triggered_by": "operator",
+	})
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -818,8 +822,9 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 
 // resumeCollection clears the collection-pause state. Idempotent —
 // clearing a row that has no active pause returns 200 with the unchanged
-// subscription. Returns 404 only when the subscription itself doesn't
-// exist.
+// subscription. A pause that had already lifted is resumed by the store
+// with its own trigger, and this handler sends nothing. Returns 404 only
+// when the subscription itself doesn't exist.
 func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")

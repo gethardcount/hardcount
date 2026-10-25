@@ -43,8 +43,6 @@ func TestProcessExpiredTrials_RoutesDueCancel(t *testing.T) {
 	svc := NewService(mem, clock.NewFake(time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)))
 	fb := &fakeBiller{}
 	svc.SetBiller(fb)
-	fd := &fakeDispatcher{}
-	svc.SetEventDispatcher(fd)
 	_, trialEnd := seedExpiredTrialMem(mem, true, nil)
 
 	processed, errsOut := svc.ProcessExpiredTrials(context.Background(), 50)
@@ -64,16 +62,6 @@ func TestProcessExpiredTrials_RoutesDueCancel(t *testing.T) {
 	if fb.createTxCalls != 0 || fb.calls != 0 {
 		t.Fatalf("bill calls = %d/%d, want 0/0 (trials are FREE)", fb.createTxCalls, fb.calls)
 	}
-	// Both lifecycle events moved IN-TX to the store writers (DispatchTx
-	// subscription subset, 2026-07-05): subscription.canceled rides the
-	// CancelAtTrialEnd tx (its CAS is what makes the winner fire exactly
-	// once), and trial_ended must not fire at all on the cancel route.
-	// Post-commit dispatch of either here would double-emit — assert none.
-	for _, e := range fd.events {
-		if e.eventType == domain.EventSubscriptionCanceled || e.eventType == domain.EventSubscriptionTrialEnded {
-			t.Fatalf("%s must not be dispatched post-commit — lifecycle events are enqueued in the transition tx", e.eventType)
-		}
-	}
 }
 
 // TestProcessExpiredTrials_NoSchedule_ActivatesAsBefore is the control: the
@@ -83,8 +71,6 @@ func TestProcessExpiredTrials_NoSchedule_ActivatesAsBefore(t *testing.T) {
 	svc := NewService(mem, clock.NewFake(time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)))
 	fb := &fakeBiller{}
 	svc.SetBiller(fb)
-	fd := &fakeDispatcher{}
-	svc.SetEventDispatcher(fd)
 	seedExpiredTrialMem(mem, false, nil)
 
 	processed, errsOut := svc.ProcessExpiredTrials(context.Background(), 50)

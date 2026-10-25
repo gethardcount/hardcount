@@ -6210,7 +6210,10 @@ export const getPauseSubscriptionCollectionUrl = (id: string,) => {
  * replaces the current pause, including one dunning set; the pause is
  * then yours (`set_by: operator`), and a payment no longer lifts it.
  *
- * Sends the `subscription.collection_paused` webhook event.
+ * Sends the `subscription.collection_paused` webhook event, with
+ * `triggered_by: operator`. If the current pause had already ended
+ * (its `resumes_at` has passed), its `subscription.collection_resumed`
+ * is sent first.
  * @summary Pause collection
  */
 export const pauseSubscriptionCollection = async (id: string,
@@ -6286,8 +6289,10 @@ export const getResumeSubscriptionCollectionUrl = (id: string,) => {
  * Ends a collection pause. The period that is running bills
  * normally; a period that ended during the pause keeps its draft
  * invoice. Sends the `subscription.collection_resumed` webhook
- * event. Calling it on a subscription that is not paused returns the
- * subscription unchanged and sends no event.
+ * event. If the pause had already ended (its `resumes_at` has
+ * passed), the event says what ended it: `triggered_by` is `payment`
+ * or `schedule`, not `operator`. Calling it on a subscription that is
+ * not paused returns the subscription unchanged and sends no event.
  * @summary Resume collection
  */
 export const resumeSubscriptionCollection = async (id: string, options?: RequestInit): Promise<Subscription> => {

@@ -48,7 +48,7 @@ func TestList_CollectionPausedFilter(t *testing.T) {
 		t.Helper()
 		if _, err := s.store.SetPauseCollection(s.ctx, s.tenantID, id, domain.PauseCollection{
 			Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: resumesAt,
-		}); err != nil {
+		}, nil); err != nil {
 			t.Fatalf("pause %s: %v", id, err)
 		}
 	}

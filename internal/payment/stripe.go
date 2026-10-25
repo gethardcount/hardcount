@@ -1957,9 +1957,13 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 	// than the invoice now claims — report-only tripwire via the standard
 	// anomaly channel; the settle itself proceeds (the money already moved,
 	// absorbing silently is the one wrong option).
+	// The event names the charge's currency in upper case, as Velox writes
+	// every currency; the invoice beside it carries its own.
 	if event.Currency != "" && !strings.EqualFold(event.Currency, inv.Currency) {
+		chargeCurrency := strings.ToUpper(event.Currency)
 		s.escalatePaymentAnomaly(ctx, tenantID, inv, domain.EventPaymentCurrencyMismatch, event.PaymentIntentID, captured,
-			fmt.Sprintf("charge settled in %s but the invoice is labeled %s", strings.ToUpper(event.Currency), strings.ToUpper(inv.Currency)))
+			map[string]any{"charge_currency": chargeCurrency},
+			fmt.Sprintf("charge settled in %s but the invoice is labeled %s", chargeCurrency, strings.ToUpper(inv.Currency)))
 	}
 	return s.SettleSucceeded(ctx, tenantID, inv, event.PaymentIntentID, captured, SourceWebhook)
 }

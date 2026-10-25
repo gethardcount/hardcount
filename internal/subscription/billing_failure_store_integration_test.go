@@ -267,14 +267,14 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 			return closeTo(id, due.Add(-30*day), due)
 		}, true},
 		{"SetPauseCollection", parked(bfRow{nextBilling: due}, due), func(id string) error {
-			_, err := s.store.SetPauseCollection(s.ctx, s.tenantID, id, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft})
+			_, err := s.store.SetPauseCollection(s.ctx, s.tenantID, id, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil)
 			return err
 		}, true},
 		{"ClearPauseCollection", parked(bfRow{nextBilling: due}, due), func(id string) error {
-			if _, err := s.store.SetPauseCollection(s.ctx, s.tenantID, id, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
+			if _, err := s.store.SetPauseCollection(s.ctx, s.tenantID, id, domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
 				return err
 			}
-			_, err := s.store.ClearPauseCollection(s.ctx, s.tenantID, id)
+			_, err := s.store.ClearPauseCollection(s.ctx, s.tenantID, id, nil)
 			return err
 		}, true},
 		{"SetBillingThresholds", parked(bfRow{nextBilling: due}, due), func(id string) error {

@@ -76,7 +76,7 @@ func (r *liveStateRig) seed(code string, status domain.SubscriptionStatus) domai
 	resumes := r.now.Add(10 * 24 * time.Hour)
 	if _, err := r.store.SetPauseCollection(r.ctx, r.tenantID, sub.ID, domain.PauseCollection{
 		Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumes,
-	}); err != nil {
+	}, nil); err != nil {
 		r.t.Fatalf("pause %s: %v", code, err)
 	}
 	if _, err := r.store.SetItemPendingPlan(r.ctx, r.tenantID, sub.Items[0].ID, r.planB.ID, end); err != nil {

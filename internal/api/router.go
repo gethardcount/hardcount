@@ -370,12 +370,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// paid transaction (ADR-036 amendment 2026-10-22).
 	invoiceStore.SetDunningPauseReleaser(subStore)
 	subH.SetEventDispatcher(eventDispatcher)
-	// Trial-expiry phases (catchup orchestrator + wall-clock cron)
-	// fire subscription.trial_ended via the subscription Service —
-	// matches the engine auto-flip path so webhook consumers see one
-	// event per trial transition regardless of which path activated
-	// the sub.
-	subSvc.SetEventDispatcher(eventDispatcher)
 	auditLogger := audit.NewLogger(db)
 	// actor_name is resolved by LEFT JOIN at read time, and customers.display_name
 	// is encrypted at rest — so without this, every customer-actor row (a

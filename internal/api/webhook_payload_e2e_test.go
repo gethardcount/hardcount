@@ -315,6 +315,12 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	if cur.Data["incoming_payment_intent_id"] != "pi_wp_g" || cur.Data["captured_cents"] != float64(6000) {
 		t.Errorf("payment.currency_mismatch extras = %v / %v, want pi_wp_g / 6000", cur.Data["incoming_payment_intent_id"], cur.Data["captured_cents"])
 	}
+	// The charge's currency, as Velox writes currencies (upper case), beside
+	// the invoice's.
+	if cur.Data["charge_currency"] != "EUR" || flowStr(cur.Data["invoice"].(map[string]any), "currency") != "USD" {
+		t.Errorf("payment.currency_mismatch charge_currency = %v, invoice currency %v; want EUR and USD",
+			cur.Data["charge_currency"], cur.Data["invoice"].(map[string]any)["currency"])
+	}
 
 	idC := newInvoice("Declined card", 7300)
 	deliver(stripeEvent("evt_wp_c", "payment_intent.payment_failed", piObject("pi_wp_c", idC, 7300, map[string]any{
@@ -472,6 +478,9 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 	checkEventResource(t, "subscription.cancel_cleared", ev, getSub(subID))
 	ev = step("pause collection", domain.EventSubscriptionCollectionPaused, "PUT", base+"/pause-collection", map[string]any{"behavior": "keep_as_draft"}, 200)
 	checkEventResource(t, "subscription.collection_paused", ev, getSub(subID))
+	if ev.Data["triggered_by"] != "operator" {
+		t.Errorf("subscription.collection_paused triggered_by = %v, want operator", ev.Data["triggered_by"])
+	}
 	ev = step("resume collection", domain.EventSubscriptionCollectionResumed, "DELETE", base+"/pause-collection", nil, 200)
 	checkEventResource(t, "subscription.collection_resumed", ev, getSub(subID))
 	if ev.Data["triggered_by"] != "operator" {
@@ -821,6 +830,22 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 		t.Errorf("dunning.escalated actions = %v / %v, want cancel / mark_uncollectible", esc.Data["final_subscription_action"], esc.Data["final_invoice_action"])
 	}
 	checkEventResource(t, "subscription.canceled (dunning)", got[domain.EventSubscriptionCanceled], getSub(advanceSub))
+	// The advance request carries an API key, but dunning made the cancel:
+	// the event and the cancel's audit row both say dunning.
+	if by := got[domain.EventSubscriptionCanceled].Data["canceled_by"]; by != "dunning" {
+		t.Errorf("subscription.canceled (dunning) canceled_by = %v, want dunning", by)
+	}
+	if by := cancelAuditCanceledBy(t, call, advanceSub); by != "dunning" {
+		t.Errorf("cancel audit row canceled_by = %q, want dunning", by)
+	}
+	// The subscription's timeline says why, from that row.
+	timeline, err := json.Marshal(call("GET", "/v1/subscriptions/"+advanceSub+"/timeline", nil).want(t, 200, "get timeline").body)
+	if err != nil {
+		t.Fatalf("encode timeline: %v", err)
+	}
+	if !strings.Contains(string(timeline), "Payment retries ran out") {
+		t.Errorf("timeline does not say the cancel was dunning's (Payment retries ran out): %s", timeline)
+	}
 	checkEventResource(t, "invoice.marked_uncollectible (dunning)", got[domain.EventInvoiceMarkedUncollectible], getInvoice(dayOneID))
 
 	// A cycle close bills a subscription in arrears.
@@ -830,4 +855,102 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 	got = events.next("cycle close", domain.EventInvoiceFinalized)
 	cycle := got[domain.EventInvoiceFinalized]
 	checkEventResource(t, "invoice.finalized (cycle)", cycle, getInvoice(flowStr(cycle.Data["invoice"].(map[string]any), "id")))
+}
+
+// cancelAuditCanceledBy reads canceled_by off the subscription's one cancel
+// audit row, through GET /v1/audit-log.
+func cancelAuditCanceledBy(t *testing.T, call func(method, path string, body any) flowResp, subID string) string {
+	t.Helper()
+	rows := flowList(call("GET", "/v1/audit-log?resource_type=subscription&resource_id="+subID+"&action="+domain.AuditActionCancel, nil).
+		want(t, 200, "list cancel audit rows").body, "data")
+	if len(rows) != 1 {
+		t.Fatalf("subscription %s has %d cancel audit rows, want 1", subID, len(rows))
+	}
+	return flowStr(rows[0], "metadata", "canceled_by")
+}
+
+// TestE2E_WebhookPayloads_DunningPause drives dunning's pause final action
+// on a test clock: retries run out and dunning pauses collection, then the
+// invoice is paid and the pause lifts.
+func TestE2E_WebhookPayloads_DunningPause(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	defer ts.Close()
+
+	tenantID := testutil.CreateTestTenant(t, db, "Webhook Payload Dunning Pause Co")
+	key := createAPIKeyWithMode(t, db, tenantID, false)
+	call := func(method, path string, body any) flowResp {
+		t.Helper()
+		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
+	}
+	events := &webhookCursor{t: t, db: db, tenantID: tenantID}
+
+	call("POST", "/v1/dunning/policies", map[string]any{
+		"name": "One retry, then pause", "enabled": true, "retry_days": []int{1},
+		"final_subscription_action": "pause", "final_invoice_action": "none",
+	}).want(t, 201, "create dunning policy")
+	planID := flowStr(call("POST", "/v1/plans", map[string]any{
+		"code": "wpp-advance", "name": "wpp-advance", "currency": "USD", "billing_interval": "monthly",
+		"base_amount_cents": 1000, "base_bill_timing": "in_advance",
+	}).want(t, 201, "create plan").body, "id")
+	start := time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)
+	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
+		"name": "webhook payload dunning pause", "frozen_time": start.Format(time.RFC3339),
+	}).want(t, 201, "create test clock").body, "id")
+	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
+		"external_id": "wpp-cust", "display_name": "wpp-cust", "email": "wpp@payload.test", "test_clock_id": clockID,
+	}).want(t, 201, "create customer").body, "id")
+	getSub := func(id string) map[string]any {
+		t.Helper()
+		return call("GET", "/v1/subscriptions/"+id, nil).want(t, 200, "get subscription").body
+	}
+	advanceTo := func(target time.Time) {
+		t.Helper()
+		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
+		deadline := time.Now().Add(60 * time.Second)
+		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
+			if time.Now().After(deadline) {
+				t.Fatal("clock advance did not settle")
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	events.next("setup")
+
+	subID := flowStr(call("POST", "/v1/subscriptions", map[string]any{
+		"code": "wpp-sub", "display_name": "wpp-sub", "customer_id": customerID,
+		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary",
+	}).want(t, 201, "create subscription").body, "id")
+	got := events.next("day-1 invoice", domain.EventSubscriptionCreated, domain.EventInvoiceFinalized, domain.EventDunningStarted)
+	invoiceID := flowStr(got[domain.EventInvoiceFinalized].Data["invoice"].(map[string]any), "id")
+
+	// The one retry fails: dunning pauses collection.
+	advanceTo(start.Add(2 * 24 * time.Hour))
+	got = events.next("dunning exhausted", domain.EventDunningEscalated, domain.EventSubscriptionCollectionPaused)
+	if applied := got[domain.EventDunningEscalated].Data["applied"]; applied != "subscription_paused" {
+		t.Errorf("dunning.escalated applied = %v, want subscription_paused", applied)
+	}
+	paused := got[domain.EventSubscriptionCollectionPaused]
+	checkEventResource(t, "subscription.collection_paused (dunning)", paused, getSub(subID))
+	if paused.Data["triggered_by"] != "dunning" {
+		t.Errorf("subscription.collection_paused triggered_by = %v, want dunning", paused.Data["triggered_by"])
+	}
+	if by := flowStr(paused.Data["subscription"].(map[string]any), "pause_collection", "set_by"); by != "dunning" {
+		t.Errorf("subscription.collection_paused pause_collection.set_by = %q, want dunning", by)
+	}
+
+	// The invoice is paid. Dunning does not resume collection itself; the
+	// payment lifts the pause, and the next advance resumes it.
+	call("POST", "/v1/invoices/"+invoiceID+"/record-payment", map[string]any{"note": "Wire ref P-2"}).want(t, 200, "record payment")
+	events.next("record payment", domain.EventInvoicePaid)
+	advanceTo(start.Add(3 * 24 * time.Hour))
+	got = events.next("resume after payment", domain.EventSubscriptionCollectionResumed)
+	resumed := got[domain.EventSubscriptionCollectionResumed]
+	checkEventResource(t, "subscription.collection_resumed (payment)", resumed, getSub(subID))
+	if resumed.Data["triggered_by"] != "payment" {
+		t.Errorf("subscription.collection_resumed triggered_by = %v, want payment", resumed.Data["triggered_by"])
+	}
+	if _, ok := got[domain.EventSubscriptionCollectionPaused]; ok {
+		t.Errorf("a second subscription.collection_paused was queued: %v", got[domain.EventSubscriptionCollectionPaused])
+	}
 }

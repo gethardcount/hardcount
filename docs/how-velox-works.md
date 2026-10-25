@@ -78,7 +78,8 @@ flowchart LR
    every retry fails, it does what your dunning policy says: pause or
    cancel the subscription, write off the invoice, both, or neither. A
    pause from dunning lifts by itself once the customer pays that
-   invoice; a pause you set stays until you resume it.
+   invoice, unless the subscription was canceled; a pause you set stays
+   until you resume it.
 
    **You see:** the invoice on the **Dunning** page while it is being
    retried. The schedule is under **Dunning policies**. A new account

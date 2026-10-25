@@ -39,8 +39,9 @@ type OutboxEnqueuer interface {
 
 // SetOutboxEnqueuer wires transactional lifecycle events (2026-07-05,
 // DispatchTx-seam subscription subset): subscription.created / .activated /
-// .canceled / .trial_ended are enqueued IN the transition tx, so a crash in
-// the old commit→dispatch window can no longer silently drop them — a
+// .canceled / .trial_ended, and dunning's .collection_paused, are enqueued
+// IN the transition tx, so a crash in the old commit→dispatch window can
+// no longer silently drop them — a
 // dropped emission left no row anywhere (nothing to replay, nothing to
 // reconcile). Optional — when unset (narrow tests), no events are enqueued.
 func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
@@ -807,19 +808,32 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 // SetPauseCollection writes the operator's (behavior, resumes_at) onto the
 // row and clears pause_collection_invoice_id: an operator who re-pauses a
 // subscription dunning paused takes the pause over, and a payment no longer
-// lifts it. Rejects a canceled row since collection-pause on a
-// terminated sub has no meaning — the engine wouldn't observe the row
-// anyway, but failing loudly here keeps the API honest. Active and paused
-// (hard) are both allowed: a hard-paused sub can simultaneously have
-// pause_collection configured for the moment status flips back to active.
-func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection) (domain.Subscription, error) {
+// lifts it. A lifted pause still on the row is resumed first, with its own
+// trigger (clearLiftedPauseTx; onResume writes its audit row). Rejects a
+// canceled row since collection-pause on a terminated sub has no meaning —
+// the engine wouldn't observe the row anyway, but failing loudly here keeps
+// the API honest. Active and paused (hard) are both allowed: a hard-paused
+// sub can simultaneously have pause_collection configured for the moment
+// status flips back to active.
+func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
 	defer postgres.Rollback(tx)
 
+	locked, err := lockSubForPauseTx(ctx, tx, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if locked.Status == domain.SubscriptionCanceled {
+		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", locked.Status))
+	}
 	now := clock.Now(ctx)
+	if err := s.resumeIfLiftedTx(ctx, tx, locked, now, onResume); err != nil {
+		return domain.Subscription{}, err
+	}
+
 	var sub domain.Subscription
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
@@ -827,21 +841,10 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 		    pause_collection_resumes_at = $2,
 		    pause_collection_invoice_id = NULL,
 		    updated_at = $3
-		WHERE id = $4 AND status <> 'canceled'
+		WHERE id = $4
 		RETURNING `+subCols,
 		string(pc.Behavior), postgres.NullableTime(pc.ResumesAt), now, id,
 	), &sub)
-	if err == sql.ErrNoRows {
-		var currentStatus string
-		err2 := tx.QueryRowContext(ctx, `SELECT status FROM subscriptions WHERE id = $1`, id).Scan(&currentStatus)
-		if err2 == sql.ErrNoRows {
-			return domain.Subscription{}, errs.ErrNotFound
-		}
-		if err2 != nil {
-			return domain.Subscription{}, err2
-		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", currentStatus))
-	}
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -854,6 +857,101 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 		return domain.Subscription{}, err
 	}
 	return sub, nil
+}
+
+// lockSubForPauseTx reads the subscription row FOR NO KEY UPDATE, the lock
+// every writer of the pause takes first (lockSubscriptionRow's order).
+func lockSubForPauseTx(ctx context.Context, tx *sql.Tx, id string) (domain.Subscription, error) {
+	var sub domain.Subscription
+	err := scanSubRow(tx.QueryRowContext(ctx, `SELECT `+subCols+` FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, id), &sub)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Subscription{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Subscription{}, fmt.Errorf("lock subscription for the pause: %w", err)
+	}
+	return sub, nil
+}
+
+// resumeIfLiftedTx resumes locked's pause when it has lifted at now: a
+// writer about to replace or clear it announces its resume first. The row
+// is locked, so the clear cannot miss.
+func (s *PostgresStore) resumeIfLiftedTx(ctx context.Context, tx *sql.Tx, locked domain.Subscription, now time.Time, onResume ResumeAudit) error {
+	if locked.PauseCollection == nil || locked.PauseCollection.InForceAt(now) {
+		return nil
+	}
+	_, ok, err := s.clearLiftedPauseTx(ctx, tx, locked, onResume)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("resume the lifted pause on %s: the locked row changed", locked.ID)
+	}
+	return nil
+}
+
+// clearLiftedPauseTx clears the lifted pause listed holds, and in the same
+// transaction runs onResume (its "Collection resumed" audit row) and
+// queues subscription.collection_resumed, with the trigger and instant of
+// liftedPauseResume. It is the one writer that removes a lifted pause.
+//
+// The clear is a compare-and-set on the pause listed: the row must still
+// hold a lifted pause with the same resumes_at and the same setter
+// (pause_collection_invoice_id set or not). Every writer that replaces a
+// pause writes a new resumes_at (none, or a future one) or clears it, and a
+// payment stamps resumes_at only on a dunning pause with none. So the pair
+// changes whenever the pause does, except on a test clock, where a payment
+// can lift a new dunning pause at the very instant an operator's timed
+// pause reached its date: the setter tells them apart, and with it the
+// trigger. Two dunning pauses lifted at the same instant are not told
+// apart, and need not be: the resume is the same (payment, at that
+// instant). The invoice id is not part of the key for that reason.
+//
+// ok is false when the CAS misses: the pause changed since it was listed,
+// and nothing is written or announced.
+func (s *PostgresStore) clearLiftedPauseTx(ctx context.Context, tx *sql.Tx, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, bool, error) {
+	pc := listed.PauseCollection
+	if pc == nil || pc.ResumesAt == nil {
+		return domain.Subscription{}, false, nil
+	}
+	r := liftedPauseResume(*pc)
+	ctx = r.bind(ctx, listed)
+	// On a test clock the bound instant is r.At itself, so the lifted check
+	// holds by the resumes_at match: a clock only moves forward.
+	now := clock.Now(ctx)
+	var cleared domain.Subscription
+	err := scanSubRow(tx.QueryRowContext(ctx, `
+		UPDATE subscriptions
+		SET pause_collection_behavior = NULL,
+		    pause_collection_resumes_at = NULL,
+		    pause_collection_invoice_id = NULL,
+		    updated_at = $1
+		WHERE id = $2
+		  AND pause_collection_behavior IS NOT NULL
+		  AND pause_collection_resumes_at = $3
+		  AND pause_collection_resumes_at <= $1
+		  AND (pause_collection_invoice_id IS NOT NULL) = $4
+		RETURNING `+subCols,
+		now, listed.ID, *pc.ResumesAt, pc.SetBy == domain.PauseSetByDunning,
+	), &cleared)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Subscription{}, false, nil
+	}
+	if err != nil {
+		return domain.Subscription{}, false, fmt.Errorf("clear the lifted pause: %w", err)
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &cleared); err != nil {
+		return domain.Subscription{}, false, err
+	}
+	if onResume != nil {
+		if err := onResume(ctx, tx, cleared, r); err != nil {
+			return domain.Subscription{}, false, err
+		}
+	}
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionResumed, cleared, r.eventExtras()); err != nil {
+		return domain.Subscription{}, false, err
+	}
+	return cleared, true, nil
 }
 
 // SetDunningPause is dunning's pause final action for the unpaid invoice
@@ -871,25 +969,27 @@ func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id str
 // operator's pause, timed or not, keeps its resumes_at and stays the
 // operator's; a dunning pause already set, by this run's earlier attempt or
 // by another invoice's dunning, keeps its invoice. A pause whose resumes_at
-// has passed but which the resumer has not cleared yet is not in force, and
-// is replaced. errs.InvalidState covers a canceled subscription.
-func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string) (domain.Subscription, DunningPauseOutcome, error) {
+// has passed but which the resumer has not cleared yet is not in force: it
+// is resumed first, with its own trigger and onResume's audit row, as the
+// resumer would have (clearLiftedPauseTx), and then replaced.
+// errs.InvalidState covers a canceled subscription.
+//
+// When it pauses, it runs inTx (the service's "Collection paused" audit
+// row) and queues subscription.collection_paused (triggered_by dunning), all
+// in the same transaction.
+func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, invoiceID string, inTx func(tx *sql.Tx, sub domain.Subscription) error, onResume ResumeAudit) (domain.Subscription, DunningPauseOutcome, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, 0, err
 	}
 	defer postgres.Rollback(tx)
 
-	var status string
-	err = tx.QueryRowContext(ctx, `SELECT status FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, subID).Scan(&status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Subscription{}, 0, errs.ErrNotFound
-	}
+	locked, err := lockSubForPauseTx(ctx, tx, subID)
 	if err != nil {
-		return domain.Subscription{}, 0, fmt.Errorf("lock subscription for the dunning pause: %w", err)
+		return domain.Subscription{}, 0, err
 	}
-	if status == string(domain.SubscriptionCanceled) {
-		return domain.Subscription{}, 0, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", status))
+	if locked.Status == domain.SubscriptionCanceled {
+		return domain.Subscription{}, 0, errs.InvalidState(fmt.Sprintf("Collection can't be paused on a %s subscription.", locked.Status))
 	}
 
 	var invStatus string
@@ -905,6 +1005,12 @@ func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, in
 	}
 
 	now := clock.Now(ctx)
+	if locked.PauseCollection.InForceAt(now) {
+		return domain.Subscription{}, DunningPauseAlreadyHeld, nil
+	}
+	if err := s.resumeIfLiftedTx(ctx, tx, locked, now, onResume); err != nil {
+		return domain.Subscription{}, 0, err
+	}
 	var sub domain.Subscription
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
@@ -912,20 +1018,29 @@ func (s *PostgresStore) SetDunningPause(ctx context.Context, tenantID, subID, in
 		    pause_collection_resumes_at = NULL,
 		    pause_collection_invoice_id = $2,
 		    updated_at = $3
-		WHERE id = $4
-		  AND (pause_collection_behavior IS NULL
-		       OR (pause_collection_resumes_at IS NOT NULL AND pause_collection_resumes_at <= $3))
+		WHERE id = $4 AND pause_collection_behavior IS NULL
 		RETURNING `+subCols,
 		string(domain.PauseCollectionKeepAsDraft), invoiceID, now, subID,
 	), &sub)
-	if errors.Is(err, sql.ErrNoRows) {
-		// The row is locked and live, so a pause is in force.
-		return domain.Subscription{}, DunningPauseAlreadyHeld, nil
-	}
 	if err != nil {
-		return domain.Subscription{}, 0, err
+		// The row is locked and holds no pause: a miss is a bug, not a race.
+		return domain.Subscription{}, 0, fmt.Errorf("write the dunning pause: %w", err)
 	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
+		return domain.Subscription{}, 0, err
+	}
+	// The audit row and the event are written with the pause, so they exist
+	// exactly when the pause commits. A re-attempted exhaustion finds the
+	// pause in force above and writes nothing, so a post-commit write that
+	// failed or a crash dropped would never come.
+	if inTx != nil {
+		if err := inTx(tx, sub); err != nil {
+			return domain.Subscription{}, 0, err
+		}
+	}
+	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionCollectionPaused, sub, map[string]any{
+		"triggered_by": "dunning",
+	}); err != nil {
 		return domain.Subscription{}, 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -994,24 +1109,45 @@ func (s *PostgresStore) ReleaseDunningPauseTx(ctx context.Context, tx *sql.Tx, s
 	return nil
 }
 
-// ClearPauseCollection nulls the pause_collection_* columns, including the
-// invoice a dunning pause waits for. A row with no pause returns
-// ErrNotPaused; a missing row errs.ErrNotFound. Status is not checked: a
+// ClearPauseCollection is the operator's resume: it nulls the
+// pause_collection_* columns, including the invoice a dunning pause waits
+// for. A row with no pause returns ErrNotPaused; a missing row
+// errs.ErrNotFound. A lifted pause (its resumes_at has passed) is resumed
+// with its own trigger and onResume's audit row (clearLiftedPauseTx), and
+// the call returns ErrPauseLifted after the commit: collection had already
+// resumed, so the operator resumed nothing. Status is not checked: a
 // canceled subscription keeps its pause, which still holds its unpaid
 // invoices, and clearing it is how an operator releases them.
-func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id string, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
 	defer postgres.Rollback(tx)
 
+	// The row lock serializes two clearers (an operator's double click, or
+	// an operator and the resumer); the second reads the cleared row and
+	// gets ErrNotPaused, so only the winner announces the resume (hazard 5
+	// root fix, 2026-08-30).
+	locked, err := lockSubForPauseTx(ctx, tx, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if locked.PauseCollection == nil {
+		return domain.Subscription{}, ErrNotPaused
+	}
 	now := clock.Now(ctx)
+	if !locked.PauseCollection.InForceAt(now) {
+		if err := s.resumeIfLiftedTx(ctx, tx, locked, now, onResume); err != nil {
+			return domain.Subscription{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.Subscription{}, err
+		}
+		return domain.Subscription{}, ErrPauseLifted
+	}
+
 	var sub domain.Subscription
-	// CAS: only a row that IS paused changes. Two clearers racing on the same
-	// row (dual-leader window) serialize on the row lock; the second
-	// re-evaluates the predicate against the cleared row and gets 0 rows —
-	// so only the winner announces the resume (hazard 5 root fix, 2026-08-30).
 	err = scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET pause_collection_behavior = NULL,
@@ -1019,20 +1155,9 @@ func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id s
 		    pause_collection_invoice_id = NULL,
 		    updated_at = $1
 		WHERE id = $2
-		  AND pause_collection_behavior IS NOT NULL
 		RETURNING `+subCols,
 		now, id,
 	), &sub)
-	if err == sql.ErrNoRows {
-		var exists bool
-		if e := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE id = $1)`, id).Scan(&exists); e != nil {
-			return domain.Subscription{}, e
-		}
-		if !exists {
-			return domain.Subscription{}, errs.ErrNotFound
-		}
-		return domain.Subscription{}, ErrNotPaused
-	}
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -1045,6 +1170,31 @@ func (s *PostgresStore) ClearPauseCollection(ctx context.Context, tenantID, id s
 		return domain.Subscription{}, err
 	}
 	return sub, nil
+}
+
+// ResumeLiftedPause is the scheduled resumers' clear of a lifted pause
+// they listed: clearLiftedPauseTx in its own transaction, with the audit
+// row and subscription.collection_resumed queued in it. It returns
+// ErrNotPaused when the row no longer holds the pause it listed: another
+// writer resumed or replaced it after the list, and announced what it did.
+func (s *PostgresStore) ResumeLiftedPause(ctx context.Context, tenantID string, listed domain.Subscription, onResume ResumeAudit) (domain.Subscription, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	cleared, ok, err := s.clearLiftedPauseTx(ctx, tx, listed, onResume)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if !ok {
+		return domain.Subscription{}, ErrNotPaused
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Subscription{}, err
+	}
+	return cleared, nil
 }
 
 // ActivateAfterTrial flips status 'trialing' → 'active' atomically. Sets
