@@ -402,3 +402,119 @@ func (s *callOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID s
 	s.log.steps = append(s.log.steps, "write")
 	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call)
 }
+
+// heldOrderStore logs every write of the held store's ingest doors and of
+// the plain ones.
+type heldOrderStore struct {
+	*heldMemStore
+	log *stepLog
+}
+
+func (s *heldOrderStore) IngestAudited(ctx context.Context, tenantID string, e domain.UsageEvent, emit func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error) {
+	s.log.steps = append(s.log.steps, "write")
+	return s.heldMemStore.IngestAudited(ctx, tenantID, e, emit)
+}
+
+func (s *heldOrderStore) IngestBatch(ctx context.Context, tenantID string, events []domain.UsageEvent) ([]int, int, error) {
+	s.log.steps = append(s.log.steps, "write")
+	return s.heldMemStore.IngestBatch(ctx, tenantID, events)
+}
+
+func (s *heldOrderStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent) (domain.UsageEvent, error) {
+	s.log.steps = append(s.log.steps, "write")
+	return s.heldMemStore.IngestResolvingHeld(ctx, tenantID, ev)
+}
+
+func (s *heldOrderStore) IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall) (CallResult, error) {
+	s.log.steps = append(s.log.steps, "write")
+	return s.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call)
+}
+
+// aggOrderReader answers a period whose paid threshold invoice billed
+// through after the event, so the class depends on the meter's aggregation,
+// and logs its reads.
+type aggOrderReader struct{ log *stepLog }
+
+func (r *aggOrderReader) OpenPeriods(context.Context, string, string) ([]OpenPeriod, error) {
+	r.log.steps = append(r.log.steps, "periods")
+	wm := opAt(opMay.AddDate(0, 0, 19))
+	return []OpenPeriod{{Start: opMay, End: opJun, Floor: opAt(opApr), Meters: meters("mtr_1"), NextMeters: meters("mtr_1"),
+		ThresholdWatermark: ThresholdWatermark{BilledThrough: wm, PaidThrough: wm}}}, nil
+}
+
+func (r *aggOrderReader) MeterBuckets(context.Context, string, string) (MeterBuckets, error) {
+	r.log.steps = append(r.log.steps, "meter")
+	return MeterBuckets{Additive: true}, nil
+}
+
+func (r *aggOrderReader) MeterBucketsTx(context.Context, *sql.Tx, string) (MeterBuckets, error) {
+	r.log.steps = append(r.log.steps, "meter")
+	return MeterBuckets{Additive: true}, nil
+}
+
+// TestIngest_ReadsTheAggregationAfterTheWrite: at every door the open
+// periods are read before the write and the meter's aggregation after it,
+// on the write's transaction (open_period.go). Read before the write, an
+// aggregation PATCH that commits in between makes the flag follow the old
+// aggregation. The flag still follows what was read.
+//
+// Mutation check: read the meter before the write again → the order is
+// [periods meter write].
+func TestIngest_ReadsTheAggregationAfterTheWrite(t *testing.T) {
+	ts := opMay.AddDate(0, 0, 5)
+	in := func(key string) IngestInput {
+		return IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: key, Timestamp: &ts}
+	}
+	doors := map[string]func(svc *Service) (int, error){
+		"single": func(svc *Service) (int, error) {
+			ev, err := svc.Ingest(context.Background(), "t1", in("k-single"))
+			return boolInt(ev.BillingStatus == BillingStatusAfterClose), err
+		},
+		"batch": func(svc *Service) (int, error) {
+			res, errs := svc.BatchIngest(context.Background(), "t1", []IngestInput{in("k-batch-1"), in("k-batch-2")})
+			if len(errs) > 0 {
+				return 0, errs[0]
+			}
+			return res.AfterClose, nil
+		},
+		"backfill": func(svc *Service) (int, error) {
+			ev, err := svc.Backfill(context.Background(), "t1", in("k-backfill"))
+			return boolInt(ev.BillingStatus == BillingStatusAfterClose), err
+		},
+		"litellm event": func(svc *Service) (int, error) {
+			ev, err := svc.IngestResolvingHeld(context.Background(), "t1", in("k-held"))
+			return boolInt(ev.BillingStatus == BillingStatusAfterClose), err
+		},
+		"litellm call": func(svc *Service) (int, error) {
+			res, err := svc.IngestCall(context.Background(), "t1", CallInput{CustomerID: "cus_1", MeterID: "mtr_1", Events: []CallEvent{
+				{Quantity: dec(1), IdempotencyKey: "c:input", Timestamp: &ts}, {Quantity: dec(1), IdempotencyKey: "c:output", Timestamp: &ts},
+			}})
+			return res.AfterClose, err
+		},
+	}
+	want := map[string]int{"single": 1, "batch": 2, "backfill": 1, "litellm event": 1, "litellm call": 2}
+	for name, run := range doors {
+		t.Run(name, func(t *testing.T) {
+			log := &stepLog{}
+			svc := NewService(&heldOrderStore{heldMemStore: &heldMemStore{memStore: newMemStore()}, log: log})
+			svc.SetOpenPeriodReader(&aggOrderReader{log: log})
+			flagged, err := run(svc)
+			if err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+			if got := strings.Join(log.steps, " "); got != "periods write meter" {
+				t.Errorf("order = [%s], want [periods write meter]", got)
+			}
+			if flagged != want[name] {
+				t.Errorf("after_close = %d, want %d", flagged, want[name])
+			}
+		})
+	}
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
