@@ -275,6 +275,9 @@ func (m *memStore) ClearScheduledCancellation(ctx context.Context, tenantID, id 
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
+	if s.CancelAt == nil && !s.CancelAtPeriodEnd {
+		return domain.Subscription{}, ErrNoScheduledCancel // mirrors the real store's CAS
+	}
 	s.CancelAt = nil
 	s.CancelAtPeriodEnd = false
 	s.UpdatedAt = clock.Now(ctx)
@@ -1974,9 +1977,12 @@ func TestScheduleCancel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("schedule: %v", err)
 		}
-		out, err := svc.ClearScheduledCancel(context.Background(), "t1", sub.ID)
+		out, cleared, err := svc.ClearScheduledCancel(context.Background(), "t1", sub.ID)
 		if err != nil {
 			t.Fatalf("clear: %v", err)
+		}
+		if !cleared {
+			t.Error("cleared = false, want true: a schedule was removed")
 		}
 		if out.CancelAtPeriodEnd {
 			t.Error("cancel_at_period_end should be false after clear")
@@ -2098,9 +2104,12 @@ func TestPauseCollection(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("pause: %v", err)
 		}
-		out, err := svc.ResumeCollection(context.Background(), "t1", sub.ID)
+		out, resumed, err := svc.ResumeCollection(context.Background(), "t1", sub.ID)
 		if err != nil {
 			t.Fatalf("resume: %v", err)
+		}
+		if !resumed {
+			t.Error("resumed = false, want true: a pause was cleared")
 		}
 		if out.PauseCollection != nil {
 			t.Errorf("PauseCollection should be nil after resume, got %+v", out.PauseCollection)

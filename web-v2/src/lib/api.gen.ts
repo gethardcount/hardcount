@@ -2578,9 +2578,10 @@ export interface paths {
         post?: never;
         /**
          * Clear a scheduled cancel
-         * @description Removes a scheduled cancel. Calling it on a subscription with no
-         *     schedule returns the subscription unchanged. Sends the
-         *     `subscription.cancel_cleared` webhook event.
+         * @description Removes a scheduled cancel and sends the
+         *     `subscription.cancel_cleared` webhook event. Calling it on a
+         *     subscription with no schedule returns the subscription unchanged
+         *     and sends no event.
          *
          *     If the scheduled date has already passed, the cancel has taken
          *     effect and the request answers 409.
@@ -2625,9 +2626,9 @@ export interface paths {
          * Resume collection
          * @description Ends a collection pause. The period that is running bills
          *     normally; a period that ended during the pause keeps its draft
-         *     invoice. Calling it on a subscription that is not paused returns
-         *     the subscription unchanged. Sends the
-         *     `subscription.collection_resumed` webhook event.
+         *     invoice. Sends the `subscription.collection_resumed` webhook
+         *     event. Calling it on a subscription that is not paused returns the
+         *     subscription unchanged and sends no event.
          */
         delete: operations["resumeSubscriptionCollection"];
         options?: never;

@@ -604,8 +604,8 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 		t.Fatalf("second clear: got %v, want ErrNotPaused", err)
 	}
 	svc := subscription.NewService(store, nil)
-	if again, err := svc.ResumeCollection(ctx, tenantID, subID); err != nil || again.ID != subID || again.PauseCollection != nil {
-		t.Fatalf("operator resume on an unpaused sub must be an idempotent no-op: %+v %v", again.PauseCollection, err)
+	if again, resumed, err := svc.ResumeCollection(ctx, tenantID, subID); err != nil || resumed || again.ID != subID || again.PauseCollection != nil {
+		t.Fatalf("operator resume on an unpaused sub must be an idempotent no-op that resumes nothing: resumed=%v %+v %v", resumed, again.PauseCollection, err)
 	}
 
 	// 5. Set on a canceled sub is rejected.
@@ -670,6 +670,69 @@ func TestClearPauseCollection_CASOneWinner(t *testing.T) {
 		t.Fatalf("second clear: got %v, want ErrNotPaused", err)
 	}
 	if _, err := store.ClearPauseCollection(ctx, tenantID, "sub_does_not_exist"); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("missing row: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestClearScheduledCancellation_CASOneWinner: of 20 clears racing on one
+// scheduled cancel, exactly one changes the row and so may announce
+// subscription.cancel_cleared; every other gets ErrNoScheduledCancel. A clear
+// with no schedule does not write the row. Mutation-verify: drop
+// `AND (cancel_at IS NOT NULL OR cancel_at_period_end)` → 20 winners.
+func TestClearScheduledCancellation_CASOneWinner(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	store := subscription.NewPostgresStore(db)
+	tenantID := testutil.CreateTestTenant(t, db, "Cancel Clear Race")
+	subID := seedActiveSubscription(t, db, tenantID, "cus_clear_race", "plan_clear_race", "sub-clear-race")
+
+	if _, err := store.ScheduleCancellation(ctx, tenantID, subID, nil, true, domain.SubscriptionActive); err != nil {
+		t.Fatalf("schedule cancel: %v", err)
+	}
+
+	const goroutines = 20
+	var (
+		wg          sync.WaitGroup
+		successes   atomic.Int64
+		noScheduled atomic.Int64
+	)
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := store.ClearScheduledCancellation(ctx, tenantID, subID)
+			switch {
+			case err == nil:
+				successes.Add(1)
+			case errors.Is(err, subscription.ErrNoScheduledCancel):
+				noScheduled.Add(1)
+			default:
+				t.Errorf("unexpected error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if successes.Load() != 1 || noScheduled.Load() != goroutines-1 {
+		t.Fatalf("successes=%d noScheduled=%d, want exactly 1 winner and %d ErrNoScheduledCancel", successes.Load(), noScheduled.Load(), goroutines-1)
+	}
+	before, err := store.Get(ctx, tenantID, subID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if before.CancelAt != nil || before.CancelAtPeriodEnd {
+		t.Fatalf("schedule left after the clear: cancel_at=%v at_period_end=%v", before.CancelAt, before.CancelAtPeriodEnd)
+	}
+	if _, err := store.ClearScheduledCancellation(ctx, tenantID, subID); !errors.Is(err, subscription.ErrNoScheduledCancel) {
+		t.Fatalf("clear with none scheduled: got %v, want ErrNoScheduledCancel", err)
+	}
+	after, err := store.Get(ctx, tenantID, subID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Errorf("a clear with none scheduled wrote the row: updated_at %v → %v", before.UpdatedAt, after.UpdatedAt)
+	}
+	if _, err := store.ClearScheduledCancellation(ctx, tenantID, "sub_does_not_exist"); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("missing row: got %v, want ErrNotFound", err)
 	}
 }

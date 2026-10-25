@@ -816,9 +816,15 @@ func (h *Handler) resumeCollection(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	sub, err := h.svc.ResumeCollection(r.Context(), tenantID, id)
+	sub, resumed, err := h.svc.ResumeCollection(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")
+		return
+	}
+	if !resumed {
+		// Collection was not paused: nothing resumed, nothing announced.
+		audit.MarkSkip(r.Context())
+		h.respondSub(w, r, http.StatusOK, sub)
 		return
 	}
 
@@ -946,15 +952,21 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 }
 
 // clearScheduledCancel removes any prior schedule. Idempotent — clearing a
-// row that has no pending cancel returns 200 with the unchanged subscription.
+// row that has no pending cancel returns 200 with the unchanged subscription,
+// and writes no audit entry and sends no event, since nothing changed.
 // Returns 404 only when the subscription itself doesn't exist.
 func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
-	sub, err := h.svc.ClearScheduledCancel(r.Context(), tenantID, id)
+	sub, cleared, err := h.svc.ClearScheduledCancel(r.Context(), tenantID, id)
 	if err != nil {
 		respond.FromError(w, r, err, "subscription")
+		return
+	}
+	if !cleared {
+		audit.MarkSkip(r.Context())
+		h.respondSub(w, r, http.StatusOK, sub)
 		return
 	}
 

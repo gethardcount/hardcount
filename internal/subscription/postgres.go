@@ -639,9 +639,11 @@ func (s *PostgresStore) ScheduleCancellation(ctx context.Context, tenantID, id s
 	return sub, nil
 }
 
-// ClearScheduledCancellation undoes a prior schedule. Idempotent — a row
-// with both fields already cleared returns unchanged. Returns errs.ErrNotFound
-// if the subscription doesn't exist. Status is not checked: every cancel
+// ClearScheduledCancellation undoes a prior schedule. A row with no schedule
+// is not written and returns ErrNoScheduledCancel, so only a clear that
+// changed the row announces it (two racing clears: the second sees the
+// cleared row). Returns errs.ErrNotFound if the subscription doesn't exist.
+// Status is not checked: every cancel
 // writer clears the schedule in its own transaction (retireLiveOnlyStateTx),
 // and migration 192 cleared the rows earlier cancels left, so on a canceled
 // subscription this changes nothing.
@@ -658,11 +660,19 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 		UPDATE subscriptions
 		SET cancel_at = NULL, cancel_at_period_end = false, updated_at = $1
 		WHERE id = $2
+		  AND (cancel_at IS NOT NULL OR cancel_at_period_end)
 		RETURNING `+subCols,
 		now, id,
 	), &sub)
 	if err == sql.ErrNoRows {
-		return domain.Subscription{}, errs.ErrNotFound
+		var exists bool
+		if e := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM subscriptions WHERE id = $1)`, id).Scan(&exists); e != nil {
+			return domain.Subscription{}, e
+		}
+		if !exists {
+			return domain.Subscription{}, errs.ErrNotFound
+		}
+		return domain.Subscription{}, ErrNoScheduledCancel
 	}
 	if err != nil {
 		return domain.Subscription{}, err

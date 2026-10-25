@@ -2669,25 +2669,35 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 }
 
 // ClearScheduledCancel undoes any prior schedule. Idempotent — a row
-// without a schedule returns unchanged.
+// without a schedule returns unchanged, with cleared false, so the caller
+// announces nothing.
 //
 // A schedule whose boundary has passed has already taken effect, even if the
 // billing run has not closed the period yet: the close runs first and fires
 // it, and the clear is then refused rather than reported as a clear.
-func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string) (domain.Subscription, bool, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	before, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
 	after, err := s.CloseEndedPeriodFirst(ctx, tenantID, id)
 	if err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
 	if before.Status == domain.SubscriptionActive && after.Status == domain.SubscriptionCanceled {
-		return domain.Subscription{}, errs.InvalidState("the scheduled cancel already took effect when the billing period ended; the subscription is canceled")
+		return domain.Subscription{}, false, errs.InvalidState("the scheduled cancel already took effect when the billing period ended; the subscription is canceled")
 	}
-	return s.store.ClearScheduledCancellation(ctx, tenantID, id)
+	sub, err := s.store.ClearScheduledCancellation(ctx, tenantID, id)
+	if errors.Is(err, ErrNoScheduledCancel) {
+		// Idempotent for the operator: nothing changed, nothing announced.
+		sub, err = s.store.Get(ctx, tenantID, id)
+		return sub, false, err
+	}
+	if err != nil {
+		return domain.Subscription{}, false, err
+	}
+	return sub, true, nil
 }
 
 // PauseCollectionInput carries the collection-pause intent. Behavior is
@@ -2825,26 +2835,28 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 }
 
 // ResumeCollection clears any active collection-pause. Idempotent — a row
-// without an active pause returns unchanged. Distinct from Resume (which
-// flips status from paused back to active).
+// without an active pause returns unchanged, with resumed false, so the
+// caller announces nothing. Distinct from Resume (which flips status from
+// paused back to active).
 //
 // Its one caller is the operator (handler). The scheduled resumers write
 // their own row (triggered_by "schedule", or "payment" for a dunning pause
 // a payment released) and do not call this method.
-func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (domain.Subscription, bool, error) {
 	ctx = s.bindForSub(ctx, tenantID, id)
 	// A period that ended while paused keeps a draft invoice; the resume
 	// applies from the period that is running.
 	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
 	sub, err := s.store.ClearPauseCollection(ctx, tenantID, id)
 	if errors.Is(err, ErrNotPaused) {
 		// Idempotent for the operator: nothing changed, nothing announced.
-		return s.store.Get(ctx, tenantID, id)
+		sub, err = s.store.Get(ctx, tenantID, id)
+		return sub, false, err
 	}
 	if err != nil {
-		return domain.Subscription{}, err
+		return domain.Subscription{}, false, err
 	}
 	if s.audit != nil {
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
@@ -2853,7 +2865,7 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 			"triggered_by": "operator",
 		})
 	}
-	return sub, nil
+	return sub, true, nil
 }
 
 // EndTrial transitions a 'trialing' subscription to 'active' immediately,
