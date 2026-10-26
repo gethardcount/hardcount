@@ -33,7 +33,7 @@ func TestCountReleased(t *testing.T) {
 	plans := map[string]PriceSet{
 		"pln_tokens":   everyEvent("mtr_tokens"),
 		"pln_seats":    everyEvent("mtr_seats"),
-		"pln_labelled": {"mtr_tokens": {{"model": "a"}}},
+		"pln_labelled": {ByMeter: map[string][]map[string]string{"mtr_tokens": {{"model": "a"}}}},
 	}
 	started := start.AddDate(0, -1, 0)
 	active := domain.Subscription{
@@ -94,10 +94,14 @@ func TestCountReleased(t *testing.T) {
 		var periods []OpenPeriod
 		for _, s := range tc.subs {
 			var stretches []Stretch
+			windows := map[string][]Window{}
 			for _, it := range s.s.Items {
 				stretches = append(stretches, Stretch{PlanID: it.PlanID, From: start, To: end})
+				for m := range plans[it.PlanID].ByMeter {
+					windows[m] = append(windows[m], Window{PlanID: it.PlanID, From: start, To: end})
+				}
 			}
-			if p, ok := OpenPeriodOf(s.s, stretches, plans, plans, s.wm); ok {
+			if p, ok := OpenPeriodOf(s.s, stretches, windows, plans, plans, s.wm); ok {
 				periods = append(periods, p)
 			}
 		}
@@ -108,7 +112,7 @@ func TestCountReleased(t *testing.T) {
 		}
 	}
 	// A plan the caller could not supply prices nothing.
-	p, _ := OpenPeriodOf(active, []Stretch{{PlanID: "pln_tokens", From: start, To: end}}, nil, nil, ThresholdWatermark{})
+	p, _ := OpenPeriodOf(active, []Stretch{{PlanID: "pln_tokens", From: start, To: end}}, nil, nil, nil, ThresholdWatermark{})
 	var got ReleaseResult
 	countReleased(&got, rows, []OpenPeriod{p}, sum)
 	if got != (ReleaseResult{NotOnPlan: 5}) {

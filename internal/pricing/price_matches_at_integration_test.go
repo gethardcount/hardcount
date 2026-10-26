@@ -21,8 +21,12 @@ import (
 // at that pin: in wall time, on a test clock with stamps, and on a clock
 // without.
 //
+// Each pin also says whether it had passed in its time domain: a wall pin
+// before now, a clock pin at or before the clock's time.
+//
 // Mutation: read the versions in wall time for every pin (drop the clock),
-// and the clock pins answer the wall-time meters.
+// and the clock pins answer the wall-time meters. Answer every pin passed →
+// the future wall pin and the clock pins ahead of clock C pass.
 func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := pricing.NewPostgresStore(db)
@@ -86,9 +90,12 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 		{PlanID: plan.ID, At: t2, ClockID: "vlx_tclk_mpa_c"},
 		{PlanID: plan.ID, At: t1.Add(-time.Hour), ClockID: "vlx_tclk_mpa_d"},
 		{PlanID: "vlx_pln_none", At: t1},
+		{PlanID: plan.ID, At: time.Now().UTC().Add(time.Hour)},
+		{PlanID: plan.ID, At: t1, ClockID: "vlx_tclk_mpa_d"},
 	}
 	m1x := m1 + `{"model":"x","tier":"1"}`
-	want := [][]string{{m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, nil}
+	want := [][]string{{m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m2 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}, nil, {m1 + "{}", m1x, m3 + "{}"}, {m1 + "{}", m1x, m3 + "{}"}}
+	wantPassed := []bool{true, true, false, false, true, true, false, true}
 	got, err := store.PriceMatchesAt(ctx, tenantID, pins)
 	if err != nil {
 		t.Fatalf("PriceMatchesAt: %v", err)
@@ -112,7 +119,10 @@ func TestPostgresStore_PriceMatchesAtMatchesPlanPricesAt(t *testing.T) {
 		for _, p := range one {
 			single = append(single, key(p.MeterID, p.DimensionMatch))
 		}
-		for _, pm := range got[i] {
+		if got[i].Passed != wantPassed[i] {
+			t.Errorf("pin %d %+v: passed = %v, want %v", i, pin, got[i].Passed, wantPassed[i])
+		}
+		for _, pm := range got[i].Matches {
 			g = append(g, key(pm.MeterID, pm.Match))
 		}
 		slices.Sort(single)

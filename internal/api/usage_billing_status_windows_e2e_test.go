@@ -19,17 +19,22 @@ import (
 // day D, and the first paid period starts at midnight of D. Usage before
 // 18:00 is trial usage, which no invoice bills: outside_subscription, sent
 // while trialing or after the expiry scan made the subscription active. An
-// event after the trial end is billed and carries no status.
+// event after the trial end is billed and carries no status. So is an event
+// of a meter the plan does not price: trial time, not not_on_plan.
 //
-// Mutation check: drop the trial-end floor from the in-period branch of
-// classify → the two trial events carry no status.
+// Mutation check: drop the trial end from classify → the seats event is
+// not_on_plan. (The calls events are also outside the close's windows,
+// which start at the trial end.)
 func TestBillingStatus_TrialEndDayBeforeTheTrialEnd(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
+	r.newMeter("seats", "sum")
 	r.newTrialEndingAt(dayAt(18, 0))
 
 	out := r.postLabelled("calls", "trial-0900", dayAt(9, 0), dayAt(9, 1), 40, nil)
 	wantStatus(t, "trial-end-day event sent while trialing", out, "outside_subscription")
+	out = r.postLabelled("seats", "trial-seats-0930", dayAt(9, 30), dayAt(9, 31), 2, nil)
+	wantStatus(t, "trial-end-day event of an unpriced meter", out, "outside_subscription")
 	r.expireTrials(dayAt(19, 45))
 	out = r.postLabelled("calls", "trial-1100", dayAt(11, 0), dayAt(19, 50), 3, nil)
 	wantStatus(t, "trial-end-day event sent after the expiry scan", out, "outside_subscription")
@@ -46,8 +51,8 @@ func TestBillingStatus_TrialEndDayBeforeTheTrialEnd(t *testing.T) {
 // its final invoice bills usage only to May 11. An event stamped after May 11
 // is outside_subscription; one before it is billed and carries no status.
 //
-// Mutation check: drop the cancel_at end from classify → the event after the
-// cancel carries no status.
+// Mutation check: drop the scheduled cancel from classify → the event after
+// the cancel carries no status.
 func TestBillingStatus_AfterAScheduledMidPeriodCancel(t *testing.T) {
 	skipShort(t)
 	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
@@ -80,8 +85,8 @@ func TestBillingStatus_AfterAScheduledMidPeriodCancel(t *testing.T) {
 // close bills the meter only from 10:00. A late event stamped 09:30 is on no
 // invoice: outside_subscription (A has ended). One stamped 12:15 is B's.
 //
-// Mutation check: classify by the stretches without the coverage floor →
-// the 09:30 event carries no status.
+// Mutation checks: build the windows without the coverage ends, or classify
+// by the stretches, not the windows → the 09:30 event carries no status.
 func TestBillingStatus_BeforeAnotherSubscriptionsCoverageEnd(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_advance", 0)
@@ -113,8 +118,9 @@ func TestBillingStatus_BeforeAnotherSubscriptionsCoverageEnd(t *testing.T) {
 // b event at 09:00 is billed by X, whose prices do not take it: no_price. A
 // model b event at 11:00 is Y's and billed.
 //
-// Mutation check: classify by the best of every stretch holding the instant
-// (no one-window-per-instant) → the 09:00 model b event carries no status.
+// Mutation check: classify by the best of every stretch holding the instant,
+// not the one window that holds it → the 09:00 model b event carries no
+// status.
 func TestBillingStatus_FirstDayReachBackKeepsTheEarlierPlan(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
@@ -171,8 +177,8 @@ func TestBillingStatus_FirstDayReachBackKeepsTheEarlierPlan(t *testing.T) {
 // saved now is in force at P1: the answer cannot say no_price. The price for
 // model c is saved, and the next period's invoice bills the event.
 //
-// Mutation check: treat a price set as final whatever its pin → the event is
-// answered no_price and then billed.
+// Mutation checks: answer every pin passed (PriceMatchesAt), or ignore a pin
+// ahead in classify → the event is answered no_price and then billed.
 func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
 	r := newPPRig(t, "next pin ahead")
 	tokens := r.meter("tokens", "sum")

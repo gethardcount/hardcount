@@ -208,24 +208,31 @@ that wrote it says why, in `billing_status`:
 | `billing_status` | Meaning | What to do |
 |---|---|---|
 | `after_close` | Its billing period was already invoiced (see Late usage below). | Bill it with a one-off invoice. |
-| `no_price` | The plan prices the meter, but no price takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions. It applies from each subscriber's next period, so this event stays unbilled. |
+| `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions. It applies from each subscriber's next period, so this event stays unbilled. |
 | `not_on_plan` | The customer's subscription covered the time, but its plan has no price for the meter. | Add a price for the meter to the plan, or move the customer to a plan that has one. |
-| `outside_subscription` | No active or trialing subscription of the customer covered the time: there is none, or the time is before it started, in a free trial, or after it ended. | Check the event's customer and timestamp. |
+| `outside_subscription` | No active or trialing subscription of the customer bills the time: there is none, or the time is before it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel, or the meter's time belonged to another subscription that has ended. | Check the event's customer and timestamp. |
 
 - The single and backfill 201 carry it. `POST /v1/usage-events/batch`
   returns `results[i]` for each event, in the order sent: `status`
   (`ingested` or `deduplicated`) and `billing_status`, plus a count of
   each status. The LiteLLM answer counts each status, and the held-usage
   release counts `no_price` and `not_on_plan`.
-- No `billing_status` means an invoice will bill the event, or still can
-  (a spend-threshold invoice not paid yet). A replay and a read never
-  carry it.
+- No `billing_status` means an invoice will bill the event, or still can:
+  a spend-threshold invoice is not paid yet, or the event's billing period
+  has not started, so a price saved now applies to it. A replay and a read
+  never carry it.
 - `not_on_plan` and `outside_subscription` describe the subscriptions when
   the event arrived. A subscription created later that day, or an item
   added on the first day of a billing period, bills from the start of that
   day, so it can still bill the event.
 - A price saved in the same instant a billing period starts can make one
   `no_price` or `not_on_plan` answer wrong.
+- A change to the subscription saved while the request is in flight can
+  make the answer wrong too. A plan swap, an added item or a new
+  subscription can bill a flagged event. After a cancel or a removed item,
+  no invoice may bill an event that has no `billing_status`. A LiteLLM
+  delivery reads the subscriptions once, so this holds for the whole
+  delivery.
 
 ### Late usage
 
@@ -238,8 +245,8 @@ An event counts toward the billing period its `timestamp` falls in.
   stored, but it is not added to that invoice or to any later one. The
   answer says so: `billing_status: "after_close"` on the event's 201
   (single and backfill), and an `after_close` count on a batch or a
-  LiteLLM delivery. A replay never carries it. No `billing_status` is not
-  a promise that the event will be billed.
+  LiteLLM delivery. A replay never carries it. What no `billing_status`
+  means is above.
 - To bill it, make a one-off invoice: `POST /v1/invoices`, then
   `POST /v1/invoices/{id}/line-items`, then
   `POST /v1/invoices/{id}/finalize`.

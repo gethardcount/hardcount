@@ -982,6 +982,6 @@ test('held usage released into a plan with no matching price says so', async ({ 
   const notice = page.getByRole('status').filter({ hasText: 'Usage held, not billed' })
   await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
   await expect(page.getByText('Released 2 usage rows')).toBeVisible()
-  await expect(page.getByText("2 fall in the current billing period, but no price on the subscription's plan matches them, so no invoice charges them.")).toBeVisible()
+  await expect(page.getByText("2 fall in a billing period not invoiced yet, but no price on the subscription's plan matches them, so no invoice charges them.")).toBeVisible()
   await expect(page.getByText('will be invoiced')).toHaveCount(0)
 })

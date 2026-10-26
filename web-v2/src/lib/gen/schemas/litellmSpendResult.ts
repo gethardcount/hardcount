@@ -44,8 +44,8 @@ export interface LitellmSpendResult {
      */
   not_on_plan: number;
   /**
-     * Of `accepted`, the events no subscription of the customer
-     * covered (`billing_status: outside_subscription`). A replay
+     * Of `accepted`, the events whose time no subscription of the
+     * customer bills (`billing_status: outside_subscription`). A replay
      * never counts here.
      */
   outside_subscription: number;

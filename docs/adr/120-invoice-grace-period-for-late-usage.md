@@ -345,9 +345,11 @@ the answer that writes the event carries one of four statuses:
   not price the meter. In an open period that is every plan the
   subscription was on at that instant; before the period start (an
   invoiced period, past the billing start) it is the current plans.
-- `outside_subscription`: no active or trialing subscription held the
-  time: none exists, or the time is before one started, in a free trial,
-  or after one ends at its period end.
+- `outside_subscription`: no active or trialing subscription bills the
+  time: none exists, or the time is before one started, in a free trial
+  (also on the trial-end day, before the trial end), after one ends at its
+  period end or at a scheduled cancel, or in a stretch of the meter that
+  another subscription, since ended, billed.
 
 Where they disagree across subscriptions, a subscription that bills the
 event wins, then one that prices its meter (`no_price`, then
@@ -370,17 +372,43 @@ read at their pins in the one statement that read their meters before
 (`pricing.PriceMatchesAt`), before the write. The read is once per
 customer per request.
 
-**Two stated exceptions.**
+**Which window an event is checked against** (review round 1). Inside a
+stretch, the close bills a meter over windows, not the whole stretch: a
+window starts no earlier than the trial end or another subscription's
+coverage end of the meter (`usageFloors`), and an item added on the
+period's first day reaches back only over time no earlier item had
+(`oneWindowPerInstant`). Ingest reads the same windows
+(`billing.PeriodPlan.UsageWindows`, which reads the other subscriptions'
+coverage ends once per active subscription) and checks an event against
+the one window holding it. Time a stretch holds but no window of the meter
+does is `outside_subscription`; time after a scheduled `cancel_at` is too,
+because the cancel's final invoice ends there.
+
+**A pin still ahead is not evidence.** A price saved now is in force at a
+pin that has not passed: the next period's start, for an event in the
+grace or the future skew read before that start, or a trial end. So
+`PriceMatchesAt` also says whether each pin had passed (a wall pin before
+the read's transaction start; a test-clock pin at or before the clock's
+time), and no flag is drawn from a price set whose pin is ahead.
+
+**Three stated exceptions.**
 
 - A price write whose transaction spans a pin and commits after the ingest
   read can make one `no_price` or `not_on_plan` flag wrong (ADR-130 §12).
+- The read is not a lock. A subscription change that commits between the
+  read and the write is not seen: a close, a cancel or an item removal can
+  leave an event unflagged that no invoice bills, and a plan swap, an item
+  add or a new subscription can bill an event that was flagged. The
+  LiteLLM door reads once per `/spend` request, so for it the gap is the
+  whole request.
 - `not_on_plan` and `outside_subscription` describe the subscriptions when
   the event arrived. A subscription's first period starts at the start of
   its first day, and an item added on a period's first day bills from the
   period start (ADR-012). So a subscription created, or such an item added,
   later on the event's day can bill an event flagged earlier that day.
   `TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt` pins
-  it. A trial event is `outside_subscription`: trial usage is free.
+  it. A trial event is `outside_subscription`: trial usage is free, on the
+  trial-end day too.
 
 **The answers.** The single and backfill 201 carry `billing_status`. The
 batch 201 counts each status (`after_close`, `no_price`, `not_on_plan`,
@@ -390,7 +418,8 @@ request. The LiteLLM answer counts the four statuses. The held-usage
 release counts `no_price` beside `not_on_plan`, so a released row no price
 takes is never `in_open_period`. A replay or a deduplicated row carries
 no status. `velox_usage_unbilled_total{reason, origin}` counts every
-written row by status; only an `after_close` row also logs a WARN line, as
+written row by status, rows the held-usage release writes included
+(`origin="backfill"`); only an `after_close` row also logs a WARN line, as
 before, because the other three are a setup to fix and can be every event
 of a customer.
 

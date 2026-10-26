@@ -43,8 +43,8 @@ export interface HeldUsageReleaseResult {
      */
   in_open_period: number;
   /**
-     * Released rows inside an active subscription's current billing
-     * period whose meter the plan prices, but that no price of the
+     * Released rows in a billing period not invoiced yet, whose meter
+     * the plan that bills their time prices, but that no price of the
      * plan takes (their dimensions do not include any price's
      * `dimension_match`). No invoice charges them.
      */
@@ -64,7 +64,8 @@ export interface HeldUsageReleaseResult {
   pending_threshold_invoice: number;
   /**
      * Released rows outside every subscription's time (before it
-     * started, in a free trial, or after it ended), and rows in an
+     * started, in a free trial, after it ended or after its scheduled
+     * cancel, or in another, ended subscription's time), and rows in an
      * earlier period of a plan that prices their meter. Also rows of a
      * sum or count meter stamped before the end of this period's paid
      * spend-threshold invoice. A subscription invoice does not count

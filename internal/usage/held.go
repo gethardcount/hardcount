@@ -229,16 +229,18 @@ type ReleaseResult struct {
 	// written off, no invoice counts them. If it is voided before the period
 	// closes, the period's invoice counts them.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
-	// NoPrice counts released rows whose time falls in a current billing
-	// period whose plan prices their meter, but no price of that plan takes
-	// their labels (dimension_match): no invoice charges them.
+	// NoPrice counts released rows whose time falls in a billing period not
+	// invoiced yet, whose meter the plan that bills that time prices, but no
+	// price of that plan takes their labels (dimension_match): no invoice
+	// charges them.
 	NoPrice int `json:"no_price"`
 	// NotOnPlan counts released rows whose time falls in a subscription's
 	// time, but whose meter the subscription's plan does not price: no
 	// invoice charges them.
 	NotOnPlan int `json:"not_on_plan"`
 	// OutsideOpenPeriod counts released rows outside every subscription's
-	// time (before it started, in a free trial, or after it ends), and rows
+	// time (before it started, in a free trial, after it ends or after its
+	// scheduled cancel, or in another, ended subscription's time), and rows
 	// in a period whose invoice is already built. It also counts rows of a
 	// sum or count meter stamped before the time a paid threshold invoice of
 	// the current period billed through. A subscription invoice does not
@@ -303,7 +305,14 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 		out.Released++
 		written = append(written, ReleasedUsage{At: r.EventAt, MeterID: in.MeterIDs[r.EventName], Labels: r.Dimensions})
 	}
-	countReleased(&out, written, periods, buckets)
+	classes := countReleased(&out, written, periods, buckets)
+	// The release has committed: count each written row no invoice will
+	// bill, as every ingest door does (origin backfill, as written).
+	for i, row := range written {
+		recordUnbilled(ctx, domain.UsageEvent{
+			CustomerID: in.CustomerID, MeterID: row.MeterID, Timestamp: row.At, Origin: domain.UsageOriginBackfill,
+		}, s.statusOf(classes[i]))
+	}
 	return out, nil
 }
 
@@ -443,10 +452,12 @@ func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInpu
 //     after the end of a subscription that ends there.
 //
 // buckets holds each row's meter; a meter missing from it is read as not
-// additive.
-func countReleased(out *ReleaseResult, rows []ReleasedUsage, periods []OpenPeriod, buckets map[string]MeterBuckets) {
+// additive. It returns each row's class, in the order of rows.
+func countReleased(out *ReleaseResult, rows []ReleasedUsage, periods []OpenPeriod, buckets map[string]MeterBuckets) []Class {
+	classes := make([]Class, 0, len(rows))
 	for _, row := range rows {
 		c, _ := classify(row.At, row.MeterID, row.Labels, periods, func() (MeterBuckets, error) { return buckets[row.MeterID], nil })
+		classes = append(classes, c)
 		switch c {
 		case InOpen:
 			out.InOpenPeriod++
@@ -460,4 +471,5 @@ func countReleased(out *ReleaseResult, rows []ReleasedUsage, periods []OpenPerio
 			out.OutsideOpenPeriod++
 		}
 	}
+	return classes
 }

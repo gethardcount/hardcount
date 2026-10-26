@@ -1694,11 +1694,12 @@ type usageOpenPeriods struct {
 type usageLiveSubscriptions interface {
 	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error)
 	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
+	ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error)
 }
 
 type usageMeterReader interface {
 	GetMeterTx(ctx context.Context, tx *sql.Tx, id string) (domain.Meter, error)
-	PriceMatchesAt(ctx context.Context, tenantID string, pins []pricing.PlanPin) ([][]pricing.PriceMatch, error)
+	PriceMatchesAt(ctx context.Context, tenantID string, pins []pricing.PlanPin) ([]pricing.PinPrices, error)
 }
 
 type usageThresholdReader interface {
@@ -1707,27 +1708,30 @@ type usageThresholdReader interface {
 
 // OpenPeriods reads every active and trialing subscription of the customer
 // (one transaction); for each, the threshold watermarks of its current
-// period, and the plan stretches the close bills the period by
-// (billing.PeriodPlans), from its billing intervals when it is active; then,
-// in one more transaction, the prices of each plan of the period at its pin
-// of the period and, for the plans that continue, at the period end (the
-// next period's pin), in the subscription's own time domain (ADR-130 §4). A
-// plan's pin is the one the close prices it at: the period start, or the
-// first instant in the period the subscription had an item on the plan. The
-// watermarks are read whether or not the subscription still has thresholds:
-// the close keys them on the period's threshold invoices, not on the
-// setting.
+// period, how the close bills the period (billing.PeriodPlans: the plan
+// stretches, from its billing intervals when it is active, and each plan's
+// pin), and where the customer's other subscriptions stopped covering a
+// meter in the period; then, in one more transaction, the prices of each
+// plan of the period at its pin of the period and, for the plans that
+// continue, at the period end (the next period's pin), in the
+// subscription's own time domain (ADR-130 §4), each with whether its pin
+// had passed. From the meters the plans price at their pins it builds the
+// period's usage windows, the close's own (billing.PeriodPlan.UsageWindows).
+// The watermarks are read whether or not the subscription still has
+// thresholds: the close keys them on the period's threshold invoices, not
+// on the setting.
 func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
 	subs, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list live subscriptions: %w", err)
 	}
 	type subPins struct {
-		sub       domain.Subscription
-		wm        usage.ThresholdWatermark
-		stretches []usage.Stretch
-		atPin     map[string]int // plan id → index in pins, at its pin of the period
-		atEnd     map[string]int // plan id → index in pins
+		sub      domain.Subscription
+		wm       usage.ThresholdWatermark
+		period   billing.PeriodPlan
+		coverage []domain.MeterCoverageEnd
+		atPin    map[string]int // plan id → index in pins, at its pin of the period
+		atEnd    map[string]int // plan id → index in pins
 	}
 	var (
 		pins []pricing.PlanPin
@@ -1743,18 +1747,19 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 		if err != nil {
 			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
 		}
-		stretches, planPins, err := billing.PeriodPlans(sub, start, end, func() ([]domain.ItemInterval, error) {
+		sp.period, err = billing.PeriodPlans(sub, start, end, func() ([]domain.ItemInterval, error) {
 			return a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
 		})
 		if err != nil {
 			return nil, err
 		}
-		for _, st := range stretches {
-			sp.stretches = append(sp.stretches, usage.Stretch{PlanID: st.PlanID, From: st.From, To: st.To})
+		sp.coverage, err = a.subs.ListCustomerMeterCoverageEnds(ctx, tenantID, sub.CustomerID, sub.ID, start, end)
+		if err != nil {
+			return nil, fmt.Errorf("other subscriptions' meter coverage of %s: %w", sub.ID, err)
 		}
-		for _, planID := range slices.Sorted(maps.Keys(planPins)) {
+		for _, planID := range slices.Sorted(maps.Keys(sp.period.Pins)) {
 			sp.atPin[planID] = len(pins)
-			pins = append(pins, pricing.PlanPin{PlanID: planID, At: planPins[planID], ClockID: sub.TestClockID})
+			pins = append(pins, pricing.PlanPin{PlanID: planID, At: sp.period.Pins[planID], ClockID: sub.TestClockID})
 		}
 		for _, it := range sub.Items {
 			for _, planID := range []string{it.PlanID, it.PendingPlanID} {
@@ -1779,21 +1784,33 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 		return nil, fmt.Errorf("prices of the plans: %w", err)
 	}
 	priceSet := func(i int) usage.PriceSet {
-		ps := usage.PriceSet{}
-		for _, pm := range prices[i] {
-			ps[pm.MeterID] = append(ps[pm.MeterID], pm.Match)
+		ps := usage.PriceSet{Ahead: !prices[i].Passed, ByMeter: map[string][]map[string]string{}}
+		for _, pm := range prices[i].Matches {
+			ps.ByMeter[pm.MeterID] = append(ps.ByMeter[pm.MeterID], pm.Match)
 		}
 		return ps
 	}
 	for _, sp := range read {
 		atPin, atEnd := map[string]usage.PriceSet{}, map[string]usage.PriceSet{}
+		planMeters := map[string][]string{}
 		for planID, i := range sp.atPin {
 			atPin[planID] = priceSet(i)
+			planMeters[planID] = slices.Sorted(maps.Keys(atPin[planID].ByMeter))
 		}
 		for planID, i := range sp.atEnd {
 			atEnd[planID] = priceSet(i)
 		}
-		if p, ok := usage.OpenPeriodOf(sp.sub, sp.stretches, atPin, atEnd, sp.wm); ok {
+		var stretches []usage.Stretch
+		for _, st := range sp.period.Stretches() {
+			stretches = append(stretches, usage.Stretch{PlanID: st.PlanID, From: st.From, To: st.To})
+		}
+		windows := map[string][]usage.Window{}
+		for meterID, ws := range sp.period.UsageWindows(planMeters, sp.coverage) {
+			for _, w := range ws {
+				windows[meterID] = append(windows[meterID], usage.Window{PlanID: w.PlanID, From: w.From, To: w.To})
+			}
+		}
+		if p, ok := usage.OpenPeriodOf(sp.sub, stretches, windows, atPin, atEnd, sp.wm); ok {
 			out = append(out, p)
 		}
 	}

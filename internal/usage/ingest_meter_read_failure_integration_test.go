@@ -103,13 +103,14 @@ func TestIngest_FailedMeterReadWritesNothing(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Second)
 			at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 			meters := map[string]bool{f.meter.ID: true}
-			catchAll := usage.PriceSet{f.meter.ID: {{}}}
+			catchAll := usage.PriceSet{ByMeter: map[string][]map[string]string{f.meter.ID: {{}}}}
 			// The event is before a paid threshold invoice's end, so its
 			// class depends on the meter's aggregation and the meter is read.
 			f.svc.SetOpenPeriodReader(failingMeterReader{period: usage.OpenPeriod{
 				Start: now.Add(-2 * time.Hour), End: now.Add(24 * time.Hour), Floor: at(-3 * time.Hour),
 				Meters: meters, Next: []usage.PriceSet{catchAll},
-				Spans:              []usage.PlanSpan{{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour), Prices: catchAll}},
+				Plans: map[string]usage.PriceSet{"pln": catchAll}, Stretches: []usage.Stretch{{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour)}},
+				Windows:            map[string][]usage.Window{f.meter.ID: {{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour)}}},
 				ThresholdWatermark: usage.ThresholdWatermark{BilledThrough: at(-30 * time.Minute), PaidThrough: at(-30 * time.Minute)},
 			}})
 

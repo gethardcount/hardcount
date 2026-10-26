@@ -1137,14 +1137,19 @@ func (f usageFloors) start(mid string, s, e time.Time) time.Time {
 // A read failure is returned: a window built without its floor bills usage
 // another subscription already billed, or trial usage.
 func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, from, to time.Time) (usageFloors, error) {
+	ends, err := e.intervalSnap.ListCustomerMeterCoverageEnds(ctx, sub.TenantID, sub.CustomerID, sub.ID, from, to)
+	if err != nil {
+		return usageFloors{}, fmt.Errorf("usage window: other subscriptions' meter coverage: %w", err)
+	}
+	return floorsOf(sub, ends), nil
+}
+
+// floorsOf is sub's usage floors given the coverage ends read for its window.
+func floorsOf(sub domain.Subscription, ends []domain.MeterCoverageEnd) usageFloors {
 	var f usageFloors
 	if sub.TrialEndAt != nil {
 		te := *sub.TrialEndAt
 		f.trialEnd = &te
-	}
-	ends, err := e.intervalSnap.ListCustomerMeterCoverageEnds(ctx, sub.TenantID, sub.CustomerID, sub.ID, from, to)
-	if err != nil {
-		return usageFloors{}, fmt.Errorf("usage window: other subscriptions' meter coverage: %w", err)
 	}
 	for _, end := range ends {
 		if f.coverageEnds == nil {
@@ -1152,7 +1157,7 @@ func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, f
 		}
 		f.coverageEnds[end.MeterID] = append(f.coverageEnds[end.MeterID], end.EndsAt)
 	}
-	return f, nil
+	return f
 }
 
 // meterUsageIntervals builds, per (plan, meter), the windows a closer bills

@@ -541,7 +541,7 @@ pin), G5 to G8 and ADR-129 stay.
 Built in #1390 (notes of 2026-10-27, from the code):
 
 - `not_on_plan` and `outside_subscription` shipped with it (D07). The rule,
-  their precedence and both stated exceptions are in the
+  their precedence and the stated exceptions are in the
   [ADR-120 amendment of 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-every-unbilled-event-says-why-adr-130-pr-6-d07).
 - An open-period event is checked against the plan stretches the close
   bills by, not only the current items' plans: a plan swapped away from
@@ -552,6 +552,10 @@ Built in #1390 (notes of 2026-10-27, from the code):
   statement that read the plans' meters at their pins, before the write.
 - The straddle exception below can make a `not_on_plan` flag wrong too: a
   price write that adds a meter's first price to the plan.
+- Inside a stretch an event is checked against the close's own usage
+  windows (trial end, other subscriptions' coverage ends, one window per
+  instant), and a price set whose pin had not passed when read draws no
+  flag: a price saved now is in force there (review round 1).
 - `/batch` returns `results[i]` per event and a count per status.
 
 - The ingest answer's `billing_status` is omitted when an open period will

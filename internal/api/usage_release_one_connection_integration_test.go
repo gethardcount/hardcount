@@ -36,6 +36,11 @@ func (s releaseSubs) ListItemIntervals(context.Context, string, string) ([]domai
 	return []domain.ItemInterval{{SubscriptionItemID: "si_release", PlanID: "pln_release", Quantity: 1, StartsAt: s.start.Add(-time.Hour)}}, nil
 }
 
+// ListCustomerMeterCoverageEnds answers no other subscription.
+func (s releaseSubs) ListCustomerMeterCoverageEnds(context.Context, string, string, string, time.Time, time.Time) ([]domain.MeterCoverageEnd, error) {
+	return nil, nil
+}
+
 // releasePricing reads meters from the store and answers that plan
 // pln_release prices meterID for every event.
 type releasePricing struct {
@@ -43,11 +48,12 @@ type releasePricing struct {
 	meterID string
 }
 
-func (p releasePricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]pricing.PriceMatch, error) {
-	out := make([][]pricing.PriceMatch, len(pins))
+func (p releasePricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([]pricing.PinPrices, error) {
+	out := make([]pricing.PinPrices, len(pins))
 	for i, pin := range pins {
+		out[i].Passed = true
 		if pin.PlanID == "pln_release" {
-			out[i] = []pricing.PriceMatch{{MeterID: p.meterID, Match: map[string]string{}}}
+			out[i].Matches = []pricing.PriceMatch{{MeterID: p.meterID, Match: map[string]string{}}}
 		}
 	}
 	return out, nil

@@ -36,6 +36,11 @@ func (s openPeriodsSubs) ListItemIntervals(context.Context, string, string) ([]d
 	}, nil
 }
 
+// ListCustomerMeterCoverageEnds answers no other subscription.
+func (s openPeriodsSubs) ListCustomerMeterCoverageEnds(context.Context, string, string, string, time.Time, time.Time) ([]domain.MeterCoverageEnd, error) {
+	return nil, nil
+}
+
 type noWatermarks struct{}
 
 func (noWatermarks) ThresholdWatermarks(context.Context, string, string, time.Time, time.Time) (*time.Time, *time.Time, error) {
@@ -67,11 +72,11 @@ func (p countingPricing) priceAt(planID string, at time.Time) pricing.PriceMatch
 	}
 }
 
-func (p countingPricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]pricing.PriceMatch, error) {
+func (p countingPricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([]pricing.PinPrices, error) {
 	*p.reads++
-	out := make([][]pricing.PriceMatch, len(pins))
+	out := make([]pricing.PinPrices, len(pins))
 	for i, pin := range pins {
-		out[i] = []pricing.PriceMatch{p.priceAt(pin.PlanID, pin.At)}
+		out[i] = pricing.PinPrices{Passed: true, Matches: []pricing.PriceMatch{p.priceAt(pin.PlanID, pin.At)}}
 	}
 	return out, nil
 }
@@ -112,7 +117,7 @@ func TestUsageOpenPeriods_ReadsPlanPricesOnce(t *testing.T) {
 	}
 	next := map[string]string{}
 	for _, ps := range p.Next {
-		for m, matches := range ps {
+		for m, matches := range ps.ByMeter {
 			next[m] = fmt.Sprint(matches)
 		}
 	}
@@ -131,6 +136,15 @@ func TestUsageOpenPeriods_ReadsPlanPricesOnce(t *testing.T) {
 type joinedSubs struct {
 	start, end time.Time
 	reads      map[string]int // billing-interval reads, by subscription
+	coverage   []domain.MeterCoverageEnd
+}
+
+// ListCustomerMeterCoverageEnds answers s.coverage for sub_new.
+func (s joinedSubs) ListCustomerMeterCoverageEnds(_ context.Context, _, _, excludeSubID string, _, _ time.Time) ([]domain.MeterCoverageEnd, error) {
+	if excludeSubID != "sub_new" {
+		return nil, nil
+	}
+	return s.coverage, nil
 }
 
 func (s joinedSubs) times() (started, gone, added, back, swapped time.Time) {
@@ -186,13 +200,13 @@ func (p pinRecorder) GetMeterTx(context.Context, *sql.Tx, string) (domain.Meter,
 	panic("not read by OpenPeriods")
 }
 
-func (p pinRecorder) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]pricing.PriceMatch, error) {
-	out := make([][]pricing.PriceMatch, len(pins))
+func (p pinRecorder) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([]pricing.PinPrices, error) {
+	out := make([]pricing.PinPrices, len(pins))
 	for i, pin := range pins {
 		if pin.At.Before(p.end) {
 			p.pins[pin.PlanID] = pin.At
 		}
-		out[i] = []pricing.PriceMatch{{MeterID: "mtr_" + pin.PlanID, Match: map[string]string{}}}
+		out[i] = pricing.PinPrices{Passed: true, Matches: []pricing.PriceMatch{{MeterID: "mtr_" + pin.PlanID, Match: map[string]string{}}}}
 	}
 	return out, nil
 }
@@ -245,7 +259,7 @@ func TestUsageOpenPeriods_PinsEachPlanWhereItWasFirstJoined(t *testing.T) {
 // Mutation: read billing intervals only when an item joined its plan in the
 // period → sub_old's stretch is missing; build spans from the current items
 // → pln_prev and it_gone's pln_back stretch are missing.
-func TestUsageOpenPeriods_SpansAreTheClosesStretches(t *testing.T) {
+func TestUsageOpenPeriods_StretchesAreTheClosesStretches(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	subs := joinedSubs{start: start, end: end, reads: map[string]int{}}
@@ -260,9 +274,9 @@ func TestUsageOpenPeriods_SpansAreTheClosesStretches(t *testing.T) {
 	_, gone, _, _, swapped := subs.times()
 	spans := func(p usage.OpenPeriod) []string {
 		var out []string
-		for _, sp := range p.Spans {
+		for _, sp := range p.Stretches {
 			var meters []string
-			for m := range sp.Prices {
+			for m := range p.Plans[sp.PlanID].ByMeter {
 				meters = append(meters, m)
 			}
 			slices.Sort(meters)
@@ -282,13 +296,49 @@ func TestUsageOpenPeriods_SpansAreTheClosesStretches(t *testing.T) {
 	}
 	slices.Sort(wantNew)
 	if g := spans(got[0]); fmt.Sprint(g) != fmt.Sprint(wantNew) {
-		t.Errorf("sub_new spans =\n%v\nwant\n%v", g, wantNew)
+		t.Errorf("sub_new stretches =\n%v\nwant\n%v", g, wantNew)
 	}
 	wantOld := []string{fmt.Sprintf("pln_old [%s, %s) [mtr_pln_old]", f(start), f(end))}
 	if g := spans(got[1]); fmt.Sprint(g) != fmt.Sprint(wantOld) {
-		t.Errorf("sub_old spans = %v, want %v", g, wantOld)
+		t.Errorf("sub_old stretches = %v, want %v", g, wantOld)
 	}
 	if subs.reads["sub_new"] != 1 || subs.reads["sub_old"] != 1 {
 		t.Errorf("billing-interval reads = %v, want each subscription once", subs.reads)
+	}
+}
+
+// Ingest classifies an event of a meter by the windows the close bills the
+// meter's usage over (billing.PeriodPlan.UsageWindows): it_back, added on
+// the period's first day on pln_back, reaches back to the period start, but
+// the time before 16:00 stays with it_gone, which was on the meter then. And
+// another subscription that stopped covering mtr_pln_start at 17:00 moves
+// that meter's window start there.
+//
+// Mutation: build the windows without the coverage ends → pln_start's window
+// starts at the period start.
+func TestUsageOpenPeriods_WindowsAreTheClosesWindows(t *testing.T) {
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	covered := start.Add(17 * time.Hour)
+	subs := joinedSubs{start: start, end: end, reads: map[string]int{}, coverage: []domain.MeterCoverageEnd{{MeterID: "mtr_pln_start", EndsAt: covered}}}
+	a := usageOpenPeriods{subs: subs, pricing: pinRecorder{end: end, pins: map[string]time.Time{}}, thresholds: noWatermarks{}}
+	got, err := a.OpenPeriods(context.Background(), "ten_open", "cus_open")
+	if err != nil {
+		t.Fatalf("OpenPeriods: %v", err)
+	}
+	_, gone, _, _, _ := subs.times()
+	f := func(t time.Time) string { return t.Format("02 15:04") }
+	windows := func(meterID string) string {
+		var out []string
+		for _, w := range got[0].Windows[meterID] {
+			out = append(out, fmt.Sprintf("[%s, %s)", f(w.From), f(w.To)))
+		}
+		return fmt.Sprint(out)
+	}
+	if g, w := windows("mtr_pln_back"), fmt.Sprint([]string{fmt.Sprintf("[%s, %s)", f(start), f(gone)), fmt.Sprintf("[%s, %s)", f(gone), f(end))}); g != w {
+		t.Errorf("mtr_pln_back windows = %s, want %s: one window per instant", g, w)
+	}
+	if g, w := windows("mtr_pln_start"), fmt.Sprint([]string{fmt.Sprintf("[%s, %s)", f(covered), f(end))}); g != w {
+		t.Errorf("mtr_pln_start windows = %s, want %s: from the other subscription's coverage end", g, w)
 	}
 }

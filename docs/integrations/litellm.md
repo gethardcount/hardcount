@@ -316,7 +316,7 @@ Velox customer yet, both of its events are held:
 | `after_close` | Of `accepted`, events whose billing period was already invoiced, such as a replay after the invoice was built. They are saved but billed on no invoice; bill them with a one-off invoice. A resent event counted in `deduplicated` is never counted here. |
 | `no_price` | Of `accepted`, events no price of the customer's plan takes: usually a model the plan has no price for. They are saved but billed on no invoice. Add a price for the model; it applies from the next billing period. |
 | `not_on_plan` | Of `accepted`, events of a meter the customer's plan has no price for. Saved, billed on no invoice. |
-| `outside_subscription` | Of `accepted`, events no subscription of the customer covered: there is none yet, or the call was before it started, in a free trial, or after it ended. Saved, billed on no invoice. |
+| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills: there is none yet, or the call was before it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel. Saved, billed on no invoice. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the
@@ -375,11 +375,10 @@ exist, Velox holds the call's events instead of billing them:
 period its time falls in, the same rule as any late usage (see
 [ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)):
 
-- Inside the customer's current billing period, and a price of the
-  subscription's plan takes it: the next invoice for that period includes
-  it.
-- Inside the current billing period, and the plan prices the meter but no
-  price takes the event (a model with no price): no invoice charges it.
+- In a billing period not invoiced yet, and a price of the plan that
+  bills that time takes it: that period's invoice includes it.
+- In a billing period not invoiced yet, and that plan prices the meter but
+  no price takes the event (a model with no price): no invoice charges it.
 - On a meter the plan does not price: no invoice charges it. Add the meter
   to the plan if it should be charged.
 - Before the subscription started, or in a period whose invoice is already
