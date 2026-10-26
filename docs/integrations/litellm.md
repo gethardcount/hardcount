@@ -319,10 +319,12 @@ Velox customer yet, both of its events are held:
 | `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills: there is none yet, or the call was before the day it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel. Saved, billed on no invoice. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
-An event after the end of the customer's current billing period is not
-checked until that period's invoice is built (an hour after the period
-end by default), so it is counted in none of `after_close`, `no_price` and
-`not_on_plan`. Its own period's invoice bills it if a price takes it.
+An event after the end of a subscription's current billing period, sent
+before that period's invoice is built (an hour after the period end by
+default), is not checked, so it is counted in none of `after_close`,
+`no_price` and `not_on_plan`. Its own period's invoice bills it if a price
+takes it. An event after a trial's end, sent before Velox ends the trial,
+is not checked either.
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the
 batch as delivered, and does not send it again. So a row in `errors` is

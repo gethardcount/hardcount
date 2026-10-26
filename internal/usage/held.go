@@ -220,7 +220,9 @@ type ReleaseResult struct {
 	// row after the period end, released before that period's invoice is
 	// built (the grace), counts here too when the subscription goes on: a
 	// period not invoiced yet holds it, but it is not checked against that
-	// period's prices, which are not known yet. A row of a sum or count
+	// period's prices, which are not known yet. So does a row at or after
+	// the trial end of a subscription still trialing: the trial can still be
+	// extended past it, so it is not checked either. A row of a sum or count
 	// meter before the time a threshold invoice of the period billed
 	// through does not count here: see PendingThresholdInvoice and
 	// OutsideOpenPeriod.
@@ -440,8 +442,8 @@ func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInpu
 // countReleased counts released rows into out by classify:
 //
 //   - InOpenPeriod (InOpen, Later): an open period's invoice counts it, or
-//     it is after the current period's end, in a period not invoiced yet,
-//     and not checked.
+//     it is not checked: after the current period's end, in a period not
+//     invoiced yet, or after the trial end of a subscription still trialing.
 //   - NoPrice (NoPrice): the time falls in an open period whose plan prices
 //     the meter, but no price takes the row's labels. No invoice counts it.
 //   - NotOnPlan (NotOnPlan): the time falls in an open period, but its

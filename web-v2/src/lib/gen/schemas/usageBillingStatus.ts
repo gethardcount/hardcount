@@ -32,13 +32,13 @@
  *   time is before its first billing period (which starts at midnight
  *   of the day it started), in a free trial (also on the day the
  *   trial ends, before its end), after one ended or after its
- *   scheduled cancel (a trial with a cancel at period end ends at its
- *   trial end), or the meter's time belonged to another subscription
- *   that has ended.
+ *   scheduled cancel, or the meter's time belonged to another
+ *   subscription that has ended.
  *
  * `not_on_plan` and `outside_subscription` describe the customer's
- * subscriptions when the event arrived. A subscription created later
- * that day, or an item added on the first day of a billing period,
+ * subscriptions when the event arrived. A subscription created or
+ * activated later that day, or an item added on the first day of a
+ * billing period,
  * bills from the start of that day, so it can bill the event after
  * all. A price saved in the same instant a billing period starts can
  * make one `no_price` or `not_on_plan` answer wrong. A change to the
@@ -52,7 +52,13 @@
  * applies to it). Absent too for an event at or after the end of the
  * subscription's current billing period, which is not checked: its
  * own period bills it at that period's prices, not known until the
- * current period's invoice is built. Absent on a replay and on a read.
+ * current period's invoice is built. Absent too for an event at or
+ * after a trial's end while the subscription is still trialing, which
+ * is not checked: until Velox ends the trial, the trial can be
+ * extended past the event or a cancel at period end undone. When one
+ * subscription of the customer does not check an event, it carries no
+ * status even if another subscription would flag it. Absent on a
+ * replay and on a read.
  */
 export type UsageBillingStatus = typeof UsageBillingStatus[keyof typeof UsageBillingStatus];
 

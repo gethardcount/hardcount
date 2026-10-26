@@ -362,9 +362,9 @@ the answer that writes the event carries one of four statuses:
   period the trial outlasts), after one ends at its period end or at a
   scheduled cancel, or in a stretch of the meter that another
   subscription, since ended, billed. The end is the subscription's
-  `cancel_effective_at` (ADR-069): for a trialing subscription with a
-  cancel at period end, the trial end, where it is canceled free (review
-  round 2).
+  `cancel_effective_at` (ADR-069). Review round 2 also ended a trialing
+  subscription with a cancel at period end at its trial end; round 4
+  replaced that (below).
 
 Where they disagree across subscriptions, a subscription that bills the
 event wins, then one that prices its meter (`no_price`), then one that
@@ -373,8 +373,14 @@ invoiced its time (`after_close`), then one whose open period holds it
 subscription whose open period holds the time but does not price the
 meter no longer turns an `after_close` event into a silent one. Nothing is
 sent when an invoice bills the event or still can (before an unpaid
-threshold invoice's end), or when the event is after the current period's
-end (below).
+threshold invoice's end), or when a subscription does not check it: after
+its current period's end, or after its trial end while it still trials
+(below). A subscription that does not check an event outranks every flag
+of another (review round 4): the event may be in the unchecked time, so
+no other subscription's flag can say that no invoice bills it. So in the
+grace after an add-on subscription's period end, and while its close is
+late or failing, the base subscription's flags for that time are not
+sent.
 
 **The floor is where the close began to bill** (review round 3). A
 subscription's first period starts at midnight of its first day
@@ -402,6 +408,20 @@ zone and each plan's interval, and the plan changes due at each), which
 was left out. If its plan prices the meter but no price takes it, the
 close logs its unpriced-usage WARN, and `velox_usage_unpriced_quantity_total`
 counts it (not for a test-clock subscription).
+
+**After a trial end, before the trial scan, nothing is checked** (review
+round 4). A trialing subscription stays trialing past its trial end until
+the trial scan runs (each billing run, hourly by default). Until then the
+operator can extend the trial past an event (`ExtendTrial` does not check
+that the trial end is still ahead), and the event becomes free trial usage, or
+undo a cancel at period end (the clear is refused only once the close has
+canceled an active subscription), and the scan then activates the
+subscription and bills it. No status is true of both outcomes, so such an
+event gets none. This replaces round 2's rule, which ended a trialing
+subscription with a cancel at period end at its trial end and answered
+`outside_subscription` there, wrongly once the cancel was undone. Refusing
+both operator actions once the trial end has passed would make a flag
+possible again; that is a subscription-behavior change, left open.
 
 **Which plan an event is checked against.** The close bills an open
 period by plan stretches: each stretch of the period during which an item
@@ -448,9 +468,11 @@ time), and no flag is drawn from a price set whose pin is ahead.
 - `not_on_plan` and `outside_subscription` describe the subscriptions when
   the event arrived. A subscription's first period starts at the start of
   its first day, and an item added on a period's first day bills from the
-  period start (ADR-012). So a subscription created, or such an item added,
-  later on the event's day can bill an event flagged earlier that day.
-  `TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt` pins
+  period start (ADR-012). So a subscription created or activated (a
+  draft), or such an item added, later on the event's day can bill an
+  event flagged earlier that day.
+  `TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt` and
+  `TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay` pin
   it. A trial event is `outside_subscription`: trial usage is free, on the
   trial-end day too.
 

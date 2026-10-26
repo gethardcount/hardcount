@@ -152,7 +152,8 @@ five places:
   same instant a billing period starts, or a plan change saved while the
   request is in flight, can make one such answer wrong. An event after the
   end of the subscription's current period, sent before that period's
-  invoice is built, is not checked, so it carries no `billing_status`;
+  invoice is built, is not checked, so it carries no `billing_status`.
+  Neither is an event after a trial's end, sent before Velox ends the trial;
 - the "not billed" row of the customer's usage, on the customer page and
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
   you pass `from` and `to`), marked `no_price`;
