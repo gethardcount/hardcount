@@ -178,10 +178,11 @@ func BucketsOf(meter domain.Meter) MeterBuckets {
 //   - at >= End (the grace before End's invoice, or a close running late):
 //     the next period counts it if the subscription continues and prices the
 //     meter from End on. Never AfterClose: the next close bills it.
-//   - Start <= at < End: InOpen if a current plan prices the meter at the
-//     period start, else NotOnPlan. When the meter is additive and at is past the floor:
-//     before PaidThrough it is AfterClose, and before BilledThrough (a
-//     threshold invoice not paid yet) it is Unsettled.
+//   - Start <= at < End: InOpen if a current item's plan prices the meter
+//     at the item's window pin (OpenPeriod.Meters), else NotOnPlan. When
+//     the meter is additive and at is past the floor: before PaidThrough it
+//     is AfterClose, and before BilledThrough (a threshold invoice not paid
+//     yet) it is Unsettled.
 //   - at < Start: AfterClose when a current plan prices the meter and at is
 //     at or past the floor. Else Outside.
 //

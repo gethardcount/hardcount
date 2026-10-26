@@ -437,7 +437,9 @@ components:
         end), an immediate plan change onto the plan, or an item added on
         it. Each is priced from that moment by the plan's prices then, so a
         subscription that starts later on the day of the write bills a price
-        added that day and not one removed that day.
+        added that day and not one removed that day. On a test clock, the
+        write takes effect just after the clock's time: a subscriber who
+        joins at that same clock time gets the earlier prices.
       allOf:
         - $ref: "#/components/schemas/PlanPrice"
         - type: object
@@ -12946,7 +12948,10 @@ paths:
         at once when the customer joins the plan after it is created: an
         override created before a subscription starts (after a trial,
         before the trial ends), even on the same day, applies from its
-        first period. The override takes the plan's currency. A plan swap does not carry
+        first period. On a test clock, it takes effect just after the
+        clock's time, so a subscription created at that same clock time
+        bills the list price; advance the clock first. The override takes
+        the plan's currency. A plan swap does not carry
         it: the new plan's price is another price.
       operationId: createPriceOverride
       parameters:

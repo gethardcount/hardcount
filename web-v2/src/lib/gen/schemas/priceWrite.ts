@@ -21,7 +21,9 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * end), an immediate plan change onto the plan, or an item added on
  * it. Each is priced from that moment by the plan's prices then, so a
  * subscription that starts later on the day of the write bills a price
- * added that day and not one removed that day.
+ * added that day and not one removed that day. On a test clock, the
+ * write takes effect just after the clock's time: a subscriber who
+ * joins at that same clock time gets the earlier prices.
  */
 export type PriceWrite = PlanPrice & {
   effective: PriceWriteEffective;

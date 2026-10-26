@@ -155,3 +155,28 @@ func TestMeterUsageIntervals_OneWindowPerInstant(t *testing.T) {
 		})
 	}
 }
+
+// subtractUsageIntervals takes the taken time out of each interval: a hole
+// in the middle splits it, an edge trims it, and a cover removes it.
+func TestSubtractUsageIntervals(t *testing.T) {
+	h := func(n int) time.Time { return time.Date(2026, 4, 10, n, 0, 0, 0, time.UTC) }
+	iv := func(a, b int) usageInterval { return usageInterval{h(a), h(b)} }
+	cases := []struct {
+		name       string
+		ivs, taken []usageInterval
+		want       []usageInterval
+	}{
+		{"nothing taken", []usageInterval{iv(0, 10)}, nil, []usageInterval{iv(0, 10)}},
+		{"hole in the middle", []usageInterval{iv(0, 10)}, []usageInterval{iv(2, 4)}, []usageInterval{iv(0, 2), iv(4, 10)}},
+		{"front and back", []usageInterval{iv(0, 10)}, []usageInterval{iv(0, 2), iv(8, 12)}, []usageInterval{iv(2, 8)}},
+		{"covered", []usageInterval{iv(2, 4)}, []usageInterval{iv(0, 10)}, nil},
+		{"touching only", []usageInterval{iv(2, 4)}, []usageInterval{iv(0, 2), iv(4, 6)}, []usageInterval{iv(2, 4)}},
+		{"two intervals, two holes", []usageInterval{iv(0, 4), iv(6, 10)}, []usageInterval{iv(1, 2), iv(3, 7)}, []usageInterval{iv(0, 1), iv(2, 3), iv(7, 10)}},
+	}
+	for _, c := range cases {
+		got := subtractUsageIntervals(c.ivs, c.taken)
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}

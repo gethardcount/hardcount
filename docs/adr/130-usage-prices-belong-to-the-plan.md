@@ -235,10 +235,22 @@ item of #1386. Step 3 changes; the other steps stay.
   balance and customer usage. Ingest reads each current item's plan at the
   item's window pin, from the item's last swap (`plan_changed_at`), its
   `created_at` and the subscription's start.
-- On a test clock the pin is in simulated time. A version written at clock
-  time T takes effect at T + 1 µs (section 7), so a subscription created
-  while the clock still reads T pays the earlier price. Advance the clock,
-  then subscribe.
+- On a test clock the pin is in simulated time. A price version or an
+  override written at clock time T takes effect at T + 1 µs (sections 6
+  and 7), so a subscription created, an immediate swap or an item added
+  while the clock still reads T gets the earlier prices. Advance the clock
+  first.
+- One meter's usage at one instant is in one window. The meter-overlap
+  guard keeps two live items of a subscription off one meter, but an add on
+  a period's first day bills from the period start (ADR-012), so its window
+  can reach back over an item that left the meter earlier that day: removed,
+  or swapped to another plan, on the same plan or on another one. That time
+  stays with the window with the earlier pin, the item that was on the
+  meter then; the added item's window keeps the rest. With one key per
+  (plan, meter, pin), windows of one plan with different pins are no longer
+  merged, so without this rule the time before the removal was billed once
+  per window (review of #1388). Across two plans that double bill was older
+  than this amendment; the same rule ends it.
 - Every pin is a stored instant (`started_at`, `trial_end_at`, a billing
   interval's start, an item's `created_at`), so all readers agree on it. A
   subscription create, an immediate swap and an item add hold their plans
@@ -526,7 +538,9 @@ pin), G5 to G8 and ADR-129 stay.
   status. It replaces ADR-120's `velox_usage_after_close_total{origin}`,
   which becomes `reason="after_close"`.
 - Ingest pins at the open period's start, and at its end for an event in
-  the grace after it.
+  the grace after it. (Amended 2026-10-26, section 4: an event in the open
+  period is checked against each current item's plan at that item's window
+  pin.)
 - Matching runs in Go. With string values, per-key equality is the same as
   Postgres `@>`; a real-Postgres test checks the two agree.
 - **One stated exception to "a flag is never false"** (ADR-120): a price

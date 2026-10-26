@@ -175,9 +175,6 @@ they were on it then, so:
   the add. So a subscription that starts later on the day of a change pays
   the new rate, bills a price added earlier and does not bill a price
   removed earlier, from its first period.
-- On a test clock, a change takes effect just after the clock's current
-  time. A subscription created at that same clock time pays the earlier
-  price, so advance the clock before you subscribe.
 - A customer's negotiated rate (a price override) keeps applying when the
   price's rate changes. Removing the price ends it, and the answer lists the
   overrides it ended.
@@ -185,6 +182,10 @@ they were on it then, so:
   joins the plan after it was created, and otherwise from the next period.
   So one created before a subscription starts (after a trial, before the
   trial ends), even on the same day, applies from its first period.
+- On a test clock, a change or an override takes effect just after the
+  clock's current time. A subscription, an immediate plan change or an
+  added item at that same clock time gets the earlier prices, so advance
+  the clock first.
 
 On the dashboard, open the plan under **Pricing**. Its **Usage prices**
 card says which of the two applies before you save.

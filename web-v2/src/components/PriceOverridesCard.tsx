@@ -193,7 +193,8 @@ function CreateOverrideDialog({ customerId, prices, existing, onClose, onCreated
           <DialogDescription>
             A negotiated rate for this customer on one plan price. It applies from this customer's
             next billing period; the period in progress keeps the rate it started with. If the customer
-            subscribes to the plan or moves to it after you save, it applies from then.
+            subscribes to the plan or moves to it after you save, it applies from then. On a test clock, advance
+            the clock first.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">

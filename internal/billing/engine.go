@@ -1181,7 +1181,10 @@ func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, f
 // invoice) must aggregate over the full window, because clamping a max to
 // the residual window drops a pre-fire peak (partial-window mis-bill), and
 // splitting it double-bills. With no watermark full is empty and only
-// clamped is used. Intervals are not merged; callers run mergeUsageIntervals.
+// clamped is used.
+//
+// A meter's usage at one instant is in one window (oneWindowPerInstant).
+// Callers still run mergeUsageIntervals on each key.
 func meterUsageIntervals(stretches []planStretch, planMeters map[planPin][]string, billedThrough *time.Time, floors usageFloors) (clamped, full map[planMeter][]usageInterval) {
 	clamped = map[planMeter][]usageInterval{}
 	full = map[planMeter][]usageInterval{}
@@ -1204,7 +1207,75 @@ func meterUsageIntervals(stretches []planStretch, planMeters map[planPin][]strin
 			clamped[k] = append(clamped[k], usageInterval{s, st.end})
 		}
 	}
+	oneWindowPerInstant(clamped)
+	oneWindowPerInstant(full)
 	return clamped, full
+}
+
+// oneWindowPerInstant leaves each instant of a meter's usage in one window
+// of windows. The meter-overlap guard keeps two live items of a subscription
+// off one meter, but an item added on a period's first day bills from the
+// period start (ADR-012), so its window reaches back over an item that left
+// the meter earlier that day: removed, or swapped to another plan. Without
+// this the usage before it left is billed twice, once at each pin, and
+// across two plans once by each plan. That time stays with the window whose
+// pin is earlier, the item that was on the meter then; the later window
+// keeps the rest. Pins tie only across plans; the plan id breaks the tie.
+func oneWindowPerInstant(windows map[planMeter][]usageInterval) {
+	byMeter := map[string][]planMeter{}
+	for k := range windows {
+		byMeter[k.meterID] = append(byMeter[k.meterID], k)
+	}
+	for _, keys := range byMeter {
+		if len(keys) < 2 {
+			continue
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if !keys[i].pin.at.Equal(keys[j].pin.at) {
+				return keys[i].pin.at.Before(keys[j].pin.at)
+			}
+			return keys[i].planID < keys[j].planID
+		})
+		var taken []usageInterval
+		for _, k := range keys {
+			own := mergeUsageIntervals(windows[k])
+			left := subtractUsageIntervals(own, taken)
+			taken = mergeUsageIntervals(append(taken, own...))
+			if len(left) == 0 {
+				delete(windows, k)
+				continue
+			}
+			windows[k] = left
+		}
+	}
+}
+
+// subtractUsageIntervals is ivs without the time in taken. Both are sorted
+// and disjoint (mergeUsageIntervals); so is the result.
+func subtractUsageIntervals(ivs, taken []usageInterval) []usageInterval {
+	var out []usageInterval
+	for _, iv := range ivs {
+		s := iv.start
+		for _, t := range taken {
+			if !t.end.After(s) {
+				continue
+			}
+			if !t.start.Before(iv.end) {
+				break
+			}
+			if t.start.After(s) {
+				out = append(out, usageInterval{s, t.start})
+			}
+			s = t.end
+			if !s.Before(iv.end) {
+				break
+			}
+		}
+		if s.Before(iv.end) {
+			out = append(out, usageInterval{s, iv.end})
+		}
+	}
+	return out
 }
 
 // hydrateSegmentPlans reads into plans every plan only a segment names: an

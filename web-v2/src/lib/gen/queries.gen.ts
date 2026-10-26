@@ -15128,7 +15128,10 @@ export const getCreatePriceOverrideUrl = () => {
  * at once when the customer joins the plan after it is created: an
  * override created before a subscription starts (after a trial,
  * before the trial ends), even on the same day, applies from its
- * first period. The override takes the plan's currency. A plan swap does not carry
+ * first period. On a test clock, it takes effect just after the
+ * clock's time, so a subscription created at that same clock time
+ * bills the list price; advance the clock first. The override takes
+ * the plan's currency. A plan swap does not carry
  * it: the new plan's price is another price.
  * @summary Create a customer price override
  */
