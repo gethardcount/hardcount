@@ -107,7 +107,6 @@ func TestIngest_FailedMeterReadWritesNothing(t *testing.T) {
 			// class depends on the meter's aggregation and the meter is read.
 			f.svc.SetOpenPeriodReader(failingMeterReader{period: usage.OpenPeriod{
 				Start: now.Add(-2 * time.Hour), End: now.Add(24 * time.Hour), Floor: at(-3 * time.Hour),
-				Next:  []usage.PriceSet{catchAll},
 				Plans: map[string]usage.PriceSet{"pln": catchAll}, Stretches: []usage.Stretch{{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour)}},
 				Windows:            map[string][]usage.Window{f.meter.ID: {{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour)}}},
 				ThresholdWatermark: usage.ThresholdWatermark{BilledThrough: at(-30 * time.Minute), PaidThrough: at(-30 * time.Minute)},

@@ -92,7 +92,10 @@ export function releaseSummary(r: HeldUsageReleaseResult): { title: string; desc
     ? 'Nothing released'
     : `Released ${rowsWord(recorded)}`
   const parts: string[] = []
-  if (r.in_open_period > 0) parts.push(`${r.in_open_period.toLocaleString('en-US')} fall in a billing period not invoiced yet and will be invoiced.`)
+  // in_open_period also counts rows after the current period's end, which
+  // the server does not check against prices yet, so this line does not
+  // promise an invoice charges every one.
+  if (r.in_open_period > 0) parts.push(`${r.in_open_period.toLocaleString('en-US')} fall in a billing period not invoiced yet. Its invoice charges them if a price on the subscription's plan matches them.`)
   if (r.no_price > 0) {
     parts.push(`${r.no_price.toLocaleString('en-US')} fall in a billing period not invoiced yet, but no price on the subscription's plan matches them, so no invoice charges them.`)
   }

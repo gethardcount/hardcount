@@ -36,8 +36,8 @@ export interface HeldUsageReleaseResult {
      * period that a price of the subscription's plan takes. That
      * period's invoice counts them. A row after the period end,
      * released before that period's invoice is built, counts here when
-     * the subscription continues and a price of its plan from then on
-     * takes it. Rows of a sum or count meter stamped before the end of
+     * the subscription continues, without a price check: that
+     * period's prices are not known yet. Rows of a sum or count meter stamped before the end of
      * this period's spend-threshold invoice are not counted here: see
      * `pending_threshold_invoice` and `outside_open_period`.
      */

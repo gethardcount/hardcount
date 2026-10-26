@@ -322,9 +322,10 @@ periods before it writes, and each meter's aggregation on the release's
 transaction, after its inserts: a release can write a meter's first
 events, and the aggregation can change until then (ADR-130 §2, amended
 2026-10-24). A released row at or after the period end, before
-that period's invoice, belongs to the next period: `in_open_period` when
-the subscription continues past the end and its plan from then on prices
-the meter. A row the rule calls after_close counts as
+that period's invoice, counts as `in_open_period` when the subscription
+continues past the end: a period not invoiced yet holds it. Since the
+amendment of 2026-10-27 (review round 3) it is not checked against that
+period's prices. A row the rule calls after_close counts as
 `outside_open_period`. A row before the end of an unpaid threshold invoice
 counts as `pending_threshold_invoice`: the period's invoice bills it only
 if that threshold invoice is voided first.
@@ -336,7 +337,8 @@ bill. The rule is still `classify` (`internal/usage/open_period.go`), and
 the answer that writes the event carries one of four statuses:
 
 - `after_close`: as above. Before the period start (an invoiced period,
-  past the billing start) it is after_close whatever the subscription's
+  from where the close began to bill the subscription) it is after_close
+  whatever the subscription's
   plans price now (review round 2). The current plans are not the plans
   that held that period: after a swap at renewal to a plan without the
   meter they would call a late April event `not_on_plan`, which tells the
@@ -354,7 +356,8 @@ the answer that writes the event carries one of four statuses:
   time, but no plan the subscription was on at that instant prices the
   meter.
 - `outside_subscription`: no active or trialing subscription bills the
-  time: none exists, or the time is before one started, in a free trial
+  time: none exists, or the time is before one's first period (which
+  starts at midnight of its first day), in a free trial
   (also on the trial-end day, before the trial end, and in the grace of a
   period the trial outlasts), after one ends at its period end or at a
   scheduled cancel, or in a stretch of the meter that another
@@ -370,7 +373,35 @@ invoiced its time (`after_close`), then one whose open period holds it
 subscription whose open period holds the time but does not price the
 meter no longer turns an `after_close` event into a silent one. Nothing is
 sent when an invoice bills the event or still can (before an unpaid
-threshold invoice's end).
+threshold invoice's end), or when the event is after the current period's
+end (below).
+
+**The floor is where the close began to bill** (review round 3). A
+subscription's first period starts at midnight of its first day
+(ADR-012), and the close bills its usage from there, not from the instant
+it started. So the floor of after_close is the start of its earliest
+billing interval (`billing.PeriodPlan.BilledFrom`), moved to the trial end
+when it had a trial. An event on the first day, before the start instant,
+is billed in the open first period, and after_close once that period is
+invoiced, not `outside_subscription`. The threshold watermark flags it
+too: the close clamps sum and count windows to the watermark from the
+period start, so an event there before a paid fire's end is billed
+nowhere.
+
+**After the period end, nothing is checked** (review round 3). An event at
+or after the current period's end is billed by its own period's plans at
+that period's pins. The current period's close has not run, and it can be
+behind by more than one period: a failing run, a stopped scheduler, a test
+clock catching up. A price edit or a plan change between the period end and
+the event's own period start would make a flag drawn from the plans at
+the period end wrong either way. So such an event gets no
+`billing_status`, unless a trial or a scheduled cancel makes it
+`outside_subscription`. Checking it exactly would need the close's
+period sequence in ingest (the next period ends, from the tenant's time
+zone and each plan's interval, and the plan changes due at each), which
+was left out. If its plan prices the meter but no price takes it, the
+close logs its unpriced-usage WARN, and `velox_usage_unpriced_quantity_total`
+counts it (not for a test-clock subscription).
 
 **Which plan an event is checked against.** The close bills an open
 period by plan stretches: each stretch of the period during which an item
@@ -398,8 +429,8 @@ does is `outside_subscription`; time after a scheduled `cancel_at` is too,
 because the cancel's final invoice ends there.
 
 **A pin still ahead is not evidence.** A price saved now is in force at a
-pin that has not passed: the next period's start, for an event in the
-grace or the future skew read before that start, or a trial end. So
+pin that has not passed: a trial end, for an event in the future skew
+read before it. So
 `PriceMatchesAt` also says whether each pin had passed (a wall pin before
 the read's transaction start; a test-clock pin at or before the clock's
 time), and no flag is drawn from a price set whose pin is ahead.
@@ -428,8 +459,9 @@ batch 201 counts each status (`after_close`, `no_price`, `not_on_plan`,
 `outside_subscription`) and returns `results[i]`, each event's `status`
 (`ingested` or `deduplicated`) and `billing_status`, at its index in the
 request. The LiteLLM answer counts the four statuses. The held-usage
-release counts `no_price` beside `not_on_plan`, so a released row no price
-takes is never `in_open_period`. A replay or a deduplicated row carries
+release counts `no_price` beside `not_on_plan`, so a released row in the
+current period that no price takes is never `in_open_period` (a row after
+the period end is not checked). A replay or a deduplicated row carries
 no status. `velox_usage_unbilled_total{reason, origin}` counts every
 written row by status, rows the held-usage release writes included
 (`origin="backfill"`); only an `after_close` row also logs a WARN line, as

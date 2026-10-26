@@ -195,16 +195,23 @@ type PeriodPlan struct {
 	stretches []planStretch
 	// Pins holds, by plan id, the plan's pin of the period.
 	Pins map[string]time.Time
+	// BilledFrom is the start of the subscription's earliest billing
+	// interval: where the close began to bill it, the start of its first
+	// period (ADR-101). Nil for a trialing subscription, which has none
+	// yet.
+	BilledFrom *time.Time
 }
 
 // PeriodPlans reads sub's billing period [start, end) as the close bills it:
 // every stretch during which an item was on a plan, an item removed in the
 // period and a plan swapped away from included, and the pin of each plan of
-// the period. An active subscription's stretches come from its billing
-// intervals, read through intervals. A trialing one has none until its trial
-// ends, and each current item is on its plan for the whole period.
+// the period, and where the close began to bill the subscription. An
+// active subscription's stretches come from its billing intervals, read
+// through intervals. A trialing one has none until its trial ends, and each
+// current item is on its plan for the whole period.
 func PeriodPlans(sub domain.Subscription, start, end time.Time, intervals func() ([]domain.ItemInterval, error)) (PeriodPlan, error) {
 	var segs map[string][]baseSegment
+	var billedFrom *time.Time
 	if sub.Status != domain.SubscriptionTrialing {
 		rows, err := intervals()
 		if err != nil {
@@ -213,6 +220,10 @@ func PeriodPlans(sub domain.Subscription, start, end time.Time, intervals func()
 		rowsByItem := map[string][]domain.ItemInterval{}
 		for _, iv := range rows {
 			rowsByItem[iv.SubscriptionItemID] = append(rowsByItem[iv.SubscriptionItemID], iv)
+			if billedFrom == nil || iv.StartsAt.Before(*billedFrom) {
+				at := iv.StartsAt
+				billedFrom = &at
+			}
 		}
 		segs = intervalSegmentsByItem(rowsByItem, start, end)
 	}
@@ -222,7 +233,7 @@ func PeriodPlans(sub domain.Subscription, start, end time.Time, intervals func()
 	for planID, pin := range pins.byPlan {
 		byPlan[planID] = pin.at
 	}
-	return PeriodPlan{sub: sub, stretches: stretches, Pins: byPlan}, nil
+	return PeriodPlan{sub: sub, stretches: stretches, Pins: byPlan, BilledFrom: billedFrom}, nil
 }
 
 // Stretches is the period's plan stretches.

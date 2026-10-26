@@ -560,6 +560,11 @@ Built in #1390 (notes of 2026-10-27, from the code):
   `after_close` whatever the current plans price: they are not the plans
   that held that period. A trialing subscription with a cancel at period
   end ends at its trial end, where it is canceled free (review round 2).
+- The floor of `after_close` is where the close began to bill (the first
+  billing interval's start, at midnight of the first day), not the start
+  instant. An event at or after the current period's end is not checked:
+  its own period's prices are not known while the close has not run, which
+  can be more than one period late (review round 3).
 - `/batch` returns `results[i]` per event and a count per status.
 
 - The ingest answer's `billing_status` is omitted when an open period will

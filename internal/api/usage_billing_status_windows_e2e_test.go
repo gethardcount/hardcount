@@ -173,12 +173,13 @@ func TestBillingStatus_FirstDayReachBackKeepsTheEarlierPlan(t *testing.T) {
 // TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged: a test clock is
 // parked three minutes before its subscription's period end P1. An event
 // stamped one minute after P1 (inside the future skew) is in the next period,
-// whose prices are read at P1. P1 has not passed on the clock, so a price
-// saved now is in force at P1: the answer cannot say no_price. The price for
-// model c is saved, and the next period's invoice bills the event.
+// priced at P1. P1 has not passed on the clock, so a price saved now is in
+// force at P1: the answer cannot say no_price. The price for model c is
+// saved, and the next period's invoice bills the event. Since review round 3
+// an event after the period end is not checked at all.
 //
-// Mutation checks: answer every pin passed (PriceMatchesAt), or ignore a pin
-// ahead in classify → the event is answered no_price and then billed.
+// Mutation check: classify an event after the period end by the period's
+// plans → the event is answered no_price and then billed.
 func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
 	r := newPPRig(t, "next pin ahead")
 	tokens := r.meter("tokens", "sum")

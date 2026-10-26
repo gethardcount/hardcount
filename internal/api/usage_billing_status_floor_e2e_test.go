@@ -97,8 +97,8 @@ func TestBillingStatus_FirstDayBeforeTheStartInTheInvoicedFirstPeriod(t *testing
 // close is behind, so it answers neither with a status. It must not answer
 // no_price for the model b event, which is billed.
 //
-// Mutation check: classify an event after the period end by the prices at
-// the period end → the model b event is no_price, and then billed.
+// Mutation check: classify an event after the period end by the current
+// period's plans → the model b event is no_price, and then billed.
 func TestBillingStatus_LaterPeriodWhileTheCloseIsBehind(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)

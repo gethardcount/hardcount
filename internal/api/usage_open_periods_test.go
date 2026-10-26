@@ -14,13 +14,15 @@ import (
 )
 
 // openPeriodsSubs answers one active subscription with two items, one of
-// them with a plan change pending at the period end.
+// them with a plan change pending at the period end, which ingest does not
+// read: an event after the period end is not checked.
 type openPeriodsSubs struct{ start, end time.Time }
 
 func (s openPeriodsSubs) ListLiveByCustomer(context.Context, string, string) ([]domain.Subscription, error) {
+	started := s.start.Add(15 * time.Hour)
 	return []domain.Subscription{{
 		ID: "sub_open", Status: domain.SubscriptionActive,
-		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &s.start,
+		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &started,
 		Items: []domain.SubscriptionItem{
 			{ID: "it_a", PlanID: "pln_a", PendingPlanID: "pln_b", PendingPlanEffectiveAt: &s.end},
 			{ID: "it_c", PlanID: "pln_c"},
@@ -53,6 +55,7 @@ func (noWatermarks) ThresholdWatermarks(context.Context, string, string, time.Ti
 type countingPricing struct {
 	end   time.Time
 	reads *int
+	pins  *[]string
 }
 
 func (p countingPricing) GetMeterTx(context.Context, *sql.Tx, string) (domain.Meter, error) {
@@ -76,24 +79,28 @@ func (p countingPricing) PriceMatchesAt(_ context.Context, _ string, pins []pric
 	*p.reads++
 	out := make([]pricing.PinPrices, len(pins))
 	for i, pin := range pins {
+		*p.pins = append(*p.pins, pin.PlanID+"@"+pin.At.Format("02 15:04"))
 		out[i] = pricing.PinPrices{Passed: true, Matches: []pricing.PriceMatch{p.priceAt(pin.PlanID, pin.At)}}
 	}
 	return out, nil
 }
 
 // Ingest reads a customer's open periods on every event. The prices each
-// plan has at each pin are one read, however many items, pins and pending
-// changes the subscriptions have.
+// plan has at each pin are one read, however many items and pins the
+// subscriptions have. Only the period's plans are read, at their pins: not
+// the plans from the period end on, or a pending change's plan. And the
+// floor is the first billing interval's start.
 //
 // Mutation: read each (plan, pin) on its own, and the subscription below
-// costs five reads.
+// costs two reads.
 func TestUsageOpenPeriods_ReadsPlanPricesOnce(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	reads := 0
+	var pins []string
 	a := usageOpenPeriods{
 		subs:       openPeriodsSubs{start: start, end: end},
-		pricing:    countingPricing{end: end, reads: &reads},
+		pricing:    countingPricing{end: end, reads: &reads, pins: &pins},
 		thresholds: noWatermarks{},
 	}
 	got, err := a.OpenPeriods(context.Background(), "ten_open", "cus_open")
@@ -116,14 +123,12 @@ func TestUsageOpenPeriods_ReadsPlanPricesOnce(t *testing.T) {
 	if want := map[string]string{"pln_a": "mtr_a", "pln_c": "mtr_c"}; fmt.Sprint(atPin) != fmt.Sprint(want) {
 		t.Errorf("prices at the period start = %v, want %v", atPin, want)
 	}
-	next := map[string]string{}
-	for _, ps := range p.Next {
-		for m, matches := range ps.ByMeter {
-			next[m] = fmt.Sprint(matches)
-		}
+	slices.Sort(pins)
+	if want := []string{"pln_a@01 15:00", "pln_c@01 15:00"}; fmt.Sprint(pins) != fmt.Sprint(want) {
+		t.Errorf("pins read = %v, want %v", pins, want)
 	}
-	if want := map[string]string{"mtr_b": "[map[model:x]]", "mtr_c": "[map[]]"}; fmt.Sprint(next) != fmt.Sprint(want) {
-		t.Errorf("prices from the period end = %v, want %v (pln_b after its pending change, and pln_c)", next, want)
+	if p.Floor == nil || !p.Floor.Equal(start) {
+		t.Errorf("floor = %v, want the first billing interval's start %v, not the start instant", p.Floor, start)
 	}
 }
 

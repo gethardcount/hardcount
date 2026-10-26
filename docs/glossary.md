@@ -73,8 +73,9 @@ Words used in the Velox docs and dashboard. For the big picture, read
   event Velox just stored: `after_close` (its period was already
   invoiced), `no_price`, `not_on_plan` (the plan of a period not
   invoiced yet has no price for its meter) or `outside_subscription` (no subscription bills its time).
-  Absent when an invoice will bill it or still can, except in the stated
-  cases. Only the answer that wrote the event carries it.
+  Absent when an invoice will bill it or still can, and for an event after
+  the current billing period's end, which is not checked; except in the
+  stated cases. Only the answer that wrote the event carries it.
   [More](api-surface.md#usage-that-will-not-be-billed)
 - **plan**: A price package you sell: a currency, a billing interval
   (monthly or yearly), a fixed base fee, and its usage prices. Its meters

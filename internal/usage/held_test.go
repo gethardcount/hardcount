@@ -102,7 +102,7 @@ func TestCountReleased(t *testing.T) {
 					windows[m] = append(windows[m], Window{PlanID: it.PlanID, From: start, To: end})
 				}
 			}
-			if p, ok := OpenPeriodOf(s.s, stretches, windows, plans, plans, s.wm); ok {
+			if p, ok := OpenPeriodOf(s.s, stretches, windows, plans, &started, s.wm); ok {
 				periods = append(periods, p)
 			}
 		}
@@ -113,7 +113,7 @@ func TestCountReleased(t *testing.T) {
 		}
 	}
 	// A plan the caller could not supply prices nothing.
-	p, _ := OpenPeriodOf(active, []Stretch{{PlanID: "pln_tokens", From: start, To: end}}, nil, nil, nil, ThresholdWatermark{})
+	p, _ := OpenPeriodOf(active, []Stretch{{PlanID: "pln_tokens", From: start, To: end}}, nil, nil, &started, ThresholdWatermark{})
 	var got ReleaseResult
 	countReleased(&got, rows, []OpenPeriod{p}, sum)
 	if got != (ReleaseResult{NotOnPlan: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}) {

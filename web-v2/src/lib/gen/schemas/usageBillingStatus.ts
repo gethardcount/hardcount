@@ -25,9 +25,12 @@
  *   price you add now does not apply to it.
  * - `not_on_plan`: a billing period of a subscription not invoiced yet
  *   covers the event's time, but the plan has no price for this meter.
+ *   A price added now, or a move to a plan that has one, bills later
+ *   usage, not this event.
  * - `outside_subscription`: no active or trialing subscription of the
  *   customer bills the event's time. The customer has none, or the
- *   time is before one started, in a free trial (also on the day the
+ *   time is before its first billing period (which starts at midnight
+ *   of the day it started), in a free trial (also on the day the
  *   trial ends, before its end), after one ended or after its
  *   scheduled cancel (a trial with a cancel at period end ends at its
  *   trial end), or the meter's time belonged to another subscription
@@ -44,10 +47,12 @@
  * can bill a flagged event, and after a cancel or a removed item no
  * invoice may bill an event that has no `billing_status`.
  *
- * Absent when an invoice will bill the event, or still can: a
- * spend-threshold invoice is not paid yet, or the event's billing
- * period has not started, so a price saved now applies to it. Absent
- * on a replay and on a read.
+ * Absent when an invoice will bill the event, or still can (a
+ * spend-threshold invoice is not paid yet, or a price saved now still
+ * applies to it). Absent too for an event at or after the end of the
+ * subscription's current billing period, which is not checked: its
+ * own period bills it at that period's prices, not known until the
+ * current period's invoice is built. Absent on a replay and on a read.
  */
 export type UsageBillingStatus = typeof UsageBillingStatus[keyof typeof UsageBillingStatus];
 

@@ -103,7 +103,7 @@ For usage that missed an invoice, look for the after-close signal:
 
 ```bash
 # How many events arrived after their period's invoice, by origin:
-curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep 'velox_usage_unbilled_total{reason="after_close"
+curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep '^velox_usage_unbilled_total{' | grep 'reason="after_close"'
 # Which ones: the WARN line per event.
 #   {"level":"WARN","msg":"usage event arrived after its period was invoiced — stored, billed on no invoice","customer_id":...,"meter_id":...,"timestamp":...}
 ```

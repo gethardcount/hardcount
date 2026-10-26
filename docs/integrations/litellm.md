@@ -316,8 +316,13 @@ Velox customer yet, both of its events are held:
 | `after_close` | Of `accepted`, events whose billing period was already invoiced, such as a replay after the invoice was built. They are saved but billed on no invoice; bill them with a one-off invoice. A resent event counted in `deduplicated` is never counted here. |
 | `no_price` | Of `accepted`, events no price of the customer's plan takes: usually a model the plan has no price for. They are saved but billed on no invoice. Add a price for the model; it applies from the next billing period. |
 | `not_on_plan` | Of `accepted`, events in a billing period not invoiced yet, of a meter the customer's plan has no price for. Saved, billed on no invoice. |
-| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills: there is none yet, or the call was before it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel. Saved, billed on no invoice. |
+| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills: there is none yet, or the call was before the day it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel. Saved, billed on no invoice. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
+
+An event after the end of the customer's current billing period is not
+checked until that period's invoice is built (an hour after the period
+end by default), so it is counted in none of `after_close`, `no_price` and
+`not_on_plan`. Its own period's invoice bills it if a price takes it.
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the
 batch as delivered, and does not send it again. So a row in `errors` is
@@ -382,8 +387,11 @@ period its time falls in, the same rule as any late usage (see
 - In a billing period not invoiced yet, on a meter the plan does not
   price: no invoice charges it. Add the meter to the plan if later usage
   should be charged.
-- Before the subscription started, or in a period whose invoice is already
-  built: stored, but no subscription invoice includes it. For a customer
+- After the end of the subscription's current period, before that
+  period's invoice is built: counted as `in_open_period` without a price
+  check. Its own period's invoice includes it if a price takes it.
+- Before the day the subscription started, or in a period whose invoice is
+  already built: stored, but no subscription invoice includes it. For a customer
   created after the calls, this is the usual case. Bill it with a one-off
   invoice if it should be charged.
 - Inside the current period, but before the end of a spend-threshold

@@ -51,10 +51,19 @@ test('release is offered only once the customer and a meter exist', () => {
   assert.equal(canRelease(groupHeldByCustomer(ready)[0], ready), true)
 })
 
+// Review round 3 (#1390): in_open_period counts rows after the period end
+// that are not checked against prices, so the line never says they will be
+// invoiced.
+test('the release summary does not promise rows in a period not invoiced yet are charged', () => {
+  const s = releaseSummary({ customer_id: 'c', released: 2, deduplicated: 0, still_held: 0, more_to_release: 0, in_open_period: 2, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 0 })
+  assert.equal(s.description, "2 fall in a billing period not invoiced yet. Its invoice charges them if a price on the subscription's plan matches them.")
+  assert.doesNotMatch(s.description, /will be invoiced/)
+})
+
 test('the release summary says which rows a subscription invoice will not include', () => {
   const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 1, still_held: 0, more_to_release: 0, in_open_period: 1, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 2 })
   assert.equal(s.title, 'Released 4 usage rows')
-  assert.match(s.description, /1 fall in a billing period not invoiced yet and will be invoiced/)
+  assert.match(s.description, /1 fall in a billing period not invoiced yet\. Its invoice charges them if a price on the subscription's plan matches them\./)
   // Review round 2 (#1390): these rows include trial time and time after a
   // cancel inside the current period, and no invoice will bill any of them.
   assert.match(s.description, /2 fall in time no subscription bills \(before it starts, in a free trial, or after it ends\) or in time already invoiced, so no subscription invoice includes them\. Bill them with a one-off invoice if needed\./)
@@ -82,7 +91,7 @@ test('the release summary names unpriced rows and rows past the cap apart', () =
 // invoiced.
 test('the release summary names rows no price matches', () => {
   const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 0, still_held: 0, more_to_release: 0, in_open_period: 1, no_price: 2, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 0 })
-  assert.match(s.description, /1 fall in a billing period not invoiced yet and will be invoiced\./)
+  assert.match(s.description, /1 fall in a billing period not invoiced yet\. Its invoice charges them if a price on the subscription's plan matches them\./)
   assert.match(s.description, /2 fall in a billing period not invoiced yet, but no price on the subscription's plan matches them, so no invoice charges them\./)
   assert.doesNotMatch(s.description, /for a meter/)
 })

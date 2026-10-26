@@ -264,7 +264,6 @@ func TestIngest_AfterCloseFollowsTheAggregationTheEventIsCountedUnder(t *testing
 				catchAll := usage.PriceSet{ByMeter: map[string][]map[string]string{f.meter.ID: {{}}}}
 				r := &patchBeforeTheInsert{f: f, to: tc.to, paused: newPausedAudit(), patchDone: make(chan struct{}), period: usage.OpenPeriod{
 					Start: now.Add(-2 * time.Hour), End: now.Add(24 * time.Hour), Floor: at(-3 * time.Hour),
-					Next:  []usage.PriceSet{catchAll},
 					Plans: map[string]usage.PriceSet{"pln": catchAll}, Stretches: []usage.Stretch{{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour)}},
 					Windows:            map[string][]usage.Window{f.meter.ID: {{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour)}}},
 					ThresholdWatermark: usage.ThresholdWatermark{BilledThrough: at(-30 * time.Minute), PaidThrough: at(-30 * time.Minute)},
