@@ -74,10 +74,8 @@ Words used in the Velox docs and dashboard. For the big picture, read
   A plan's status is active or archived. [More](features.md)
 - **recipe**: A ready-made pricing setup that one API call applies. The
   built-in ones are `anthropic_style`, `openai_style` and
-  `replicate_style`. A recipe creates meters and a plan with its prices, and
-  sets the tenant's dunning policy. It also adds a webhook
-  endpoint that stays inactive until you give it a real URL. Applying the
-  same recipe again changes nothing. [More](quick-start.md#what-each-demo-step-does)
+  `replicate_style`. A recipe creates meters and a plan with its prices,
+  and nothing else. Applying the same recipe again changes nothing. [More](quick-start.md#what-each-demo-step-does)
 - **idempotency key**: A unique string that makes a retry safe: the same
   key means the same operation, so it takes effect once. The main kinds
   are the `Idempotency-Key` HTTP header, the key on each usage event, and

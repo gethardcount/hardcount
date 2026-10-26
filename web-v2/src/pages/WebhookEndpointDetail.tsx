@@ -89,8 +89,8 @@ export default function WebhookEndpointDetailPage() {
 
   // Resume used to be reachable only from All endpoints → Edit → Active.
   // PATCH with just `active` leaves URL, events and secret as they are. The
-  // confirm shows the URL: a recipe-made endpoint starts paused with a
-  // placeholder address, and resuming that would send events to it.
+  // confirm shows the URL, so a paused endpoint with a placeholder address
+  // is not resumed by mistake.
   const [resuming, setResuming] = useState(false)
   const [confirmResume, setConfirmResume] = useState(false)
   const handleResume = async () => {

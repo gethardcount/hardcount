@@ -15,13 +15,11 @@ terminal.
 
 ## Ready-made recipes
 
-A recipe creates a meter, a price for each model and kind of token, and a
-monthly plan with no base fee, in one call. It also creates a schedule for
-retrying failed card payments, and a webhook endpoint (a URL in your app
-that Velox calls when something happens). The endpoint starts turned off,
-with a placeholder address: set your own address and turn it on under
-**Webhooks**. The prices start at the provider's public list prices, which you can change
-later.
+A recipe creates a meter and a monthly plan with no base fee, with a price
+for each model and kind of token, in one call. It creates nothing else:
+set payment retries under **Dunning policies** and webhook endpoints under
+**Webhooks**. The prices start at the provider's public list prices, which
+you can change later.
 
 | Recipe | Meter | Models it prices | Kinds of token (`token_type`) |
 |---|---|---|---|
@@ -228,6 +226,38 @@ jq -n --arg meter "$METER_ID" \
 
 If a later release learns the model and renames it, the price stops
 matching, and the usage shows as not billed until you price the new name.
+
+## Price one platform's model name differently
+
+Each event keeps the name LiteLLM sent in `model_raw`, such as
+`vertex_ai/claude-opus-4-6@default`. To charge that name another rate,
+add a price with one more label than the recipe's price for the model:
+`model_raw` beside its labels. The price with more labels wins. This
+example charges Claude Opus 4.6 input tokens sent under that name $5.50
+per million, on the `anthropic_style` plan "AI API":
+
+```bash
+CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+  | jq -r '.data[] | select(.name == "AI API") | .id')
+jq -n --arg meter "$METER_ID" \
+    '{meter_id: $meter,
+      dimension_match: {model: "claude-opus-4.6", model_raw: "vertex_ai/claude-opus-4-6@default", token_type: "input"},
+      mode: "per_unit", unit_amount_cents: "0.00055"}' \
+  | curl -s -X POST "$VELOX/v1/plans/$CLAUDE_PLAN_ID/prices" \
+    -H "Authorization: Bearer $VELOX_KEY" \
+    -H "Content-Type: application/json" \
+    -d @- | jq -c '{dimension_match, effective}'
+```
+
+**You see:**
+`{"dimension_match":{"model":"claude-opus-4.6","model_raw":"vertex_ai/claude-opus-4-6@default","token_type":"input"},"effective":"next_period"}`
+
+- Keep `model` in the price. `{model_raw, token_type}` beside the recipe's
+  `{model, token_type}` has as many labels, and both could take one event,
+  so it is refused with 409 `price_conflict`.
+- Claude Haiku 5.5's recipe prices also carry `context_tier`, so a price
+  for one of its names needs four labels: `model`, `model_raw`,
+  `context_tier` and `token_type`.
 
 ## Sell prepaid credit (a prepaid commit)
 

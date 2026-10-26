@@ -15,6 +15,4 @@ export interface RecipeCreatedObjects {
   meter_ids?: string[];
   plan_ids?: string[];
   price_ids?: string[];
-  dunning_policy_id?: string;
-  webhook_endpoint_id?: string;
 }

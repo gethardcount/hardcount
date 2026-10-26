@@ -3730,9 +3730,7 @@ export const getPatchV1WebhookEndpointsEndpointsIdUrl = (id: string,) => {
  * Mutates url / description / events / active WITHOUT rotating the
  * signing secret — the receiver keeps verifying while the target or
  * event set changes. Fields omitted are left unchanged; events are
- * validated against the emit catalog. This is also how a
- * recipe-created endpoint (inactive, placeholder URL) is pointed at
- * a real receiver and activated.
+ * validated against the emit catalog.
  * @summary Update webhook endpoint (no secret rotation)
  */
 export const patchV1WebhookEndpointsEndpointsId = async (id: string,
@@ -13076,8 +13074,8 @@ export const getInstantiateRecipeUrl = (key: string,) => {
 /**
  * Applies the recipe for the tenant under one transaction: meters are
  * adopted-or-created, a fresh born-unique plan is generated with the
- * recipe's prices, optional dunning policy and (inactive) webhook
- * endpoint created, then the install badge written. Adopting a meter
+ * recipe's prices, then the install badge written. It creates nothing
+ * else: no dunning policy and no webhook endpoint. Adopting a meter
  * other plans price changes none of their prices.
  * Idempotent per (tenant, livemode): re-posting an installed recipe
  * returns the EXISTING instance — 201 both times, never a 409, never

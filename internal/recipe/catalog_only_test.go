@@ -180,7 +180,7 @@ func TestEmbeddedRecipes_CatalogOnly(t *testing.T) {
 // TestPreview_ListsTheCatalog: the preview lists what an install creates,
 // the meters and each plan with its prices, and nothing else.
 func TestPreview_ListsTheCatalog(t *testing.T) {
-	svc := NewService(nil, newMemStore(), loadRegistry(t), nil, nil, nil)
+	svc := NewService(nil, newMemStore(), loadRegistry(t), nil)
 	out, err := svc.Preview(t.Context(), "replicate_style", nil)
 	if err != nil {
 		t.Fatalf("Preview: %v", err)

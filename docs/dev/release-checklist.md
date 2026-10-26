@@ -53,7 +53,7 @@ clean.
 
 A dunning run is the automatic retries after a failed payment.
 
-- [ ] Dunning policies page: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). Its row reads "3 retries, on day 3, 7 and 14". When its retries run out it changes nothing: final actions none and none. If you ran the demo first, its recipe's "AI default retry" is the default instead, and "Default retries" stays listed.
+- [ ] Dunning policies page: "Default retries" is the default and enabled. A bootstrap creates it in both modes (ADR-123). Its row reads "3 retries, on day 3, 7 and 14". When its retries run out it changes nothing: final actions none and none. Running the demo first does not change this: a recipe creates no dunning policy.
 - [ ] Mint a test clock, create a customer with an email, pinned to the clock, and subscribe it to a plan with a base fee (plans bill in arrears by default).
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run starts.

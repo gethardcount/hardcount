@@ -1,9 +1,9 @@
 # ADR-085: A recipe is an idempotent, additive provisioning event — one verb, no uninstall
 
 **Date:** 2026-07-08
-**Status:** Accepted (amended 2026-07-26 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (rule adoption is gone, built in PR-4 #1386; recipes stop creating dunning policies and webhook endpoints, not built yet)
+**Status:** Accepted (amended 2026-07-26 and 2026-10-23); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (rule adoption is gone, built in PR-4 #1386; recipes create no dunning policy or webhook endpoint, built in PR-5 #1389)
 
-**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Built in PR-4 (#1386): rating-rule adoption, its conformance check ("Never republish an existing rule key") and the 2026-10-23 amendment are gone, because a recipe's prices belong to its new plan and touch no other plan. The plan's currency comes from the recipe, not from adopted rules. The meter is read inside the apply's transaction. Not built yet: step 4 goes, so recipes no longer create a dunning policy or a webhook endpoint (PR-5). The fresh plan per apply, the badge and the meter aggregation check stay.
+**Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Built in PR-4 (#1386): rating-rule adoption, its conformance check ("Never republish an existing rule key") and the 2026-10-23 amendment are gone, because a recipe's prices belong to its new plan and touch no other plan. The plan's currency comes from the recipe, not from adopted rules. The meter is read inside the apply's transaction. Built in PR-5 (#1389): step 4 is gone, so a recipe creates no dunning policy and no webhook endpoint, and a recipe file holds only meters and plans with their prices. The fresh plan per apply, the badge and the meter aggregation check stay.
 
 ## Summary
 

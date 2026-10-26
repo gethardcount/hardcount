@@ -54,13 +54,13 @@ func TestRecipeInstantiate_AuditSharedFate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("load registry: %v", err)
 		}
-		svc := NewService(f.db, NewPostgresStore(f.db), registry, f.pricingSvc, f.dunningSvc, f.webhookSvc)
+		svc := NewService(f.db, NewPostgresStore(f.db), registry, f.pricingSvc)
 		svc.SetAuditLogger(failingRecipeEmitter{})
 
 		if _, err := svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{}); err == nil {
 			t.Fatal("instantiate must fail when its audit emission fails (shared fate)")
 		}
-		for _, table := range []string{"recipe_instances", "plans", "meters", "plan_prices", "webhook_endpoints"} {
+		for _, table := range []string{"recipe_instances", "plans", "meters", "plan_prices"} {
 			if n := countRows(t, f.db, tenantID, table); n != 0 {
 				t.Errorf("%s: %d rows survived a failed audit emission — the un-audited install leaked", table, n)
 			}
@@ -106,11 +106,11 @@ func TestRecipeInstantiate_AuditSharedFate(t *testing.T) {
 		assertIDList(t, got.Metadata, "plan_ids", inst.CreatedObjects.PlanIDs)
 		assertIDList(t, got.Metadata, "meter_ids", inst.CreatedObjects.MeterIDs)
 		assertIDList(t, got.Metadata, "price_ids", inst.CreatedObjects.PriceIDs)
-		if got.Metadata["dunning_policy_id"] != inst.CreatedObjects.DunningPolicyID {
-			t.Errorf("metadata dunning_policy_id: got %v, want %s", got.Metadata["dunning_policy_id"], inst.CreatedObjects.DunningPolicyID)
-		}
-		if got.Metadata["webhook_endpoint_id"] != inst.CreatedObjects.WebhookEndpointID {
-			t.Errorf("metadata webhook_endpoint_id: got %v, want %s", got.Metadata["webhook_endpoint_id"], inst.CreatedObjects.WebhookEndpointID)
+		// A recipe touches only the catalog (ADR-130 §15).
+		for _, k := range []string{"dunning_policy_id", "webhook_endpoint_id"} {
+			if v, ok := got.Metadata[k]; ok {
+				t.Errorf("metadata %s = %v, want none", k, v)
+			}
 		}
 
 		t.Run("idempotent re-apply installs nothing and emits nothing", func(t *testing.T) {

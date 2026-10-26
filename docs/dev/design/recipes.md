@@ -1,6 +1,6 @@
 # Pricing Recipes — Technical Design
 
-> - **Decided:** one API call sets up a common pricing shape from a built-in template: a meter, its pricing rules, a plan, a payment-retry (dunning) policy and a webhook endpoint.
+> - **Decided:** one API call sets up a common pricing shape from a built-in template: a meter, its pricing rules, a plan, a payment-retry (dunning) policy and a webhook endpoint. Since 2026-10-26 a recipe creates only meters and a plan with its prices (item 12 below).
 > - **Shipped:** v0.1.0, in [#23](https://github.com/getvelox/velox/pull/23) (migration `0055_recipe_instances`).
 > - **Current docs:** [Ready-made recipes](../../ai-pricing.md#ready-made-recipes) in the AI pricing reference. The decisions made since, and where the body is out of date, are listed below. Where this page and the code disagree, the code wins.
 
@@ -13,12 +13,13 @@
 > 3. The apply route is `POST /v1/recipes/{key}/instantiate`. Uninstall (`DELETE /v1/recipes/instances/{id}`) was removed with no replacement. Retire a generated plan by archiving it; the `recipe_instances` record is permanent.
 > 4. `force=true` was removed. A plan-code collision creates a new plan (`<code>_2`, `<code>_3`, …) instead.
 > 5. `seed_sample_data` and the YAML `sample_data` block were never wired to a writer and stay unused.
-> 6. A plan is never adopted by code, so ADR-083's plan conformance gate no longer exists. Rating rules and the shared `tokens` meter are still adopted by natural key. Apply is refused with a 409 when an existing rule's money fields differ (ADR-085, 2026-07-26 amendment), when the meter's aggregation differs, or when it would mix currencies on the meter (ADR-100). Adopted rules are never republished (ADR-070).
+> 6. A plan is never adopted by code, so ADR-083's plan conformance gate no longer exists. The shared `tokens` meter is still adopted by `event_name`, and apply is refused with a 409 when its aggregation differs. Rating rules, and their adoption and currency checks, are gone ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md), [#1386](https://github.com/getvelox/velox/pull/1386)).
 > 7. Re-applying a recipe already installed in the same mode (test or live) is always a no-op that returns the existing instance (`201`, same `id`, same `created_objects`). The install record is per mode (ADR-085, 2026-07-26 amendment), so a test-mode install does not count as a live-mode one.
 > 8. The dunning policy's `final_action` was removed from the recipe format (ADR-112).
 > 9. The dunning policy's schedule is one list of days, `retry_days` (2026-10-23, ADR-036 amendment). It replaced `max_retries` and `intervals_hours`, which the parser now refuses.
-> 10. A recipe meter is named by `event_name`, not `key`, and a pricing rule has no `aggregation_mode`: it bills under its meter's aggregation ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §2). In the preview, a pricing rule names its meter by `event_name` and a plan lists `event_names`. The built-ins are now at 8.0.0 (anthropic), 7.0.0 (openai) and 5.0.0 (replicate), not the `1.0.0` shown.
+> 10. A recipe meter is named by `event_name`, not `key`, and a pricing rule has no `aggregation_mode`: it bills under its meter's aggregation ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §2). In the preview, a pricing rule names its meter by `event_name` and a plan lists `event_names`. The built-ins are now at 10.0.0 (anthropic), 9.0.0 (openai) and 7.0.0 (replicate), not the `1.0.0` shown.
 > 11. A rating rule's rate is `unit_amount_cents` with `mode: per_unit` (not `flat`/`flat_amount_cents`), and graduated tiers are `tiers` with `up_to: null` on the last ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §3, [#1381](https://github.com/getvelox/velox/pull/1381)).
+> 12. A recipe file holds only `meters` and `plans`, each plan with its `prices` (`meter`, `dimension_match` and the price shape), and an install creates nothing else ([ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md) §15, [#1389](https://github.com/getvelox/velox/pull/1389)). The `rating_rules`, `pricing_rules`, `dunning` and `webhook` sections below are gone, and a file that has one fails to load. So items 8 and 9 no longer apply, and the preview lists `meters` and `plans` only.
 
 ## Motivation
 

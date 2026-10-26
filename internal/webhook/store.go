@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"context"
-	"database/sql"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
@@ -20,7 +19,6 @@ type EndpointStats struct {
 type Store interface {
 	// Endpoints
 	CreateEndpoint(ctx context.Context, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error)
-	CreateEndpointTx(ctx context.Context, tx *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error)
 	GetEndpoint(ctx context.Context, tenantID, id string) (domain.WebhookEndpoint, error)
 	// UpdateEndpoint mutates url/description/events/active without touching
 	// the signing secret (the PATCH shape; delete+recreate was the only

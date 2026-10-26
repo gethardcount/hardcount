@@ -7,19 +7,13 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { RecipeDunningPolicy } from './recipeDunningPolicy';
 import type { RecipeMeter } from './recipeMeter';
 import type { RecipePlan } from './recipePlan';
-import type { RecipePrice } from './recipePrice';
-import type { RecipeWebhook } from './recipeWebhook';
 
 /**
- * Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards.
+ * What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
  */
 export interface RecipePreviewObjects {
   meters: RecipeMeter[];
   plans: RecipePlan[];
-  prices: RecipePrice[];
-  dunning_policies: RecipeDunningPolicy[];
-  webhook_endpoints: RecipeWebhook[];
 }

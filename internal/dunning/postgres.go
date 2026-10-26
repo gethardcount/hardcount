@@ -217,13 +217,6 @@ func (s *PostgresStore) UpsertPolicy(ctx context.Context, tenantID string, p dom
 	return stored, nil
 }
 
-// UpsertPolicyTx upserts the dunning policy inside an existing tx. Used by
-// recipe.Service.Instantiate so a recipe that opts into a custom dunning
-// schedule can land it atomically with the rest of the recipe's objects.
-func (s *PostgresStore) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	return s.upsertPolicyTx(ctx, tx, tenantID, p)
-}
-
 // upsertPolicyTx inserts a new policy when p.ID is empty, updates the
 // existing row when p.ID is set. The migration to the campaigns model
 // (ADR-036) made tenant↔policy a 1:N relation, so the prior ON CONFLICT
@@ -235,8 +228,8 @@ func (s *PostgresStore) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 // demote-all/promote-one path). The ONE exception is the initial default —
 // the FIRST policy inserted per (tenant, livemode) is auto-promoted to
 // is_default=true in-statement (ADR-036 amendment; see the INSERT branch),
-// so a recipe/first-create tenant resolves a working default with no extra
-// call. The partial UNIQUE index is the loud backstop against two defaults.
+// so a tenant's first policy is a working default with no extra call. The
+// partial UNIQUE index is the loud backstop against two defaults.
 func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
 	// A dunning policy is tenant-level operator config, not a per-customer
 	// billing event — its created_at/updated_at must record the real instant
@@ -252,9 +245,9 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		// INSERT new policy. The FIRST policy in a (tenant, livemode) scope is
 		// born is_default=true (ADR-036 amendment): NOT EXISTS(... WHERE is_default)
 		// is evaluated against the pre-insert table state, RLS-scoped to the
-		// current (tenant, livemode) — so a tenant that instantiates a recipe (or
-		// creates its first policy manually) gets a WORKING default with no extra
-		// SetDefaultPolicy step, closing the "policies exist but GetDefaultPolicy
+		// current (tenant, livemode) — so a tenant that creates its first
+		// policy gets a WORKING default with no extra SetDefaultPolicy step,
+		// closing the "policies exist but GetDefaultPolicy
 		// → not found" trap. Subsequent policies are is_default=false; the operator
 		// re-points via SetDefaultPolicy (the atomic demote-all/promote-one path).
 		// The partial unique index idx_dunning_policies_one_default_per_tenant is
@@ -267,8 +260,8 @@ func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID
 		// only holds the default until someone creates a policy of their
 		// own. Demote it first, so the NOT EXISTS below sees no default and
 		// this insert takes the slot, exactly as the first policy did before
-		// accounts had one. Without this, a recipe's policy (or the
-		// operator's first one) would be created non-default and assigned
+		// accounts had one. Without this, the operator's first policy
+		// would be created non-default and assigned
 		// to nobody, so it would never govern a run. A seeded policy that
 		// was edited or chosen as default has seeded = false and keeps the
 		// slot. A concurrent edit of the seeded row holds its row lock;

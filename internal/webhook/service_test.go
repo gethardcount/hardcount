@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -58,10 +57,6 @@ func (m *memStore) CreateEndpoint(ctx context.Context, tenantID string, ep domai
 	ep.SecretLast4 = lastFour(ep.Secret)
 	m.endpoints[ep.ID] = ep
 	return ep, nil
-}
-
-func (m *memStore) CreateEndpointTx(ctx context.Context, _ *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error) {
-	return m.CreateEndpoint(ctx, tenantID, ep)
 }
 
 func (m *memStore) GetEndpoint(_ context.Context, tenantID, id string) (domain.WebhookEndpoint, error) {

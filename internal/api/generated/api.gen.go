@@ -1490,45 +1490,6 @@ func (e ReadinessReportStatus) Valid() bool {
 	}
 }
 
-// Defines values for RecipeDunningPolicyFinalInvoiceAction.
-const (
-	RecipeDunningPolicyFinalInvoiceActionMarkUncollectible RecipeDunningPolicyFinalInvoiceAction = "mark_uncollectible"
-	RecipeDunningPolicyFinalInvoiceActionNone              RecipeDunningPolicyFinalInvoiceAction = "none"
-)
-
-// Valid indicates whether the value is a known member of the RecipeDunningPolicyFinalInvoiceAction enum.
-func (e RecipeDunningPolicyFinalInvoiceAction) Valid() bool {
-	switch e {
-	case RecipeDunningPolicyFinalInvoiceActionMarkUncollectible:
-		return true
-	case RecipeDunningPolicyFinalInvoiceActionNone:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipeDunningPolicyFinalSubscriptionAction.
-const (
-	RecipeDunningPolicyFinalSubscriptionActionCancel RecipeDunningPolicyFinalSubscriptionAction = "cancel"
-	RecipeDunningPolicyFinalSubscriptionActionNone   RecipeDunningPolicyFinalSubscriptionAction = "none"
-	RecipeDunningPolicyFinalSubscriptionActionPause  RecipeDunningPolicyFinalSubscriptionAction = "pause"
-)
-
-// Valid indicates whether the value is a known member of the RecipeDunningPolicyFinalSubscriptionAction enum.
-func (e RecipeDunningPolicyFinalSubscriptionAction) Valid() bool {
-	switch e {
-	case RecipeDunningPolicyFinalSubscriptionActionCancel:
-		return true
-	case RecipeDunningPolicyFinalSubscriptionActionNone:
-		return true
-	case RecipeDunningPolicyFinalSubscriptionActionPause:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for RecipeOverrideType.
 const (
 	Int    RecipeOverrideType = "int"
@@ -1598,27 +1559,6 @@ func (e RecipePriceMode) Valid() bool {
 	case RecipePriceModePackage:
 		return true
 	case RecipePriceModePerUnit:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for RecipeRatingRuleMode.
-const (
-	RecipeRatingRuleModeGraduated RecipeRatingRuleMode = "graduated"
-	RecipeRatingRuleModePackage   RecipeRatingRuleMode = "package"
-	RecipeRatingRuleModePerUnit   RecipeRatingRuleMode = "per_unit"
-)
-
-// Valid indicates whether the value is a known member of the RecipeRatingRuleMode enum.
-func (e RecipeRatingRuleMode) Valid() bool {
-	switch e {
-	case RecipeRatingRuleModeGraduated:
-		return true
-	case RecipeRatingRuleModePackage:
-		return true
-	case RecipeRatingRuleModePerUnit:
 		return true
 	default:
 		return false
@@ -2716,19 +2656,19 @@ func (e UpdatePlanJSONBodyStatus) Valid() bool {
 
 // Defines values for CreatePriceOverrideJSONBodyMode.
 const (
-	Graduated CreatePriceOverrideJSONBodyMode = "graduated"
-	Package   CreatePriceOverrideJSONBodyMode = "package"
-	PerUnit   CreatePriceOverrideJSONBodyMode = "per_unit"
+	CreatePriceOverrideJSONBodyModeGraduated CreatePriceOverrideJSONBodyMode = "graduated"
+	CreatePriceOverrideJSONBodyModePackage   CreatePriceOverrideJSONBodyMode = "package"
+	CreatePriceOverrideJSONBodyModePerUnit   CreatePriceOverrideJSONBodyMode = "per_unit"
 )
 
 // Valid indicates whether the value is a known member of the CreatePriceOverrideJSONBodyMode enum.
 func (e CreatePriceOverrideJSONBodyMode) Valid() bool {
 	switch e {
-	case Graduated:
+	case CreatePriceOverrideJSONBodyModeGraduated:
 		return true
-	case Package:
+	case CreatePriceOverrideJSONBodyModePackage:
 		return true
-	case PerUnit:
+	case CreatePriceOverrideJSONBodyModePerUnit:
 		return true
 	default:
 		return false
@@ -4332,8 +4272,8 @@ type DunningPolicy struct {
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next enabled policy you create (by hand or from a
-	// recipe) becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create becomes the default
+	// instead. Ignored in request bodies.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -4407,8 +4347,8 @@ type DunningPolicyListItem struct {
 
 	// Seeded True for the "Default retries" policy the account was created
 	// with, until you edit it or make it the default. While it is
-	// true, the next enabled policy you create (by hand or from a
-	// recipe) becomes the default instead. Ignored in request bodies.
+	// true, the next enabled policy you create becomes the default
+	// instead. Ignored in request bodies.
 	Seeded    bool      `json:"seeded"`
 	TenantId  string    `json:"tenant_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -5865,80 +5805,47 @@ type ReadinessReport struct {
 // ReadinessReportStatus defines model for ReadinessReport.Status.
 type ReadinessReportStatus string
 
-// Recipe A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata. An install turns the pricing rules into prices on its plans.
+// Recipe A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else.
 type Recipe struct {
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
-	Key           string              `json:"key"`
-	Meters        []RecipeMeter       `json:"meters"`
-	Name          string              `json:"name"`
-	Overridable   []RecipeOverride    `json:"overridable"`
-	Plans         []RecipePlan        `json:"plans"`
-	PricingRules  []RecipePricingRule `json:"pricing_rules"`
-	RatingRules   []RecipeRatingRule  `json:"rating_rules"`
-	Summary       string              `json:"summary"`
-	Version       string              `json:"version"`
-	Webhook       RecipeWebhook       `json:"webhook,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Key         string           `json:"key"`
+	Meters      []RecipeMeter    `json:"meters"`
+	Name        string           `json:"name"`
+	Overridable []RecipeOverride `json:"overridable"`
+	Plans       []RecipePlan     `json:"plans"`
+	Summary     string           `json:"summary"`
+	Version     string           `json:"version"`
 }
 
 // RecipeCreatedObjects Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads.
 type RecipeCreatedObjects struct {
-	DunningPolicyId   string   `json:"dunning_policy_id,omitempty"`
-	MeterIds          []string `json:"meter_ids,omitempty"`
-	PlanIds           []string `json:"plan_ids,omitempty"`
-	PriceIds          []string `json:"price_ids,omitempty"`
-	WebhookEndpointId string   `json:"webhook_endpoint_id,omitempty"`
+	MeterIds []string `json:"meter_ids,omitempty"`
+	PlanIds  []string `json:"plan_ids,omitempty"`
+	PriceIds []string `json:"price_ids,omitempty"`
 }
 
 // RecipeCreates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
 type RecipeCreates struct {
-	DunningPolicies int `json:"dunning_policies"`
-	Meters          int `json:"meters"`
-	Plans           int `json:"plans"`
+	Meters int `json:"meters"`
+	Plans  int `json:"plans"`
 
 	// Prices The prices the install puts on its plans.
-	Prices           int `json:"prices"`
-	WebhookEndpoints int `json:"webhook_endpoints"`
+	Prices int `json:"prices"`
 }
 
 // RecipeDetail defines model for RecipeDetail.
 type RecipeDetail struct {
 	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates       RecipeCreates       `json:"creates"`
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
-	Key           string              `json:"key"`
-	Meters        []RecipeMeter       `json:"meters"`
-	Name          string              `json:"name"`
-	Overridable   []RecipeOverride    `json:"overridable"`
-	Plans         []RecipePlan        `json:"plans"`
-	PricingRules  []RecipePricingRule `json:"pricing_rules"`
-	RatingRules   []RecipeRatingRule  `json:"rating_rules"`
-	Summary       string              `json:"summary"`
-	Version       string              `json:"version"`
-	Webhook       RecipeWebhook       `json:"webhook,omitempty"`
+	Creates     RecipeCreates    `json:"creates"`
+	Description string           `json:"description,omitempty"`
+	Key         string           `json:"key"`
+	Meters      []RecipeMeter    `json:"meters"`
+	Name        string           `json:"name"`
+	Overridable []RecipeOverride `json:"overridable"`
+	Plans       []RecipePlan     `json:"plans"`
+	Summary     string           `json:"summary"`
+	Version     string           `json:"version"`
 }
-
-// RecipeDunningPolicy defines model for RecipeDunningPolicy.
-type RecipeDunningPolicy struct {
-	// FinalInvoiceAction What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-	// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-	FinalInvoiceAction RecipeDunningPolicyFinalInvoiceAction `json:"final_invoice_action"`
-
-	// FinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-	FinalSubscriptionAction RecipeDunningPolicyFinalSubscriptionAction `json:"final_subscription_action"`
-	Name                    string                                     `json:"name"`
-
-	// RetryDays The policy's schedule, as `retry_days` on a dunning policy.
-	RetryDays []int `json:"retry_days"`
-}
-
-// RecipeDunningPolicyFinalInvoiceAction What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-// Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-type RecipeDunningPolicyFinalInvoiceAction string
-
-// RecipeDunningPolicyFinalSubscriptionAction What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-type RecipeDunningPolicyFinalSubscriptionAction string
 
 // RecipeInstance The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
 type RecipeInstance struct {
@@ -5961,22 +5868,18 @@ type RecipeInstance struct {
 // RecipeListItem defines model for RecipeListItem.
 type RecipeListItem struct {
 	// Creates Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count.
-	Creates       RecipeCreates       `json:"creates"`
-	Description   string              `json:"description,omitempty"`
-	DunningPolicy RecipeDunningPolicy `json:"dunning_policy,omitempty"`
+	Creates     RecipeCreates `json:"creates"`
+	Description string        `json:"description,omitempty"`
 
 	// Instantiated The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses.
-	Instantiated RecipeInstance      `json:"instantiated,omitempty"`
-	Key          string              `json:"key"`
-	Meters       []RecipeMeter       `json:"meters"`
-	Name         string              `json:"name"`
-	Overridable  []RecipeOverride    `json:"overridable"`
-	Plans        []RecipePlan        `json:"plans"`
-	PricingRules []RecipePricingRule `json:"pricing_rules"`
-	RatingRules  []RecipeRatingRule  `json:"rating_rules"`
-	Summary      string              `json:"summary"`
-	Version      string              `json:"version"`
-	Webhook      RecipeWebhook       `json:"webhook,omitempty"`
+	Instantiated RecipeInstance   `json:"instantiated,omitempty"`
+	Key          string           `json:"key"`
+	Meters       []RecipeMeter    `json:"meters"`
+	Name         string           `json:"name"`
+	Overridable  []RecipeOverride `json:"overridable"`
+	Plans        []RecipePlan     `json:"plans"`
+	Summary      string           `json:"summary"`
+	Version      string           `json:"version"`
 }
 
 // RecipeMeter defines model for RecipeMeter.
@@ -6010,10 +5913,10 @@ type RecipePlan struct {
 	BillingInterval RecipePlanBillingInterval `json:"billing_interval"`
 	Code            string                    `json:"code"`
 	Currency        string                    `json:"currency"`
+	Name            string                    `json:"name"`
 
-	// EventNames The recipe meters the plan prices.
-	EventNames []string `json:"event_names"`
-	Name       string   `json:"name"`
+	// Prices The plan's usage prices. Each takes the plan's currency.
+	Prices []RecipePrice `json:"prices"`
 }
 
 // RecipePlanBaseBillTiming Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
@@ -6022,20 +5925,17 @@ type RecipePlanBaseBillTiming string
 // RecipePlanBillingInterval defines model for RecipePlan.BillingInterval.
 type RecipePlanBillingInterval string
 
-// RecipePreviewObjects Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards.
+// RecipePreviewObjects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 type RecipePreviewObjects struct {
-	DunningPolicies  []RecipeDunningPolicy `json:"dunning_policies"`
-	Meters           []RecipeMeter         `json:"meters"`
-	Plans            []RecipePlan          `json:"plans"`
-	Prices           []RecipePrice         `json:"prices"`
-	WebhookEndpoints []RecipeWebhook       `json:"webhook_endpoints"`
+	Meters []RecipeMeter `json:"meters"`
+	Plans  []RecipePlan  `json:"plans"`
 }
 
 // RecipePreviewResult defines model for RecipePreviewResult.
 type RecipePreviewResult struct {
 	Key string `json:"key"`
 
-	// Objects Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards.
+	// Objects What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation.
 	Objects  RecipePreviewObjects `json:"objects"`
 	Version  string               `json:"version"`
 	Warnings []string             `json:"warnings"`
@@ -6045,8 +5945,8 @@ type RecipePreviewResult struct {
 type RecipePrice struct {
 	DimensionMatch map[string]string `json:"dimension_match"`
 
-	// EventName The recipe meter the price is on.
-	EventName string `json:"event_name"`
+	// Meter The `event_name` of the recipe meter the price is on.
+	Meter string `json:"meter"`
 
 	// Mode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 	Mode RecipePriceMode `json:"mode"`
@@ -6055,8 +5955,7 @@ type RecipePrice struct {
 	PackageAmountCents string `json:"package_amount_cents,omitempty"`
 
 	// PackageSize Used when `mode` is `package`. Must be above 0.
-	PackageSize int64  `json:"package_size,omitempty"`
-	PlanCode    string `json:"plan_code"`
+	PackageSize int64 `json:"package_size,omitempty"`
 
 	// Tiers Used when `mode` is `graduated`. Each `up_to` is a whole number above the one before. The last tier has `up_to: null` (no upper bound), and only the last. Otherwise 422 with `param` `tiers`. A tier's rate takes the limits of `unit_amount_cents`; a refusal names `tiers[i].unit_amount_cents` (i counts from 0).
 	Tiers []PriceTier `json:"tiers,omitempty"`
@@ -6067,43 +5966,6 @@ type RecipePrice struct {
 
 // RecipePriceMode `per_unit` bills quantity × `unit_amount_cents`. `graduated` bills each tier's part of the quantity at that tier's rate. `package` bills ceil(quantity ÷ `package_size`) × `package_amount_cents`: a part package bills as a whole one.
 type RecipePriceMode string
-
-// RecipePricingRule One price of the recipe's YAML: the meter, the events it takes and the rating rule that gives its rate. An install puts it on each plan that names the meter. `priority` is not used: the price with the most labels takes an event.
-type RecipePricingRule struct {
-	DimensionMatch map[string]interface{} `json:"dimension_match"`
-
-	// EventName The recipe meter the rule prices.
-	EventName     string `json:"event_name"`
-	Priority      int    `json:"priority"`
-	RatingRuleKey string `json:"rating_rule_key"`
-}
-
-// RecipeRatingRule A rate in the recipe's YAML. An install puts it on the plan as the price of each pricing rule that names it.
-type RecipeRatingRule struct {
-	Currency string `json:"currency"`
-	Key      string `json:"key"`
-
-	// Mode As on PriceShape.
-	Mode RecipeRatingRuleMode `json:"mode"`
-	Name string               `json:"name,omitempty"`
-
-	// PackageAmountCents Price of one package in cents, as a decimal string.
-	PackageAmountCents string      `json:"package_amount_cents"`
-	PackageSize        int64       `json:"package_size,omitempty"`
-	Tiers              []PriceTier `json:"tiers,omitempty"`
-
-	// UnitAmountCents Price per unit in cents, as a decimal string (see PriceShape.unit_amount_cents).
-	UnitAmountCents string `json:"unit_amount_cents"`
-}
-
-// RecipeRatingRuleMode As on PriceShape.
-type RecipeRatingRuleMode string
-
-// RecipeWebhook defines model for RecipeWebhook.
-type RecipeWebhook struct {
-	Events         []string `json:"events"`
-	UrlPlaceholder string   `json:"url_placeholder"`
-}
 
 // RecoveryWarning What an operator must know BEFORE recording an OFFLINE payment on a
 // written-off invoice (`status = uncollectible`) — a consequence that

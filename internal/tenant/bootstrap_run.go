@@ -307,9 +307,8 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	// The account's default dunning policy, one per mode (ADR-123): without
 	// it a failed payment is never retried until someone thinks to create a
 	// policy. Seeded last so app.tenant_id is already stamped for its audit
-	// rows. The seed only holds the default until the first policy anyone
-	// creates (a recipe's, or the operator's own) takes it over, so it does
-	// not shadow a recipe applied right after bootstrap.
+	// rows. The seed only holds the default until the operator's first
+	// enabled policy takes it over.
 	if err := seedDunningPolicies(ctx, tx, deps.SeedDunningTx, deps.Audit, tenantID, "bootstrap_provisioned"); err != nil {
 		return BootstrapResult{}, err
 	}

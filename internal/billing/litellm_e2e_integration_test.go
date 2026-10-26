@@ -14,7 +14,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -25,7 +24,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
-	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // TestLiteLLM_WedgeE2E is the AI-native wedge as a CI test: a REALISTIC LiteLLM
@@ -72,9 +70,7 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load recipe registry: %v", err)
 	}
-	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry,
-		pricingSvc, dunning.NewService(dunning.NewPostgresStore(db), nil, nil),
-		webhook.NewService(webhook.NewPostgresStore(db), nil, "local"))
+	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry, pricingSvc)
 	if _, err := recipeSvc.Instantiate(ctx, tenantID, "anthropic_style", nil, recipe.InstantiateOptions{}); err != nil {
 		t.Fatalf("instantiate anthropic_style: %v", err)
 	}

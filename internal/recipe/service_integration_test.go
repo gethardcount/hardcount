@@ -10,12 +10,10 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/testutil"
-	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // recipeIntegrationFixture wires the real per-domain stores and services
@@ -26,8 +24,6 @@ type recipeIntegrationFixture struct {
 	svc        *Service
 	store      *PostgresStore
 	pricingSvc *pricing.Service
-	dunningSvc *dunning.Service
-	webhookSvc *webhook.Service
 }
 
 func newRecipeFixture(t *testing.T) *recipeIntegrationFixture {
@@ -38,19 +34,13 @@ func newRecipeFixture(t *testing.T) *recipeIntegrationFixture {
 		t.Fatalf("load recipe registry: %v", err)
 	}
 	pricingSvc := pricing.NewService(pricing.NewPostgresStore(db))
-	// dunning needs no retrier for UpsertPolicyTx — passing nil is safe;
-	// the recipes flow never invokes RetryPayment.
-	dunningSvc := dunning.NewService(dunning.NewPostgresStore(db), nil, nil)
-	webhookSvc := webhook.NewService(webhook.NewPostgresStore(db), nil, "local")
 	store := NewPostgresStore(db)
-	svc := NewService(db, store, registry, pricingSvc, dunningSvc, webhookSvc)
+	svc := NewService(db, store, registry, pricingSvc)
 	return &recipeIntegrationFixture{
 		db:         db,
 		svc:        svc,
 		store:      store,
 		pricingSvc: pricingSvc,
-		dunningSvc: dunningSvc,
-		webhookSvc: webhookSvc,
 	}
 }
 
@@ -73,8 +63,8 @@ func countRows(t *testing.T, db *postgres.DB, tenantID, table string) int {
 }
 
 // TestService_Instantiate_BuildsFullGraph mirrors the design-doc acceptance
-// test: anthropic_style produces 1 meter, 1 plan with its prices, 1 dunning
-// policy, 1 webhook endpoint. Counts come from direct
+// test: anthropic_style produces 1 meter and 1 plan with its prices, and
+// nothing else (ADR-130 §15). Counts come from direct
 // SQL so there's no test-side double-counting via the same Store path the
 // production code wrote through.
 func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
@@ -97,22 +87,15 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	if got, want := len(inst.CreatedObjects.MeterIDs), 1; got != want {
 		t.Errorf("CreatedObjects.MeterIDs: got %d, want %d", got, want)
 	}
-	// anthropic_style v6 (ADR-044 matrix): 25 price sets × 5 token roles —
+	// anthropic_style (ADR-044 matrix): 25 price sets × 5 token roles —
 	// 7 from the v2/v3 catalog, 12 added by the 2026-07-26 refresh, and 6
 	// added on 2026-10-22 (Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, and
 	// Haiku 5.5's two prompt tiers).
-	// The recipe's pricing rules are the plan's prices (ADR-130 §15).
 	if got, want := len(inst.CreatedObjects.PriceIDs), 125; got != want {
 		t.Errorf("CreatedObjects.PriceIDs: got %d, want %d", got, want)
 	}
 	if got, want := len(inst.CreatedObjects.PlanIDs), 1; got != want {
 		t.Errorf("CreatedObjects.PlanIDs: got %d, want %d", got, want)
-	}
-	if inst.CreatedObjects.DunningPolicyID == "" {
-		t.Error("expected DunningPolicyID")
-	}
-	if inst.CreatedObjects.WebhookEndpointID == "" {
-		t.Error("expected WebhookEndpointID")
 	}
 
 	// Verify against the actual rows persisted in each domain's table.
@@ -128,11 +111,11 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	if n := countRows(t, f.db, tenantID, "plans"); n != 1 {
 		t.Errorf("plans row count: got %d, want 1", n)
 	}
-	if n := countRows(t, f.db, tenantID, "dunning_policies"); n != 1 {
-		t.Errorf("dunning_policies row count: got %d, want 1", n)
+	if n := countRows(t, f.db, tenantID, "dunning_policies"); n != 0 {
+		t.Errorf("dunning_policies row count: got %d, want 0", n)
 	}
-	if n := countRows(t, f.db, tenantID, "webhook_endpoints"); n != 1 {
-		t.Errorf("webhook_endpoints row count: got %d, want 1", n)
+	if n := countRows(t, f.db, tenantID, "webhook_endpoints"); n != 0 {
+		t.Errorf("webhook_endpoints row count: got %d, want 0", n)
 	}
 	if n := countRows(t, f.db, tenantID, "recipe_instances"); n != 1 {
 		t.Errorf("recipe_instances row count: got %d, want 1", n)
@@ -177,7 +160,7 @@ func TestService_Instantiate_AtomicityRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
-	svc := NewService(f.db, NewPostgresStore(f.db), registry, failing, f.dunningSvc, f.webhookSvc)
+	svc := NewService(f.db, NewPostgresStore(f.db), registry, failing)
 
 	_, err = svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{})
 	if err == nil {
@@ -185,8 +168,7 @@ func TestService_Instantiate_AtomicityRollback(t *testing.T) {
 	}
 
 	for _, tbl := range []string{
-		"meters", "plans", "plan_prices", "plan_price_versions",
-		"dunning_policies", "webhook_endpoints", "recipe_instances",
+		"meters", "plans", "plan_prices", "plan_price_versions", "recipe_instances",
 	} {
 		if n := countRows(t, f.db, tenantID, tbl); n != 0 {
 			t.Errorf("%s after rollback: got %d, want 0", tbl, n)
@@ -242,7 +224,7 @@ func TestService_Instantiate_PreviewParity(t *testing.T) {
 		t.Fatalf("Instantiate: %v", err)
 	}
 
-	if got, want := len(inst.CreatedObjects.PriceIDs), len(previewed.Objects.Prices); got != want || got == 0 {
+	if got, want := len(inst.CreatedObjects.PriceIDs), len(previewed.Objects.Plans[0].Prices); got != want || got == 0 {
 		t.Errorf("price count drift: instantiate=%d, preview=%d", got, want)
 	}
 	plans, err := f.pricingSvc.ListPlans(ctx, tenantID)
@@ -383,7 +365,7 @@ func TestService_Instantiate_RefusesDivergentMeter(t *testing.T) {
 
 	// Mutation-verify: the entire tx rolled back — nothing the recipe would
 	// have created persisted.
-	for _, tbl := range []string{"recipe_instances", "plans", "plan_prices", "dunning_policies", "webhook_endpoints"} {
+	for _, tbl := range []string{"recipe_instances", "plans", "plan_prices"} {
 		if n := countRows(t, f.db, tenantID, tbl); n != 0 {
 			t.Errorf("%s after refusal: got %d, want 0 (tx must roll back)", tbl, n)
 		}
@@ -529,62 +511,5 @@ func TestService_Instantiate_AdoptsAMeterOtherPlansPrice(t *testing.T) {
 		if after[i].ID != before[i].ID || !after[i].UnitAmountCents.Equal(before[i].UnitAmountCents) || after[i].UpdatedAt != before[i].UpdatedAt {
 			t.Errorf("operator price %s changed: %+v → %+v", before[i].ID, before[i], after[i])
 		}
-	}
-}
-
-// TestService_Instantiate_TakesOverSeededDefault: every new account starts
-// with a seeded "Default retries" policy per mode (ADR-123). A recipe
-// applied afterwards must still govern dunning — its policy becomes the
-// default and the seed is demoted, not left as a second, unused policy.
-// Mutation check: remove the seeded-default demote in upsertPolicyTx and
-// the recipe policy is created non-default.
-func TestService_Instantiate_TakesOverSeededDefault(t *testing.T) {
-	f := newRecipeFixture(t)
-	tenantID := testutil.CreateTestTenant(t, f.db, "seeded then recipe")
-	liveCtx := postgres.WithLivemode(context.Background(), true)
-	tx, err := f.db.BeginTx(liveCtx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if err := f.dunningSvc.SeedDefaultPoliciesTx(liveCtx, tx, tenantID, nil); err != nil {
-		postgres.Rollback(tx)
-		t.Fatalf("seed: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit seed: %v", err)
-	}
-
-	ctx := postgres.WithLivemode(context.Background(), false)
-	inst, err := f.svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{CreatedBy: "operator@example.com"})
-	if err != nil {
-		t.Fatalf("Instantiate: %v", err)
-	}
-	def, err := f.dunningSvc.GetDefaultPolicy(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("default: %v", err)
-	}
-	if def.ID != inst.CreatedObjects.DunningPolicyID {
-		t.Fatalf("default = %s (%q), want the recipe's policy %s", def.ID, def.Name, inst.CreatedObjects.DunningPolicyID)
-	}
-	policies, err := f.dunningSvc.ListPolicies(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	defaults := 0
-	for _, p := range policies {
-		if p.IsDefault {
-			defaults++
-		}
-	}
-	if len(policies) != 2 || defaults != 1 {
-		t.Fatalf("test mode has %d policies and %d defaults, want the demoted seed + the recipe's, one default", len(policies), defaults)
-	}
-	// Live mode keeps its seed as default: the recipe was applied in test mode.
-	liveDef, err := f.dunningSvc.GetDefaultPolicy(liveCtx, tenantID)
-	if err != nil {
-		t.Fatalf("live default: %v", err)
-	}
-	if !liveDef.Seeded {
-		t.Fatalf("live default = %q, want the untouched live seed", liveDef.Name)
 	}
 }

@@ -9,6 +9,7 @@
  */
 import type { RecipePlanBaseBillTiming } from './recipePlanBaseBillTiming';
 import type { RecipePlanBillingInterval } from './recipePlanBillingInterval';
+import type { RecipePrice } from './recipePrice';
 
 export interface RecipePlan {
   code: string;
@@ -18,6 +19,6 @@ export interface RecipePlan {
   base_amount_cents: number;
   /** Optional when the base fee is 0; the plan is then in_arrears (ADR-031). */
   base_bill_timing?: RecipePlanBaseBillTiming;
-  /** The recipe meters the plan prices. */
-  event_names: string[];
+  /** The plan's usage prices. Each takes the plan's currency. */
+  prices: RecipePrice[];
 }

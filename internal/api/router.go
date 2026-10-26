@@ -423,7 +423,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		panic(fmt.Sprintf("load recipe registry: %v", err))
 	}
 	recipeStore := recipe.NewPostgresStore(db)
-	recipeSvc := recipe.NewService(db, recipeStore, recipeRegistry, pricingSvc, dunningSvc, webhookOutSvc)
+	recipeSvc := recipe.NewService(db, recipeStore, recipeRegistry, pricingSvc)
 	recipeH := recipe.NewHandler(recipeSvc)
 
 	// Global circuit breaker around Stripe calls. When Stripe is unhealthy
