@@ -186,6 +186,9 @@ func TestClassify(t *testing.T) {
 		{"unsettled here, open in another subscription", opMay.AddDate(0, 0, 5), "m", nil, []OpenPeriod{unpaid, whole(opMay, opJun, opAt(opApr), "m")}, sum, InOpen},
 		{"grace: next period", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{may}, sum, Later},
 		{"grace: not checked, open in another subscription", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{may, whole(opJun, opJun.AddDate(0, 1, 0), opAt(opApr), "m")}, sum, InOpen},
+		// Review round 4 on #1390: an event one subscription does not check
+		// carries no status, even when another subscription would flag it
+		// (yearly does not price x). This is the stated rule, not a gap.
 		{"grace: not checked, not priced by another subscription", opJun.Add(10 * time.Minute), "x", nil, []OpenPeriod{may, yearly}, sum, Later},
 		{"grace: ends at the period end", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{ending}, sum, Outside},
 		// Review round 3 on #1390: the first period starts at midnight of
@@ -332,17 +335,36 @@ func TestOpenPeriodOf(t *testing.T) {
 		t.Errorf("cancel_at at the end: ends %v, want the cancel", p.Ends)
 	}
 
-	// Review round 2 on #1390: a trialing subscription with a cancel at
-	// period end is canceled free at its trial end (ADR-069), so its billed
-	// time ends there.
-	trialCancel := base
-	trialCancel.Status = domain.SubscriptionTrialing
-	trialCancel.TrialEndAt = opAt(opMay.Add(18 * time.Hour))
+	// Review round 4 on #1390: while a subscription is trialing, an event
+	// after its trial end is not checked. Until the trial scan ends the
+	// trial, the operator can still extend it past the event (then it is
+	// free) or undo a cancel at period end (then it is billed). Before the
+	// trial end it is trial usage, which is free.
+	trialing := base
+	trialing.Status = domain.SubscriptionTrialing
+	trialing.TrialEndAt = opAt(opMay.Add(18 * time.Hour))
+	trialCancel := trialing
 	trialCancel.CancelAtPeriodEnd = true
-	if p, _ := OpenPeriodOf(trialCancel, stretches, windows, plans, nil, ThresholdWatermark{}); p.Ends == nil || !p.Ends.Equal(*trialCancel.TrialEndAt) {
-		t.Errorf("trialing, cancel at period end: ends %v, want the trial end", p.Ends)
-	} else if c, _ := classify(opMay.Add(19*time.Hour), "m", nil, []OpenPeriod{p}, nil); c != Outside {
-		t.Errorf("trialing, cancel at period end: after the trial end = %v, want Outside", c)
+	for name, sub := range map[string]domain.Subscription{"trialing": trialing, "trialing, cancel at period end": trialCancel} {
+		p, ok := OpenPeriodOf(sub, stretches, windows, plans, nil, ThresholdWatermark{})
+		if !ok {
+			t.Fatalf("%s: no open period", name)
+		}
+		for _, c := range []struct {
+			what  string
+			at    time.Time
+			meter string
+			want  Class
+		}{
+			{"before the trial end", opMay.Add(17 * time.Hour), "m", Outside},
+			{"after the trial end", opMay.Add(19 * time.Hour), "m", Later},
+			{"after the trial end, meter not priced", opMay.Add(19 * time.Hour), "x", Later},
+			{"after the period end", opJun.Add(10 * time.Minute), "m", Later},
+		} {
+			if got, err := classify(c.at, c.meter, nil, []OpenPeriod{p}, func() (MeterBuckets, error) { return MeterBuckets{Additive: true}, nil }); err != nil || got != c.want {
+				t.Errorf("%s, %s: classify = %v, %v; want %v", name, c.what, got, err, c.want)
+			}
+		}
 	}
 
 	trial := base
