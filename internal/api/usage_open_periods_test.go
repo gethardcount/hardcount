@@ -108,3 +108,82 @@ func TestUsageOpenPeriods_ReadsPlanMetersOnce(t *testing.T) {
 		t.Errorf("NextMeters = %v, want mtr_b and mtr_c", p.NextMeters)
 	}
 }
+
+// joinedSubs answers two active subscriptions. sub_new is in its first
+// period, which started at midnight; the subscription started at 15:00. Its
+// item it_start came with it, it_added was added at 18:00 and it_swapped was
+// swapped onto its plan on the 10th. sub_old is in a later period, and every
+// item of it joined its plan before that period started.
+type joinedSubs struct{ start, end time.Time }
+
+func (s joinedSubs) ListLiveByCustomer(context.Context, string, string) ([]domain.Subscription, error) {
+	started := s.start.Add(15 * time.Hour)
+	added := s.start.Add(18 * time.Hour)
+	swapped := s.start.AddDate(0, 0, 9).Add(12 * time.Hour)
+	earlier := s.start.AddDate(0, -2, 0)
+	return []domain.Subscription{{
+		ID: "sub_new", Status: domain.SubscriptionActive, CreatedAt: started,
+		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &started,
+		Items: []domain.SubscriptionItem{
+			{ID: "it_start", PlanID: "pln_start", CreatedAt: started},
+			{ID: "it_added", PlanID: "pln_added", CreatedAt: added},
+			{ID: "it_swapped", PlanID: "pln_swapped", CreatedAt: started, PlanChangedAt: &swapped},
+		},
+	}, {
+		ID: "sub_old", Status: domain.SubscriptionActive, CreatedAt: earlier,
+		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &earlier,
+		Items: []domain.SubscriptionItem{
+			{ID: "it_old", PlanID: "pln_old", CreatedAt: earlier.Add(time.Hour), PlanChangedAt: &earlier},
+		},
+	}}, nil
+}
+
+// pinRecorder records each pin read at the period start, by plan.
+type pinRecorder struct {
+	end  time.Time
+	pins map[string]time.Time
+}
+
+func (p pinRecorder) GetMeterTx(context.Context, *sql.Tx, string) (domain.Meter, error) {
+	panic("not read by OpenPeriods")
+}
+
+func (p pinRecorder) MetersPricedAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]string, error) {
+	out := make([][]string, len(pins))
+	for i, pin := range pins {
+		if pin.At.Before(p.end) {
+			p.pins[pin.PlanID] = pin.At
+		}
+		out[i] = []string{"mtr_" + pin.PlanID}
+	}
+	return out, nil
+}
+
+// Ingest reads the meters of each current item's plan at the item's own
+// window pin, the instant the item joined that plan in this period, as the
+// close prices it (ADR-130 §4 step 3, amended 2026-10-26): a subscription's
+// start, an add, a swap. An item that joined before the period is read at
+// the period start.
+//
+// Mutation: read every plan at the period start, and the plans of sub_new
+// are read at midnight.
+func TestUsageOpenPeriods_PinsEachItemWhereItJoined(t *testing.T) {
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	rec := pinRecorder{end: end, pins: map[string]time.Time{}}
+	a := usageOpenPeriods{subs: joinedSubs{start: start, end: end}, pricing: rec, thresholds: noWatermarks{}}
+	if _, err := a.OpenPeriods(context.Background(), "ten_open", "cus_open"); err != nil {
+		t.Fatalf("OpenPeriods: %v", err)
+	}
+	want := map[string]time.Time{
+		"pln_start":   start.Add(15 * time.Hour),
+		"pln_added":   start.Add(18 * time.Hour),
+		"pln_swapped": start.AddDate(0, 0, 9).Add(12 * time.Hour),
+		"pln_old":     start,
+	}
+	for plan, at := range want {
+		if got, ok := rec.pins[plan]; !ok || !got.Equal(at) {
+			t.Errorf("plan %s read at %v, want %v", plan, got, at)
+		}
+	}
+}
