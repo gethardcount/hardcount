@@ -22,8 +22,9 @@ import (
 // period it is invoiced only when a price of the plan takes it; it is
 // no_price when the plan prices its meter but no price takes its labels, and
 // not_on_plan when the plan does not price its meter. A row at or after the
-// period end, released before that period's invoice (the grace), belongs to
-// the next period when the subscription continues; it is outside when the
+// period end, released before that period's invoice (the grace), is in a
+// period not invoiced yet when the subscription continues, and is not
+// checked against prices (review round 3 on #1390); it is outside when the
 // subscription ends at the period end. A sum row before a paid threshold
 // invoice's end is outside; before an unpaid one's, pending.
 func TestCountReleased(t *testing.T) {
@@ -71,14 +72,14 @@ func TestCountReleased(t *testing.T) {
 		{"active, plan prices the meter", []sub{{s: active}}, rows, ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
 		// Review finding (#1151): a plan without the meter used to count
 		// these as "will be invoiced".
-		{"active, plan does not price the meter", []sub{{s: seatsOnly}}, rows, ReleaseResult{NotOnPlan: 4, OutsideOpenPeriod: 1}},
+		{"active, plan does not price the meter", []sub{{s: seatsOnly}}, rows, ReleaseResult{NotOnPlan: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}},
 		{"two subscriptions, one prices it", []sub{{s: seatsOnly}, {s: active}}, rows, ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
 		{"active, cancels at the period end", []sub{{s: ending}}, rows, ReleaseResult{InOpenPeriod: 3, OutsideOpenPeriod: 2}},
 		// Review finding 3 on #1350: the release ignored the watermark.
 		{"threshold invoice unpaid", []sub{{active, ThresholdWatermark{BilledThrough: &fire}}}, rows, ReleaseResult{InOpenPeriod: 2, PendingThresholdInvoice: 2, OutsideOpenPeriod: 1}},
 		{"threshold invoice paid", []sub{{active, ThresholdWatermark{BilledThrough: &fire, PaidThrough: &fire}}}, rows, ReleaseResult{InOpenPeriod: 2, OutsideOpenPeriod: 3}},
 		// Design G9: released rows no price takes were in_open_period.
-		{"no price takes the rows", []sub{{s: labelled}}, rows, ReleaseResult{NoPrice: 4, OutsideOpenPeriod: 1}},
+		{"no price takes the rows", []sub{{s: labelled}}, rows, ReleaseResult{NoPrice: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}},
 		{"a price takes the rows", []sub{{s: labelled}}, func() []ReleasedUsage {
 			out := slices.Clone(rows)
 			for i := range out {
@@ -115,8 +116,8 @@ func TestCountReleased(t *testing.T) {
 	p, _ := OpenPeriodOf(active, []Stretch{{PlanID: "pln_tokens", From: start, To: end}}, nil, nil, nil, ThresholdWatermark{})
 	var got ReleaseResult
 	countReleased(&got, rows, []OpenPeriod{p}, sum)
-	if got != (ReleaseResult{NotOnPlan: 4, OutsideOpenPeriod: 1}) {
-		t.Errorf("no plans: %+v, want not_on_plan 4 and the invoiced row outside", got)
+	if got != (ReleaseResult{NotOnPlan: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}) {
+		t.Errorf("no plans: %+v, want not_on_plan 3, the row after the end not checked, the invoiced row outside", got)
 	}
 }
 

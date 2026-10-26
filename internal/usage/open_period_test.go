@@ -71,6 +71,13 @@ func TestClassify(t *testing.T) {
 	partPaid.PaidThrough = opAt(opMay.AddDate(0, 0, 9))
 	ending := may
 	ending.Next = nil
+	// Started at 11:00 on May 1 with no trial: the first period starts at
+	// midnight. A threshold fire billed May 1 00:00 to 20:00.
+	firstDay := whole(opMay, opJun, opAt(opMay.Add(11*time.Hour)), "m")
+	firstDay.BilledThrough = opAt(opMay.Add(20 * time.Hour))
+	firstDay.PaidThrough = firstDay.BilledThrough
+	firstDayUnpaid := firstDay
+	firstDayUnpaid.PaidThrough = nil
 	pendingDrop := may
 	pendingDrop.Next = []PriceSet{{}}
 	noFloor := may
@@ -182,9 +189,12 @@ func TestClassify(t *testing.T) {
 		{"before the watermark, meter not priced", opMay.AddDate(0, 0, 5), "x", nil, []OpenPeriod{watermark}, sum, NotOnPlan},
 		{"unsettled here, open in another subscription", opMay.AddDate(0, 0, 5), "m", nil, []OpenPeriod{unpaid, whole(opMay, opJun, opAt(opApr), "m")}, sum, InOpen},
 		{"grace: next period", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{may}, sum, InOpen},
-		{"grace: next period, no price takes the labels", opJun.Add(10 * time.Minute), "m", map[string]any{"model": "b"}, []OpenPeriod{labelled}, sum, NoPrice},
 		{"grace: ends at the period end", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{ending}, sum, Outside},
-		{"grace: next plan drops the meter", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{pendingDrop}, sum, NotOnPlan},
+		// Review round 3 on #1390: the first period starts at midnight of
+		// the first day, before the start instant, and the close's
+		// threshold watermark holds from there.
+		{"first day, before the start instant, before a paid watermark", opMay.Add(9 * time.Hour), "m", nil, []OpenPeriod{firstDay}, sum, AfterClose},
+		{"first day, before the start instant, before an unpaid watermark", opMay.Add(9 * time.Hour), "m", nil, []OpenPeriod{firstDayUnpaid}, sum, Unsettled},
 		// The subscription that prices the meter invoiced April; another one
 		// holds April but does not price it.
 		{"invoiced here, another subscription holds it unpriced", opApr.AddDate(0, 0, 20), "m", nil, []OpenPeriod{may, yearly}, sum, AfterClose},
@@ -196,6 +206,36 @@ func TestClassify(t *testing.T) {
 			got, err := classify(c.at, c.meter, c.labels, c.periods, func() (MeterBuckets, error) { return c.mb, nil })
 			if err != nil || got != c.want {
 				t.Errorf("classify = %v, %v; want %v", got, err, c.want)
+			}
+		})
+	}
+}
+
+// TestClassify_AfterThePeriodEndIsNotChecked: an event at or after the
+// current period's end is billed by its own period's plans at that period's
+// pins. While the period's close has not run, ingest knows neither (the
+// close can be behind by more than one period), so it answers no status,
+// whatever the plans price at the period end. A trial and a scheduled
+// cancel still make it outside_subscription.
+func TestClassify_AfterThePeriodEndIsNotChecked(t *testing.T) {
+	modelA := PriceSet{ByMeter: map[string][]map[string]string{"m": {{"model": "a"}}}}
+	labelled := onPlans(opMay, opJun, opAt(opApr), map[string]PriceSet{"pln": modelA}, []Stretch{{PlanID: "pln", From: opMay, To: opJun}}, modelA)
+	drops := onPlans(opMay, opJun, opAt(opApr), map[string]PriceSet{"pln": everyEvent("m")}, []Stretch{{PlanID: "pln", From: opMay, To: opJun}}, PriceSet{})
+	for _, c := range []struct {
+		name   string
+		at     time.Time
+		labels map[string]any
+		p      OpenPeriod
+	}{
+		{"grace, no price at the period end takes the labels", opJun.Add(10 * time.Minute), map[string]any{"model": "b"}, labelled},
+		{"grace, the plan at the period end drops the meter", opJun.Add(10 * time.Minute), nil, drops},
+		{"a later period, the close behind", opJun.AddDate(0, 1, 9), map[string]any{"model": "b"}, labelled},
+		{"a later period, a price takes the labels at the period end", opJun.AddDate(0, 1, 9), map[string]any{"model": "a"}, labelled},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := classify(c.at, "m", c.labels, []OpenPeriod{c.p}, func() (MeterBuckets, error) { return MeterBuckets{Additive: true}, nil })
+			if err != nil || got.BillingStatus() != "" {
+				t.Errorf("classify = %v (%q), %v; want no status", got, got.BillingStatus(), err)
 			}
 		})
 	}
