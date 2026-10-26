@@ -37,7 +37,7 @@ A recipe is an **idempotent, additive provisioning EVENT**, not an owned resourc
 
 ### Idempotency
 
-The badge is the gate, checked before any write. Re-applying an already-installed recipe is a **no-op that returns the existing instance** — same `id`, same `created_objects`, same HTTP `201`. Never a 409, never a duplicate plan.
+The badge is the gate, checked before any write. Re-applying an already-installed recipe is a **no-op that returns the existing instance** — same `id`, same `created_objects`, same HTTP `201`. Never a 409, never a duplicate plan. Amended 2026-10-26: two applies that run at the same time can conflict. The second gets a 409 (the meter, the plan code or the badge already exists) and installs nothing; a retry returns the first one's install.
 
 **Amendment (2026-07-26, m0157): the badge is scoped per livemode.** `0055` shipped the badge mode-blind while everything a recipe provisions is mode-partitioned (0020) — so a test-mode install's badge gated the live-mode install of the same recipe, which "no-op'd" into a Live dashboard showing *Installed* with zero live pricing objects. The badge now carries `livemode` (0020 treatment: mode-scoped unique, RLS predicate, session-stamped insert trigger), so "applied once" means *once per mode*, matching the objects the badge records. The class lesson: a mode-blind tenant table is only safe when its lookups ride FK-scoped mode-aware parents; the badge is addressed by a **natural key** (`recipe_key`), the one shape that argument doesn't cover — `TestRLSIsolation_AllModeAwareTablesHaveLivemodePredicate` now derives the mode-aware set from the schema so the next such table can't ship silently.
 

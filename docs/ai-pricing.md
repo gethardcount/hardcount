@@ -15,11 +15,15 @@ terminal.
 
 ## Ready-made recipes
 
-A recipe creates a meter and a monthly plan with no base fee, with a price
-for each model and kind of token, in one call. It creates nothing else:
-set payment retries under **Dunning policies** and webhook endpoints under
-**Webhooks**. The prices start at the provider's public list prices, which
-you can change later.
+A recipe creates, in one call, a monthly plan with no base fee and its
+prices: one for each model and kind of token, or for each GPU type in
+`replicate_style`. The prices bill the meter in the table below. If you
+have no meter with that event name, the recipe creates it. If you have one
+with the same aggregation, the recipe uses it. If yours has another
+aggregation, the recipe is refused with 409 and creates nothing. It creates
+nothing else: set payment retries under **Dunning policies** and webhook
+endpoints under **Webhooks**. The prices start at the provider's public
+list prices, which you can change later.
 
 | Recipe | Meter | Models it prices | Kinds of token (`token_type`) |
 |---|---|---|---|
@@ -209,13 +213,15 @@ count until it is released. Every price of the meter bills under it.
 A Claude name Velox does not know keeps its own name in `model`, such as
 `claude-opus-4-9`. Price it as in [Price a model a recipe does not
 cover](#price-a-model-a-recipe-does-not-cover), with one price for each kind
-of token:
+of token. This example adds it to the `anthropic_style` plan "AI API":
 
 ```bash
+CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+  | jq -r '.data[] | select(.name == "AI API") | .id')
 jq -n --arg meter "$METER_ID" \
     '{meter_id: $meter, dimension_match: {model: "claude-opus-4-9", token_type: "input"},
       mode: "per_unit", unit_amount_cents: "0.0015"}' \
-  | curl -s -X POST "$VELOX/v1/plans/$PLAN_ID/prices" \
+  | curl -s -X POST "$VELOX/v1/plans/$CLAUDE_PLAN_ID/prices" \
     -H "Authorization: Bearer $VELOX_KEY" \
     -H "Content-Type: application/json" \
     -d @- | jq -c '{dimension_match, effective}'

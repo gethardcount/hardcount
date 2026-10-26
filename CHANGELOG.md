@@ -208,6 +208,7 @@ original text.
 
 ### Fixed
 
+- **Two installs of the same recipe at the same time: the second now answers 409, not 500 (2026-10-26, [#1389](https://github.com/getvelox/velox/pull/1389)).** It installs nothing, and a retry returns the first install.
 - **When an item leaves a meter on the first day of a period and an item on another plan that prices the meter is added later that day, each event is billed once (2026-10-26, [#1388](https://github.com/getvelox/velox/pull/1388)).** The added item bills from the period start, and the events before the first item left were billed by both items. This covers the invoices, the previews, customer usage and the live balance.
 - **Every collection pause that ends sends one `subscription.collection_resumed`, with its own trigger (2026-10-25, [#1384](https://github.com/getvelox/velox/pull/1384)).** A pause can end before Velox clears it: its date comes, or its invoice is paid. A new pause or a resume call that reached it first sent no resume, or sent `triggered_by: operator`. And the scheduled resume could clear a pause dunning set a moment earlier, sending `triggered_by: payment` for an invoice nobody paid. The scheduled resume's event and audit row are now saved with the change.
 - **On a test clock, a cancel by dunning says `canceled_by: dunning` in `subscription.canceled` and in its audit row (2026-10-25, [#1384](https://github.com/getvelox/velox/pull/1384)).** It said `operator`, taken from the API key of the clock advance that ran dunning.

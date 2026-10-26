@@ -13077,9 +13077,12 @@ export const getInstantiateRecipeUrl = (key: string,) => {
  * recipe's prices, then the install badge written. It creates nothing
  * else: no dunning policy and no webhook endpoint. Adopting a meter
  * other plans price changes none of their prices.
- * Idempotent per (tenant, livemode): re-posting an installed recipe
- * returns the EXISTING instance — 201 both times, never a 409, never
- * a duplicate plan (ADR-085; badge livemode-scoped per m0157).
+ * Idempotent per (tenant, livemode): re-posting a recipe that is
+ * installed returns the EXISTING instance with 201 and creates
+ * nothing (ADR-085; badge livemode-scoped per m0157). Two installs
+ * that run at the same time can conflict: the second gets a 409 and
+ * installs nothing. A retry returns the first install, or, for
+ * another recipe, reuses the meter it made.
  * @summary Instantiate recipe (idempotent apply)
  */
 export const instantiateRecipe = async (key: string,

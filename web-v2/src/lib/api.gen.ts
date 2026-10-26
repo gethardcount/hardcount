@@ -5838,9 +5838,12 @@ export interface paths {
          *     recipe's prices, then the install badge written. It creates nothing
          *     else: no dunning policy and no webhook endpoint. Adopting a meter
          *     other plans price changes none of their prices.
-         *     Idempotent per (tenant, livemode): re-posting an installed recipe
-         *     returns the EXISTING instance — 201 both times, never a 409, never
-         *     a duplicate plan (ADR-085; badge livemode-scoped per m0157).
+         *     Idempotent per (tenant, livemode): re-posting a recipe that is
+         *     installed returns the EXISTING instance with 201 and creates
+         *     nothing (ADR-085; badge livemode-scoped per m0157). Two installs
+         *     that run at the same time can conflict: the second gets a 409 and
+         *     installs nothing. A retry returns the first install, or, for
+         *     another recipe, reuses the meter it made.
          */
         post: operations["instantiateRecipe"];
         delete?: never;
@@ -14775,7 +14778,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description An existing meter with the same `event_name` diverges from the recipe (aggregation mismatch) — reconcile the meter before instantiating. Nothing is installed. */
+            /** @description Nothing is installed. Either a meter with the recipe's `event_name` has another aggregation, so the recipe cannot use it, or another install that ran at the same time created the meter, the plan code or this recipe's install first (retry). */
             409: {
                 headers: {
                     [name: string]: unknown;

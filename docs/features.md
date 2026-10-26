@@ -11,7 +11,7 @@ labels on a usage event, such as `model` or `token_type`.
 | Feature | What it does for you | Learn more |
 |---|---|---|
 | Meters with dimensions | One meter can have many prices. Each usage event carries labels, such as `model`, that pick its price. So one Tokens meter prices every model and token type. | [How Velox works](how-velox-works.md) |
-| Pricing recipes | One call creates a meter, prices and a plan for a common pricing shape: `anthropic_style`, `openai_style` or `replicate_style`. It creates nothing else. | [AI pricing](ai-pricing.md) |
+| Pricing recipes | One call creates a plan with its prices, and the meter they bill if you do not have it yet, for a common pricing shape: `anthropic_style`, `openai_style` or `replicate_style`. It creates nothing else. | [AI pricing](ai-pricing.md) |
 | LiteLLM | Point LiteLLM's spend callback at Velox, and each AI call becomes token usage, labelled with `model` and `provider`. A resent call is counted once. No SDK (client library) is needed. | [LiteLLM guide](integrations/litellm.md) |
 | Prepaid commits | Sell "pay $9k, get $10k of usage" as a line on a one-off invoice. The credit is added when that invoice is finalized, in the same step and before it is paid. Each later invoice uses it up when Velox collects it, free (promotional) credit first. | [AI pricing](ai-pricing.md#sell-prepaid-credit-a-prepaid-commit) |
 | Margin per customer | Enter what each AI provider charges you per token, once. Velox then shows each customer's usage revenue next to what it cost you. Covers usage only: base fees, credits and taxes are left out. | [AI pricing](ai-pricing.md#see-your-margin) |
