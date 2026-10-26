@@ -52,16 +52,6 @@ func renderRecipe(r domain.Recipe, overrides map[string]any) (domain.Recipe, err
 		return domain.Recipe{}, err
 	}
 
-	out.RatingRules = append([]domain.RecipeRatingRule(nil), r.RatingRules...)
-	for i, rr := range out.RatingRules {
-		if out.RatingRules[i].Currency, err = apply(rr.Currency); err != nil {
-			return domain.Recipe{}, err
-		}
-		if out.RatingRules[i].Name, err = apply(rr.Name); err != nil {
-			return domain.Recipe{}, err
-		}
-	}
-
 	out.Plans = append([]domain.RecipePlan(nil), r.Plans...)
 	for i, p := range out.Plans {
 		if out.Plans[i].Code, err = apply(p.Code); err != nil {
@@ -177,14 +167,6 @@ func validateTemplateReferences(r domain.Recipe, allowed map[string]struct{}) er
 	}
 	if err := check(r.Description, "description"); err != nil {
 		return err
-	}
-	for i, rr := range r.RatingRules {
-		if err := check(rr.Currency, fmt.Sprintf("rating_rules[%d].currency", i)); err != nil {
-			return err
-		}
-		if err := check(rr.Name, fmt.Sprintf("rating_rules[%d].name", i)); err != nil {
-			return err
-		}
 	}
 	for i, p := range r.Plans {
 		if err := check(p.Code, fmt.Sprintf("plans[%d].code", i)); err != nil {

@@ -43,17 +43,6 @@ export const SEEDED_POLICY_NOTE =
   'Created with your account. When retries run out nothing changes: the subscription keeps billing, so each new unpaid invoice is retried on its own. Choose "Pause collection" to stop that. The first enabled policy you create becomes the default instead, unless you edit this one or make it the default first.'
 
 /**
- * What applying a recipe's retry policy does to the default, so the
- * preview says it before anything is created.
- */
-export function recipeRetryNote(policies: PolicyLike[]): string {
-  const def = policies.find(p => p.is_default)
-  if (!def) return 'becomes your default'
-  if (def.seeded) return `becomes your default, replacing ${def.name}`
-  return `added next to your default, ${def.name}`
-}
-
-/**
  * What saving a new policy does to the default, shown in the create dialog
  * before anything is saved. Only the seeded default hands over (ADR-123),
  * and only to an enabled policy: a policy created turned off leaves it in

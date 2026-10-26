@@ -15,7 +15,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/dunning"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
 	"github.com/sagarsuperuser/velox/internal/invoice"
@@ -29,7 +28,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/subscription/subscriptiontest"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
-	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
 // recipeTenant is one tenant with the anthropic_style recipe installed and
@@ -66,9 +64,7 @@ func newRecipeTenant(t *testing.T, db *postgres.DB, name string) *recipeTenant {
 	if err != nil {
 		t.Fatalf("load recipes: %v", err)
 	}
-	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry,
-		pricingSvc, dunning.NewService(dunning.NewPostgresStore(db), nil, nil),
-		webhook.NewService(webhook.NewPostgresStore(db), nil, "local"))
+	recipeSvc := recipe.NewService(db, recipe.NewPostgresStore(db), registry, pricingSvc)
 	if _, err := recipeSvc.Instantiate(ctx, tenantID, "anthropic_style", nil, recipe.InstantiateOptions{}); err != nil {
 		t.Fatalf("instantiate anthropic_style: %v", err)
 	}
@@ -441,5 +437,73 @@ func TestLiteLLM_ProviderCostsAfterUpgrade(t *testing.T) {
 		if e.ProviderCostMicros == nil || *e.ProviderCostMicros != 20_000 {
 			t.Errorf("%s: cost %v micros, want 20000: provider costs have no context_tier, so the one Haiku 5.5 cost covers both tiers", e.IdempotencyKey, e.ProviderCostMicros)
 		}
+	}
+}
+
+// TestLiteLLM_RawNamesOnAFreshInstall: the anthropic_style recipe prices
+// Claude by the family the LiteLLM mapper puts in `model`, so a fresh install
+// bills platform names (a Foundry azure_ai/ name, a Google Cloud @date name, a
+// Bedrock cross-region name) at their model's list price, and a name the
+// mapper does not know keeps itself and has no price (ADR-130 §15, design
+// §4.22). One raw name is priced apart by a price with one more label than
+// the recipe's price it refines: `model_raw` beside the recipe's labels. For
+// Haiku 5.5, whose recipe prices carry context_tier, that is four labels; a
+// three-label price there ties the recipe's and is refused.
+func TestLiteLLM_RawNamesOnAFreshInstall(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	rt := newRecipeTenant(t, db, "Raw Names Corp")
+	const vertexOpus46 = "vertex_ai/claude-opus-4-6@default"
+	const bedrockHaiku55 = "us.anthropic.claude-haiku-5-5"
+
+	rt.spend("raw_azure_opus45", "azure_ai/claude-opus-4-5", 1_000_000, 0, 0)
+	rt.spend("raw_vertex_sonnet45", "vertex_ai/claude-sonnet-4-5@20250929", 1_000_000, 0, 0)
+	rt.spend("raw_bedrock_haiku45", "bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0", 1_000_000, 0, 0)
+	rt.spend("raw_unknown", "claude-opus-5-9", 1_000_000, 0, 0)
+	rt.spend("raw_vertex_opus46", vertexOpus46, 1_000_000, 0, 0)
+	rt.spend("raw_direct_opus46", "claude-opus-4-6", 1_000_000, 0, 0)
+	rt.spend("raw_bedrock_haiku55", bedrockHaiku55, 100_000, 0, 0)
+	rt.spend("raw_direct_haiku55", "claude-haiku-5-5", 100_000, 0, 0)
+
+	rt.priceRule("0.0006", map[string]string{"model": "claude-opus-4.6", "model_raw": vertexOpus46, "token_type": "input"})
+	rt.priceRule("0.00002", map[string]string{
+		"model": "claude-haiku-5.5", "model_raw": bedrockHaiku55, "context_tier": "prompt_up_to_100k", "token_type": "input",
+	})
+	_, err := pricing.NewPostgresStore(db).WritePrice(rt.ctx, rt.tenantID, rt.planID, pricing.PriceChange{
+		Op: pricing.PriceAdd, MeterID: rt.meterID,
+		Match: map[string]string{"model": "claude-haiku-5.5", "model_raw": bedrockHaiku55, "token_type": "input"},
+		Shape: perUnitShape("0.00002"),
+	}, nil)
+	if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "vlx_prc_") {
+		t.Errorf("a three-label Haiku 5.5 model_raw price: got %v, want price_conflict naming the recipe's price", err)
+	}
+
+	subtotal, lines := rt.close()
+	want := map[string]int64{
+		"Tokens (claude-opus-4.5 · input)":                                               500,
+		"Tokens (claude-sonnet-4.5 · input)":                                             300,
+		"Tokens (claude-haiku-4.5 · input)":                                              100,
+		"Tokens (claude-opus-4.6 · " + vertexOpus46 + " · input)":                        600,
+		"Tokens (claude-opus-4.6 · input)":                                               500,
+		"Tokens (prompt_up_to_100k · claude-haiku-5.5 · " + bedrockHaiku55 + " · input)": 2,
+		"Tokens (prompt_up_to_100k · claude-haiku-5.5 · input)":                          1,
+	}
+	var wantTotal int64
+	for desc, cents := range want {
+		wantTotal += cents
+		if lines[desc] != cents {
+			t.Errorf("line %q = %d¢, want %d¢", desc, lines[desc], cents)
+		}
+	}
+	if subtotal != wantTotal || len(lines) != len(want) {
+		t.Errorf("subtotal %d¢ over %d lines, want %d¢ over %d. Lines:%s", subtotal, len(lines), wantTotal, len(want), dumpLines(lines))
+	}
+	evs, _, err := rt.usageStore.List(rt.ctx, usage.ListFilter{
+		TenantID: rt.tenantID, Dimensions: map[string]any{"model_raw": "claude-opus-5-9"}, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(evs) != 1 || evs[0].Dimensions["model"] != "claude-opus-5-9" {
+		t.Errorf("unknown model's events: %+v, want one with model = the raw name", evs)
 	}
 }

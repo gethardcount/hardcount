@@ -11,11 +11,10 @@ import type { PriceShape } from './priceShape';
 import type { RecipePriceDimensionMatch } from './recipePriceDimensionMatch';
 
 /**
- * One price an install puts on a recipe plan. It takes the plan's currency.
+ * One usage price of a recipe plan. It takes the plan's currency.
  */
 export type RecipePrice = PriceShape & {
-  plan_code: string;
-  /** The recipe meter the price is on. */
-  event_name: string;
+  /** The `event_name` of the recipe meter the price is on. */
+  meter: string;
   dimension_match: RecipePriceDimensionMatch;
 };

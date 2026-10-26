@@ -1403,9 +1403,7 @@ export interface paths {
          * @description Mutates url / description / events / active WITHOUT rotating the
          *     signing secret — the receiver keeps verifying while the target or
          *     event set changes. Fields omitted are left unchanged; events are
-         *     validated against the emit catalog. This is also how a
-         *     recipe-created endpoint (inactive, placeholder URL) is pointed at
-         *     a real receiver and activated.
+         *     validated against the emit catalog.
          */
         patch: {
             parameters: {
@@ -5837,12 +5835,15 @@ export interface paths {
          * Instantiate recipe (idempotent apply)
          * @description Applies the recipe for the tenant under one transaction: meters are
          *     adopted-or-created, a fresh born-unique plan is generated with the
-         *     recipe's prices, optional dunning policy and (inactive) webhook
-         *     endpoint created, then the install badge written. Adopting a meter
+         *     recipe's prices, then the install badge written. It creates nothing
+         *     else: no dunning policy and no webhook endpoint. Adopting a meter
          *     other plans price changes none of their prices.
-         *     Idempotent per (tenant, livemode): re-posting an installed recipe
-         *     returns the EXISTING instance — 201 both times, never a 409, never
-         *     a duplicate plan (ADR-085; badge livemode-scoped per m0157).
+         *     Idempotent per (tenant, livemode): re-posting a recipe that is
+         *     installed returns the EXISTING instance with 201 and creates
+         *     nothing (ADR-085; badge livemode-scoped per m0157). Two installs
+         *     that run at the same time can conflict: the second gets a 409 and
+         *     installs nothing. A retry returns the first install, or, for
+         *     another recipe, reuses the meter it made.
          */
         post: operations["instantiateRecipe"];
         delete?: never;
@@ -7992,34 +7993,6 @@ export interface components {
             unit: string;
             aggregation: string;
         };
-        /** @description A rate in the recipe's YAML. An install puts it on the plan as the price of each pricing rule that names it. */
-        RecipeRatingRule: {
-            key: string;
-            name?: string;
-            /**
-             * @description As on PriceShape.
-             * @enum {string}
-             */
-            mode: "per_unit" | "graduated" | "package";
-            currency: string;
-            /** @description Price per unit in cents, as a decimal string (see PriceShape.unit_amount_cents). */
-            unit_amount_cents: string;
-            tiers?: components["schemas"]["PriceTier"][];
-            /** Format: int64 */
-            package_size?: number;
-            /** @description Price of one package in cents, as a decimal string. */
-            package_amount_cents: string;
-        };
-        /** @description One price of the recipe's YAML: the meter, the events it takes and the rating rule that gives its rate. An install puts it on each plan that names the meter. `priority` is not used: the price with the most labels takes an event. */
-        RecipePricingRule: {
-            /** @description The recipe meter the rule prices. */
-            event_name: string;
-            rating_rule_key: string;
-            dimension_match: {
-                [key: string]: unknown;
-            };
-            priority: number;
-        };
         RecipePlan: {
             code: string;
             name: string;
@@ -8033,28 +8006,8 @@ export interface components {
              * @enum {string}
              */
             base_bill_timing?: "in_advance" | "in_arrears";
-            /** @description The recipe meters the plan prices. */
-            event_names: string[];
-        };
-        RecipeDunningPolicy: {
-            name: string;
-            /** @description The policy's schedule, as `retry_days` on a dunning policy. */
-            retry_days: number[];
-            /**
-             * @description What exhausting all retries does to the subscription behind the unpaid invoice. `pause` pauses collection only (the cycle keeps drafting invoices), and collection resumes by itself once that invoice is paid; a pause you set is kept as it is. `cancel` cancels the subscription. No-op on a one-off invoice, which has no subscription.
-             * @enum {string}
-             */
-            final_subscription_action: "none" | "pause" | "cancel";
-            /**
-             * @description What exhausting all retries does to the unpaid invoice. `mark_uncollectible` writes it off as bad debt — the receivable closes, the invoice stays on the books for audit, and it remains settleable out of band. `none` leaves it finalized and due, which means it stays open until a human closes or collects it.
-             *     Independent of `final_subscription_action` (ADR-112): the two were one enum until 2026-08-05, which made "cancel and write off" inexpressible.
-             * @enum {string}
-             */
-            final_invoice_action: "none" | "mark_uncollectible";
-        };
-        RecipeWebhook: {
-            events: string[];
-            url_placeholder: string;
+            /** @description The plan's usage prices. Each takes the plan's currency. */
+            prices: components["schemas"]["RecipePrice"][];
         };
         /** @description Per-role count of objects a recipe will produce when instantiated. Recipes create no product entity — there is no `products` count. */
         RecipeCreates: {
@@ -8062,16 +8015,12 @@ export interface components {
             plans: number;
             /** @description The prices the install puts on its plans. */
             prices: number;
-            dunning_policies: number;
-            webhook_endpoints: number;
         };
         /** @description Per-role map of entity IDs a recipe apply produced (including ADOPTED meters — apply reconnects to an existing meter rather than duplicating it, ADR-085). Every field is omitted when empty; clients must guard reads. */
         RecipeCreatedObjects: {
             meter_ids?: string[];
             plan_ids?: string[];
             price_ids?: string[];
-            dunning_policy_id?: string;
-            webhook_endpoint_id?: string;
         };
         /** @description The install badge: the record of a recipe being applied for a tenant (scoped per livemode since m0157). Field names are `recipe_key` / `recipe_version` — NOT `key`/`version`, which the recipe template itself uses. */
         RecipeInstance: {
@@ -8089,7 +8038,7 @@ export interface components {
             /** @description Operator email or API key ID. Omitted when empty. */
             created_by?: string;
         };
-        /** @description A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata. An install turns the pricing rules into prices on its plans. */
+        /** @description A recipe template as served by list/detail: the full parsed YAML, its meters and its plans with their prices, not just display metadata. A recipe creates nothing else. */
         Recipe: {
             key: string;
             version: string;
@@ -8098,11 +8047,7 @@ export interface components {
             description?: string;
             overridable: components["schemas"]["RecipeOverride"][];
             meters: components["schemas"]["RecipeMeter"][];
-            rating_rules: components["schemas"]["RecipeRatingRule"][];
-            pricing_rules: components["schemas"]["RecipePricingRule"][];
             plans: components["schemas"]["RecipePlan"][];
-            dunning_policy?: components["schemas"]["RecipeDunningPolicy"];
-            webhook?: components["schemas"]["RecipeWebhook"];
         };
         RecipeListItem: components["schemas"]["Recipe"] & {
             creates: components["schemas"]["RecipeCreates"];
@@ -8112,19 +8057,15 @@ export interface components {
         RecipeDetail: components["schemas"]["Recipe"] & {
             creates: components["schemas"]["RecipeCreates"];
         };
-        /** @description Would-be-created object graph, grouped by role. All arrays are always present (possibly empty); optional singletons (dunning, webhook) are emitted as 0-or-1-length arrays so clients iterate without null guards. */
+        /** @description What an install creates: the meters, and each plan with its prices. Both arrays are always present. An install reuses a meter that already exists with the same `event_name` and aggregation. */
         RecipePreviewObjects: {
             meters: components["schemas"]["RecipeMeter"][];
             plans: components["schemas"]["RecipePlan"][];
-            prices: components["schemas"]["RecipePrice"][];
-            dunning_policies: components["schemas"]["RecipeDunningPolicy"][];
-            webhook_endpoints: components["schemas"]["RecipeWebhook"][];
         };
-        /** @description One price an install puts on a recipe plan. It takes the plan's currency. */
+        /** @description One usage price of a recipe plan. It takes the plan's currency. */
         RecipePrice: {
-            plan_code: string;
-            /** @description The recipe meter the price is on. */
-            event_name: string;
+            /** @description The `event_name` of the recipe meter the price is on. */
+            meter: string;
             dimension_match: {
                 [key: string]: string;
             };
@@ -9310,8 +9251,8 @@ export interface components {
             /**
              * @description True for the "Default retries" policy the account was created
              *     with, until you edit it or make it the default. While it is
-             *     true, the next enabled policy you create (by hand or from a
-             *     recipe) becomes the default instead. Ignored in request bodies.
+             *     true, the next enabled policy you create becomes the default
+             *     instead. Ignored in request bodies.
              */
             seeded: boolean;
             /**
@@ -14837,7 +14778,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description An existing meter with the same `event_name` diverges from the recipe (aggregation mismatch) — reconcile the meter before instantiating. Nothing is installed. */
+            /** @description Nothing is installed. Either a meter with the recipe's `event_name` has another aggregation, so the recipe cannot use it, or another install that ran at the same time created the meter, the plan code or this recipe's install first (retry). */
             409: {
                 headers: {
                     [name: string]: unknown;

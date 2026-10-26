@@ -162,8 +162,7 @@ func (h *Handler) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateEndpoint is the Stripe-shaped PATCH: url / description / events /
-// active mutate WITHOUT rotating the signing secret. Also the surface that
-// makes recipe-created endpoints (inactive + placeholder URL) usable.
+// active mutate WITHOUT rotating the signing secret.
 func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")

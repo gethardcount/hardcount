@@ -16,6 +16,4 @@ export interface RecipeCreates {
   plans: number;
   /** The prices the install puts on its plans. */
   prices: number;
-  dunning_policies: number;
-  webhook_endpoints: number;
 }

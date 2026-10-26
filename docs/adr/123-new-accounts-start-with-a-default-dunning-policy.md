@@ -1,9 +1,9 @@
 # ADR-123: New accounts start with a default dunning policy that retries three times and changes nothing
 
 **Date:** 2026-10-17
-**Status:** Accepted; amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (recipes no longer create a dunning policy), not built yet
+**Status:** Accepted; amended 2026-10-26 by [ADR-130](130-usage-prices-belong-to-the-plan.md): recipes no longer create a dunning policy ([amendment](#amendment-2026-10-26-recipes-create-no-dunning-policy)).
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and not built yet. Until it is built, this ADR describes the code. Recipes no longer create a dunning policy (PR-5), so "by hand or from a recipe" becomes "by hand". The seeded default and its takeover rule stay.
+**Amended 2026-10-26 ([ADR-130](130-usage-prices-belong-to-the-plan.md), built in #1389).** A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default. Where this ADR says "by hand or from a recipe", read "by hand". The seeded default and its takeover rule stay.
 
 ## Summary
 
@@ -157,6 +157,20 @@ seed knows nothing about.
   PATCH (which also covers disabling) and set-default. A new route that
   edits a policy must clear it too, or a later create would take over a
   policy the operator customised.
+
+## Amendment 2026-10-26: recipes create no dunning policy
+
+Decided 2026-10-23 with [ADR-130](130-usage-prices-belong-to-the-plan.md)
+(owner call D3) and built in #1389. A recipe holds only meters and plans
+with their prices; its `dunning` section is gone, and a recipe file that
+has one fails to load. Installing a recipe leaves the account's policies
+and its default as they were. So:
+
+- the takeover rule above applies to a policy the operator creates, and
+  to nothing else;
+- the reason in "Why this design" that the rule "keeps recipes working"
+  no longer applies; the rule stands for the operator's first policy;
+- alternatives A and B, which were about a recipe's policy, are moot.
 
 ## References
 

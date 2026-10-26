@@ -17,19 +17,24 @@ import (
 // Keeping the wire form separate keeps domain.Recipe free of YAML tags and
 // lets us evolve the YAML schema without leaking transient parse fields
 // into the rest of the codebase.
+//
+// A recipe is catalog only (ADR-130 §15): meters, and plans with their
+// prices. The removed sections are decoded only so parseRecipe can refuse
+// them by name with what replaced them.
 type rawRecipe struct {
-	Key          string             `yaml:"key"`
-	Version      string             `yaml:"version"`
-	Name         string             `yaml:"name"`
-	Summary      string             `yaml:"summary"`
-	Description  string             `yaml:"description"`
-	Overridable  []rawOverride      `yaml:"overridable"`
-	Meters       []rawMeter         `yaml:"meters"`
-	RatingRules  []rawRatingRule    `yaml:"rating_rules"`
-	PricingRules []rawPricingRule   `yaml:"pricing_rules"`
-	Plans        []rawPlan          `yaml:"plans"`
-	Dunning      *rawDunningSection `yaml:"dunning"`
-	Webhook      *rawWebhook        `yaml:"webhook"`
+	Key         string        `yaml:"key"`
+	Version     string        `yaml:"version"`
+	Name        string        `yaml:"name"`
+	Summary     string        `yaml:"summary"`
+	Description string        `yaml:"description"`
+	Overridable []rawOverride `yaml:"overridable"`
+	Meters      []rawMeter    `yaml:"meters"`
+	Plans       []rawPlan     `yaml:"plans"`
+
+	RatingRules  any `yaml:"rating_rules"`
+	PricingRules any `yaml:"pricing_rules"`
+	Dunning      any `yaml:"dunning"`
+	Webhook      any `yaml:"webhook"`
 }
 
 type rawOverride struct {
@@ -48,7 +53,40 @@ type rawMeter struct {
 	Aggregation string `yaml:"aggregation"`
 }
 
-type rawRatingTier struct {
+type rawPlan struct {
+	Code            string     `yaml:"code"`
+	Name            string     `yaml:"name"`
+	Currency        string     `yaml:"currency"`
+	BillingInterval string     `yaml:"billing_interval"`
+	BaseAmountCents int64      `yaml:"base_amount_cents"`
+	BaseBillTiming  string     `yaml:"base_bill_timing"`
+	Prices          []rawPrice `yaml:"prices"`
+
+	// Meters is decoded only to refuse it: a plan's meters are the meters
+	// it has a price for.
+	Meters any `yaml:"meters"`
+}
+
+// rawPrice is one usage price of a plan. It has no aggregation (the meter
+// has one), no priority (the price with the most labels wins) and no
+// currency (it takes the plan's).
+type rawPrice struct {
+	Meter          string         `yaml:"meter"`
+	DimensionMatch map[string]any `yaml:"dimension_match"`
+	Mode           string         `yaml:"mode"`
+	// UnitAmountCents and PackageAmountCents are amounts in cents read as
+	// strings (see rawTier) and converted to decimal in parseRecipe.
+	UnitAmountCents    string    `yaml:"unit_amount_cents"`
+	Tiers              []rawTier `yaml:"tiers"`
+	PackageSize        int64     `yaml:"package_size"`
+	PackageAmountCents string    `yaml:"package_amount_cents"`
+
+	// Priority and Currency are decoded only to refuse them by name.
+	Priority any `yaml:"priority"`
+	Currency any `yaml:"currency"`
+}
+
+type rawTier struct {
 	// UpTo is null (or absent) on the open last tier.
 	UpTo *int64 `yaml:"up_to"`
 	// Per-unit rate, read as a string so fractional sub-cent rates
@@ -56,59 +94,16 @@ type rawRatingTier struct {
 	UnitAmountCents string `yaml:"unit_amount_cents"`
 }
 
-type rawRatingRule struct {
-	Key      string `yaml:"key"`
-	Name     string `yaml:"name"`
-	Mode     string `yaml:"mode"`
-	Currency string `yaml:"currency"`
-	// UnitAmountCents and PackageAmountCents are amounts in cents read as
-	// strings (see rawRatingTier) and converted to decimal in parseRecipe.
-	UnitAmountCents    string          `yaml:"unit_amount_cents"`
-	Tiers              []rawRatingTier `yaml:"tiers"`
-	PackageSize        int64           `yaml:"package_size"`
-	PackageAmountCents string          `yaml:"package_amount_cents"`
-}
-
-// rawPricingRule has no aggregation of its own: every rule of a meter bills
-// under the meter's (ADR-130 §2). Strict decoding refuses a recipe that
-// still carries aggregation_mode.
-type rawPricingRule struct {
-	Meter          string         `yaml:"meter"`
-	RatingRule     string         `yaml:"rating_rule"`
-	DimensionMatch map[string]any `yaml:"dimension_match"`
-	Priority       int            `yaml:"priority"`
-}
-
-type rawPlan struct {
-	Code            string   `yaml:"code"`
-	Name            string   `yaml:"name"`
-	Currency        string   `yaml:"currency"`
-	BillingInterval string   `yaml:"billing_interval"`
-	BaseAmountCents int64    `yaml:"base_amount_cents"`
-	BaseBillTiming  string   `yaml:"base_bill_timing"`
-	Meters          []string `yaml:"meters"`
-}
-
-type rawDunningSection struct {
-	Policy rawDunningPolicy `yaml:"policy"`
-}
-
-type rawDunningPolicy struct {
-	Name      string `yaml:"name"`
-	RetryDays []int  `yaml:"retry_days"`
-	// The two terminal decisions (ADR-112).
-	FinalSubscriptionAction string `yaml:"final_subscription_action"`
-	FinalInvoiceAction      string `yaml:"final_invoice_action"`
-	// LegacyFinalAction is decoded ONLY so parse can reject a recipe still
-	// using the pre-ADR-112 key with an error that names the two keys that
-	// replace it. Strict decoding would refuse it anyway, but only as an
-	// unknown field.
-	LegacyFinalAction string `yaml:"final_action"`
-}
-
-type rawWebhook struct {
-	Events         []string `yaml:"events"`
-	URLPlaceholder string   `yaml:"url_placeholder"`
+// removedSections names each section a recipe no longer has and what
+// replaced it (ADR-130 §15).
+var removedSections = []struct {
+	name, instead string
+	present       func(r rawRecipe) bool
+}{
+	{"rating_rules", "put each rate on a price under its plan's prices", func(r rawRecipe) bool { return r.RatingRules != nil }},
+	{"pricing_rules", "put each price under its plan's prices", func(r rawRecipe) bool { return r.PricingRules != nil }},
+	{"dunning", "a recipe no longer creates a dunning policy; set retries on the Dunning policies page", func(r rawRecipe) bool { return r.Dunning != nil }},
+	{"webhook", "a recipe no longer creates a webhook endpoint; add one on the Webhooks page", func(r rawRecipe) bool { return r.Webhook != nil }},
 }
 
 // recipeKeyPattern bounds keys to lowercase identifiers so they can ride
@@ -117,10 +112,10 @@ var recipeKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 // parseRate converts a recipe's string-form amount in cents into a decimal.
 // Empty is treated as zero (a mode that doesn't use the field). A malformed
-// value, or one outside the limits a rate sent to POST /v1/rating-rules takes
+// value, or one outside the limits a rate sent to the prices API takes
 // (domain.CheckRate), fails recipe load loudly rather than silently pricing
 // at zero or failing at install.
-func parseRate(recipeKey, ruleKey, field, raw string) (decimal.Decimal, error) {
+func parseRate(where, field, raw string) (decimal.Decimal, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return decimal.Zero, nil
@@ -130,7 +125,7 @@ func parseRate(recipeKey, ruleKey, field, raw string) (decimal.Decimal, error) {
 		d, err = domain.CheckRate(field, d)
 	}
 	if err != nil {
-		return decimal.Zero, fmt.Errorf("recipe %q: rating_rule %q: invalid %s %q: %w", recipeKey, ruleKey, field, raw, err)
+		return decimal.Zero, fmt.Errorf("%s: invalid %s %q: %w", where, field, raw, err)
 	}
 	return d, nil
 }
@@ -209,90 +204,18 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 		out.Meters = append(out.Meters, domain.RecipeMeter(m))
 	}
 
-	ratingRuleKeys := make(map[string]struct{}, len(raw.RatingRules))
-	for _, r := range raw.RatingRules {
-		if r.Key == "" {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule missing key", raw.Key)
+	for _, sec := range removedSections {
+		if sec.present(raw) {
+			return domain.Recipe{}, fmt.Errorf("recipe %q: the %s section is no longer accepted: %s", raw.Key, sec.name, sec.instead)
 		}
-		if _, dup := ratingRuleKeys[r.Key]; dup {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: duplicate rating_rule key %q", raw.Key, r.Key)
-		}
-		ratingRuleKeys[r.Key] = struct{}{}
-		mode := domain.PricingMode(r.Mode)
-		switch mode {
-		case domain.PricingPerUnit, domain.PricingGraduated, domain.PricingPackage:
-		default:
-			return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q invalid mode %q", raw.Key, r.Key, r.Mode)
-		}
-		unit, err := parseRate(raw.Key, r.Key, "unit_amount_cents", r.UnitAmountCents)
-		if err != nil {
-			return domain.Recipe{}, err
-		}
-		pkg, err := parseRate(raw.Key, r.Key, "package_amount_cents", r.PackageAmountCents)
-		if err != nil {
-			return domain.Recipe{}, err
-		}
-		dr := domain.RecipeRatingRule{
-			Key: r.Key, Name: r.Name, Mode: mode, Currency: r.Currency,
-			UnitAmountCents:    unit,
-			PackageSize:        r.PackageSize,
-			PackageAmountCents: pkg,
-		}
-		for _, t := range r.Tiers {
-			ua, err := parseRate(raw.Key, r.Key, "tiers.unit_amount_cents", t.UnitAmountCents)
-			if err != nil {
-				return domain.Recipe{}, err
-			}
-			dr.Tiers = append(dr.Tiers, domain.RatingTier{UpTo: t.UpTo, UnitAmountCents: ua})
-		}
-		// The shape check the pricing API runs: the mode's fields and only
-		// those, and a tier table that rates.
-		if err := domain.CheckPriceShape(mode, dr.UnitAmountCents, dr.Tiers, dr.PackageSize, dr.PackageAmountCents); err != nil {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: rating_rule %q %w", raw.Key, r.Key, err)
-		}
-		out.RatingRules = append(out.RatingRules, dr)
-	}
-
-	for i, pr := range raw.PricingRules {
-		if pr.Meter == "" || pr.RatingRule == "" {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] missing meter or rating_rule", raw.Key, i)
-		}
-		if _, ok := meterKeys[pr.Meter]; !ok {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] references unknown meter %q", raw.Key, i, pr.Meter)
-		}
-		if _, ok := ratingRuleKeys[pr.RatingRule]; !ok {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] references unknown rating_rule %q", raw.Key, i, pr.RatingRule)
-		}
-		// dimension_match keys/values must be non-empty scalars: a rule
-		// carrying an empty key or a nested value can never match an event's
-		// flat dimension map, so it would install as a dead binding that
-		// silently prices its usage at $0. Dimension VOCABULARY is an open
-		// set (operators send arbitrary dimensions), so specific key names
-		// are not validated here — the embedded catalogs' coherence with the
-		// LiteLLM mapper's emitted keys is CI-locked separately.
-		for k, v := range pr.DimensionMatch {
-			if strings.TrimSpace(k) == "" {
-				return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match has an empty key", raw.Key, i)
-			}
-			// Values are strings only (ADR-130 §1): the install makes each
-			// pricing rule a plan price, whose labels are strings.
-			val, ok := v.(string)
-			if !ok {
-				return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match[%q] must be a string, got %T", raw.Key, i, k, v)
-			}
-			if strings.TrimSpace(val) == "" {
-				return domain.Recipe{}, fmt.Errorf("recipe %q: pricing_rules[%d] dimension_match[%q] is empty", raw.Key, i, k)
-			}
-		}
-		out.PricingRules = append(out.PricingRules, domain.RecipePricingRule{
-			EventName: pr.Meter, RatingRuleKey: pr.RatingRule,
-			DimensionMatch: pr.DimensionMatch, Priority: pr.Priority,
-		})
 	}
 
 	for _, p := range raw.Plans {
 		if p.Code == "" || p.Name == "" {
 			return domain.Recipe{}, fmt.Errorf("recipe %q: plan missing code or name", raw.Key)
+		}
+		if p.Meters != nil {
+			return domain.Recipe{}, fmt.Errorf("recipe %q: plan %q: meters is no longer accepted: a plan's meters are the meters its prices are on", raw.Key, p.Code)
 		}
 		interval := domain.BillingInterval(p.BillingInterval)
 		switch interval {
@@ -300,49 +223,37 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 		default:
 			return domain.Recipe{}, fmt.Errorf("recipe %q: plan %q invalid billing_interval %q", raw.Key, p.Code, p.BillingInterval)
 		}
-		for _, mk := range p.Meters {
-			if _, ok := meterKeys[mk]; !ok {
-				return domain.Recipe{}, fmt.Errorf("recipe %q: plan %q references unknown meter %q", raw.Key, p.Code, mk)
-			}
-		}
 		timing := domain.BillTiming(p.BaseBillTiming)
 		switch timing {
 		case "", domain.BillInArrears, domain.BillInAdvance:
 		default:
 			return domain.Recipe{}, fmt.Errorf("recipe %q: plan %q invalid base_bill_timing %q (want in_advance or in_arrears)", raw.Key, p.Code, p.BaseBillTiming)
 		}
-		out.Plans = append(out.Plans, domain.RecipePlan{
+		plan := domain.RecipePlan{
 			Code: p.Code, Name: p.Name, Currency: p.Currency, BillingInterval: interval,
-			BaseAmountCents: p.BaseAmountCents, BaseBillTiming: timing, EventNames: p.Meters,
-		})
-	}
-
-	if raw.Dunning != nil {
-		dp := raw.Dunning.Policy
-		// Reject the pre-ADR-112 key by name. Ignoring it would silently
-		// apply (pause, none) to a recipe whose author wrote
-		// `final_action: cancel_subscription` — a policy they did not choose.
-		if dp.LegacyFinalAction != "" {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: dunning.policy.final_action is no longer accepted — it decided two separate things. Use final_subscription_action (none|pause|cancel) and final_invoice_action (none|mark_uncollectible)", raw.Key)
+			BaseAmountCents: p.BaseAmountCents, BaseBillTiming: timing,
 		}
-		if !domain.DunningSubscriptionAction(dp.FinalSubscriptionAction).Valid() {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: dunning.policy.final_subscription_action %q must be one of none, pause, cancel", raw.Key, dp.FinalSubscriptionAction)
+		for i, rp := range p.Prices {
+			price, err := parsePrice(fmt.Sprintf("recipe %q: plan %q: prices[%d]", raw.Key, p.Code, i), rp, meterKeys)
+			if err != nil {
+				return domain.Recipe{}, err
+			}
+			// The tie check the price writer runs (ADR-130 §4), so a recipe
+			// whose prices have no winner fails the load, not every install.
+			for j, prev := range plan.Prices {
+				if prev.Meter != price.Meter {
+					continue
+				}
+				if domain.SameMatch(prev.DimensionMatch, price.DimensionMatch) {
+					return domain.Recipe{}, fmt.Errorf("recipe %q: plan %q: prices[%d] and prices[%d] have the same labels %v", raw.Key, p.Code, j, i, price.DimensionMatch)
+				}
+				if domain.PricesTie(prev.DimensionMatch, price.DimensionMatch) {
+					return domain.Recipe{}, fmt.Errorf("recipe %q: plan %q: prices[%d] %v and prices[%d] %v could take the same events with the same number of labels, so neither would win", raw.Key, p.Code, j, prev.DimensionMatch, i, price.DimensionMatch)
+				}
+			}
+			plan.Prices = append(plan.Prices, price)
 		}
-		if !domain.DunningInvoiceAction(dp.FinalInvoiceAction).Valid() {
-			return domain.Recipe{}, fmt.Errorf("recipe %q: dunning.policy.final_invoice_action %q must be one of none, mark_uncollectible", raw.Key, dp.FinalInvoiceAction)
-		}
-		out.DunningPolicy = &domain.RecipeDunningPolicy{
-			Name:                    dp.Name,
-			RetryDays:               dp.RetryDays,
-			FinalSubscriptionAction: dp.FinalSubscriptionAction,
-			FinalInvoiceAction:      dp.FinalInvoiceAction,
-		}
-	}
-
-	if raw.Webhook != nil {
-		out.Webhook = &domain.RecipeWebhook{
-			Events: raw.Webhook.Events, URLPlaceholder: raw.Webhook.URLPlaceholder,
-		}
+		out.Plans = append(out.Plans, plan)
 	}
 
 	if err := validateTemplateReferences(out, overrideKeys); err != nil {
@@ -350,4 +261,63 @@ func parseRecipe(data []byte) (domain.Recipe, error) {
 	}
 
 	return out, nil
+}
+
+// parsePrice checks one price of a plan: a meter the recipe declares, labels
+// that are non-empty strings, and a shape the prices API accepts.
+func parsePrice(where string, rp rawPrice, meters map[string]struct{}) (domain.RecipePrice, error) {
+	if rp.Priority != nil {
+		return domain.RecipePrice{}, fmt.Errorf("%s: priority is no longer accepted: the price with the most labels takes an event", where)
+	}
+	if rp.Currency != nil {
+		return domain.RecipePrice{}, fmt.Errorf("%s: currency is no longer accepted: a price takes its plan's currency", where)
+	}
+	if _, ok := meters[rp.Meter]; !ok {
+		return domain.RecipePrice{}, fmt.Errorf("%s: meter %q is not one of the recipe's meters", where, rp.Meter)
+	}
+	// Labels are strings (ADR-130 §1). An empty key or value, or a nested
+	// one, can never match an event's labels, so the price would never bill.
+	// The vocabulary is open (operators send their own labels); the built-in
+	// catalogs' agreement with the LiteLLM mapper is checked by its tests.
+	match := make(map[string]string, len(rp.DimensionMatch))
+	for k, v := range rp.DimensionMatch {
+		if strings.TrimSpace(k) == "" {
+			return domain.RecipePrice{}, fmt.Errorf("%s: dimension_match has an empty key", where)
+		}
+		val, ok := v.(string)
+		if !ok {
+			return domain.RecipePrice{}, fmt.Errorf("%s: dimension_match[%q] must be a string, got %T", where, k, v)
+		}
+		if strings.TrimSpace(val) == "" {
+			return domain.RecipePrice{}, fmt.Errorf("%s: dimension_match[%q] is empty", where, k)
+		}
+		match[k] = val
+	}
+	unit, err := parseRate(where, "unit_amount_cents", rp.UnitAmountCents)
+	if err != nil {
+		return domain.RecipePrice{}, err
+	}
+	pkg, err := parseRate(where, "package_amount_cents", rp.PackageAmountCents)
+	if err != nil {
+		return domain.RecipePrice{}, err
+	}
+	shape := domain.PriceShape{
+		Mode:               domain.PricingMode(rp.Mode),
+		UnitAmountCents:    unit,
+		PackageSize:        rp.PackageSize,
+		PackageAmountCents: pkg,
+	}
+	for _, t := range rp.Tiers {
+		ua, err := parseRate(where, "tiers.unit_amount_cents", t.UnitAmountCents)
+		if err != nil {
+			return domain.RecipePrice{}, err
+		}
+		shape.Tiers = append(shape.Tiers, domain.RatingTier{UpTo: t.UpTo, UnitAmountCents: ua})
+	}
+	// The shape check the prices API runs: the mode's fields and only
+	// those, and a tier table that rates.
+	if err := domain.CheckPriceShape(shape.Mode, shape.UnitAmountCents, shape.Tiers, shape.PackageSize, shape.PackageAmountCents); err != nil {
+		return domain.RecipePrice{}, fmt.Errorf("%s: %w", where, err)
+	}
+	return domain.RecipePrice{Meter: rp.Meter, DimensionMatch: match, PriceShape: shape}, nil
 }

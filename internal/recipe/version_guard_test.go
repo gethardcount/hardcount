@@ -38,10 +38,15 @@ import (
 // replicate 6.0.0): the price shapes take ADR-130 §3's names, mode per_unit
 // and unit_amount_cents, and parseRecipe refuses flat_amount_cents. Prices
 // are unchanged.
+// MAJOR bumps on 2026-10-26 (anthropic 10.0.0, openai 9.0.0, replicate
+// 7.0.0): a recipe holds only meters and plans with their prices (ADR-130
+// §15). rating_rules, pricing_rules, dunning and webhook are gone, and
+// parseRecipe refuses them. Prices are unchanged; an install no longer
+// creates a dunning policy or a webhook endpoint.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@9.0.0": "9ee04582a095329eb8a6b476a1ba31611e7b5cf95e7c6c0699f8faca22f7d8c6",
-	"openai_style@8.0.0":    "f91cc6ba80c4f5c4ca4cb768c5ea1d5eda151f9d43be33c82774e23d46c114ca",
-	"replicate_style@6.0.0": "5b87f6fed4cdbbdba8454a96451df1c6deb0cb8b8f3369fc79e33d9fbb4d994e",
+	"anthropic_style@10.0.0": "fbe0a5693290dd7042a3664eb8ad7cd37dc8c25247f74bd27c4a1403e4aaddbf",
+	"openai_style@9.0.0":     "fd2564361133ba391063b343d76f820d2f7dc20f4f9ad2bec8a31fa85342a50a",
+	"replicate_style@7.0.0":  "6e32b8e7f3f792754795221ad467bee47174fa3bd6a2ee9183598d92fcfc9302",
 }
 
 // TestRecipeCatalog_VersionMovesWithContent asserts every embedded recipe's

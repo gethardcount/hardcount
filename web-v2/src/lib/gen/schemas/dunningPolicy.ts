@@ -20,8 +20,8 @@ export interface DunningPolicy {
   /**
      * True for the "Default retries" policy the account was created
      * with, until you edit it or make it the default. While it is
-     * true, the next enabled policy you create (by hand or from a
-     * recipe) becomes the default instead. Ignored in request bodies.
+     * true, the next enabled policy you create becomes the default
+     * instead. Ignored in request bodies.
      */
   seeded: boolean;
   /** Days to wait before each retry; the number of retries is its length. */

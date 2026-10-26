@@ -1,5 +1,5 @@
 key: anthropic_style
-version: 9.0.0
+version: 10.0.0
 name: Anthropic (Claude) token pricing
 summary: |
   Ready-made pricing for reselling Claude (Anthropic) API access. Bills each
@@ -21,8 +21,6 @@ description: |
       and a higher one above that (a prompt counts input, cache reads and
       cache writes)
     • A monthly plan your customers subscribe to
-    • Automatic payment retries and a notifications endpoint you can point
-      at your own systems
 
   Prices start at Anthropic's public list rates — a starting point you'll
   edit to your own margins after setup. Before installing, you can set the
@@ -48,1238 +46,582 @@ meters:
     unit: tokens
     aggregation: sum
 
-rating_rules:
-  # Claude Opus 4.5 — input $5.00 / output $25.00 per million (per-token).
-  # Cache multiples as everywhere: read 0.1×, 5m write 1.25×, 1h write 2×.
-  - key: opus45_input
-    name: Claude Opus 4.5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0005'
-  - key: opus45_output
-    name: Claude Opus 4.5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0025'
-  - key: opus45_cache_read
-    name: Claude Opus 4.5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-  - key: opus45_cache_write_5m
-    name: Claude Opus 4.5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000625'
-  - key: opus45_cache_write_1h
-    name: Claude Opus 4.5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-
-  # Claude Sonnet 4.5 — input $3.00 / output $15.00 per million (per-token).
-  - key: sonnet45_input
-    name: Claude Sonnet 4.5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0003'
-  - key: sonnet45_output
-    name: Claude Sonnet 4.5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: sonnet45_cache_read
-    name: Claude Sonnet 4.5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00003'
-  - key: sonnet45_cache_write_5m
-    name: Claude Sonnet 4.5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000375'
-  - key: sonnet45_cache_write_1h
-    name: Claude Sonnet 4.5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0006'
-
-  # Claude Haiku 4.5 — input $1.00 / output $5.00 per million (per-token).
-  - key: haiku45_input
-    name: Claude Haiku 4.5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0001'
-  - key: haiku45_output
-    name: Claude Haiku 4.5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0005'
-  - key: haiku45_cache_read
-    name: Claude Haiku 4.5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00001'
-  - key: haiku45_cache_write_5m
-    name: Claude Haiku 4.5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000125'
-  - key: haiku45_cache_write_1h
-    name: Claude Haiku 4.5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0002'
-
-  # ---- Legacy claude-3.x families (kept: proxies mid-migration still
-  # route them, and the LiteLLM mapper still families them — dropping the
-  # rules here would leave that traffic unbilled at cycle close). ----
-
-  # Claude 3.5 Sonnet — input $3.00 / output $15.00 per million (per-token).
-  - key: c35_sonnet_input
-    name: Claude 3.5 Sonnet input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0003'
-  - key: c35_sonnet_output
-    name: Claude 3.5 Sonnet output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: c35_sonnet_cache_read
-    name: Claude 3.5 Sonnet cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00003'
-  - key: c35_sonnet_cache_write_5m
-    name: Claude 3.5 Sonnet cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000375'
-  - key: c35_sonnet_cache_write_1h
-    name: Claude 3.5 Sonnet cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0006'
-
-  # Claude 3 Opus — input $15.00 / output $75.00 per million (per-token).
-  - key: opus_input
-    name: Claude 3 Opus input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: opus_output
-    name: Claude 3 Opus output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0075'
-  - key: opus_cache_read
-    name: Claude 3 Opus cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00015'
-  - key: opus_cache_write_5m
-    name: Claude 3 Opus cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001875'
-  - key: opus_cache_write_1h
-    name: Claude 3 Opus cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.003'
-
-  # Claude 3 Sonnet — input $3.00 / output $15.00 per million (per-token).
-  - key: sonnet_input
-    name: Claude 3 Sonnet input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0003'
-  - key: sonnet_output
-    name: Claude 3 Sonnet output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: sonnet_cache_read
-    name: Claude 3 Sonnet cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00003'
-  - key: sonnet_cache_write_5m
-    name: Claude 3 Sonnet cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000375'
-  - key: sonnet_cache_write_1h
-    name: Claude 3 Sonnet cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0006'
-
-  # Claude 3 Haiku — input $0.25 / output $1.25 per million (per-token).
-  # Decimal rates carry the exact derived cache multiples (no rounding):
-  # cache_read 0.1×, cache_write_5m 1.25×, cache_write_1h 2× of input.
-  - key: haiku_input
-    name: Claude 3 Haiku input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000025'
-  - key: haiku_output
-    name: Claude 3 Haiku output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000125'
-  - key: haiku_cache_read
-    name: Claude 3 Haiku cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0000025'
-  - key: haiku_cache_write_5m
-    name: Claude 3 Haiku cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00003125'
-  - key: haiku_cache_write_1h
-    name: Claude 3 Haiku cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-
-# Disjoint token roles → one rule per (model, token_type) at equal priority.
-
-  # ---- 2026-07-26 catalog refresh: current 5-generation lineup, the
-  # ---- Opus 4.6-4.8 line, and legacy families with a still-published
-  # ---- price. claude-3-7-sonnet is deliberately ABSENT: retired
-  # ---- 2026-02-19 with no price on Anthropic's page — a rate here would
-  # ---- be invented, not verified (its traffic surfaces as unmatched
-  # ---- usage on the operator card instead). ----
-
-  # Claude Fable 5 — input $10 / output $50 per million (current flagship; page-verified 2026-07-26).
-  - key: fable5_input
-    name: Claude Fable 5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-  - key: fable5_output
-    name: Claude Fable 5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.005'
-  - key: fable5_cache_read
-    name: Claude Fable 5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0001'
-  - key: fable5_cache_write_5m
-    name: Claude Fable 5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00125'
-  - key: fable5_cache_write_1h
-    name: Claude Fable 5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.002'
-
-  # Claude Mythos 5 — input $10 / output $50 per million (limited availability, published price; page-verified 2026-07-26).
-  - key: mythos5_input
-    name: Claude Mythos 5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-  - key: mythos5_output
-    name: Claude Mythos 5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.005'
-  - key: mythos5_cache_read
-    name: Claude Mythos 5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0001'
-  - key: mythos5_cache_write_5m
-    name: Claude Mythos 5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00125'
-  - key: mythos5_cache_write_1h
-    name: Claude Mythos 5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.002'
-
-  # Claude Opus 5 — input $5 / output $25 per million (current; page-verified 2026-07-26).
-  - key: opus5_input
-    name: Claude Opus 5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0005'
-  - key: opus5_output
-    name: Claude Opus 5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0025'
-  - key: opus5_cache_read
-    name: Claude Opus 5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-  - key: opus5_cache_write_5m
-    name: Claude Opus 5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000625'
-  - key: opus5_cache_write_1h
-    name: Claude Opus 5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-
-  # Claude Opus 4.8 — input $5 / output $25 per million (current; page-verified 2026-07-26).
-  - key: opus48_input
-    name: Claude Opus 4.8 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0005'
-  - key: opus48_output
-    name: Claude Opus 4.8 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0025'
-  - key: opus48_cache_read
-    name: Claude Opus 4.8 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-  - key: opus48_cache_write_5m
-    name: Claude Opus 4.8 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000625'
-  - key: opus48_cache_write_1h
-    name: Claude Opus 4.8 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-
-  # Claude Opus 4.7 — input $5 / output $25 per million (current; page-verified 2026-07-26).
-  - key: opus47_input
-    name: Claude Opus 4.7 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0005'
-  - key: opus47_output
-    name: Claude Opus 4.7 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0025'
-  - key: opus47_cache_read
-    name: Claude Opus 4.7 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-  - key: opus47_cache_write_5m
-    name: Claude Opus 4.7 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000625'
-  - key: opus47_cache_write_1h
-    name: Claude Opus 4.7 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-
-  # Claude Opus 4.6 — input $5 / output $25 per million (current; page-verified 2026-07-26).
-  - key: opus46_input
-    name: Claude Opus 4.6 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0005'
-  - key: opus46_output
-    name: Claude Opus 4.6 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0025'
-  - key: opus46_cache_read
-    name: Claude Opus 4.6 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-  - key: opus46_cache_write_5m
-    name: Claude Opus 4.6 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000625'
-  - key: opus46_cache_write_1h
-    name: Claude Opus 4.6 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-
-  # Claude Sonnet 5 — input $2 / output $10 per million (launch price made standard; page-checked 2026-10-22).
-  - key: sonnet5_input
-    name: Claude Sonnet 5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0002'
-  - key: sonnet5_output
-    name: Claude Sonnet 5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-  - key: sonnet5_cache_read
-    name: Claude Sonnet 5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00002'
-  - key: sonnet5_cache_write_5m
-    name: Claude Sonnet 5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00025'
-  - key: sonnet5_cache_write_1h
-    name: Claude Sonnet 5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0004'
-
-  # Claude Sonnet 4.6 — input $3 / output $15 per million (current; page-verified 2026-07-26).
-  - key: sonnet46_input
-    name: Claude Sonnet 4.6 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0003'
-  - key: sonnet46_output
-    name: Claude Sonnet 4.6 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: sonnet46_cache_read
-    name: Claude Sonnet 4.6 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00003'
-  - key: sonnet46_cache_write_5m
-    name: Claude Sonnet 4.6 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000375'
-  - key: sonnet46_cache_write_1h
-    name: Claude Sonnet 4.6 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0006'
-
-  # Claude Opus 4.1 — input $15 / output $75 per million (deprecated, price still published; page-verified 2026-07-26).
-  - key: opus41_input
-    name: Claude Opus 4.1 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: opus41_output
-    name: Claude Opus 4.1 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0075'
-  - key: opus41_cache_read
-    name: Claude Opus 4.1 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00015'
-  - key: opus41_cache_write_5m
-    name: Claude Opus 4.1 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001875'
-  - key: opus41_cache_write_1h
-    name: Claude Opus 4.1 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.003'
-
-  # Claude Opus 4 — input $15 / output $75 per million (retired, price still published; page-verified 2026-07-26).
-  - key: opus4_input
-    name: Claude Opus 4 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: opus4_output
-    name: Claude Opus 4 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0075'
-  - key: opus4_cache_read
-    name: Claude Opus 4 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00015'
-  - key: opus4_cache_write_5m
-    name: Claude Opus 4 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001875'
-  - key: opus4_cache_write_1h
-    name: Claude Opus 4 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.003'
-
-  # Claude Sonnet 4 — input $3 / output $15 per million (retired, price still published; page-verified 2026-07-26).
-  - key: sonnet4_input
-    name: Claude Sonnet 4 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0003'
-  - key: sonnet4_output
-    name: Claude Sonnet 4 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0015'
-  - key: sonnet4_cache_read
-    name: Claude Sonnet 4 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00003'
-  - key: sonnet4_cache_write_5m
-    name: Claude Sonnet 4 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000375'
-  - key: sonnet4_cache_write_1h
-    name: Claude Sonnet 4 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0006'
-
-  # Claude Haiku 3.5 — input $0.8 / output $4 per million (retired, price still published; page-verified 2026-07-26).
-  - key: haiku35_input
-    name: Claude Haiku 3.5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00008'
-  - key: haiku35_output
-    name: Claude Haiku 3.5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0004'
-  - key: haiku35_cache_read
-    name: Claude Haiku 3.5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000008'
-  - key: haiku35_cache_write_5m
-    name: Claude Haiku 3.5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0001'
-  - key: haiku35_cache_write_1h
-    name: Claude Haiku 3.5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00016'
-
-  # ---- 2026-10-22: the current lineup. Each block page-checked
-  # ---- 2026-10-22. Cache writes 1.25x (5m) and 2x (1h) input. ----
-
-  # Claude Fable 5.1 — input $10 / output $50 per million; cache read 0.025x input (page-checked 2026-10-22).
-  - key: fable51_input
-    name: Claude Fable 5.1 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-  - key: fable51_output
-    name: Claude Fable 5.1 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.005'
-  - key: fable51_cache_read
-    name: Claude Fable 5.1 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000025'
-  - key: fable51_cache_write_5m
-    name: Claude Fable 5.1 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00125'
-  - key: fable51_cache_write_1h
-    name: Claude Fable 5.1 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.002'
-
-  # Claude Mythos 5.1 — input $10 / output $50 per million; cache read 0.025x input (limited availability, published price) (page-checked 2026-10-22).
-  - key: mythos51_input
-    name: Claude Mythos 5.1 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-  - key: mythos51_output
-    name: Claude Mythos 5.1 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.005'
-  - key: mythos51_cache_read
-    name: Claude Mythos 5.1 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000025'
-  - key: mythos51_cache_write_5m
-    name: Claude Mythos 5.1 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00125'
-  - key: mythos51_cache_write_1h
-    name: Claude Mythos 5.1 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.002'
-
-  # Claude Opus 5.5 — input $4 / output $20 per million; cache read 0.05x input (page-checked 2026-10-22).
-  - key: opus55_input
-    name: Claude Opus 5.5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0004'
-  - key: opus55_output
-    name: Claude Opus 5.5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.002'
-  - key: opus55_cache_read
-    name: Claude Opus 5.5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00002'
-  - key: opus55_cache_write_5m
-    name: Claude Opus 5.5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0005'
-  - key: opus55_cache_write_1h
-    name: Claude Opus 5.5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0008'
-
-  # Claude Sonnet 5.5 — input $2 / output $10 per million; cache read 0.05x input (page-checked 2026-10-22).
-  - key: sonnet55_input
-    name: Claude Sonnet 5.5 input
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0002'
-  - key: sonnet55_output
-    name: Claude Sonnet 5.5 output
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.001'
-  - key: sonnet55_cache_read
-    name: Claude Sonnet 5.5 cache read
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00001'
-  - key: sonnet55_cache_write_5m
-    name: Claude Sonnet 5.5 cache write (5m)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00025'
-  - key: sonnet55_cache_write_1h
-    name: Claude Sonnet 5.5 cache write (1h)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0004'
-
-  # Claude Haiku 5.5 — prompts up to 100,000 tokens: input $0.10 / output $0.50 per million (page-checked 2026-10-22).
-  - key: haiku55_std_input
-    name: Claude Haiku 5.5 input (prompts up to 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00001'
-  - key: haiku55_std_output
-    name: Claude Haiku 5.5 output (prompts up to 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-  - key: haiku55_std_cache_read
-    name: Claude Haiku 5.5 cache read (prompts up to 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000001'
-  - key: haiku55_std_cache_write_5m
-    name: Claude Haiku 5.5 cache write (5m) (prompts up to 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0000125'
-  - key: haiku55_std_cache_write_1h
-    name: Claude Haiku 5.5 cache write (1h) (prompts up to 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00002'
-
-  # Claude Haiku 5.5 — prompts over 100,000 tokens: input $0.50 / output $2.50 per million. A prompt counts input, cache reads and cache writes; the tier applies to every token of the call (page-checked 2026-10-22).
-  - key: haiku55_long_input
-    name: Claude Haiku 5.5 input (prompts over 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00005'
-  - key: haiku55_long_output
-    name: Claude Haiku 5.5 output (prompts over 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.00025'
-  - key: haiku55_long_cache_read
-    name: Claude Haiku 5.5 cache read (prompts over 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.000005'
-  - key: haiku55_long_cache_write_5m
-    name: Claude Haiku 5.5 cache write (5m) (prompts over 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0000625'
-  - key: haiku55_long_cache_write_1h
-    name: Claude Haiku 5.5 cache write (1h) (prompts over 100K tokens)
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0001'
-
-pricing_rules:
-  - meter: tokens
-    rating_rule: opus45_input
-    dimension_match: { model: claude-opus-4.5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus45_output
-    dimension_match: { model: claude-opus-4.5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus45_cache_read
-    dimension_match: { model: claude-opus-4.5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus45_cache_write_5m
-    dimension_match: { model: claude-opus-4.5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus45_cache_write_1h
-    dimension_match: { model: claude-opus-4.5, token_type: cache_write_1h }
-    priority: 100
-
-  - meter: tokens
-    rating_rule: sonnet45_input
-    dimension_match: { model: claude-sonnet-4.5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet45_output
-    dimension_match: { model: claude-sonnet-4.5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet45_cache_read
-    dimension_match: { model: claude-sonnet-4.5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet45_cache_write_5m
-    dimension_match: { model: claude-sonnet-4.5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet45_cache_write_1h
-    dimension_match: { model: claude-sonnet-4.5, token_type: cache_write_1h }
-    priority: 100
-
-  - meter: tokens
-    rating_rule: haiku45_input
-    dimension_match: { model: claude-haiku-4.5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku45_output
-    dimension_match: { model: claude-haiku-4.5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku45_cache_read
-    dimension_match: { model: claude-haiku-4.5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku45_cache_write_5m
-    dimension_match: { model: claude-haiku-4.5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku45_cache_write_1h
-    dimension_match: { model: claude-haiku-4.5, token_type: cache_write_1h }
-    priority: 100
-
-  - meter: tokens
-    rating_rule: c35_sonnet_input
-    dimension_match: { model: claude-3.5-sonnet, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: c35_sonnet_output
-    dimension_match: { model: claude-3.5-sonnet, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: c35_sonnet_cache_read
-    dimension_match: { model: claude-3.5-sonnet, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: c35_sonnet_cache_write_5m
-    dimension_match: { model: claude-3.5-sonnet, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: c35_sonnet_cache_write_1h
-    dimension_match: { model: claude-3.5-sonnet, token_type: cache_write_1h }
-    priority: 100
-
-  - meter: tokens
-    rating_rule: opus_input
-    dimension_match: { model: claude-3-opus, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus_output
-    dimension_match: { model: claude-3-opus, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus_cache_read
-    dimension_match: { model: claude-3-opus, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus_cache_write_5m
-    dimension_match: { model: claude-3-opus, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus_cache_write_1h
-    dimension_match: { model: claude-3-opus, token_type: cache_write_1h }
-    priority: 100
-
-  - meter: tokens
-    rating_rule: sonnet_input
-    dimension_match: { model: claude-3-sonnet, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet_output
-    dimension_match: { model: claude-3-sonnet, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet_cache_read
-    dimension_match: { model: claude-3-sonnet, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet_cache_write_5m
-    dimension_match: { model: claude-3-sonnet, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet_cache_write_1h
-    dimension_match: { model: claude-3-sonnet, token_type: cache_write_1h }
-    priority: 100
-
-  - meter: tokens
-    rating_rule: haiku_input
-    dimension_match: { model: claude-3-haiku, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku_output
-    dimension_match: { model: claude-3-haiku, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku_cache_read
-    dimension_match: { model: claude-3-haiku, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku_cache_write_5m
-    dimension_match: { model: claude-3-haiku, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku_cache_write_1h
-    dimension_match: { model: claude-3-haiku, token_type: cache_write_1h }
-    priority: 100
-
-
-  - meter: tokens
-    rating_rule: fable5_input
-    dimension_match: { model: claude-fable-5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable5_output
-    dimension_match: { model: claude-fable-5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable5_cache_read
-    dimension_match: { model: claude-fable-5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable5_cache_write_5m
-    dimension_match: { model: claude-fable-5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable5_cache_write_1h
-    dimension_match: { model: claude-fable-5, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos5_input
-    dimension_match: { model: claude-mythos-5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos5_output
-    dimension_match: { model: claude-mythos-5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos5_cache_read
-    dimension_match: { model: claude-mythos-5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos5_cache_write_5m
-    dimension_match: { model: claude-mythos-5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos5_cache_write_1h
-    dimension_match: { model: claude-mythos-5, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus5_input
-    dimension_match: { model: claude-opus-5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus5_output
-    dimension_match: { model: claude-opus-5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus5_cache_read
-    dimension_match: { model: claude-opus-5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus5_cache_write_5m
-    dimension_match: { model: claude-opus-5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus5_cache_write_1h
-    dimension_match: { model: claude-opus-5, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus48_input
-    dimension_match: { model: claude-opus-4.8, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus48_output
-    dimension_match: { model: claude-opus-4.8, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus48_cache_read
-    dimension_match: { model: claude-opus-4.8, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus48_cache_write_5m
-    dimension_match: { model: claude-opus-4.8, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus48_cache_write_1h
-    dimension_match: { model: claude-opus-4.8, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus47_input
-    dimension_match: { model: claude-opus-4.7, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus47_output
-    dimension_match: { model: claude-opus-4.7, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus47_cache_read
-    dimension_match: { model: claude-opus-4.7, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus47_cache_write_5m
-    dimension_match: { model: claude-opus-4.7, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus47_cache_write_1h
-    dimension_match: { model: claude-opus-4.7, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus46_input
-    dimension_match: { model: claude-opus-4.6, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus46_output
-    dimension_match: { model: claude-opus-4.6, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus46_cache_read
-    dimension_match: { model: claude-opus-4.6, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus46_cache_write_5m
-    dimension_match: { model: claude-opus-4.6, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus46_cache_write_1h
-    dimension_match: { model: claude-opus-4.6, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet5_input
-    dimension_match: { model: claude-sonnet-5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet5_output
-    dimension_match: { model: claude-sonnet-5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet5_cache_read
-    dimension_match: { model: claude-sonnet-5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet5_cache_write_5m
-    dimension_match: { model: claude-sonnet-5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet5_cache_write_1h
-    dimension_match: { model: claude-sonnet-5, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet46_input
-    dimension_match: { model: claude-sonnet-4.6, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet46_output
-    dimension_match: { model: claude-sonnet-4.6, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet46_cache_read
-    dimension_match: { model: claude-sonnet-4.6, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet46_cache_write_5m
-    dimension_match: { model: claude-sonnet-4.6, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet46_cache_write_1h
-    dimension_match: { model: claude-sonnet-4.6, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus41_input
-    dimension_match: { model: claude-opus-4.1, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus41_output
-    dimension_match: { model: claude-opus-4.1, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus41_cache_read
-    dimension_match: { model: claude-opus-4.1, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus41_cache_write_5m
-    dimension_match: { model: claude-opus-4.1, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus41_cache_write_1h
-    dimension_match: { model: claude-opus-4.1, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus4_input
-    dimension_match: { model: claude-opus-4, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus4_output
-    dimension_match: { model: claude-opus-4, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus4_cache_read
-    dimension_match: { model: claude-opus-4, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus4_cache_write_5m
-    dimension_match: { model: claude-opus-4, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus4_cache_write_1h
-    dimension_match: { model: claude-opus-4, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet4_input
-    dimension_match: { model: claude-sonnet-4, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet4_output
-    dimension_match: { model: claude-sonnet-4, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet4_cache_read
-    dimension_match: { model: claude-sonnet-4, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet4_cache_write_5m
-    dimension_match: { model: claude-sonnet-4, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet4_cache_write_1h
-    dimension_match: { model: claude-sonnet-4, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku35_input
-    dimension_match: { model: claude-3.5-haiku, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku35_output
-    dimension_match: { model: claude-3.5-haiku, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku35_cache_read
-    dimension_match: { model: claude-3.5-haiku, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku35_cache_write_5m
-    dimension_match: { model: claude-3.5-haiku, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku35_cache_write_1h
-    dimension_match: { model: claude-3.5-haiku, token_type: cache_write_1h }
-    priority: 100
-
-  # Claude Haiku 5.5 rules name context_tier, which the LiteLLM mapper sets
-  # from the prompt's length. A Haiku 5.5 rule without it would price both
-  # tiers at one rate.
-  - meter: tokens
-    rating_rule: fable51_input
-    dimension_match: { model: claude-fable-5.1, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable51_output
-    dimension_match: { model: claude-fable-5.1, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable51_cache_read
-    dimension_match: { model: claude-fable-5.1, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable51_cache_write_5m
-    dimension_match: { model: claude-fable-5.1, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: fable51_cache_write_1h
-    dimension_match: { model: claude-fable-5.1, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos51_input
-    dimension_match: { model: claude-mythos-5.1, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos51_output
-    dimension_match: { model: claude-mythos-5.1, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos51_cache_read
-    dimension_match: { model: claude-mythos-5.1, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos51_cache_write_5m
-    dimension_match: { model: claude-mythos-5.1, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: mythos51_cache_write_1h
-    dimension_match: { model: claude-mythos-5.1, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus55_input
-    dimension_match: { model: claude-opus-5.5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus55_output
-    dimension_match: { model: claude-opus-5.5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus55_cache_read
-    dimension_match: { model: claude-opus-5.5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus55_cache_write_5m
-    dimension_match: { model: claude-opus-5.5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: opus55_cache_write_1h
-    dimension_match: { model: claude-opus-5.5, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet55_input
-    dimension_match: { model: claude-sonnet-5.5, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet55_output
-    dimension_match: { model: claude-sonnet-5.5, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet55_cache_read
-    dimension_match: { model: claude-sonnet-5.5, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet55_cache_write_5m
-    dimension_match: { model: claude-sonnet-5.5, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: sonnet55_cache_write_1h
-    dimension_match: { model: claude-sonnet-5.5, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_std_input
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_std_output
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_std_cache_read
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_std_cache_write_5m
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_std_cache_write_1h
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_write_1h }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_long_input
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: input }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_long_output
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: output }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_long_cache_read
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_read }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_long_cache_write_5m
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_write_5m }
-    priority: 100
-  - meter: tokens
-    rating_rule: haiku55_long_cache_write_1h
-    dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_write_1h }
-    priority: 100
-
 plans:
   - code: '{{ .plan_code }}'
     name: '{{ .plan_name }}'
     currency: '{{ .currency }}'
     billing_interval: monthly
     base_amount_cents: 0
-    meters: [tokens]
+    prices:
+      # Claude Opus 4.5 — input $5.00 / output $25.00 per million (per-token).
+      # Cache multiples as everywhere: read 0.1×, 5m write 1.25×, 1h write 2×.
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0025'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000625'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.001'
 
-dunning:
-  policy:
-    name: AI default retry
-    # Retries on day 3, 4, 7 and 14 after the failed payment (or the
-    # collection that found no card): the first waits 3 days, each next
-    # one 1, 3 and 7 days after the one before.
-    retry_days: [3, 1, 3, 7]
-    final_subscription_action: pause
-    final_invoice_action: none
+      # Claude Sonnet 4.5 — input $3.00 / output $15.00 per million (per-token).
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0003'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00003'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000375'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0006'
 
-webhook:
-  events:
-    - invoice.finalized
-    - invoice.paid
-    - payment.failed
-    - subscription.item.updated
-    - subscription.canceled
-  url_placeholder: 'https://example.com/webhooks/velox'
+      # Claude Haiku 4.5 — input $1.00 / output $5.00 per million (per-token).
+      - meter: tokens
+        dimension_match: { model: claude-haiku-4.5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0001'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-4.5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0005'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-4.5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00001'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-4.5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000125'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-4.5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0002'
+
+      # ---- Legacy claude-3.x families (kept: proxies mid-migration still
+      # route them, and the LiteLLM mapper still families them — dropping the
+      # prices here would leave that traffic unbilled at cycle close). ----
+
+      # Claude 3.5 Sonnet — input $3.00 / output $15.00 per million (per-token).
+      - meter: tokens
+        dimension_match: { model: claude-3.5-sonnet, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0003'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-sonnet, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-sonnet, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00003'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-sonnet, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000375'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-sonnet, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0006'
+
+      # Claude 3 Opus — input $15.00 / output $75.00 per million (per-token).
+      - meter: tokens
+        dimension_match: { model: claude-3-opus, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-3-opus, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0075'
+      - meter: tokens
+        dimension_match: { model: claude-3-opus, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00015'
+      - meter: tokens
+        dimension_match: { model: claude-3-opus, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.001875'
+      - meter: tokens
+        dimension_match: { model: claude-3-opus, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.003'
+
+      # Claude 3 Sonnet — input $3.00 / output $15.00 per million (per-token).
+      - meter: tokens
+        dimension_match: { model: claude-3-sonnet, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0003'
+      - meter: tokens
+        dimension_match: { model: claude-3-sonnet, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-3-sonnet, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00003'
+      - meter: tokens
+        dimension_match: { model: claude-3-sonnet, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000375'
+      - meter: tokens
+        dimension_match: { model: claude-3-sonnet, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0006'
+
+      # Claude 3 Haiku — input $0.25 / output $1.25 per million (per-token).
+      # Decimal rates carry the exact derived cache multiples (no rounding):
+      # cache_read 0.1×, cache_write_5m 1.25×, cache_write_1h 2× of input.
+      - meter: tokens
+        dimension_match: { model: claude-3-haiku, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.000025'
+      - meter: tokens
+        dimension_match: { model: claude-3-haiku, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.000125'
+      - meter: tokens
+        dimension_match: { model: claude-3-haiku, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.0000025'
+      - meter: tokens
+        dimension_match: { model: claude-3-haiku, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.00003125'
+      - meter: tokens
+        dimension_match: { model: claude-3-haiku, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+
+      # Token types do not overlap, so one price per (model, token_type)
+      # takes each event.
+
+      # ---- 2026-07-26 catalog refresh: current 5-generation lineup, the
+      # ---- Opus 4.6-4.8 line, and legacy families with a still-published
+      # ---- price. claude-3-7-sonnet is deliberately ABSENT: retired
+      # ---- 2026-02-19 with no price on Anthropic's page — a rate here would
+      # ---- be invented, not verified (its traffic surfaces as unmatched
+      # ---- usage on the operator card instead). ----
+
+      # Claude Fable 5 — input $10 / output $50 per million (current flagship; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-fable-5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.005'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.0001'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.00125'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.002'
+
+      # Claude Mythos 5 — input $10 / output $50 per million (limited availability, published price; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.005'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.0001'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.00125'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.002'
+
+      # Claude Opus 5 — input $5 / output $25 per million (current; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-opus-5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0025'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000625'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+
+      # Claude Opus 4.8 — input $5 / output $25 per million (current; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.8, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.8, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0025'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.8, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.8, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000625'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.8, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+
+      # Claude Opus 4.7 — input $5 / output $25 per million (current; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.7, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.7, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0025'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.7, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.7, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000625'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.7, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+
+      # Claude Opus 4.6 — input $5 / output $25 per million (current; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.6, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.6, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0025'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.6, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.6, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000625'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.6, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+
+      # Claude Sonnet 5 — input $2 / output $10 per million (launch price made standard; page-checked 2026-10-22).
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0002'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00002'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.00025'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0004'
+
+      # Claude Sonnet 4.6 — input $3 / output $15 per million (current; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.6, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0003'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.6, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.6, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00003'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.6, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000375'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4.6, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0006'
+
+      # Claude Opus 4.1 — input $15 / output $75 per million (deprecated, price still published; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.1, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.1, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0075'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.1, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00015'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.1, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.001875'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4.1, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.003'
+
+      # Claude Opus 4 — input $15 / output $75 per million (retired, price still published; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-opus-4, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0075'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00015'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.001875'
+      - meter: tokens
+        dimension_match: { model: claude-opus-4, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.003'
+
+      # Claude Sonnet 4 — input $3 / output $15 per million (retired, price still published; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0003'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0015'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00003'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.000375'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-4, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0006'
+
+      # Claude Haiku 3.5 — input $0.8 / output $4 per million (retired, price still published; page-verified 2026-07-26).
+      - meter: tokens
+        dimension_match: { model: claude-3.5-haiku, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.00008'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-haiku, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.0004'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-haiku, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.000008'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-haiku, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.0001'
+      - meter: tokens
+        dimension_match: { model: claude-3.5-haiku, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.00016'
+
+      # ---- 2026-10-22: the current lineup. Each block page-checked
+      # ---- 2026-10-22. Cache writes 1.25x (5m) and 2x (1h) input. ----
+
+      # Claude Fable 5.1 — input $10 / output $50 per million; cache read 0.025x input (page-checked 2026-10-22).
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.1, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.1, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.005'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.1, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.000025'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.1, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.00125'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.1, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.002'
+
+      # Claude Mythos 5.1 — input $10 / output $50 per million; cache read 0.025x input (limited availability, published price) (page-checked 2026-10-22).
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.1, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.1, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.005'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.1, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.000025'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.1, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.00125'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.1, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.002'
+
+      # Claude Opus 5.5 — input $4 / output $20 per million; cache read 0.05x input (page-checked 2026-10-22).
+      - meter: tokens
+        dimension_match: { model: claude-opus-5.5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0004'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5.5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.002'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5.5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00002'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5.5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.0005'
+      - meter: tokens
+        dimension_match: { model: claude-opus-5.5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0008'
+
+      # Claude Sonnet 5.5 — input $2 / output $10 per million; cache read 0.05x input (page-checked 2026-10-22).
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5.5, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0002'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5.5, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5.5, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00001'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5.5, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.00025'
+      - meter: tokens
+        dimension_match: { model: claude-sonnet-5.5, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0004'
+
+      # Claude Haiku 5.5 prices name context_tier, which the LiteLLM mapper
+      # sets from the prompt's length. A Haiku 5.5 price without it would
+      # price both tiers at one rate.
+      # Claude Haiku 5.5 — prompts up to 100,000 tokens: input $0.10 / output $0.50 per million (page-checked 2026-10-22).
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.00001'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.000001'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.0000125'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_up_to_100k, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.00002'
+
+      # Claude Haiku 5.5 — prompts over 100,000 tokens: input $0.50 / output $2.50 per million. A prompt counts input, cache reads and cache writes; the tier applies to every token of the call (page-checked 2026-10-22).
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.00005'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.00025'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.000005'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.0000625'
+      - meter: tokens
+        dimension_match: { model: claude-haiku-5.5, context_tier: prompt_over_100k, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0001'

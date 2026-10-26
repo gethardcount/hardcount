@@ -1,5 +1,5 @@
 key: replicate_style
-version: 6.0.0
+version: 7.0.0
 name: GPU compute pricing (per-second)
 summary: |
   Ready-made pricing for reselling GPU compute. Bills each customer per
@@ -16,8 +16,6 @@ description: |
     • A per-second price for each GPU type — H100, A100 (80GB), A40, T4,
       and CPU
     • A monthly plan your customers subscribe to
-    • Automatic payment retries and a notifications endpoint you can point
-      at your own systems
 
   Prices start at Replicate's public per-second rates — a starting point
   you'll edit to your own margins after setup. Before installing, you can
@@ -43,82 +41,32 @@ meters:
     unit: seconds
     aggregation: sum
 
-# Rates in cents per second (decimal — sub-cent rates bill linearly and
-# exactly): $0.001525/s = 0.1525¢/s.
-rating_rules:
-  - key: gpu_h100
-    name: NVIDIA H100 per-second
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.1525'
-  - key: gpu_a100
-    name: NVIDIA A100 (80GB) per-second
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.14'
-  - key: gpu_a40
-    name: NVIDIA A40 per-second
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0575'
-  - key: gpu_t4
-    name: NVIDIA T4 per-second
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.0225'
-  - key: cpu
-    name: CPU-only per-second
-    mode: per_unit
-    currency: '{{ .currency }}'
-    unit_amount_cents: '0.01'
-
-# sum of per-interval deltas — see description; last_during_period on
-# cumulative totals under-bills the moment two jobs share a GPU class.
-pricing_rules:
-  - meter: gpu_seconds
-    rating_rule: gpu_h100
-    dimension_match: { gpu_type: h100 }
-    priority: 100
-  - meter: gpu_seconds
-    rating_rule: gpu_a100
-    dimension_match: { gpu_type: a100 }
-    priority: 100
-  - meter: gpu_seconds
-    rating_rule: gpu_a40
-    dimension_match: { gpu_type: a40 }
-    priority: 100
-  - meter: gpu_seconds
-    rating_rule: gpu_t4
-    dimension_match: { gpu_type: t4 }
-    priority: 100
-  - meter: gpu_seconds
-    rating_rule: cpu
-    dimension_match: { gpu_type: cpu }
-    priority: 100
-
 plans:
   - code: '{{ .plan_code }}'
     name: '{{ .plan_name }}'
     currency: '{{ .currency }}'
     billing_interval: monthly
     base_amount_cents: 0
-    meters: [gpu_seconds]
-
-dunning:
-  policy:
-    name: GPU compute retry
-    # Retries on day 3, 4, 7 and 14 after the failed payment (or the
-    # collection that found no card): the first waits 3 days, each next
-    # one 1, 3 and 7 days after the one before.
-    retry_days: [3, 1, 3, 7]
-    final_subscription_action: pause
-    final_invoice_action: none
-
-webhook:
-  events:
-    - invoice.finalized
-    - invoice.paid
-    - payment.failed
-    - subscription.item.updated
-    - subscription.canceled
-  url_placeholder: 'https://example.com/webhooks/velox'
+    prices:
+      # Rates in cents per second (decimal — sub-cent rates bill linearly and
+      # exactly): $0.001525/s = 0.1525¢/s.
+      - meter: gpu_seconds
+        dimension_match: { gpu_type: h100 }
+        mode: per_unit
+        unit_amount_cents: '0.1525'
+      - meter: gpu_seconds
+        dimension_match: { gpu_type: a100 }
+        mode: per_unit
+        unit_amount_cents: '0.14'
+      - meter: gpu_seconds
+        dimension_match: { gpu_type: a40 }
+        mode: per_unit
+        unit_amount_cents: '0.0575'
+      - meter: gpu_seconds
+        dimension_match: { gpu_type: t4 }
+        mode: per_unit
+        unit_amount_cents: '0.0225'
+      - meter: gpu_seconds
+        dimension_match: { gpu_type: cpu }
+        mode: per_unit
+        unit_amount_cents: '0.01'

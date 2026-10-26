@@ -101,6 +101,28 @@ var litellmPriceExceptions = map[string]string{
 	"vertex_ai/claude-3-5-haiku@20241022": "Google Cloud's price",
 }
 
+// recipeDoc is the part of a recipe YAML these tests read: each plan's
+// prices (ADR-130 §15).
+type recipeDoc struct {
+	Plans []struct {
+		Prices []recipePrice `yaml:"prices"`
+	} `yaml:"plans"`
+}
+
+type recipePrice struct {
+	DimensionMatch  map[string]string `yaml:"dimension_match"`
+	UnitAmountCents string            `yaml:"unit_amount_cents"`
+}
+
+// prices lists every plan's prices.
+func (d recipeDoc) prices() []recipePrice {
+	var out []recipePrice
+	for _, p := range d.Plans {
+		out = append(out, p.Prices...)
+	}
+	return out
+}
+
 // recipeListPrices reads anthropic_style.yaml into model -> token type ->
 // dollars per million tokens. For a model priced by prompt length it keeps
 // the lower tier's price.
@@ -110,26 +132,13 @@ func recipeListPrices(t *testing.T) map[string]map[string]decimal.Decimal {
 	if err != nil {
 		t.Fatalf("read recipe: %v", err)
 	}
-	var doc struct {
-		RatingRules []struct {
-			Key             string `yaml:"key"`
-			UnitAmountCents string `yaml:"unit_amount_cents"`
-		} `yaml:"rating_rules"`
-		PricingRules []struct {
-			RatingRule     string            `yaml:"rating_rule"`
-			DimensionMatch map[string]string `yaml:"dimension_match"`
-		} `yaml:"pricing_rules"`
-	}
+	var doc recipeDoc
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("parse recipe: %v", err)
 	}
-	cents := map[string]decimal.Decimal{}
-	for _, r := range doc.RatingRules {
-		cents[r.Key] = decimal.RequireFromString(r.UnitAmountCents)
-	}
 	out := map[string]map[string]decimal.Decimal{}
-	for _, r := range doc.PricingRules {
-		m := r.DimensionMatch
+	for _, p := range doc.prices() {
+		m := p.DimensionMatch
 		if tier := m[DimContextTier]; tier != "" && tier != ContextTierUpTo100k {
 			continue
 		}
@@ -137,7 +146,10 @@ func recipeListPrices(t *testing.T) map[string]map[string]decimal.Decimal {
 			out[m["model"]] = map[string]decimal.Decimal{}
 		}
 		// cents per token x 1,000,000 / 100 = dollars per million tokens.
-		out[m["model"]][m["token_type"]] = cents[r.RatingRule].Mul(decimal.NewFromInt(10_000))
+		out[m["model"]][m["token_type"]] = decimal.RequireFromString(p.UnitAmountCents).Mul(decimal.NewFromInt(10_000))
+	}
+	if len(out) == 0 {
+		t.Fatal("read no prices from anthropic_style.yaml: has the recipe format changed?")
 	}
 	return out
 }

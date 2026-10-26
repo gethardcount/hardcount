@@ -2,9 +2,7 @@ package recipe
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -31,18 +29,6 @@ type PricingWriter interface {
 	ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error)
 }
 
-// DunningWriter is the narrow tx-aware surface recipe.Service needs from
-// dunning.Service.
-type DunningWriter interface {
-	UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error)
-}
-
-// WebhookWriter is the narrow tx-aware surface recipe.Service needs from
-// webhook.Service.
-type WebhookWriter interface {
-	CreateEndpointTx(ctx context.Context, tx *sql.Tx, tenantID string, ep domain.WebhookEndpoint) (domain.WebhookEndpoint, error)
-}
-
 // AuditEmitter is the narrow in-tx audit seam (ADR-090). Instantiate owns the
 // coordinator transaction that spans every cross-domain write, so it emits the
 // audit row on that same tx: the installed object graph and the record of what
@@ -53,17 +39,15 @@ type AuditEmitter interface {
 
 // Service is the orchestrator for the recipes feature: it answers
 // "list recipes", "preview", and "instantiate" (idempotent apply). The
-// canonical entities a recipe creates (meters, plans and their prices,
-// dunning policy, webhook endpoint) live in their own per-domain stores;
-// this service threads a single transaction across the cross-domain
-// writes so a recipe is either fully applied or not applied at all.
+// entities a recipe creates (meters, plans and their prices) live in the
+// pricing domain's store; this service threads a single transaction across
+// those writes and the install record, so a recipe is either fully applied
+// or not applied at all. A recipe touches only the catalog (ADR-130 §15).
 type Service struct {
 	db          *postgres.DB
 	store       Store
 	registry    *Registry
 	pricing     PricingWriter
-	dunning     DunningWriter
-	webhook     WebhookWriter
 	auditLogger AuditEmitter
 }
 
@@ -74,16 +58,12 @@ func NewService(
 	store Store,
 	registry *Registry,
 	pricing PricingWriter,
-	dunning DunningWriter,
-	webhook WebhookWriter,
 ) *Service {
 	return &Service{
 		db:       db,
 		store:    store,
 		registry: registry,
 		pricing:  pricing,
-		dunning:  dunning,
-		webhook:  webhook,
 	}
 }
 
@@ -112,30 +92,16 @@ type RecipeListItem struct {
 // Counts mirror the shape of domain.CreatedObjects (which is per-ID),
 // scaled down to integers for display.
 type RecipeCreates struct {
-	Meters           int `json:"meters"`
-	Plans            int `json:"plans"`
-	Prices           int `json:"prices"`
-	DunningPolicies  int `json:"dunning_policies"`
-	WebhookEndpoints int `json:"webhook_endpoints"`
+	Meters int `json:"meters"`
+	Plans  int `json:"plans"`
+	Prices int `json:"prices"`
 }
 
 // countCreates derives a RecipeCreates summary from a parsed recipe.
-// Optional sections (DunningPolicy, Webhook) count as 1 when present, 0
-// when absent — they're singletons in the YAML schema, not slices. A recipe
-// the parser accepted always translates (recipePrices), so a failure here
-// counts no prices.
 func countCreates(r domain.Recipe) RecipeCreates {
-	prices, _ := recipePrices(r)
-	c := RecipeCreates{
-		Meters: len(r.Meters),
-		Plans:  len(r.Plans),
-		Prices: len(prices),
-	}
-	if r.DunningPolicy != nil {
-		c.DunningPolicies = 1
-	}
-	if r.Webhook != nil {
-		c.WebhookEndpoints = 1
+	c := RecipeCreates{Meters: len(r.Meters), Plans: len(r.Plans)}
+	for _, p := range r.Plans {
+		c.Prices += len(p.Prices)
 	}
 	return c
 }
@@ -216,11 +182,9 @@ func (s *Service) ListInstances(ctx context.Context, tenantID string) ([]domain.
 }
 
 // PreviewResult is the wire shape of POST /v1/recipes/{key}/preview.
-// `objects` groups the would-be-created entities by role so the
-// dashboard's preview panel renders one collapsible card per type.
-// `warnings` surfaces non-fatal conditions (currency-vs-Stripe-account
-// mismatches, placeholder webhook URLs, etc.); empty array in v1 — slot
-// is in place so the contract stays stable when richer warnings land.
+// `objects` lists what an install creates: the meters, and each plan with
+// its prices. `warnings` is a slot for non-fatal conditions; it is always
+// empty today, and stays so the contract is stable when one lands.
 type PreviewResult struct {
 	Key      string         `json:"key"`
 	Version  string         `json:"version"`
@@ -228,16 +192,13 @@ type PreviewResult struct {
 	Warnings []string       `json:"warnings"`
 }
 
-// PreviewObjects mirrors the recipe's object-graph sections. Optional
-// pieces (DunningPolicy, Webhook) are emitted as 0-or-1-length slices so
-// the wire shape is uniform — picker UI iterates without null guards.
-// Empty arrays are emitted (no `omitempty`) for the same reason.
+// PreviewObjects is what an install creates. Empty arrays are emitted (no
+// `omitempty`) so the picker UI iterates without null guards. An install
+// reuses a meter that already exists with the same event_name and
+// aggregation; the preview lists it either way.
 type PreviewObjects struct {
-	Meters           []domain.RecipeMeter         `json:"meters"`
-	Plans            []domain.RecipePlan          `json:"plans"`
-	Prices           []domain.RecipePrice         `json:"prices"`
-	DunningPolicies  []domain.RecipeDunningPolicy `json:"dunning_policies"`
-	WebhookEndpoints []domain.RecipeWebhook       `json:"webhook_endpoints"`
+	Meters []domain.RecipeMeter `json:"meters"`
+	Plans  []domain.RecipePlan  `json:"plans"`
 }
 
 // Preview renders a recipe with caller-supplied overrides and returns
@@ -252,45 +213,29 @@ func (s *Service) Preview(_ context.Context, recipeKey string, overrides map[str
 	if err != nil {
 		return PreviewResult{}, errs.Invalid("overrides", err.Error())
 	}
-	return previewResultFrom(rendered)
+	return previewResultFrom(rendered), nil
 }
 
 // previewResultFrom converts a rendered domain.Recipe into the public
 // preview wire shape. Slices default to non-nil so the JSON encoder
 // emits `[]` rather than `null` — picker UI maps without guards.
-func previewResultFrom(r domain.Recipe) (PreviewResult, error) {
-	prices, err := recipePrices(r)
-	if err != nil {
-		return PreviewResult{}, err
-	}
+func previewResultFrom(r domain.Recipe) PreviewResult {
 	out := PreviewResult{
-		Key:     r.Key,
-		Version: r.Version,
-		Objects: PreviewObjects{
-			Meters:           r.Meters,
-			Plans:            r.Plans,
-			Prices:           prices,
-			DunningPolicies:  []domain.RecipeDunningPolicy{},
-			WebhookEndpoints: []domain.RecipeWebhook{},
-		},
+		Key:      r.Key,
+		Version:  r.Version,
+		Objects:  PreviewObjects{Meters: r.Meters, Plans: make([]domain.RecipePlan, 0, len(r.Plans))},
 		Warnings: []string{},
 	}
 	if out.Objects.Meters == nil {
 		out.Objects.Meters = []domain.RecipeMeter{}
 	}
-	if out.Objects.Prices == nil {
-		out.Objects.Prices = []domain.RecipePrice{}
+	for _, p := range r.Plans {
+		if p.Prices == nil {
+			p.Prices = []domain.RecipePrice{}
+		}
+		out.Objects.Plans = append(out.Objects.Plans, p)
 	}
-	if out.Objects.Plans == nil {
-		out.Objects.Plans = []domain.RecipePlan{}
-	}
-	if r.DunningPolicy != nil {
-		out.Objects.DunningPolicies = []domain.RecipeDunningPolicy{*r.DunningPolicy}
-	}
-	if r.Webhook != nil {
-		out.Objects.WebhookEndpoints = []domain.RecipeWebhook{*r.Webhook}
-	}
-	return out, nil
+	return out
 }
 
 // InstantiateOptions controls one-off knobs for Instantiate. CreatedBy is
@@ -301,9 +246,9 @@ type InstantiateOptions struct {
 }
 
 // Instantiate applies a recipe for tenantID under one transaction. Order:
-// meters → plan with its prices → (optional) dunning policy → (optional)
-// webhook endpoint → instance row. Any failure rolls back the whole
-// graph; partial state never reaches the tenant. Apply is an idempotent EVENT
+// meters → each plan with its prices → instance row → audit row. Any
+// failure rolls back the whole graph; partial state never reaches the
+// tenant. It writes only the catalog (ADR-130 §15). Apply is an idempotent EVENT
 // (ADR-085): a second call on an already-installed recipe is a no-op that
 // returns the existing instance — never a 409, never a duplicate plan.
 func (s *Service) Instantiate(
@@ -335,7 +280,7 @@ func (s *Service) Instantiate(
 	// happened (the fabricated-record class ADR-090 exists to kill). The
 	// original apply's row is the truthful record. Everything the badge
 	// recorded is still present (plans are
-	// ON DELETE RESTRICT with no hard-delete; the catalog is shared reference
+	// ON DELETE RESTRICT with no hard-delete; meters are shared reference
 	// data), so there is nothing to re-create and never a second plan to mint
 	// on a double-submit — the badge IS the idempotency gate. The badge is
 	// mode-scoped like the objects it records (0157): RLS partitions this read
@@ -356,11 +301,6 @@ func (s *Service) Instantiate(
 	}
 
 	objs := domain.CreatedObjects{}
-
-	prices, err := recipePrices(rendered)
-	if err != nil {
-		return domain.RecipeInstance{}, err
-	}
 
 	// Meters — adopt an existing event name only if its AGGREGATION matches
 	// (the sole billing-consulted field; sum vs max/count/last silently
@@ -411,13 +351,10 @@ func (s *Service) Instantiate(
 		takenCodes[ep.Code] = true
 	}
 	for _, p := range rendered.Plans {
-		var planPrices []domain.PlanPrice
-		for _, rp := range prices {
-			if rp.PlanCode != p.Code {
-				continue
-			}
+		planPrices := make([]domain.PlanPrice, 0, len(p.Prices))
+		for _, rp := range p.Prices {
 			planPrices = append(planPrices, domain.PlanPrice{
-				MeterID:        meterIDByKey[rp.EventName],
+				MeterID:        meterIDByKey[rp.Meter],
 				DimensionMatch: rp.DimensionMatch,
 				PriceShape:     rp.PriceShape,
 			})
@@ -440,38 +377,6 @@ func (s *Service) Instantiate(
 		for _, cp := range createdPrices {
 			objs.PriceIDs = append(objs.PriceIDs, cp.ID)
 		}
-	}
-
-	// Optional dunning policy.
-	if rendered.DunningPolicy != nil {
-		dp := dunningFromRecipe(*rendered.DunningPolicy)
-		created, err := s.dunning.UpsertPolicyTx(ctx, tx, tenantID, dp)
-		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("dunning policy: %w", err)
-		}
-		objs.DunningPolicyID = created.ID
-	}
-
-	// Optional webhook endpoint. Created inactive with the YAML's
-	// url_placeholder; the operator points it at a real URL and activates
-	// it via PATCH /v1/webhook-endpoints/endpoints/{id} (or the dashboard's Edit) —
-	// a surface that didn't exist until 2026-07-05, which left every
-	// recipe endpoint permanently dead.
-	if rendered.Webhook != nil {
-		secret, err := newWebhookSecret()
-		if err != nil {
-			return domain.RecipeInstance{}, err
-		}
-		created, err := s.webhook.CreateEndpointTx(ctx, tx, tenantID, domain.WebhookEndpoint{
-			URL:    rendered.Webhook.URLPlaceholder,
-			Secret: secret,
-			Events: rendered.Webhook.Events,
-			Active: false,
-		})
-		if err != nil {
-			return domain.RecipeInstance{}, fmt.Errorf("webhook endpoint: %w", err)
-		}
-		objs.WebhookEndpointID = created.ID
 	}
 
 	inst, err := s.store.CreateTx(ctx, tx, domain.RecipeInstance{
@@ -533,12 +438,6 @@ func (s *Service) emitInstantiated(ctx context.Context, tx *sql.Tx, rendered dom
 	if len(objs.PriceIDs) > 0 {
 		meta["price_ids"] = objs.PriceIDs
 	}
-	if objs.DunningPolicyID != "" {
-		meta["dunning_policy_id"] = objs.DunningPolicyID
-	}
-	if objs.WebhookEndpointID != "" {
-		meta["webhook_endpoint_id"] = objs.WebhookEndpointID
-	}
 	if err := s.auditLogger.LogInTx(ctx, tx, audit.Entry{
 		Action:        domain.AuditActionCreate,
 		ResourceType:  "recipe",
@@ -549,34 +448,6 @@ func (s *Service) emitInstantiated(ctx context.Context, tx *sql.Tx, rendered dom
 		return fmt.Errorf("audit emission: %w", err)
 	}
 	return nil
-}
-
-// dunningFromRecipe converts the recipe's dunning policy to the engine's.
-// The schedule is the same list in both (retry_days); UpsertPolicyTx
-// validates it like every other writer.
-func dunningFromRecipe(p domain.RecipeDunningPolicy) domain.DunningPolicy {
-	// Both final actions are required and validated at parse time, so no
-	// defaulting here — a recipe silently falling back to a terminal action
-	// its author did not write is exactly what parse.go refuses.
-	return domain.DunningPolicy{
-		Name:                    p.Name,
-		Enabled:                 true,
-		RetryDays:               append([]int(nil), p.RetryDays...),
-		FinalSubscriptionAction: domain.DunningSubscriptionAction(p.FinalSubscriptionAction),
-		FinalInvoiceAction:      domain.DunningInvoiceAction(p.FinalInvoiceAction),
-	}
-}
-
-// newWebhookSecret mints a fresh whsec_-prefixed signing key. Same
-// length and prefix as webhook.Service.CreateEndpoint so a recipe-created
-// endpoint is indistinguishable from a hand-created one once the
-// operator activates it.
-func newWebhookSecret() (string, error) {
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("generate webhook secret: %w", err)
-	}
-	return "whsec_" + hex.EncodeToString(buf), nil
 }
 
 // copyOverrides returns a defensive shallow copy of the caller-provided

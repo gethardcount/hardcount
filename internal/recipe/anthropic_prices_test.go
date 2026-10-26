@@ -60,31 +60,26 @@ var anthropicListPrices = []anthropicListPrice{
 }
 
 // TestAnthropicStyle_PricesMatchThePricingPage checks the anthropic_style
-// recipe against anthropicListPrices both ways: every pricing rule's rate is
-// the table's dollars per million tokens × 0.0001 (cents per token), exactly,
-// and every table entry has its rule. A price change on the page becomes a
-// list of the exact recipe rules to fix.
+// recipe against anthropicListPrices both ways: every price's rate is the
+// table's dollars per million tokens × 0.0001 (cents per token), exactly,
+// and every table entry has its price. A price change on the page becomes a
+// list of the exact recipe prices to fix.
 func TestAnthropicStyle_PricesMatchThePricingPage(t *testing.T) {
 	raw, err := recipeFS.ReadFile("recipes/anthropic_style.yaml")
 	if err != nil {
 		t.Fatalf("read recipe: %v", err)
 	}
 	var doc struct {
-		RatingRules []struct {
-			Key             string `yaml:"key"`
-			UnitAmountCents string `yaml:"unit_amount_cents"`
-		} `yaml:"rating_rules"`
-		PricingRules []struct {
-			RatingRule     string            `yaml:"rating_rule"`
-			DimensionMatch map[string]string `yaml:"dimension_match"`
-		} `yaml:"pricing_rules"`
+		Plans []struct {
+			Code   string `yaml:"code"`
+			Prices []struct {
+				DimensionMatch  map[string]string `yaml:"dimension_match"`
+				UnitAmountCents string            `yaml:"unit_amount_cents"`
+			} `yaml:"prices"`
+		} `yaml:"plans"`
 	}
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("parse recipe: %v", err)
-	}
-	rates := map[string]string{}
-	for _, r := range doc.RatingRules {
-		rates[r.Key] = r.UnitAmountCents
 	}
 
 	perMTokToCents := decimal.RequireFromString("0.0001")
@@ -107,26 +102,29 @@ func TestAnthropicStyle_PricesMatchThePricingPage(t *testing.T) {
 	}
 
 	seen := map[string]bool{}
-	for _, pr := range doc.PricingRules {
-		key := fmt.Sprintf("%s|%s|%s", pr.DimensionMatch["model"], pr.DimensionMatch["context_tier"], pr.DimensionMatch["token_type"])
-		seen[key] = true
-		w, ok := want[key]
-		if !ok {
-			t.Errorf("pricing rule %s (%s) has no row in anthropicListPrices: check the price on %s and add it", pr.RatingRule, key, anthropicPricingPage)
-			continue
-		}
-		got, err := decimal.NewFromString(rates[pr.RatingRule])
-		if err != nil {
-			t.Errorf("rating rule %s: rate %q: %v", pr.RatingRule, rates[pr.RatingRule], err)
-			continue
-		}
-		if !got.Equal(w.cents) {
-			t.Errorf("rating rule %s (%s) is %s cents per token; %s is %s", pr.RatingRule, key, got, w.source, w.cents)
+	for _, plan := range doc.Plans {
+		for i, pr := range plan.Prices {
+			key := fmt.Sprintf("%s|%s|%s", pr.DimensionMatch["model"], pr.DimensionMatch["context_tier"], pr.DimensionMatch["token_type"])
+			where := fmt.Sprintf("plan %s prices[%d]", plan.Code, i)
+			seen[key] = true
+			w, ok := want[key]
+			if !ok {
+				t.Errorf("%s (%s) has no row in anthropicListPrices: check the price on %s and add it", where, key, anthropicPricingPage)
+				continue
+			}
+			got, err := decimal.NewFromString(pr.UnitAmountCents)
+			if err != nil {
+				t.Errorf("%s: rate %q: %v", where, pr.UnitAmountCents, err)
+				continue
+			}
+			if !got.Equal(w.cents) {
+				t.Errorf("%s (%s) is %s cents per token; %s is %s", where, key, got, w.source, w.cents)
+			}
 		}
 	}
 	for key := range want {
 		if !seen[key] {
-			t.Errorf("anthropicListPrices has %s but the recipe has no pricing rule for it", key)
+			t.Errorf("anthropicListPrices has %s but the recipe has no price for it", key)
 		}
 	}
 }

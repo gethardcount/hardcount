@@ -523,8 +523,7 @@ function EventPicker({ selected, setSelected }: {
 /* ─── Edit Endpoint Dialog ─── */
 
 // PATCH without secret rotation — the receiver keeps verifying with the
-// same signing secret while URL / events / active change. Also the surface
-// that brings a recipe-created endpoint (inactive + placeholder URL) live.
+// same signing secret while URL / events / active change.
 function EndpointEditDialog({ endpoint, onClose, onSaved }: {
   endpoint: WebhookEndpoint
   onClose: () => void

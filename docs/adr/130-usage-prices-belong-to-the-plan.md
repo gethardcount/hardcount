@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes install through a parser that turns today's YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. Not built yet: the base fee next-period rule (PR-7), ingest's `no_price` answer (PR-6), recipe YAML v7 (PR-5) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. Not built yet: the base fee next-period rule (PR-7), ingest's `no_price` answer (PR-6) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -592,15 +592,15 @@ in_arrears.
 
 ### 15. Recipes (PR-4, PR-5)
 
-- PR-4: the recipe parser turns the current YAML into plan prices, so
-  install keeps working.
+- PR-4 (#1386): the recipe parser turned the old YAML into plan prices,
+  so install kept working. PR-5 (#1389) removed that step.
 - PR-5: the YAML holds only `meters` and `plans` with their `prices`.
   `rating_rules`, `pricing_rules`, `priority` and per-price `currency` go.
 - An apply always creates a new plan with a free code, as today
   ([ADR-085](085-recipe-idempotent-apply.md)). From PR-4 it reuses a meter
   by `event_name` only when the aggregation matches, read inside the
-  apply's transaction (today it is read on its own connection,
-  `internal/recipe/service.go:422`). The plan's currency is the recipe's.
+  apply's transaction (before PR-4 it was read on its own connection).
+  The plan's currency is the recipe's.
 - PR-5: recipes no longer create a dunning policy or a webhook endpoint.
   Their `dunning` and `webhook` sections are removed, and the parser
   refuses them.

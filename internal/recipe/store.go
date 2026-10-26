@@ -8,8 +8,8 @@ import (
 )
 
 // Store is the persistence boundary for recipe_instances. The cross-domain
-// entities a recipe creates (plans, meters, dunning policies, etc.) are
-// owned by their own per-domain stores; this Store only tracks the thin
+// entities a recipe creates (meters, plans and their prices) are owned by
+// the pricing domain's store; this Store only tracks the thin
 // instantiation index.
 //
 // Methods come in two families:

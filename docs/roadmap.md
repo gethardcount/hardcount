@@ -44,8 +44,10 @@ first. Every shipped change, with its date, is in the
   rate names one plan price. Rating rules, meter pricing rules and a meter's
   default price are gone
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
-- **Planned:** recipe files written as plan prices; an install translates
-  today's files. A base fee change that waits for each subscriber's next
+- **Done:** a recipe file holds only meters and plans with their
+  prices, and an install creates nothing else: no dunning policy and no
+  webhook endpoint.
+- **Planned:** a base fee change that waits for each subscriber's next
   period may follow
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
 

@@ -437,8 +437,7 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		// a tenant creates is auto-promoted to default — so an API caller
 		// ends up with a policy that is simultaneously the tenant default and
 		// inert, with no error at create, no run, and (before this) no log.
-		// The dashboard is unaffected: its form sends enabled:true, and the
-		// recipe installer sets Enabled explicitly.
+		// The dashboard is unaffected: its form sends enabled:true.
 		slog.WarnContext(ctx, "dunning policy is disabled — skipping enrollment; the invoice will not dun",
 			"tenant_id", tenantID, "invoice_id", invoiceID, "customer_id", customerID,
 			"policy_id", policy.ID, "policy_name", policy.Name, "is_default", policy.IsDefault)
@@ -1820,21 +1819,6 @@ func (s *Service) UpsertPolicy(ctx context.Context, tenantID string, policy doma
 	return s.store.UpsertPolicy(ctx, tenantID, policy)
 }
 
-// UpsertPolicyTx is the tx-aware upsert used by the recipe-instantiate path.
-// It runs the SAME normalize+validate as UpsertPolicy: the recipe schema layer
-// does not check the schedule's bounds (recipe/parse.go), and before #333 this
-// path skipped validation, so a recipe whose retry count outran its waits
-// stalled its campaign at retry time instead of failing at instantiate time.
-// One validation chokepoint for every writer; a policy the API path would
-// reject must never enter via a recipe.
-func (s *Service) UpsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, policy domain.DunningPolicy) (domain.DunningPolicy, error) {
-	policy, err := normalizeAndValidatePolicy(policy)
-	if err != nil {
-		return domain.DunningPolicy{}, err
-	}
-	return s.store.UpsertPolicyTx(ctx, tx, tenantID, policy)
-}
-
 // DefaultSeedPolicy is the policy every new account starts with, once per
 // mode (ADR-123, #1152). Three retries on day 3, 7 and 14 after the failed
 // payment (or the collection that found no card): Stripe's recommended two-week window, and its limit of three
@@ -1872,7 +1856,8 @@ func (s *Service) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantI
 
 // normalizeAndValidatePolicy applies the save-time defaults and enforces the
 // policy invariants. The single chokepoint shared by UpsertPolicy and
-// UpsertPolicyTx so no writer can persist a policy another path would reject.
+// SeedDefaultPoliciesTx so no writer can persist a policy another path would
+// reject.
 func normalizeAndValidatePolicy(policy domain.DunningPolicy) (domain.DunningPolicy, error) {
 	if err := validateRetryDays(policy.RetryDays); err != nil {
 		return domain.DunningPolicy{}, err
