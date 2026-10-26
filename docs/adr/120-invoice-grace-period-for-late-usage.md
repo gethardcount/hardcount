@@ -3,7 +3,7 @@
 **Date:** 2026-10-14
 **Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; every unbilled event answers with its status, and one unbilled counter, built in PR-6 #1390)
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Built in PR-6 (#1390), with D07 folded in: every written event no invoice will bill now answers with a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`), and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). The `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` or `not_on_plan` flag wrong. The grace and the after_close flag stay.
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: every written event no invoice will bill now answers with a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`), and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). The `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` or `not_on_plan` flag wrong. The grace and the after_close flag stay.
 
 ## Summary
 
@@ -250,7 +250,9 @@ Usage that arrives after its period's invoice is still stored, answered
 after_close when an active or trialing subscription that prices its meter
 already invoiced its time, and no active or trialing subscription's open
 period holds it. (Since 2026-10-27: no other subscription's open period
-bills it or prices its meter; see below.) "Already invoiced" means either:
+bills it or prices its meter, and the before-the-period-start case below
+holds whatever the current plans price; see below.) "Already invoiced"
+means either:
 
 - the event is before the subscription's current period start, and not
   before its trial end (trial usage is free) or its start; or
@@ -333,7 +335,14 @@ The after_close signal now covers every written event no invoice will
 bill. The rule is still `classify` (`internal/usage/open_period.go`), and
 the answer that writes the event carries one of four statuses:
 
-- `after_close`: as above.
+- `after_close`: as above. Before the period start (an invoiced period,
+  past the billing start) it is after_close whatever the subscription's
+  plans price now (review round 2). The current plans are not the plans
+  that held that period: after a swap at renewal to a plan without the
+  meter they would call a late April event `not_on_plan`, which tells the
+  operator a price would bill it. No price would; only a one-off invoice
+  can. An event of a meter no plan ever priced is after_close too, which
+  is still true: its period was invoiced.
 - `no_price`: the event's time is in an open period whose plan prices its
   meter at the plan's pin, but no price of that plan takes its dimensions.
   "Takes" is the close's `properties @> dimension_match`. Ingest checks it
@@ -341,19 +350,23 @@ the answer that writes the event carries one of four statuses:
   string equality, and a number label never equals a string.
   `TestTakes_AgreesWithPostgresContainment` checks the two agree on a
   generated corpus.
-- `not_on_plan`: a subscription held the event's time, but its plan does
-  not price the meter. In an open period that is every plan the
-  subscription was on at that instant; before the period start (an
-  invoiced period, past the billing start) it is the current plans.
+- `not_on_plan`: an open period of a subscription holds the event's
+  time, but no plan the subscription was on at that instant prices the
+  meter.
 - `outside_subscription`: no active or trialing subscription bills the
   time: none exists, or the time is before one started, in a free trial
-  (also on the trial-end day, before the trial end), after one ends at its
-  period end or at a scheduled cancel, or in a stretch of the meter that
-  another subscription, since ended, billed.
+  (also on the trial-end day, before the trial end, and in the grace of a
+  period the trial outlasts), after one ends at its period end or at a
+  scheduled cancel, or in a stretch of the meter that another
+  subscription, since ended, billed. The end is the subscription's
+  `cancel_effective_at` (ADR-069): for a trialing subscription with a
+  cancel at period end, the trial end, where it is canceled free (review
+  round 2).
 
 Where they disagree across subscriptions, a subscription that bills the
-event wins, then one that prices its meter (`no_price`, then
-`after_close`), then one that held its time (`not_on_plan`). So a
+event wins, then one that prices its meter (`no_price`), then one that
+invoiced its time (`after_close`), then one whose open period holds it
+(`not_on_plan`). So a
 subscription whose open period holds the time but does not price the
 meter no longer turns an `after_close` event into a silent one. Nothing is
 sent when an invoice bills the event or still can (before an unpaid

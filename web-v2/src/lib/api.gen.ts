@@ -7210,9 +7210,9 @@ export interface components {
          * @description Sent only on the answer that wrote the event, when no invoice will
          *     bill it. The event is stored all the same.
          *
-         *     - `after_close`: a subscription whose plan prices this meter already
-         *       invoiced the event's time. Bill it with a one-off invoice if it
-         *       should be charged. A spend-threshold invoice counts only once it
+         *     - `after_close`: a subscription already invoiced the event's time,
+         *       whatever plan it is on now. Bill it with a one-off invoice if it
+         *       should be charged; a price added to a plan does not bill it. A spend-threshold invoice counts only once it
          *       is paid: until then it can be voided, and then the period's
          *       invoice bills the event.
          *     - `no_price`: the plan that bills the event's time prices this
@@ -7221,14 +7221,15 @@ export interface components {
          *       `dimension_match`, compared as strings: the number `1` is not
          *       the string `"1"`. The event's billing period has started, so a
          *       price you add now does not apply to it.
-         *     - `not_on_plan`: a subscription covered the event's time, but its
-         *       plan has no price for this meter.
+         *     - `not_on_plan`: a billing period of a subscription not invoiced yet
+         *       covers the event's time, but the plan has no price for this meter.
          *     - `outside_subscription`: no active or trialing subscription of the
          *       customer bills the event's time. The customer has none, or the
          *       time is before one started, in a free trial (also on the day the
          *       trial ends, before its end), after one ended or after its
-         *       scheduled cancel, or the meter's time belonged to another
-         *       subscription that has ended.
+         *       scheduled cancel (a trial with a cancel at period end ends at its
+         *       trial end), or the meter's time belonged to another subscription
+         *       that has ended.
          *
          *     `not_on_plan` and `outside_subscription` describe the customer's
          *     subscriptions when the event arrived. A subscription created later
@@ -9549,8 +9550,9 @@ export interface components {
              */
             no_price: number;
             /**
-             * @description Released rows in a subscription's time whose meter the
-             *     subscription's plan does not price. No invoice charges them.
+             * @description Released rows in a subscription's billing period not invoiced
+             *     yet whose meter the subscription's plan does not price. No
+             *     invoice charges them.
              */
             not_on_plan: number;
             /**
@@ -9564,12 +9566,11 @@ export interface components {
             /**
              * @description Released rows outside every subscription's time (before it
              *     started, in a free trial, after it ended or after its scheduled
-             *     cancel, or in another, ended subscription's time), and rows in an
-             *     earlier period of a plan that prices their meter. Also rows of a
-             *     sum or count meter stamped before the end of this period's paid
-             *     spend-threshold invoice. A subscription invoice does not count
-             *     them unless that period's invoice has not been built yet. Bill
-             *     them with a one-off invoice if they should be charged.
+             *     cancel, or in another, ended subscription's time), and rows in a
+             *     period already invoiced. Also rows of a sum or count meter
+             *     stamped before the end of this period's paid spend-threshold
+             *     invoice. No subscription invoice counts them. Bill them with a
+             *     one-off invoice if they should be charged.
              */
             outside_open_period: number;
         };

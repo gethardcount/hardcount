@@ -20,7 +20,8 @@ import (
 // release count them, and velox_usage_unbilled_total{reason, origin} counts
 // every written row by status. The statuses:
 //
-//   - after_close: its billing period was already invoiced.
+//   - after_close: its billing period was already invoiced, whatever plan
+//     the subscription is on now. Only a one-off invoice can bill it.
 //   - no_price: a plan of the subscription prices its meter, but no price of
 //     that plan takes the event's labels (dimension_match).
 //   - not_on_plan: a subscription held its time, but its plan does not price
@@ -28,8 +29,9 @@ import (
 //   - outside_subscription: no active or trialing subscription billed its
 //     time: the customer has none, or the time is before one started, in a
 //     free trial (also on the trial-end day, before the trial end), after one
-//     ends or after its scheduled cancel, or the meter's time belonged to
-//     another subscription that has since ended.
+//     ends or after its scheduled cancel (a trial with a cancel at period
+//     end ends at its trial end), or the meter's time belonged to another
+//     subscription that has since ended.
 //
 // Inside a current period an event is placed by the windows the close bills
 // the meter over (billing.PeriodPlan.UsageWindows), not by the period: a
@@ -107,12 +109,13 @@ const (
 	// Before a subscription started, in a trial, after its end, or in
 	// another subscription's time for the meter.
 	Outside Class = iota
-	// NotOnPlan: a subscription held the row's time (an open period, or an
-	// invoiced one since its billing started), but no plan it was on then
-	// prices the meter. For an invoiced period, its current plans.
+	// NotOnPlan: an open period of a subscription holds the row's time, but
+	// no plan it was on then prices the meter.
 	NotOnPlan
-	// AfterClose: a subscription whose current plan prices the meter already
-	// invoiced the row's time, and no future invoice counts it.
+	// AfterClose: a subscription already invoiced the row's time (a period
+	// since its billing started, before the current one), and no future
+	// invoice counts it. Whatever plan it is on now: a price added now would
+	// not bill the row.
 	AfterClose
 	// NoPrice: the time falls in an open period whose plan prices the meter
 	// at its pin, but no price of the plan takes the row's labels.
@@ -224,10 +227,14 @@ type OpenPeriod struct {
 	Floor *time.Time
 	// TrialEnd is the subscription's trial end, nil without a trial. Usage
 	// before it is free, also in the first paid period, which starts at
-	// midnight of the trial-end day.
+	// midnight of the trial-end day, and in the grace of a period the trial
+	// outlasts.
 	TrialEnd *time.Time
-	// Ends is the subscription's scheduled cancel (cancel_at): its final
-	// invoice bills no usage from it on. Nil when none is scheduled.
+	// Ends is where the subscription's scheduled cancel takes effect
+	// (Subscription.CancelEffectiveAt): cancel_at, the period end for a
+	// cancel at period end, or the trial end for a trialing subscription
+	// with one, which is canceled free there (ADR-069). No invoice bills its
+	// usage from it on. Nil when no cancel is scheduled.
 	Ends *time.Time
 	// Plans holds, by plan id, each plan's prices at its pin of the period.
 	Plans map[string]PriceSet
@@ -241,15 +248,9 @@ type OpenPeriod struct {
 	// starts no earlier than the trial end or another subscription's
 	// coverage end of the meter.
 	Windows map[string][]Window
-	// Meters are the meters the current items' plans price at each plan's
-	// pin of the period: Start, or the first instant in the period the
-	// subscription had an item on the plan (ADR-130 §4 step 3). A row before
-	// Start is AfterClose only for these.
-	Meters map[string]bool
 	// Next are the prices from End on: of each plan after any change pending
 	// at or before End, at End, the next period's pin. Nil when the
-	// subscription ends at End (cancel at period end, or cancel_at at or
-	// before End).
+	// subscription ends at or before End (Ends).
 	Next []PriceSet
 	// BilledThrough and PaidThrough are the subscription's threshold
 	// watermarks (ThresholdWatermark).
@@ -297,29 +298,25 @@ func OpenPeriodOf(sub domain.Subscription, stretches []Stretch, windows map[stri
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return OpenPeriod{}, false
 	}
+	// Derived here from the schedule fields, as the store's scan derives
+	// it, so the rule does not depend on how sub was read.
+	sub.DeriveCancelEffectiveAt()
 	p := OpenPeriod{
 		Start:              *sub.CurrentBillingPeriodStart,
 		End:                *sub.CurrentBillingPeriodEnd,
 		TrialEnd:           sub.TrialEndAt,
-		Ends:               sub.CancelAt,
+		Ends:               sub.CancelEffectiveAt,
 		Plans:              atPin,
 		Stretches:          stretches,
 		Windows:            windows,
-		Meters:             map[string]bool{},
 		ThresholdWatermark: wm,
 	}
 	p.Floor = sub.BillingStartedAt()
-	continues := !sub.CancelAtPeriodEnd && (sub.CancelAt == nil || sub.CancelAt.After(p.End))
-	if continues {
-		p.Next = []PriceSet{}
+	if p.Ends != nil && !p.Ends.After(p.End) {
+		return p, true
 	}
+	p.Next = []PriceSet{}
 	for _, it := range sub.Items {
-		for id := range atPin[it.PlanID].ByMeter {
-			p.Meters[id] = true
-		}
-		if !continues {
-			continue
-		}
 		next := it.PlanID
 		if it.PendingPlanID != "" && it.PendingPlanEffectiveAt != nil && !it.PendingPlanEffectiveAt.After(p.End) {
 			next = it.PendingPlanID
@@ -342,6 +339,7 @@ func BucketsOf(meter domain.Meter) MeterBuckets {
 // meter.
 //
 // For each period:
+//   - before the trial end: Outside. Trial usage is free.
 //   - at or after Ends (a scheduled cancel): Outside. The final invoice
 //     bills usage only to the cancel.
 //   - at >= End (the grace before End's invoice, or a close running late):
@@ -352,8 +350,8 @@ func BucketsOf(meter domain.Meter) MeterBuckets {
 //   - Start <= at < End: inPeriod. When InOpen, the meter is additive and
 //     at is past the floor: before PaidThrough it is AfterClose, and before
 //     BilledThrough (a threshold invoice not paid yet) it is Unsettled.
-//   - at < Start, at or past the floor: AfterClose when a current plan prices
-//     the meter, else NotOnPlan.
+//   - at < Start, at or past the floor: AfterClose. That period was
+//     invoiced; what the current plans price does not change that.
 //   - else Outside.
 //
 // A price set whose pin is ahead answers InOpen (classOf). The highest class
@@ -376,6 +374,7 @@ func classify(at time.Time, meterID string, labels map[string]any, periods []Ope
 		c := Outside
 		pastFloor := p.Floor != nil && !at.Before(*p.Floor)
 		switch {
+		case p.TrialEnd != nil && at.Before(*p.TrialEnd):
 		case p.Ends != nil && !at.Before(*p.Ends):
 		case !at.Before(p.End):
 			if p.Next != nil {
@@ -399,18 +398,15 @@ func classify(at time.Time, meterID string, labels map[string]any, periods []Ope
 				}
 			}
 		case pastFloor:
-			c = NotOnPlan
-			if p.Meters[meterID] {
-				c = AfterClose
-			}
+			c = AfterClose
 		}
 		best = max(best, c)
 	}
 	return best, nil
 }
 
-// inPeriod places a row at Start <= at < End as the close bills the period:
-//   - before the trial end: Outside, trial usage is free.
+// inPeriod places a row at or after the trial end, Start <= at < End, as
+// the close bills the period:
 //   - a stretch holding at whose plan's pin is ahead: InOpen.
 //   - in a window of the meter: by that window's plan, InOpen if a price
 //     takes the labels, else NoPrice. One window holds an instant.
@@ -418,9 +414,6 @@ func classify(at time.Time, meterID string, labels map[string]any, periods []Ope
 //     starts later, at another subscription's coverage end, so that time
 //     is not this subscription's. Else NotOnPlan.
 func (p OpenPeriod) inPeriod(at time.Time, meterID string, labels map[string]any) Class {
-	if p.TrialEnd != nil && at.Before(*p.TrialEnd) {
-		return Outside
-	}
 	held := false
 	for _, st := range p.Stretches {
 		if !st.holds(at) {

@@ -207,10 +207,10 @@ that wrote it says why, in `billing_status`:
 
 | `billing_status` | Meaning | What to do |
 |---|---|---|
-| `after_close` | Its billing period was already invoiced (see Late usage below). | Bill it with a one-off invoice. |
+| `after_close` | Its billing period was already invoiced (see Late usage below), whatever plan the subscription is on now. | Bill it with a one-off invoice. A price added to a plan does not bill it. |
 | `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions. It applies from each subscriber's next period, so this event stays unbilled. |
-| `not_on_plan` | The customer's subscription covered the time, but its plan has no price for the meter. | Add a price for the meter to the plan, or move the customer to a plan that has one. |
-| `outside_subscription` | No active or trialing subscription of the customer bills the time: there is none, or the time is before it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel, or the meter's time belonged to another subscription that has ended. | Check the event's customer and timestamp. |
+| `not_on_plan` | A billing period of the customer's subscription that is not invoiced yet covers the time, but its plan has no price for the meter. | Add a price for the meter to the plan, or move the customer to a plan that has one. |
+| `outside_subscription` | No active or trialing subscription of the customer bills the time: there is none, or the time is before it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel (a trial with a cancel at period end ends at its trial end), or the meter's time belonged to another subscription that has ended. | Check the event's customer and timestamp. |
 
 - The single and backfill 201 carry it. `POST /v1/usage-events/batch`
   returns `results[i]` for each event, in the order sent: `status`
@@ -273,7 +273,10 @@ An event counts toward the billing period its `timestamp` falls in.
 The metric `velox_usage_unbilled_total{reason, origin}` counts the events
 answered with each `billing_status` (`reason="after_close"` for late usage).
 Usage on a canceled subscription is answered `outside_subscription`, not
-`after_close`. `velox_usage_late_event_total`
+`after_close`, or `not_on_plan` when another subscription's open period
+holds that time without pricing the meter. An event before a
+subscription's current period is `after_close` whatever plan it is on now:
+adding a price to a plan never bills it. `velox_usage_late_event_total`
 counts events, not sent through the backfill route, whose `timestamp` is
 more than 24 hours older than their arrival. It does not say whether an
 event missed an invoice.

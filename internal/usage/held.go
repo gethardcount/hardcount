@@ -235,18 +235,17 @@ type ReleaseResult struct {
 	// charges them.
 	NoPrice int `json:"no_price"`
 	// NotOnPlan counts released rows whose time falls in a subscription's
-	// time, but whose meter the subscription's plan does not price: no
-	// invoice charges them.
+	// billing period not invoiced yet, but whose meter the subscription's
+	// plan does not price: no invoice charges them.
 	NotOnPlan int `json:"not_on_plan"`
 	// OutsideOpenPeriod counts released rows outside every subscription's
 	// time (before it started, in a free trial, after it ends or after its
 	// scheduled cancel, or in another, ended subscription's time), and rows
 	// in a period whose invoice is already built. It also counts rows of a
 	// sum or count meter stamped before the time a paid threshold invoice of
-	// the current period billed through. A subscription invoice does not
-	// count them (unless that period's invoice has not been built yet); bill
-	// them with a one-off invoice if they should be charged. Velox never
-	// moves usage onto a later invoice (ADR-120).
+	// the current period billed through. No subscription invoice counts
+	// them; bill them with a one-off invoice if they should be charged.
+	// Velox never moves usage onto a later invoice (ADR-120).
 	OutsideOpenPeriod int `json:"outside_open_period"`
 }
 
@@ -441,8 +440,8 @@ func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInpu
 //   - InOpenPeriod (InOpen): an open period's invoice counts it.
 //   - NoPrice (NoPrice): the time falls in an open period whose plan prices
 //     the meter, but no price takes the row's labels. No invoice counts it.
-//   - NotOnPlan (NotOnPlan): the time falls in the subscription's time, but
-//     its plan does not price the meter. No invoice counts it.
+//   - NotOnPlan (NotOnPlan): the time falls in an open period, but its
+//     plan does not price the meter. No invoice counts it.
 //   - PendingThresholdInvoice (Unsettled): before the time a threshold
 //     invoice that is not paid billed through. Counted if that invoice is
 //     voided before the period closes, else on no invoice.

@@ -916,6 +916,8 @@ test('held LiteLLM usage is shown on the Usage page and released once', async ({
   await expect(notice.getByText(`2 usage rows held for customer '${ext}'`)).toBeVisible()
   await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
   await expect(page.getByText('Released 2 usage rows')).toBeVisible()
+  // The customer has no subscription, so no invoice bills the rows.
+  await expect(page.getByText('2 fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced, so no subscription invoice includes them. Bill them with a one-off invoice if needed.')).toBeVisible()
   await expect(page.getByText(`held for customer '${ext}'`)).toHaveCount(0)
 
   const events = await api<{ data: unknown[]; total: number }>('GET', `/usage-events?customer_id=${customer.id}`)

@@ -50,8 +50,9 @@ export interface HeldUsageReleaseResult {
      */
   no_price: number;
   /**
-     * Released rows in a subscription's time whose meter the
-     * subscription's plan does not price. No invoice charges them.
+     * Released rows in a subscription's billing period not invoiced
+     * yet whose meter the subscription's plan does not price. No
+     * invoice charges them.
      */
   not_on_plan: number;
   /**
@@ -65,12 +66,11 @@ export interface HeldUsageReleaseResult {
   /**
      * Released rows outside every subscription's time (before it
      * started, in a free trial, after it ended or after its scheduled
-     * cancel, or in another, ended subscription's time), and rows in an
-     * earlier period of a plan that prices their meter. Also rows of a
-     * sum or count meter stamped before the end of this period's paid
-     * spend-threshold invoice. A subscription invoice does not count
-     * them unless that period's invoice has not been built yet. Bill
-     * them with a one-off invoice if they should be charged.
+     * cancel, or in another, ended subscription's time), and rows in a
+     * period already invoiced. Also rows of a sum or count meter
+     * stamped before the end of this period's paid spend-threshold
+     * invoice. No subscription invoice counts them. Bill them with a
+     * one-off invoice if they should be charged.
      */
   outside_open_period: number;
 }

@@ -107,13 +107,14 @@ func TestUsageOpenPeriods_ReadsPlanPricesOnce(t *testing.T) {
 		t.Fatalf("open periods = %d, want 1", len(got))
 	}
 	p := got[0]
-	for _, m := range []string{"mtr_a", "mtr_c"} {
-		if !p.Meters[m] {
-			t.Errorf("Meters = %v, want %s (priced at the period start)", p.Meters, m)
+	atPin := map[string]string{}
+	for planID, ps := range p.Plans {
+		for m := range ps.ByMeter {
+			atPin[planID] += m
 		}
 	}
-	if len(p.Meters) != 2 {
-		t.Errorf("Meters = %v, want mtr_a and mtr_c", p.Meters)
+	if want := map[string]string{"pln_a": "mtr_a", "pln_c": "mtr_c"}; fmt.Sprint(atPin) != fmt.Sprint(want) {
+		t.Errorf("prices at the period start = %v, want %v", atPin, want)
 	}
 	next := map[string]string{}
 	for _, ps := range p.Next {

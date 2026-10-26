@@ -556,6 +556,10 @@ Built in #1390 (notes of 2026-10-27, from the code):
   windows (trial end, other subscriptions' coverage ends, one window per
   instant), and a price set whose pin had not passed when read draws no
   flag: a price saved now is in force there (review round 1).
+- An event before the current period, past the billing start, is
+  `after_close` whatever the current plans price: they are not the plans
+  that held that period. A trialing subscription with a cancel at period
+  end ends at its trial end, where it is canceled free (review round 2).
 - `/batch` returns `results[i]` per event and a count per status.
 
 - The ingest answer's `billing_status` is omitted when an open period will

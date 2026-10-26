@@ -42,15 +42,10 @@ func whole(start, end time.Time, floor *time.Time, meters ...string) OpenPeriod 
 // are each stretch's for each meter its plan prices (the stretches must not
 // overlap on a meter), and next from end on.
 func onPlans(start, end time.Time, floor *time.Time, plans map[string]PriceSet, stretches []Stretch, next PriceSet) OpenPeriod {
-	p := OpenPeriod{Start: start, End: end, Floor: floor, Meters: map[string]bool{}, Next: []PriceSet{next}, Plans: plans, Stretches: stretches, Windows: map[string][]Window{}}
+	p := OpenPeriod{Start: start, End: end, Floor: floor, Next: []PriceSet{next}, Plans: plans, Stretches: stretches, Windows: map[string][]Window{}}
 	for _, st := range stretches {
 		for m := range plans[st.PlanID].ByMeter {
 			p.Windows[m] = append(p.Windows[m], Window(st))
-		}
-	}
-	for _, ps := range plans {
-		for m := range ps.ByMeter {
-			p.Meters[m] = true
 		}
 	}
 	return p
@@ -271,7 +266,7 @@ func TestOpenPeriodOf(t *testing.T) {
 	stretches := []Stretch{{PlanID: "pOld", From: opMay, To: opMay.AddDate(0, 0, 9)}, {PlanID: "pA", From: opMay.AddDate(0, 0, 9), To: opJun}}
 	windows := map[string][]Window{"o": {{PlanID: "pOld", From: opMay, To: opMay.AddDate(0, 0, 9)}}, "m": {{PlanID: "pA", From: opMay.AddDate(0, 0, 9), To: opJun}}}
 	p, ok := OpenPeriodOf(base, stretches, windows, plans, plans, ThresholdWatermark{})
-	if !ok || !p.Meters["m"] || p.Meters["o"] || len(p.Next) != 1 || p.Next[0].ByMeter["m"] == nil || p.Floor == nil || !p.Floor.Equal(opApr) || p.TrialEnd != nil || p.Ends != nil {
+	if !ok || len(p.Next) != 1 || p.Next[0].ByMeter["m"] == nil || p.Floor == nil || !p.Floor.Equal(opApr) || p.TrialEnd != nil || p.Ends != nil {
 		t.Fatalf("plain: %+v %v", p, ok)
 	}
 	if len(p.Stretches) != 2 || p.Stretches[0].PlanID != "pOld" || p.Plans["pOld"].ByMeter["o"] == nil || len(p.Windows["m"]) != 1 || p.Windows["m"][0].PlanID != "pA" {
@@ -289,8 +284,8 @@ func TestOpenPeriodOf(t *testing.T) {
 	}
 	pending := base
 	pending.Items = []domain.SubscriptionItem{{PlanID: "pA", PendingPlanID: "pB", PendingPlanEffectiveAt: opAt(opJun)}}
-	if p, _ := OpenPeriodOf(pending, stretches, windows, plans, plans, ThresholdWatermark{}); !p.Meters["m"] || nextMeters(p)["m"] || !nextMeters(p)["n"] {
-		t.Errorf("pending change at the end: meters %v next %v, want m now and n next", p.Meters, nextMeters(p))
+	if p, _ := OpenPeriodOf(pending, stretches, windows, plans, plans, ThresholdWatermark{}); nextMeters(p)["m"] || !nextMeters(p)["n"] {
+		t.Errorf("pending change at the end: next %v, want n", nextMeters(p))
 	}
 	later := base
 	later.Items = []domain.SubscriptionItem{{PlanID: "pA", PendingPlanID: "pB", PendingPlanEffectiveAt: opAt(opJun.AddDate(0, 1, 0))}}
@@ -300,8 +295,8 @@ func TestOpenPeriodOf(t *testing.T) {
 
 	atEnd := base
 	atEnd.CancelAtPeriodEnd = true
-	if p, _ := OpenPeriodOf(atEnd, stretches, windows, plans, plans, ThresholdWatermark{}); p.Next != nil {
-		t.Errorf("cancel at period end: next %v, want nil", p.Next)
+	if p, _ := OpenPeriodOf(atEnd, stretches, windows, plans, plans, ThresholdWatermark{}); p.Next != nil || p.Ends == nil || !p.Ends.Equal(opJun) {
+		t.Errorf("cancel at period end: next %v ends %v, want nil and the period end", p.Next, p.Ends)
 	}
 	cancelAt := base
 	cancelAt.CancelAt = opAt(opJun)

@@ -71,8 +71,8 @@ Words used in the Velox docs and dashboard. For the big picture, read
   [More](ops/runbook/usage-with-no-price.md)
 - **billing_status (on an ingest answer)**: Why no invoice will bill an
   event Velox just stored: `after_close` (its period was already
-  invoiced), `no_price`, `not_on_plan` (the plan has no price for its
-  meter) or `outside_subscription` (no subscription bills its time).
+  invoiced), `no_price`, `not_on_plan` (the plan of a period not
+  invoiced yet has no price for its meter) or `outside_subscription` (no subscription bills its time).
   Absent when an invoice will bill it or still can, except in the stated
   cases. Only the answer that wrote the event carries it.
   [More](api-surface.md#usage-that-will-not-be-billed)

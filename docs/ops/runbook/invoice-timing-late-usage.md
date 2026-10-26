@@ -133,8 +133,10 @@ curl -sS "$API/v1/customers/$CUSTOMER/usage?from=$BILLING_PERIOD_START&to=$BILLI
   `POST /v1/invoices/{id}/finalize`.
 - For a max or last meter, the late events may change nothing; check the
   events before you bill.
-- An event flagged `after_close` is billed on no invoice, so bill it. A
-  late event that is not flagged may still be on the period-end invoice;
+- An event flagged `after_close` is billed on no invoice, so bill it if
+  the plan the customer was on in that period priced its meter. The flag
+  does not check that: it says only that the period was invoiced. A late
+  event that is not flagged may still be on the period-end invoice;
   compare before you bill.
 
 **A pipeline that often delivers later than the grace.** Raise
