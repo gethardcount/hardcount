@@ -28,8 +28,8 @@ type Service struct {
 	// held keeps usage rows that could not be ingested yet (#1044). Taken
 	// from the store when it implements HeldStore (PostgresStore does).
 	held HeldStore
-	// periods reads the customer's open periods, to answer an event no
-	// invoice will bill with its billing_status; see SetOpenPeriodReader.
+	// periods reads the customer's open periods, to answer an event with
+	// its billing_status; see SetOpenPeriodReader.
 	periods OpenPeriodReader
 }
 
@@ -47,8 +47,8 @@ func NewService(store Store) *Service {
 // for a period that may already have closed, so that action is recorded.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 
-// SetOpenPeriodReader wires the open-period reads that answer an event no
-// invoice will bill with its billing_status (open_period.go). Optional:
+// SetOpenPeriodReader wires the open-period reads that answer an event with
+// its billing_status (open_period.go). Optional:
 // unwired, nothing is flagged (narrow tests).
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
@@ -272,7 +272,7 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 }
 
 // markWritten sets billing_status on a row the write just inserted and
-// records it, when no invoice will bill the row. A replay never reaches
+// records it, when the row has one (open_period.go). A replay never reaches
 // here: it is an error out of the store.
 func (s *Service) markWritten(ctx context.Context, event *domain.UsageEvent, class Class) {
 	event.BillingStatus = s.statusOf(class)
@@ -423,8 +423,7 @@ type BatchResult struct {
 	Deduplicated int
 	// Results is each event's result, in request order.
 	Results []BatchEventResult
-	// Unbilled counts the written rows no invoice will bill, by
-	// billing_status (open_period.go).
+	// Unbilled counts the written rows by billing_status (open_period.go).
 	Unbilled UnbilledCounts
 }
 
@@ -436,8 +435,8 @@ const (
 
 // BatchEventResult is what a batch did with one event: wrote it
 // ("ingested") or found it already stored under its key ("deduplicated").
-// BillingStatus is set only on a row the batch wrote that no invoice will
-// bill: a deduplicated row was answered when it was first written.
+// BillingStatus is set only on a row the batch wrote, when it has one: a
+// deduplicated row was answered when it was first written.
 type BatchEventResult struct {
 	Status        string `json:"status"`
 	BillingStatus string `json:"billing_status,omitempty"`

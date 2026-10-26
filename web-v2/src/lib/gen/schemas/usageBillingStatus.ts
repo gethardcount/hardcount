@@ -9,56 +9,40 @@
  */
 
 /**
- * Sent only on the answer that wrote the event, when no invoice will
- * bill it. The event is stored all the same.
+ * What Velox found when the event arrived. It checked the event
+ * against the customer's subscriptions, the plans and prices in force,
+ * and the invoices already built at that moment. Sent only on the
+ * answer that wrote the event; the event is stored all the same.
  *
- * - `after_close`: a subscription already invoiced the event's time,
- *   whatever plan it is on now. Bill it with a one-off invoice if it
- *   should be charged; a price added to a plan does not bill it. A spend-threshold invoice counts only once it
- *   is paid: until then it can be voided, and then the period's
- *   invoice bills the event.
+ * A status that is present was true at that moment:
+ *
+ * - `after_close`: the event's time is already invoiced. A
+ *   spend-threshold invoice counts only once it is paid. Bill the
+ *   event with a one-off invoice if it should be charged.
+ * - `not_on_plan`: a billing period not invoiced yet holds the event's
+ *   time, but its plan has no price for this meter.
+ * - `outside_subscription`: no active or trialing subscription of the
+ *   customer bills the event's time. For example, it has none, or the
+ *   time is before one starts, in a free trial, or after one ends or
+ *   its scheduled cancel.
  * - `no_price`: the plan that bills the event's time prices this
  *   meter, but no price of that plan takes the event's `dimensions`.
  *   A price takes an event whose dimensions include all of its
- *   `dimension_match`, compared as strings: the number `1` is not
- *   the string `"1"`. The event's billing period has started, so a
- *   price you add now does not apply to it.
- * - `not_on_plan`: a billing period of a subscription not invoiced yet
- *   covers the event's time, but the plan has no price for this meter.
- *   A price added now, or a move to a plan that has one, bills later
- *   usage, not this event.
- * - `outside_subscription`: no active or trialing subscription of the
- *   customer bills the event's time. The customer has none, or the
- *   time is before its first billing period (which starts at midnight
- *   of the day it started), in a free trial (also on the day the
- *   trial ends, before its end), after one ended or after its
- *   scheduled cancel, or the meter's time belonged to another
- *   subscription that has ended.
+ *   `dimension_match`, compared as strings: the number `1` is not the
+ *   string `"1"`.
  *
- * `not_on_plan` and `outside_subscription` describe the customer's
- * subscriptions when the event arrived. A subscription created or
- * activated later that day, or an item added on the first day of a
- * billing period,
- * bills from the start of that day, so it can bill the event after
- * all. A price saved in the same instant a billing period starts can
- * make one `no_price` or `not_on_plan` answer wrong. A change to the
- * subscription saved while the request is in flight can make the
- * answer wrong too: a plan swap, an added item or a new subscription
- * can bill a flagged event, and after a cancel or a removed item no
- * invoice may bill an event that has no `billing_status`.
+ * No `billing_status` means Velox found no reason then. It is not a
+ * promise that the event will be billed. Velox checks only the
+ * customer's current billing periods: time after a period end whose
+ * invoice is not built yet is not checked, nor is time after a trial's
+ * end before Velox ends the trial. A later change can change the
+ * outcome either way: a subscription created, activated or changed, a
+ * trial extended, a scheduled cancel undone, or a price added. The
+ * invoice is the final answer.
  *
- * Absent when an invoice will bill the event, or still can (a
- * spend-threshold invoice is not paid yet, or a price saved now still
- * applies to it). Absent too for an event at or after the end of the
- * subscription's current billing period, which is not checked: its
- * own period bills it at that period's prices, not known until the
- * current period's invoice is built. Absent too for an event at or
- * after a trial's end while the subscription is still trialing, which
- * is not checked: until Velox ends the trial, the trial can be
- * extended past the event or a cancel at period end undone. When one
- * subscription of the customer does not check an event, it carries no
- * status even if another subscription would flag it. Absent on a
- * replay and on a read.
+ * A price saved in the same instant a billing period starts, or a
+ * subscription change saved while the request is in flight, can make
+ * a present status wrong. Absent on a replay and on a read.
  */
 export type UsageBillingStatus = typeof UsageBillingStatus[keyof typeof UsageBillingStatus];
 

@@ -11,12 +11,13 @@ import (
 	"github.com/sagarsuperuser/velox/internal/api/generated"
 )
 
-// Usage that no invoice will bill is answered with a billing_status (D07,
-// ADR-130 §10 and PR-6): outside_subscription, not_on_plan, no_price and
-// after_close. The status is absent when an open period's invoice bills the
-// event. Each test that flags an event also closes the period and checks
-// that the invoice really leaves it out, and each event the invoice does
-// bill is checked to carry no status.
+// A billing_status is what Velox found when the event arrived (D07, ADR-130
+// §10 and PR-6, ADR-120 amendment 2026-10-27): outside_subscription,
+// not_on_plan, no_price or after_close. A present status was true then; no
+// status promises nothing. Each test that flags an event also closes the
+// period and checks that the invoice really leaves it out (nothing changes
+// after the answer unless the test says so), and each event the invoice
+// does bill is checked to carry no status.
 //
 // The rig is the close-lag rig (close_lag_e2e_test.go): the real server over
 // HTTP, April is P0 = [Apr 1, May 1) and B = May 1.
@@ -121,10 +122,11 @@ func TestBillingStatus_OutsideSubscription(t *testing.T) {
 	}
 }
 
-// TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt pins the
-// stated exception: a subscription's first period starts at the start of
-// its first day (ADR-012), so a subscription created later that day bills an
-// event that was answered outside_subscription earlier that day.
+// TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt pins a
+// later change: a subscription's first period starts at the start of its
+// first day (ADR-012), so a subscription created later that day bills an
+// event that was answered outside_subscription earlier that day. The status
+// was true when the event arrived; the invoice is the final answer.
 func TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))

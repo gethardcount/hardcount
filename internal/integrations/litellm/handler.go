@@ -90,7 +90,7 @@ func (h *Handler) Routes() chi.Router {
 //	  "errors": [{ "id": "...", "error": "..." }] }
 //
 // after_close, no_price, not_on_plan and outside_subscription count accepted
-// rows no invoice will bill, by the billing_status a single ingest would
+// rows by the billing_status a single ingest would
 // answer them with (usage open_period.go). They are stored all the same. A
 // replay never counts.
 //

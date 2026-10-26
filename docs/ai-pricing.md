@@ -148,12 +148,10 @@ five places:
 
 - the answer that sent the event: `billing_status: "no_price"` on its 201,
   or a `no_price` count on a batch or a LiteLLM delivery, counted in
-  `velox_usage_unbilled_total{reason="no_price"}`. A price saved in the
-  same instant a billing period starts, or a plan change saved while the
-  request is in flight, can make one such answer wrong. An event after the
-  end of the subscription's current period, sent before that period's
-  invoice is built, is not checked, so it carries no `billing_status`.
-  Neither is an event after a trial's end, sent before Velox ends the trial;
+  `velox_usage_unbilled_total{reason="no_price"}`. It is what Velox found
+  when the event arrived. An event with no `billing_status` is not
+  promised to be billed
+  ([more](api-surface.md#what-velox-found-when-the-event-arrived));
 - the "not billed" row of the customer's usage, on the customer page and
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
   you pass `from` and `to`), marked `no_price`;

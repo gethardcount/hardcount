@@ -8,6 +8,11 @@
  * OpenAPI spec version: 2026-04-07
  */
 
+/**
+ * The counts are what Velox found when the release wrote the rows, as
+ * for `billing_status` (see `UsageBillingStatus`). The invoice is the
+ * final answer.
+ */
 export interface HeldUsageReleaseResult {
   /** The customer the rows were ingested for. */
   customer_id: string;
@@ -32,28 +37,24 @@ export interface HeldUsageReleaseResult {
      */
   more_to_release: number;
   /**
-     * Released rows inside an active subscription's current billing
-     * period that a price of the subscription's plan takes. That
-     * period's invoice counts them. A row after the period end,
-     * released before that period's invoice is built, counts here when
-     * the subscription continues, without a price check: that
-     * period's prices are not known yet. So does a row at or after a
-     * trial's end while the subscription is still trialing. Rows of a sum or count meter stamped before the end of
-     * this period's spend-threshold invoice are not counted here: see
-     * `pending_threshold_invoice` and `outside_open_period`.
+     * Released rows in a billing period not invoiced yet that a price
+     * of its plan takes. Rows Velox does not check count here too:
+     * rows after the current period's end, while the subscription
+     * continues, and rows after a trial's end while the subscription
+     * still trials. Rows of a sum or count meter stamped before the end
+     * of this period's spend-threshold invoice are not counted here:
+     * see `pending_threshold_invoice` and `outside_open_period`.
      */
   in_open_period: number;
   /**
-     * Released rows in a billing period not invoiced yet, whose meter
-     * the plan that bills their time prices, but that no price of the
-     * plan takes (their dimensions do not include any price's
-     * `dimension_match`). No invoice charges them.
+     * Released rows in a billing period not invoiced yet whose plan
+     * prices the meter, but no price of that plan takes them (their
+     * dimensions do not include any price's `dimension_match`).
      */
   no_price: number;
   /**
-     * Released rows in a subscription's billing period not invoiced
-     * yet whose meter the subscription's plan does not price. No
-     * invoice charges them.
+     * Released rows in a billing period not invoiced yet whose plan
+     * does not price the meter.
      */
   not_on_plan: number;
   /**
@@ -70,8 +71,8 @@ export interface HeldUsageReleaseResult {
      * cancel, or in another, ended subscription's time), and rows in a
      * period already invoiced. Also rows of a sum or count meter
      * stamped before the end of this period's paid spend-threshold
-     * invoice. No subscription invoice counts them. Bill them with a
-     * one-off invoice if they should be charged.
+     * invoice. Bill them with a one-off invoice if they should be
+     * charged.
      */
   outside_open_period: number;
 }

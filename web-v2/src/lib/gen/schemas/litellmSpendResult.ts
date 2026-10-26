@@ -25,16 +25,15 @@ export interface LitellmSpendResult {
   /** The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. */
   cache_hits: number;
   /**
-     * Of `accepted`, the events whose period a subscription already
-     * invoiced: stored, billed on no invoice. A replay never counts
-     * here.
+     * Of `accepted`, the events answered `billing_status:
+     * after_close`: their time was already invoiced. A replay never
+     * counts here.
      */
   after_close: number;
   /**
      * Of `accepted`, the events no price of the subscription's plan
-     * takes (`billing_status: no_price`): stored, billed on no
-     * invoice. A model no price names lands here. A replay never
-     * counts here.
+     * takes (`billing_status: no_price`), such as a model no price
+     * names. A replay never counts here.
      */
   no_price: number;
   /**

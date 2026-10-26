@@ -45,7 +45,8 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   counts it, and a WARN
   line names the customer, meter and timestamp. There is no list of such
   events yet.
-- **What is not flagged.** Usage on a canceled subscription. And usage
+- **What is not flagged `after_close`.** Usage on a canceled subscription
+  (it is `outside_subscription`). And usage
   stamped before a spend-threshold invoice that is not paid yet: if that
   invoice is voided before the period-end invoice is built, the period-end
   invoice bills all the period's usage again, late events included. So such an

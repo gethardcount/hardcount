@@ -12,13 +12,20 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
-// Every written usage row that no invoice will bill is answered with a
-// billing_status (ADR-120 amendment 2026-10-22; ADR-130, PR-6, which builds
-// D07). Velox stores such an event and answers 2xx. The caller and the
-// operator are told: the event answer carries the status, the batch answer
-// carries it per event and counts each, the LiteLLM answer and the held-usage
-// release count them, and velox_usage_unbilled_total{reason, origin} counts
-// every written row by status. The statuses:
+// A written usage row carries a billing_status when Velox finds a reason no
+// invoice bills it (ADR-120 amendments 2026-10-22 and 2026-10-27; ADR-130,
+// PR-6, which builds D07). The status is what Velox found when the row
+// arrived, checked against the customer's subscriptions, the plans and
+// prices in force, and the invoices already built at that moment. A present
+// status was true then. No status means Velox found no reason then; it is
+// not a promise that the row will be billed, and a later change can change
+// the outcome either way. The invoice is the final answer.
+//
+// Velox stores such an event and answers 2xx. The event answer carries the
+// status, the batch answer carries it per event and counts each, the LiteLLM
+// answer and the held-usage release count them, and
+// velox_usage_unbilled_total{reason, origin} counts every written row by
+// status. The statuses:
 //
 //   - after_close: its billing period was already invoiced, whatever plan
 //     the subscription is on now. Only a one-off invoice can bill it.
@@ -40,25 +47,18 @@ import (
 // close began to bill the subscription (the start of its first period, at
 // midnight of its first day, or its trial end) is after_close.
 //
-// An event at or after the current period's end is not checked against
-// prices or plans (review round 3 on #1390). Its own period's close bills it
-// at that period's prices, and ingest does not know that period while the
-// current one's close has not run: the close can be behind by more than one
-// period (a failing run, a stopped scheduler, a test clock catching up), and
-// a price edit or a plan change can fall between. Such an event answers no
-// billing_status, unless a trial or a scheduled cancel makes it
-// outside_subscription. If its plan prices the meter but no price takes it,
-// the close logs its unpriced-usage WARN.
+// Two kinds of time are not checked (Later, no billing_status), unless a
+// trial or a scheduled cancel makes the event outside_subscription:
+//   - at or after the current period's end. Its own period's plans and pins
+//     are not known while the current period's close has not run, and the
+//     close can be behind by more than one period.
+//   - at or after the trial end of a subscription that is still trialing,
+//     until the trial scan ends the trial.
 //
-// An event at or after the trial end of a subscription that is still
-// trialing is not checked either (review round 4 on #1390). Until the trial
-// scan ends the trial, the operator can still extend it past the event
-// (then the event is free) or undo a cancel at period end (then it is
-// billed), so no status would be true of both.
-//
-// One subscription's not checked wins over another's flag (Later ranks
-// above every flag): the event may be in the unchecked period, so no
-// subscription's flag can say that no invoice bills it.
+// If such an event's plan prices the meter but no price takes it, the close
+// logs its unpriced-usage WARN. One subscription's unchecked time wins over
+// another's flag (Later ranks above every flag): that subscription may bill
+// the event, so Velox found no reason for the customer as a whole.
 //
 // The rule is one function, classify, shared by ingest and the held-usage
 // release. Ingest reads the open periods, with each plan's prices at its pin,
@@ -69,12 +69,10 @@ import (
 // reading its usage. So when the read shows the window frozen, it was frozen
 // before this event existed, and nothing counted it.
 //
-// The read is not a lock. A subscription change that commits between the
-// read and the write is not seen. A close, a cancel or an item removal can
-// only leave the event unflagged. A plan swap, an item add or a new
-// subscription can make a flag wrong: the stretch it opens can bill the
-// event. The LiteLLM door reads once per /spend request, so for it the gap
-// is the whole request.
+// The read is not a lock. A plan swap, an item add or a new subscription
+// that commits between the read and the write can make a flag wrong: the
+// stretch it opens can bill the event. The LiteLLM door reads once per
+// /spend request, so for it the gap is the whole request.
 //
 // no_price holds for the same reason the close's price does: a period's
 // price set is fixed at its pin, and a price written later is in force from
@@ -87,12 +85,12 @@ import (
 // wrong. Closing it would take a lock on the plan on every ingest; it is
 // stated instead (ADR-120 amendment).
 //
-// not_on_plan and outside_subscription describe the subscriptions when the
-// event arrived. A subscription's first period starts at the start of its
-// first day, and an item added on a period's first day bills from the period
-// start (ADR-012). So a subscription created or activated (a draft), or an
-// item added on that first day, later on the event's day can still bill an
-// event flagged earlier that day.
+// A subscription's first period starts at the start of its first day, and
+// an item added on a period's first day bills from the period start
+// (ADR-012). So a subscription created or activated (a draft), or such an
+// item added, later on the event's day can bill an event flagged earlier
+// that day. That is a later change: the flag was true when the event
+// arrived.
 //
 // The meter's aggregation is read the other way round: on the write's own
 // transaction, after its insert (classifyWritten). The insert's foreign key
@@ -158,8 +156,8 @@ const (
 )
 
 // BillingStatus is the billing_status a written row of class c answers
-// with: "" when an invoice counts the row or still can (InOpen, Unsettled),
-// and when it was not checked (Later).
+// with: "" when Velox found no reason no invoice bills the row (InOpen,
+// Unsettled), and when it was not checked (Later).
 func (c Class) BillingStatus() string {
 	switch c {
 	case Outside:
@@ -539,7 +537,7 @@ var unbilledEvents *prometheus.CounterVec
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "velox_usage_unbilled_total",
-		Help: "Usage events written that no invoice will bill, by billing_status (reason: after_close, no_price, not_on_plan, outside_subscription). Counted once per written row; a replay is not counted.",
+		Help: "Usage events written with a billing_status, what Velox found when the event arrived (reason: after_close, no_price, not_on_plan, outside_subscription). Counted once per written row; a replay is not counted.",
 	}, []string{"reason", "origin"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
 		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
@@ -594,7 +592,7 @@ func (s *Service) statusOf(class Class) string {
 	return class.BillingStatus()
 }
 
-// recordUnbilled counts one written row that no invoice will bill, and logs
+// recordUnbilled counts one written row answered with a billing_status, and logs
 // an after_close row (the other statuses are a setup to fix, not a late
 // event, and could be every event of a customer: the answer and the counter
 // say so). Called only after the write committed, for rows the write

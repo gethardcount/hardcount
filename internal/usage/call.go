@@ -74,8 +74,8 @@ type CallResult struct {
 	// or the legacy events when Legacy is true). IngestCall counts the
 	// unbilled rows from it.
 	Written []int
-	// Unbilled counts, for IngestCall, the rows written that no invoice
-	// will bill, by billing_status (open_period.go).
+	// Unbilled counts, for IngestCall, the rows written by billing_status
+	// (open_period.go).
 	Unbilled UnbilledCounts
 }
 

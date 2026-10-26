@@ -115,10 +115,12 @@ release it once with an honest statement of what it will bill.
    Since 2026-10-27 (ADR-120 amendment of that date) it reads the plan
    stretches the close bills by, so such a row is judged by the plan it was
    on, and a row that plan prices but no price of it takes counts as
-   `no_price`. No subscription invoice bills an `outside_open_period` row:
-   it is outside every subscription's billed time, in a period already
-   invoiced (whatever plan the subscription is on now), or before a paid
-   threshold invoice's end. The operator bills it with a one-off invoice,
+   `no_price`. The counts are what Velox found when the release wrote the
+   rows, as for ingest's `billing_status` (ADR-120 amendment of
+   2026-10-27). An `outside_open_period` row was then outside every
+   subscription's billed time, in a period already invoiced (whatever plan
+   the subscription is on now), or before a paid threshold invoice's
+   end. The operator bills it with a one-off invoice,
    as for any late usage (ADR-120). Since
    2026-10-22 the counts follow ADR-120's after-close rule, spend-threshold
    invoices included: a sum or count row before the end of a paid one

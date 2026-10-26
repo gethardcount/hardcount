@@ -313,18 +313,20 @@ Velox customer yet, both of its events are held:
 | `held` | Events Velox kept but did not bill, because the customer or the `tokens` meter does not exist yet. See the next section. |
 | `skipped` | Calls that bill nothing: a kind of call Velox does not bill (see [Which LiteLLM calls bill](#which-litellm-calls-bill)), a call with zero tokens, a failed call, or a LiteLLM response-cache hit. |
 | `cache_hits` | The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0. |
-| `after_close` | Of `accepted`, events whose billing period was already invoiced, such as a replay after the invoice was built. They are saved but billed on no invoice; bill them with a one-off invoice. A resent event counted in `deduplicated` is never counted here. |
-| `no_price` | Of `accepted`, events no price of the customer's plan takes: usually a model the plan has no price for. They are saved but billed on no invoice. Add a price for the model; it applies from the next billing period. |
-| `not_on_plan` | Of `accepted`, events in a billing period not invoiced yet, of a meter the customer's plan has no price for. Saved, billed on no invoice. |
-| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills: there is none yet, or the call was before the day it started, in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel. Saved, billed on no invoice. |
+| `after_close` | Of `accepted`, events whose time was already invoiced, such as a replay after the invoice was built. Bill them with a one-off invoice if they should be charged. A resent event counted in `deduplicated` is never counted here. |
+| `no_price` | Of `accepted`, events no price of the customer's plan takes: usually a model the plan has no price for. To bill later calls, add a price for the model; it applies from the next billing period. |
+| `not_on_plan` | Of `accepted`, events in a billing period not invoiced yet, of a meter the customer's plan has no price for. |
+| `outside_subscription` | Of `accepted`, events whose time no subscription of the customer bills. For example, there is none yet, or the call was before the day it started, in a free trial, or after it ended or its scheduled cancel. |
 | `errors` | Rows Velox refused and did not keep: a call with no `user` or no `id`, or a record that is not valid. |
 
-An event after the end of a subscription's current billing period, sent
-before that period's invoice is built (an hour after the period end by
-default), is not checked, so it is counted in none of `after_close`,
-`no_price` and `not_on_plan`. Its own period's invoice bills it if a price
-takes it. An event after a trial's end, sent before Velox ends the trial,
-is not checked either.
+These four counts are what Velox found when each event arrived. An event
+in none of them is not promised to be billed. Velox does not check time
+after a period end whose invoice is not built yet, nor time after a
+trial's end before Velox ends the trial. A later change, such as a new
+subscription or an added price, can change the outcome either way. A
+delivery reads the customer's subscriptions once, so a subscription change
+saved during it can make a count wrong. The invoice is the final answer
+([more](../api-surface.md#what-velox-found-when-the-event-arrived)).
 
 A refused row does not fail the batch. LiteLLM sees a 200 and treats the
 batch as delivered, and does not send it again. So a row in `errors` is
@@ -378,33 +380,31 @@ exist, Velox holds the call's events instead of billing them:
   even after you create the customer, it is counted as `deduplicated` and
   not billed.
 
-**What a release bills.** A released event counts toward the billing
+**What a release counts.** A released event counts toward the billing
 period its time falls in, the same rule as any late usage (see
-[ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)):
+[ADR-120](../adr/120-invoice-grace-period-for-late-usage.md)). The release
+answer counts what Velox found for each event when it wrote it, the same
+way as the counts above:
 
-- In a billing period not invoiced yet, and a price of the plan that
-  bills that time takes it: that period's invoice includes it.
-- In a billing period not invoiced yet, and that plan prices the meter but
-  no price takes the event (a model with no price): no invoice charges it.
-- In a billing period not invoiced yet, on a meter the plan does not
-  price: no invoice charges it. Add the meter to the plan if later usage
-  should be charged.
-- After the end of the subscription's current period, before that
-  period's invoice is built: counted as `in_open_period` without a price
-  check. Its own period's invoice includes it if a price takes it.
-- Before the day the subscription started, or in a period whose invoice is
-  already built: stored, but no subscription invoice includes it. For a customer
-  created after the calls, this is the usual case. Bill it with a one-off
-  invoice if it should be charged.
-- Inside the current period, but before the end of a spend-threshold
-  invoice of that period: that invoice already covered the time. If it is
-  paid or written off, no invoice includes the event, as above. If it is
-  not paid yet, the period's invoice includes it only if the
-  spend-threshold invoice is voided first.
+- `in_open_period`: in a billing period not invoiced yet, and a price of
+  the plan that bills that time takes it. Events Velox does not check
+  count here too: after the end of the subscription's current period, and
+  after a trial's end before Velox ends the trial.
+- `no_price`: in a billing period not invoiced yet, and that plan prices
+  the meter but no price takes the event (a model with no price).
+- `not_on_plan`: in a billing period not invoiced yet, on a meter the plan
+  does not price. Add the meter to the plan if later usage should be
+  charged.
+- `outside_open_period`: before the day the subscription started, in a
+  free trial, after it ended, or in a period whose invoice is already
+  built. For a customer created after the calls, this is the usual case.
+  Bill it with a one-off invoice if it should be charged.
+- `pending_threshold_invoice`: inside the current period, but before the
+  end of a spend-threshold invoice of that period that is not paid yet.
+  The period's invoice includes it only if that invoice is voided first.
+  Once that invoice is paid, such an event counts as `outside_open_period`.
 
-The release answer counts each kind (`in_open_period`, `no_price`,
-`not_on_plan`, `outside_open_period`, and `pending_threshold_invoice` for the unpaid
-spend-threshold case; the paid case counts as `outside_open_period`). Events whose meter still does not exist, or whose
+The invoice is the final answer. Events whose meter still does not exist, or whose
 time is after the customer's current time (a customer on a test clock set
 in the past), stay held, counted in `still_held`.
 

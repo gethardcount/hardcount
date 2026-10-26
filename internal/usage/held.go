@@ -197,7 +197,10 @@ type ReleaseInput struct {
 	MeterIDs map[string]string
 }
 
-// ReleaseResult is the response of POST /v1/usage-events/held/release.
+// ReleaseResult is the response of POST /v1/usage-events/held/release. Its
+// counts are what Velox found when the release wrote the rows, as for an
+// ingest's billing_status (open_period.go): not a promise. The invoice is the
+// final answer.
 type ReleaseResult struct {
 	CustomerID string `json:"customer_id"`
 	// Released counts rows newly written to usage_events.
@@ -216,13 +219,10 @@ type ReleaseResult struct {
 	MoreToRelease int `json:"more_to_release"`
 	// InOpenPeriod counts released rows whose time falls in an active
 	// subscription's current billing period and that a price of the plan the
-	// subscription was on then takes: that period's invoice counts them. A
-	// row after the period end, released before that period's invoice is
-	// built (the grace), counts here too when the subscription goes on: a
-	// period not invoiced yet holds it, but it is not checked against that
-	// period's prices, which are not known yet. So does a row at or after
-	// the trial end of a subscription still trialing: the trial can still be
-	// extended past it, so it is not checked either. A row of a sum or count
+	// subscription was on then takes. Rows Velox does not check count here
+	// too: a row after the period end, released before that period's invoice
+	// is built (the grace), when the subscription goes on, and a row at or
+	// after the trial end of a subscription still trialing. A row of a sum or count
 	// meter before the time a threshold invoice of the period billed
 	// through does not count here: see PendingThresholdInvoice and
 	// OutsideOpenPeriod.
@@ -235,20 +235,19 @@ type ReleaseResult struct {
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 	// NoPrice counts released rows whose time falls in a billing period not
 	// invoiced yet, whose meter the plan that bills that time prices, but no
-	// price of that plan takes their labels (dimension_match): no invoice
-	// charges them.
+	// price of that plan takes their labels (dimension_match).
 	NoPrice int `json:"no_price"`
 	// NotOnPlan counts released rows whose time falls in a subscription's
 	// billing period not invoiced yet, but whose meter the subscription's
-	// plan does not price: no invoice charges them.
+	// plan does not price.
 	NotOnPlan int `json:"not_on_plan"`
 	// OutsideOpenPeriod counts released rows outside every subscription's
 	// time (before it started, in a free trial, after it ends or after its
 	// scheduled cancel, or in another, ended subscription's time), and rows
 	// in a period whose invoice is already built. It also counts rows of a
 	// sum or count meter stamped before the time a paid threshold invoice of
-	// the current period billed through. No subscription invoice counts
-	// them; bill them with a one-off invoice if they should be charged.
+	// the current period billed through. Bill them with a one-off invoice if
+	// they should be charged.
 	// Velox never moves usage onto a later invoice (ADR-120).
 	OutsideOpenPeriod int `json:"outside_open_period"`
 }
@@ -309,8 +308,8 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 		written = append(written, ReleasedUsage{At: r.EventAt, MeterID: in.MeterIDs[r.EventName], Labels: r.Dimensions})
 	}
 	classes := countReleased(&out, written, periods, buckets)
-	// The release has committed: count each written row no invoice will
-	// bill, as every ingest door does (origin backfill, as written).
+	// The release has committed: count each written row answered with a
+	// billing_status, as every ingest door does (origin backfill, as written).
 	for i, row := range written {
 		recordUnbilled(ctx, domain.UsageEvent{
 			CustomerID: in.CustomerID, MeterID: row.MeterID, Timestamp: row.At, Origin: domain.UsageOriginBackfill,
@@ -441,13 +440,14 @@ func (s *Service) releaseBuckets(ctx context.Context, tx *sql.Tx, in ReleaseInpu
 
 // countReleased counts released rows into out by classify:
 //
-//   - InOpenPeriod (InOpen, Later): an open period's invoice counts it, or
-//     it is not checked: after the current period's end, in a period not
-//     invoiced yet, or after the trial end of a subscription still trialing.
+//   - InOpenPeriod (InOpen, Later): a price of an open period's plan takes
+//     it, or it is not checked: after the current period's end, in a period
+//     not invoiced yet, or after the trial end of a subscription still
+//     trialing.
 //   - NoPrice (NoPrice): the time falls in an open period whose plan prices
-//     the meter, but no price takes the row's labels. No invoice counts it.
+//     the meter, but no price takes the row's labels.
 //   - NotOnPlan (NotOnPlan): the time falls in an open period, but its
-//     plan does not price the meter. No invoice counts it.
+//     plan does not price the meter.
 //   - PendingThresholdInvoice (Unsettled): before the time a threshold
 //     invoice that is not paid billed through. Counted if that invoice is
 //     voided before the period closes, else on no invoice.

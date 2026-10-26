@@ -50,7 +50,9 @@ Replay LiteLLM's spend logs for the window to
   naming it. Rows on a canceled subscription count as
   `outside_subscription` instead, and rows before a spend-threshold
   invoice that is not paid yet are not counted (see
-  [Invoice timing and late usage](invoice-timing-late-usage.md)). `velox_usage_late_event_total` counts only events more than
+  [Invoice timing and late usage](invoice-timing-late-usage.md)). These
+  counts are what Velox found when each row arrived; the invoice is the
+  final answer. `velox_usage_late_event_total` counts only events more than
   24 hours old on arrival, so it does not show which rows missed an
   invoice.
 

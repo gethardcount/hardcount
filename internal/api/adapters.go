@@ -1680,8 +1680,8 @@ func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, custo
 }
 
 // usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest and
-// the held-usage release read to answer an event no invoice will bill with
-// its billing_status (ADR-120, ADR-130): the open periods with their plans'
+// the held-usage release read to answer an event with its billing_status
+// (ADR-120, ADR-130): the open periods with their plans'
 // prices before the write, the meter's aggregation on the write's
 // transaction after it. The rule itself lives in usage (usage.OpenPeriodOf,
 // usage.BucketsOf); this only reads.

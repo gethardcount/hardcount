@@ -66,18 +66,18 @@ Words used in the Velox docs and dashboard. For the big picture, read
   billing period, and from the join for a subscriber who first joins the plan
   in a period after it; on a plan no one has used, at once.
 - **no_price**: Usage of a meter that no price of the customer's plan
-  takes. Velox records it and bills nothing for it. Ingest answers such an
-  event with `billing_status: "no_price"`.
+  takes. Velox records it and bills nothing for it. When ingest finds
+  this, it answers `billing_status: "no_price"`.
   [More](ops/runbook/usage-with-no-price.md)
-- **billing_status (on an ingest answer)**: Why no invoice will bill an
-  event Velox just stored: `after_close` (its period was already
-  invoiced), `no_price`, `not_on_plan` (the plan of a period not
-  invoiced yet has no price for its meter) or `outside_subscription` (no subscription bills its time).
-  Absent when an invoice will bill it or still can, and for an event Velox
-  does not check: one after a subscription's current billing period ends,
-  or after a trial's end before Velox ends the trial; except in the stated
-  cases. Only the answer that wrote the event carries it.
-  [More](api-surface.md#usage-that-will-not-be-billed)
+- **billing_status (on an ingest answer)**: What Velox found when it
+  stored an event: `after_close` (its time is already invoiced),
+  `not_on_plan` (the plan of a period not invoiced yet has no price for its
+  meter), `outside_subscription` (no subscription bills its time) or
+  `no_price`. A status that is present was true then. No status means Velox
+  found no reason then; it is not a promise that the event will be billed.
+  The invoice is the final answer. Only the answer that wrote the event
+  carries it.
+  [More](api-surface.md#what-velox-found-when-the-event-arrived)
 - **plan**: A price package you sell: a currency, a billing interval
   (monthly or yearly), a fixed base fee, and its usage prices. Its meters
   are the meters it has a price for. A subscription has one or more items, each a plan with a quantity.

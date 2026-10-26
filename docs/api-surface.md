@@ -200,57 +200,46 @@ value, is refused with `422` and `param: quantity`. The event's
 `dimensions` pick its price; `properties`, the old name, is refused when
 it has a key (`null` or `{}` is ignored).
 
-### Usage that will not be billed
+### What Velox found when the event arrived
 
-Velox stores every valid event. When no invoice will bill it, the answer
-that wrote it says why, in `billing_status`:
+Velox stores every valid event. The answer that wrote it can carry a
+`billing_status`: what Velox found when the event arrived. Velox checked
+the event against the customer's subscriptions, the plans and prices in
+force, and the invoices already built at that moment. A status that is
+present was true at that moment:
 
-| `billing_status` | Meaning | What to do |
+| `billing_status` | What Velox found | What to do |
 |---|---|---|
-| `after_close` | Its billing period was already invoiced (see Late usage below), whatever plan the subscription is on now. | Bill it with a one-off invoice. A price added to a plan does not bill it. |
-| `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions. It applies from each subscriber's next period, so this event stays unbilled. |
-| `not_on_plan` | A billing period of the customer's subscription that is not invoiced yet covers the time, but its plan has no price for the meter. | Bill it with a one-off invoice. To bill later usage, add a price for the meter to the plan (it applies from each subscriber's next period) or move the customer to a plan that has one. Neither bills this event. |
-| `outside_subscription` | No active or trialing subscription of the customer bills the time: there is none, or the time is before its first billing period (which starts at midnight of the day it started), in a free trial (also on the day the trial ends, before its end), after it ended or after its scheduled cancel, or the meter's time belonged to another subscription that has ended. | Check the event's customer and timestamp. |
+| `after_close` | The event's time is already invoiced (see Late usage below). | Bill it with a one-off invoice if it should be charged. A price added to a plan does not bill it. |
+| `not_on_plan` | A billing period not invoiced yet holds the event's time, but its plan has no price for the meter. | To bill later usage, add a price for the meter to the plan, or move the customer to a plan that has one. Check the invoice before you bill this event by hand. |
+| `outside_subscription` | No active or trialing subscription of the customer bills the event's time. For example, there is none, or the time is before one starts, in a free trial, or after one ends or its scheduled cancel. | Check the event's customer and timestamp. |
+| `no_price` | The plan that bills the event's time prices the meter, but no price of it takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions to bill later usage. Check the invoice before you bill this event by hand. |
+
+No `billing_status` means Velox found no reason then. It is not a promise
+that the event will be billed.
+
+- Velox checks only the customer's current billing periods. Time after a
+  period end whose invoice is not built yet is not checked, nor is time
+  after a trial's end before Velox ends the trial.
+- A later change can change the outcome either way: a subscription
+  created, activated or changed, a trial extended, a scheduled cancel
+  undone, or a price added.
+- The invoice is the final answer.
+
+A present status can be wrong in two cases: a price saved in the same
+instant a billing period starts, and a subscription change saved while the
+request is in flight. A LiteLLM delivery reads the subscriptions once, so
+the second case covers the whole delivery.
+
+Where it is sent:
 
 - The single and backfill 201 carry it. `POST /v1/usage-events/batch`
   returns `results[i]` for each event, in the order sent: `status`
   (`ingested` or `deduplicated`) and `billing_status`, plus a count of
-  each status. The LiteLLM answer counts each status, and the held-usage
-  release counts `no_price` and `not_on_plan`.
-- No `billing_status` means an invoice will bill the event, or still can
-  (a spend-threshold invoice is not paid yet, or a price saved now still
-  applies to it), or that Velox did not check it.
-- Velox does not check an event at or after the end of a subscription's
-  current billing period. Its own period bills it at that period's prices,
-  which are not known until the current period's invoice is built: an hour
-  after the period end by default (Late usage below), longer when billing
-  runs late or fails. Such an event carries no `billing_status`, except
-  `outside_subscription` in a free trial or after a scheduled cancel. If no
-  price takes it, the period-end invoice leaves it off and Velox logs a
-  warning then.
-- Velox does not check an event at or after a trial's end while the
-  subscription is still trialing. Velox ends the trial on its next billing
-  run (hourly by default). Until then you can extend the trial past the
-  event, which makes it free, or undo a cancel at period end, which can
-  bill it.
-- When one subscription of the customer does not check an event, the
-  event carries no `billing_status`, even if another subscription would
-  flag it. For example, an event in the hour after an add-on
-  subscription's period ends carries none, though the base subscription
-  does not price its meter.
+  each status.
+- The LiteLLM answer counts each status, and the held-usage release counts
+  `no_price` and `not_on_plan`. Their counts follow the same rule.
 - A replay and a read never carry `billing_status`.
-- `not_on_plan` and `outside_subscription` describe the subscriptions when
-  the event arrived. A subscription created or activated later that day,
-  or an item added on the first day of a billing period, bills from the
-  start of that day, so it can still bill the event.
-- A price saved in the same instant a billing period starts can make one
-  `no_price` or `not_on_plan` answer wrong.
-- A change to the subscription saved while the request is in flight can
-  make the answer wrong too. A plan swap, an added item or a new
-  subscription can bill a flagged event. After a cancel or a removed item,
-  no invoice may bill an event that has no `billing_status`. A LiteLLM
-  delivery reads the subscriptions once, so this holds for the whole
-  delivery.
 
 ### Late usage
 
@@ -264,7 +253,7 @@ An event counts toward the billing period its `timestamp` falls in.
   answer says so: `billing_status: "after_close"` on the event's 201
   (single and backfill), and an `after_close` count on a batch or a
   LiteLLM delivery. A replay never carries it. What no `billing_status`
-  means is above.
+  means is [above](#what-velox-found-when-the-event-arrived).
 - To bill it, make a one-off invoice: `POST /v1/invoices`, then
   `POST /v1/invoices/{id}/line-items`, then
   `POST /v1/invoices/{id}/finalize`.

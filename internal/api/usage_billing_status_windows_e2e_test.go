@@ -210,7 +210,7 @@ func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
 }
 
 // TestBillingStatus_HeldReleaseCountsTheUnbilledMetric: rows the held-usage
-// release writes that no invoice will bill are counted in
+// release writes with a billing_status are counted in
 // velox_usage_unbilled_total, as every other written row is (origin
 // backfill, as the release writes them).
 //
@@ -279,8 +279,9 @@ func TestBillingStatus_TrialCanceledAtPeriodEnd(t *testing.T) {
 // 18:40, before the trial scan. At 18:45 the operator undoes the cancel,
 // which the subscription still allows: it is trialing. The scan then
 // activates it at its trial end, and the first paid invoice bills the event.
-// So the event must not carry outside_subscription (review round 4 on
-// #1390).
+// The event is in time Velox does not check (after the trial end of a
+// subscription still trialing), so it carries no status (review round 4 on
+// #1390); the undo is a later change, and the invoice is the final answer.
 //
 // Mutation check: answer the trial end of a trialing subscription with a
 // cancel at period end as its end → the event is outside_subscription, and
@@ -358,8 +359,8 @@ func TestBillingStatus_AnotherSubscriptionsGraceIsNotChecked(t *testing.T) {
 	}
 }
 
-// TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay pins the
-// stated exception for activation: a draft created the day before and
+// TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay pins a
+// later change, activation: a draft created the day before and
 // activated at 15:00 on day D starts its first period at midnight of D
 // (ADR-012), so it bills an event answered outside_subscription at 09:00
 // that day (review round 4 on #1390).

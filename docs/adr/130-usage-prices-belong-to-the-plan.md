@@ -540,9 +540,14 @@ pin), G5 to G8 and ADR-129 stay.
 
 Built in #1390 (notes of 2026-10-27, from the code):
 
-- `not_on_plan` and `outside_subscription` shipped with it (D07). The rule,
-  their precedence and the stated exceptions are in the
-  [ADR-120 amendment of 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-every-unbilled-event-says-why-adr-130-pr-6-d07).
+- **The contract changed** (main session, 2026-10-27). `billing_status` is
+  what Velox found when the event arrived. A status that is present was
+  true then; no status is not a promise that the event will be billed.
+  This replaces "omitted when an open period will bill the event" below.
+- `not_on_plan` and `outside_subscription` shipped with it (D07). The
+  contract and why, the rule, the precedence and where a present status
+  can be wrong are in the
+  [ADR-120 amendment of 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-an-events-answer-says-what-velox-found-adr-130-pr-6-d07).
 - An open-period event is checked against the plan stretches the close
   bills by, not only the current items' plans: a plan swapped away from
   and an item removed in the period keep their stretches. So ingest reads
@@ -558,19 +563,15 @@ Built in #1390 (notes of 2026-10-27, from the code):
   flag: a price saved now is in force there (review round 1).
 - An event before the current period, past the billing start, is
   `after_close` whatever the current plans price: they are not the plans
-  that held that period. (Review round 2 also ended a trialing
-  subscription with a cancel at period end at its trial end; round 4
-  replaced that, below.)
+  that held that period.
 - The floor of `after_close` is where the close began to bill (the first
   billing interval's start, at midnight of the first day), not the start
   instant. An event at or after the current period's end is not checked:
   its own period's prices are not known while the close has not run, which
   can be more than one period late (review round 3).
 - An event at or after a trial's end while the subscription is still
-  trialing is not checked: until the trial scan ends the trial, it can be
-  extended past the event (free) or a cancel at period end undone
-  (billed). One subscription's not checked wins over another's flag
-  (review round 4).
+  trialing is not checked (review round 4). One subscription's unchecked
+  time wins over another's flag.
 - `/batch` returns `results[i]` per event and a count per status.
 
 - The ingest answer's `billing_status` is omitted when an open period will

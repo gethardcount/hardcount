@@ -10,11 +10,10 @@ The earliest sign is at ingest: the answer that wrote the event carries
 `billing_status: "no_price"` (a `no_price` count on a batch, a LiteLLM
 delivery or a held-usage release), and
 `velox_usage_unbilled_total{reason="no_price"}` rises. Usage of a meter the
-plan has no price for at all is answered `not_on_plan` instead. An event
-after the end of the subscription's current period, sent before that
-period's invoice is built, is not checked at ingest, and neither is an
-event after a trial's end, sent before Velox ends the trial: only the
-invoice signs below show it.
+plan has no price for at all is answered `not_on_plan` instead. These are
+what Velox found when the event arrived. Ingest does not check every event,
+and an event with no status is not promised to be billed: the invoice signs
+below are the final answer.
 
 At the invoice, `velox_usage_unpriced_quantity_total{meter_id, mode}` rises (`mode` is
 `live` or `test`; test-clock simulations are not counted). Or the server

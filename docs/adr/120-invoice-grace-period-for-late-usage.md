@@ -1,9 +1,9 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; every unbilled event answers with its status, and one unbilled counter, built in PR-6 #1390)
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Velox found when it arrived, and one unbilled counter, built in PR-6 #1390)
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: every written event no invoice will bill now answers with a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`), and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). The `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` or `not_on_plan` flag wrong. The grace and the after_close flag stay.
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: the answer that writes an event carries a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`) when Velox finds a reason it is not billed, as a snapshot of what Velox found then, not a promise; and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). The `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` or `not_on_plan` flag wrong. The grace and the after_close flag stay.
 
 ## Summary
 
@@ -306,7 +306,7 @@ flagged.
 
 **Scope.** Canceled subscriptions are not read: usage for a canceled
 subscription's final period that arrives after its final invoice stays
-silent. A failed read of the periods refuses the request with 503
+silent (since 2026-10-27 it is `outside_subscription`). A failed read of the periods refuses the request with 503
 `ingest_unavailable`, like a failed customer or meter lookup, so nothing is
 written without its signal. The read costs one tenant transaction per
 customer per request, plus one per active or trialing subscription for its
@@ -324,27 +324,60 @@ events, and the aggregation can change until then (ADR-130 §2, amended
 2026-10-24). A released row at or after the period end, before
 that period's invoice, counts as `in_open_period` when the subscription
 continues past the end: a period not invoiced yet holds it. Since the
-amendment of 2026-10-27 (review round 3) it is not checked against that
-period's prices. A row the rule calls after_close counts as
+amendment of 2026-10-27 it is not checked against that period's prices. A row the rule calls after_close counts as
 `outside_open_period`. A row before the end of an unpaid threshold invoice
 counts as `pending_threshold_invoice`: the period's invoice bills it only
 if that threshold invoice is voided first.
 
-## Amendment 2026-10-27: every unbilled event says why (ADR-130 PR-6, D07)
+## Amendment 2026-10-27: an event's answer says what Velox found (ADR-130 PR-6, D07)
 
-The after_close signal now covers every written event no invoice will
-bill. The rule is still `classify` (`internal/usage/open_period.go`), and
-the answer that writes the event carries one of four statuses:
+The after_close signal now has three siblings. The rule is still
+`classify` (`internal/usage/open_period.go`), and the answer that writes
+an event can carry one of four statuses.
+
+**The contract** (main session, 2026-10-27). `billing_status` is what
+Velox found when the event arrived. Velox checks the event against the
+customer's subscriptions, the plans and prices in force, and the invoices
+already built at that moment.
+
+- A status that is present was true at that moment:
+  - `after_close`: the event's time is already invoiced.
+  - `not_on_plan`: a billing period not invoiced yet holds the time, but
+    its plan does not price the meter.
+  - `outside_subscription`: no active or trialing subscription bills the
+    time.
+  - `no_price`: the plan that bills the time prices the meter, but no
+    price of it takes the event's dimensions.
+- No status means Velox found no reason then. It is not a promise that the
+  event will be billed. Velox checks only the customer's current billing
+  periods: time after a period end whose invoice is not built yet is not
+  checked. A later change can change the outcome either way: a
+  subscription created, activated or changed, a trial extended, a
+  scheduled cancel undone, or a price added. The invoice is the final
+  answer.
+
+**Why a snapshot, not a prediction.** The first contract of #1390 said the
+status is absent only when an invoice will bill the event, or still can.
+That made ingest predict the close exactly. Four review rounds found 9, 4,
+5 and 6 real defects, and the count was not falling. Most came from a
+change made after the answer: a scheduled cancel undone, a trial extended
+after its end, a draft activated or a subscription created later the same
+day, a sibling subscription's close running behind, a price added. Each
+fix narrowed the promise or added a case. A snapshot can be true by
+construction; a prediction must model every later writer. Stripe's meter
+events and Lago's events API also answer an event without saying whether
+an invoice will bill it. So the contract changed and the code did not.
+
+**The statuses in detail.**
 
 - `after_close`: as above. Before the period start (an invoiced period,
   from where the close began to bill the subscription) it is after_close
-  whatever the subscription's
-  plans price now (review round 2). The current plans are not the plans
-  that held that period: after a swap at renewal to a plan without the
-  meter they would call a late April event `not_on_plan`, which tells the
-  operator a price would bill it. No price would; only a one-off invoice
-  can. An event of a meter no plan ever priced is after_close too, which
-  is still true: its period was invoiced.
+  whatever the subscription's plans price now (review round 2). The
+  current plans are not the plans that held that period: after a swap at
+  renewal to a plan without the meter they would call a late April event
+  `not_on_plan`, which tells the operator a price would bill it. No price
+  would; only a one-off invoice can. An event of a meter no plan ever
+  priced is after_close too, which is still true: its period was invoiced.
 - `no_price`: the event's time is in an open period whose plan prices its
   meter at the plan's pin, but no price of that plan takes its dimensions.
   "Takes" is the close's `properties @> dimension_match`. Ingest checks it
@@ -357,30 +390,24 @@ the answer that writes the event carries one of four statuses:
   meter.
 - `outside_subscription`: no active or trialing subscription bills the
   time: none exists, or the time is before one's first period (which
-  starts at midnight of its first day), in a free trial
-  (also on the trial-end day, before the trial end, and in the grace of a
-  period the trial outlasts), after one ends at its period end or at a
-  scheduled cancel, or in a stretch of the meter that another
-  subscription, since ended, billed. The end is the subscription's
-  `cancel_effective_at` (ADR-069). Review round 2 also ended a trialing
-  subscription with a cancel at period end at its trial end; round 4
-  replaced that (below).
+  starts at midnight of its first day), in a free trial (also on the
+  trial-end day, before the trial end, and in the grace of a period the
+  trial outlasts), after one ends at its period end or at a scheduled
+  cancel, or in a stretch of the meter that another subscription, since
+  ended, billed. The end is the subscription's `cancel_effective_at`
+  (ADR-069).
 
 Where they disagree across subscriptions, a subscription that bills the
 event wins, then one that prices its meter (`no_price`), then one that
 invoiced its time (`after_close`), then one whose open period holds it
-(`not_on_plan`). So a
-subscription whose open period holds the time but does not price the
-meter no longer turns an `after_close` event into a silent one. Nothing is
-sent when an invoice bills the event or still can (before an unpaid
-threshold invoice's end), or when a subscription does not check it: after
-its current period's end, or after its trial end while it still trials
-(below). A subscription that does not check an event outranks every flag
-of another (review round 4): the event may be in the unchecked time, so
-no other subscription's flag can say that no invoice bills it. So in the
-grace after an add-on subscription's period end, and while its close is
-late or failing, the base subscription's flags for that time are not
-sent.
+(`not_on_plan`). So a subscription whose open period holds the time but
+does not price the meter does not turn an `after_close` event into a
+silent one. Nothing is sent when an open period bills the event, when an
+unpaid threshold invoice covers it (a void would give it back to the
+period), or when a subscription does not check it (below). A subscription
+that does not check an event outranks every flag of another (review round
+4): that subscription may bill it, so Velox found no reason for the
+customer as a whole.
 
 **The floor is where the close began to bill** (review round 3). A
 subscription's first period starts at midnight of its first day
@@ -394,34 +421,18 @@ too: the close clamps sum and count windows to the watermark from the
 period start, so an event there before a paid fire's end is billed
 nowhere.
 
-**After the period end, nothing is checked** (review round 3). An event at
-or after the current period's end is billed by its own period's plans at
-that period's pins. The current period's close has not run, and it can be
-behind by more than one period: a failing run, a stopped scheduler, a test
-clock catching up. A price edit or a plan change between the period end and
-the event's own period start would make a flag drawn from the plans at
-the period end wrong either way. So such an event gets no
-`billing_status`, unless a trial or a scheduled cancel makes it
-`outside_subscription`. Checking it exactly would need the close's
-period sequence in ingest (the next period ends, from the tenant's time
-zone and each plan's interval, and the plan changes due at each), which
-was left out. If its plan prices the meter but no price takes it, the
-close logs its unpriced-usage WARN, and `velox_usage_unpriced_quantity_total`
-counts it (not for a test-clock subscription).
+**What is not checked.** Two kinds of time get no status, except
+`outside_subscription` from a trial or a scheduled cancel:
 
-**After a trial end, before the trial scan, nothing is checked** (review
-round 4). A trialing subscription stays trialing past its trial end until
-the trial scan runs (each billing run, hourly by default). Until then the
-operator can extend the trial past an event (`ExtendTrial` does not check
-that the trial end is still ahead), and the event becomes free trial usage, or
-undo a cancel at period end (the clear is refused only once the close has
-canceled an active subscription), and the scan then activates the
-subscription and bills it. No status is true of both outcomes, so such an
-event gets none. This replaces round 2's rule, which ended a trialing
-subscription with a cancel at period end at its trial end and answered
-`outside_subscription` there, wrongly once the cancel was undone. Refusing
-both operator actions once the trial end has passed would make a flag
-possible again; that is a subscription-behavior change, left open.
+- Time at or after the current period's end (review round 3). Its own
+  period's plans and pins are not known while the current period's close
+  has not run, and that close can be more than one period behind.
+- Time at or after a trial's end while the subscription is still trialing
+  (review round 4). The trial scan ends the trial on the next billing run
+  (hourly by default).
+
+An unpriced event there still gets the close's unpriced-usage WARN and
+`velox_usage_unpriced_quantity_total` (not for a test-clock subscription).
 
 **Which plan an event is checked against.** The close bills an open
 period by plan stretches: each stretch of the period during which an item
@@ -431,10 +442,10 @@ Ingest reads the same stretches (`billing.PeriodPlans`), so the billing
 intervals of every active subscription are read on each open-period read,
 not only when an item joined its plan in the period. Checked only against
 the current items, an event before a swap or a removal would be called
-`not_on_plan` and then billed. The prices of every plan of the period are
-read at their pins in the one statement that read their meters before
-(`pricing.PriceMatchesAt`), before the write. The read is once per
-customer per request.
+`not_on_plan` although the close bills it. The prices of every plan of
+the period are read at their pins in the one statement that read their
+meters before (`pricing.PriceMatchesAt`), before the write. The read is
+once per customer per request.
 
 **Which window an event is checked against** (review round 1). Inside a
 stretch, the close bills a meter over windows, not the whole stretch: a
@@ -448,47 +459,53 @@ the one window holding it. Time a stretch holds but no window of the meter
 does is `outside_subscription`; time after a scheduled `cancel_at` is too,
 because the cancel's final invoice ends there.
 
-**A pin still ahead is not evidence.** A price saved now is in force at a
+**A pin still ahead draws no flag.** A price saved now is in force at a
 pin that has not passed: a trial end, for an event in the future skew
-read before it. So
-`PriceMatchesAt` also says whether each pin had passed (a wall pin before
-the read's transaction start; a test-clock pin at or before the clock's
-time), and no flag is drawn from a price set whose pin is ahead.
+read before it. So `PriceMatchesAt` also says whether each pin had passed
+(a wall pin before the read's transaction start; a test-clock pin at or
+before the clock's time), and no flag is drawn from a price set whose pin
+is ahead.
 
-**Three stated exceptions.**
+**Where a present status can be wrong.**
 
 - A price write whose transaction spans a pin and commits after the ingest
   read can make one `no_price` or `not_on_plan` flag wrong (ADR-130 §12).
-- The read is not a lock. A subscription change that commits between the
-  read and the write is not seen: a close, a cancel or an item removal can
-  leave an event unflagged that no invoice bills, and a plan swap, an item
-  add or a new subscription can bill an event that was flagged. The
-  LiteLLM door reads once per `/spend` request, so for it the gap is the
-  whole request.
-- `not_on_plan` and `outside_subscription` describe the subscriptions when
-  the event arrived. A subscription's first period starts at the start of
-  its first day, and an item added on a period's first day bills from the
-  period start (ADR-012). So a subscription created or activated (a
-  draft), or such an item added, later on the event's day can bill an
-  event flagged earlier that day.
-  `TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt` and
-  `TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay` pin
-  it. A trial event is `outside_subscription`: trial usage is free, on the
-  trial-end day too.
+- The read is not a lock. A plan swap, an item add or a new subscription
+  that commits between the read and the write can bill a flagged event.
+  The LiteLLM door reads once per `/spend` request, so for it the gap is
+  the whole request.
+
+A subscription created or activated later the same day, or an item added
+on a period's first day, bills from midnight (ADR-012) and can bill an
+event flagged earlier that day. Under the contract this is a later
+change, not an exception: the status was true when the event arrived.
+`TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt` and
+`TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay` pin it.
 
 **The answers.** The single and backfill 201 carry `billing_status`. The
 batch 201 counts each status (`after_close`, `no_price`, `not_on_plan`,
 `outside_subscription`) and returns `results[i]`, each event's `status`
 (`ingested` or `deduplicated`) and `billing_status`, at its index in the
 request. The LiteLLM answer counts the four statuses. The held-usage
-release counts `no_price` beside `not_on_plan`, so a released row in the
-current period that no price takes is never `in_open_period` (a row after
-the period end is not checked). A replay or a deduplicated row carries
-no status. `velox_usage_unbilled_total{reason, origin}` counts every
-written row by status, rows the held-usage release writes included
-(`origin="backfill"`); only an `after_close` row also logs a WARN line, as
-before, because the other three are a setup to fix and can be every event
-of a customer.
+release counts `no_price` beside `not_on_plan`, by the same rule, so a
+released row in the current period that no price takes is never
+`in_open_period`. A replay or a deduplicated row carries no status.
+`velox_usage_unbilled_total{reason, origin}` counts every written row by
+status, rows the held-usage release writes included (`origin="backfill"`);
+only an `after_close` row also logs a WARN line, as before, because the
+other three are a setup to fix and can be every event of a customer.
+
+**Decisions on the open items** (main session, 2026-10-27). All accepted
+under the contract: same-day reach-back; a trial extended or a scheduled
+cancel undone after the trial end; the draft activation day; a sibling
+subscription's unchecked period hiding flags; time after a period end not
+checked; held rows after the period end counted `in_open_period` without a
+price check; an event before the period start being `after_close`
+whatever plan priced it then; and the read-to-write race. Refusing
+`ExtendTrial` and `ClearScheduledCancel` after the trial end, before the
+scan, is a separate item. A stored per-event status (for a Usage list
+badge) is PR-8 input: it should come from the close, which knows what it
+billed.
 
 ## References
 

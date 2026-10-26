@@ -663,7 +663,7 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 }
 
 // batchResponse is the batch 201. The counts by billing_status count written
-// rows no invoice will bill (open_period.go); results holds each event's
+// rows answered with each status (open_period.go); results holds each event's
 // result at its index in the request.
 type batchResponse struct {
 	Ingested     int `json:"ingested"`

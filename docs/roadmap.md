@@ -47,10 +47,10 @@ first. Every shipped change, with its date, is in the
 - **Done:** a recipe file holds only meters and plans with their
   prices, and an install creates nothing else: no dunning policy and no
   webhook endpoint.
-- **Done:** the answer to a usage event says when Velox stores it but
-  will not bill it, and why: no price of the plan takes it, the plan does
-  not price its meter, no subscription covers its time, or its period was
-  already invoiced. A batch answer gives each event's status
+- **Done:** the answer to a usage event says when Velox, as it stored
+  the event, found a reason it is not billed: no price of the plan takes
+  it, the plan does not price its meter, no subscription covers its time,
+  or its period was already invoiced. A batch answer gives each event's status
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §12).
 - **Planned:** a base fee change that waits for each subscriber's next
   period may follow

@@ -83,30 +83,31 @@ export function heldUnlisted(listed: HeldCustomer[], totalCustomers: number, tot
   return `Showing the ${listed.length.toLocaleString('en-US')} customers held most recently. ${rowsWord(hiddenRows)} for ${hidden.toLocaleString('en-US')} more ${hidden === 1 ? 'customer' : 'customers'} ${hiddenRows === 1 ? 'is' : 'are'} held too; release or discard these to see them.`
 }
 
-// releaseSummary is the toast after a release. It says plainly which rows a
-// subscription invoice will count, because rows from before the customer
-// existed usually fall before any billing period.
+// releaseSummary is the toast after a release. It says plainly what Velox
+// found for the rows when it wrote them, because rows from before the
+// customer existed usually fall before any billing period. It promises no
+// invoice: a later change can change what is billed, and the invoice is the
+// final answer.
 export function releaseSummary(r: HeldUsageReleaseResult): { title: string; description: string } {
   const recorded = r.released + r.deduplicated
   const title = recorded === 0
     ? 'Nothing released'
     : `Released ${rowsWord(recorded)}`
   const parts: string[] = []
-  // in_open_period also counts rows after the current period's end, which
-  // the server does not check against prices yet, so this line does not
-  // promise an invoice charges every one.
-  if (r.in_open_period > 0) parts.push(`${r.in_open_period.toLocaleString('en-US')} fall in a billing period not invoiced yet. Its invoice charges them if a price on the subscription's plan matches them.`)
+  // in_open_period also counts rows the server does not check (after the
+  // current period's end), so this line names the period only.
+  if (r.in_open_period > 0) parts.push(`${r.in_open_period.toLocaleString('en-US')} fall in a billing period not invoiced yet.`)
   if (r.no_price > 0) {
-    parts.push(`${r.no_price.toLocaleString('en-US')} fall in a billing period not invoiced yet, but no price on the subscription's plan matches them, so no invoice charges them.`)
+    parts.push(`${r.no_price.toLocaleString('en-US')} fall in a billing period not invoiced yet, but no price on the subscription's plan matches them.`)
   }
   if (r.not_on_plan > 0) {
-    parts.push(`${r.not_on_plan.toLocaleString('en-US')} are for a meter the subscription's plan has no price for, so no invoice charges them.`)
+    parts.push(`${r.not_on_plan.toLocaleString('en-US')} are for a meter the subscription's plan has no price for.`)
   }
   if (r.pending_threshold_invoice > 0) {
     parts.push(`${r.pending_threshold_invoice.toLocaleString('en-US')} fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet. If it is paid or written off, no invoice charges them. If it is voided before the period's invoice is built, the period's invoice does.`)
   }
   if (r.outside_open_period > 0) {
-    parts.push(`${r.outside_open_period.toLocaleString('en-US')} fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced, so no subscription invoice includes them. Bill them with a one-off invoice if needed.`)
+    parts.push(`${r.outside_open_period.toLocaleString('en-US')} fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.`)
   }
   if (r.deduplicated > 0) parts.push(`${r.deduplicated.toLocaleString('en-US')} were already recorded and were not added again.`)
   if (r.more_to_release > 0) parts.push(`${rowsWord(r.more_to_release)} more are ready. One release takes at most 5,000 rows; release again to record them.`)

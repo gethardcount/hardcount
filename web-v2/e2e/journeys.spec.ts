@@ -916,8 +916,8 @@ test('held LiteLLM usage is shown on the Usage page and released once', async ({
   await expect(notice.getByText(`2 usage rows held for customer '${ext}'`)).toBeVisible()
   await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
   await expect(page.getByText('Released 2 usage rows')).toBeVisible()
-  // The customer has no subscription, so no invoice bills the rows.
-  await expect(page.getByText('2 fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced, so no subscription invoice includes them. Bill them with a one-off invoice if needed.')).toBeVisible()
+  // The customer has no subscription, so no subscription bills the rows.
+  await expect(page.getByText('2 fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.')).toBeVisible()
   await expect(page.getByText(`held for customer '${ext}'`)).toHaveCount(0)
 
   const events = await api<{ data: unknown[]; total: number }>('GET', `/usage-events?customer_id=${customer.id}`)
@@ -984,6 +984,6 @@ test('held usage released into a plan with no matching price says so', async ({ 
   const notice = page.getByRole('status').filter({ hasText: 'Usage held, not billed' })
   await notice.getByRole('button', { name: `Release held usage for ${ext}` }).click()
   await expect(page.getByText('Released 2 usage rows')).toBeVisible()
-  await expect(page.getByText("2 fall in a billing period not invoiced yet, but no price on the subscription's plan matches them, so no invoice charges them.")).toBeVisible()
+  await expect(page.getByText("2 fall in a billing period not invoiced yet, but no price on the subscription's plan matches them.")).toBeVisible()
   await expect(page.getByText('will be invoiced')).toHaveCount(0)
 })
