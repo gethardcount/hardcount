@@ -204,7 +204,7 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 				resp.Held += res.Inserted
 			} else {
 				resp.Accepted += res.Inserted
-				resp.UnbilledCounts = resp.UnbilledCounts.Plus(res.Unbilled)
+				resp.UnbilledCounts = resp.Plus(res.Unbilled)
 			}
 			// Rows the store already had, or already held. Still a
 			// success — LiteLLM retrying a delivered batch is the happy
