@@ -446,25 +446,26 @@ func TestBillingStatus_LiteLLMCounts(t *testing.T) {
 	}
 }
 
-// TestBillingStatus_HeldReleaseCountsNoPrice: held LiteLLM rows released
-// into a subscription whose plan prices tokens for another model only count
-// as no_price, never in_open_period.
+// TestBillingStatus_HeldReleaseCountsNoPrice: held LiteLLM rows are released
+// into a subscription whose plan prices tokens for gpt-4o input only. The
+// input row is in_open_period and billed; the output row no price takes
+// counts as no_price, never in_open_period, and is not billed.
 //
-// Mutation check: classify released rows without their labels →
-// in_open_period 2.
+// Mutation check: classify released rows without their labels → both rows
+// no_price.
 func TestBillingStatus_HeldReleaseCountsNoPrice(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0, WithInvoiceGrace(e2eGrace))
 	tokens := r.newMeter("tokens", "sum")
-	plan := r.planPricing("plan_held", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "claude-x"}})
+	plan := r.planPricing("plan_held", map[string]any{"meter_id": tokens, "dimension_match": map[string]any{"model": "gpt-4o", "token_type": "input"}})
 	r.newSub("held", plan, lagP0, nil)
 	out := r.heldRelease(lagP0.AddDate(0, 0, 3), lagP0.AddDate(0, 0, 4))
-	if count(out, "released") != 2 || count(out, "no_price") != 2 || count(out, "in_open_period") != 0 {
-		t.Errorf("release answer = %v, want released 2, no_price 2, in_open_period 0", out)
+	if count(out, "released") != 2 || count(out, "no_price") != 1 || count(out, "in_open_period") != 1 {
+		t.Errorf("release answer = %v, want released 2, no_price 1, in_open_period 1", out)
 	}
 	r.run(lagB.Add(2 * time.Hour))
-	if got := usageBilled(r.invoices()); got != 0 {
+	if got := usageBilled(r.invoices()); got != 10 {
 		r.logInvoices(r.invoices())
-		t.Errorf("usage billed = %dc, want 0c", got)
+		t.Errorf("usage billed = %dc, want 10c: the 10 input tokens only", got)
 	}
 }
