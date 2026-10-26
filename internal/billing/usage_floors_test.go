@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -102,5 +103,55 @@ func TestLoadUsageFloors_ReadErrorFailsLoud(t *testing.T) {
 	}
 	if got := f.start("m", d, d.AddDate(0, 1, 0)); !got.Equal(d.Add(12 * time.Hour)) {
 		t.Errorf("start = %v, want the latest coverage end", got)
+	}
+}
+
+// One meter's usage at one instant is in one window. The meter-overlap guard
+// keeps two live items of a subscription off one meter, but an item added on
+// a period's first day bills from the period start (ADR-012), so its window
+// reaches back over an item that left the meter earlier that day, on the
+// same plan (another pin) or on another plan. That time stays with the
+// window with the earlier pin, the item that was on the meter then, in both
+// maps.
+//
+// Mutation: drop the overlap step, and the added item's windows start at the
+// period start; resolve it only within one plan, and the other-plan case
+// overlaps; let the later pin win, and the removed item's windows vanish.
+func TestMeterUsageIntervals_OneWindowPerInstant(t *testing.T) {
+	d := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	pe := d.AddDate(0, 1, 0)
+	created := d.AddDate(0, 0, -20)
+	left := d.Add(2 * time.Hour)
+	added := d.Add(4 * time.Hour)
+	wm := d.Add(time.Hour)
+	for _, addedPlan := range []string{"p", "q"} {
+		t.Run("added on "+addedPlan, func(t *testing.T) {
+			sub := domain.Subscription{CreatedAt: created, StartedAt: &created, Items: []domain.SubscriptionItem{{ID: "y", PlanID: addedPlan, CreatedAt: added}}}
+			segs := map[string][]baseSegment{
+				"x": {{start: d, end: left, planID: "p", runStart: created, itemCreatedAt: created}},
+				"y": {{start: d, end: pe, planID: addedPlan, runStart: d, itemCreatedAt: added}},
+			}
+			pinX, pinY := windowPin(sub, d, created), windowPin(sub, d, added)
+			plans := map[planPin][]string{{planID: "p", pin: pinX}: {"m"}, {planID: addedPlan, pin: pinY}: {"m"}}
+			x := planMeter{planID: "p", meterID: "m", pin: pinX}
+			y := planMeter{planID: addedPlan, meterID: "m", pin: pinY}
+
+			clamped, full := meterUsageIntervals(planStretches(sub, segs, d, pe, d), plans, &wm, usageFloors{})
+			want := func(what string, got []usageInterval, s, e time.Time) {
+				t.Helper()
+				got = mergeUsageIntervals(got)
+				if len(got) != 1 || !got[0].start.Equal(s) || !got[0].end.Equal(e) {
+					var ivs []string
+					for _, iv := range got {
+						ivs = append(ivs, fmt.Sprintf("[%s, %s)", iv.start.Format(time.RFC3339), iv.end.Format(time.RFC3339)))
+					}
+					t.Errorf("%s = %v, want [[%s, %s)]", what, ivs, s.Format(time.RFC3339), e.Format(time.RFC3339))
+				}
+			}
+			want("clamped, the item that left", clamped[x], wm, left)
+			want("clamped, the added item", clamped[y], left, pe)
+			want("full, the item that left", full[x], d, left)
+			want("full, the added item", full[y], left, pe)
+		})
 	}
 }
