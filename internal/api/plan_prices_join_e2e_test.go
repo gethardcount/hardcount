@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // A subscriber pays a plan as it stands when they join it (ADR-130 §4 step 3,
@@ -394,5 +398,218 @@ func TestE2E_PlanPrices_MeterMovesPlansOnTheFirstDay(t *testing.T) {
 		j.agreeOpen("meter moved plans", cust, subID, 40)
 		j.closeAt(p1.Add(time.Hour))
 		wantUsage(t, "each event once: plan A before the removal, plan C after", j.cycle(subID, p0), map[string]int64{callsA: 10, callsC: 30})
+	})
+}
+
+// graduated is a graduated price body: the first free units at freeCents
+// each, every unit above at aboveCents.
+func graduated(meterID string, free int64, freeCents, aboveCents string) map[string]any {
+	return map[string]any{"meter_id": meterID, "dimension_match": map[string]any{}, "mode": "graduated", "tiers": []map[string]any{
+		{"up_to": free, "unit_amount_cents": freeCents}, {"up_to": nil, "unit_amount_cents": aboveCents},
+	}}
+}
+
+// TestE2E_PlanPrices_ItemOffAndBackPricedAlike: an item leaves a plan on the
+// first day of a period, by removal or by an immediate swap to another plan,
+// and an item on the same plan is added later that day. The prices of the
+// plan's peak (max) and calls (graduated) meters did not change in between,
+// so each of those meters bills one window over the period: the peak once,
+// and the calls' free tier once. A price edit of another meter of the plan in
+// between does not split them.
+//
+// Mutation: keep windows of one plan and meter with different pins apart,
+// and the peak bills twice and the free tier is granted twice. Compare a
+// plan's prices as a whole instead of each meter's, and the other meter's
+// edit splits them too.
+func TestE2E_PlanPrices_ItemOffAndBackPricedAlike(t *testing.T) {
+	for _, how := range []string{"removed", "swapped_off"} {
+		t.Run(how, func(t *testing.T) {
+			joinModes(t, func(t *testing.T, onClock bool) {
+				j := newJoinRig(t, "item off and back alike "+how, onClock)
+				peak, calls, other, tokens := j.meter("peak", "max"), j.meter("calls", "sum"), j.meter("other", "sum"), j.meter("tokens", "sum")
+				planA, aIDs := j.plan("plan_a", perUnit(peak, "1", nil), graduated(calls, 10, "0", "2"), perUnit(other, "1", nil))
+				planB, _ := j.plan("plan_b", perUnit(tokens, "2", nil))
+				peakA, callsA, otherA := aIDs[0], aIDs[1], aIDs[2]
+				cust := j.cust("pp-alike")
+				var subID string
+				var p0, p1 time.Time
+				if how == "removed" {
+					subID, p0, p1 = j.subscribeItems(cust, planA, planB)
+				} else {
+					subID, p0, p1 = j.subscribeItems(cust, planA)
+				}
+				first := j.before(p0)
+				j.ingest(time.Time{}, "pp-alike", "peak", 10, first, nil)
+				j.ingest(time.Time{}, "pp-alike", "calls", 10, first, nil)
+
+				j.later()
+				j.later()
+				itemA := j.item(subID, planA)
+				if how == "removed" {
+					j.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+subID+"/items/"+itemA, nil, http.StatusNoContent)
+				} else {
+					j.must(time.Time{}, http.MethodPatch, "/v1/subscriptions/"+subID+"/items/"+itemA,
+						map[string]any{"new_plan_id": planB, "immediate": true}, http.StatusOK)
+				}
+				j.later()
+				j.editTo(planA, otherA, "5", "next_period")
+				j.later()
+				j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
+				at := j.soon()
+				j.ingest(time.Time{}, "pp-alike", "peak", 10, at, nil)
+				j.ingest(time.Time{}, "pp-alike", "calls", 10, at, nil)
+
+				j.agreeOpen("item off and back, priced alike", cust, subID, 30)
+				j.closeAt(p1.Add(time.Hour))
+				inv := j.cycle(subID, p0)
+				wantUsage(t, "one window per meter: a peak of 10 at 1c, 20 calls with 10 free at 2c", inv, map[string]int64{peakA: 10, callsA: 20})
+				if n := len(inv.usage()); n != 2 {
+					t.Errorf("%d usage lines, want 2 (one per meter): %+v", n, inv.usage())
+				}
+			})
+		})
+	}
+}
+
+// lateJoiner is the shared start of the stories below: a subscriber on the
+// plan from before a price edit (early), and one that subscribes after it the
+// same day (late), each with usage at the start of their first period.
+type lateJoiner struct {
+	j                 *joinRig
+	plan, price       string
+	early, late       string // customers
+	earlySub, lateSub string
+	p0, p1            time.Time
+}
+
+// With inAdvance the plan has a base fee billed in advance.
+func newLateJoiner(t *testing.T, name string, onClock, inAdvance bool) *lateJoiner {
+	j := newJoinRig(t, name, onClock)
+	calls := j.meter("calls", "sum")
+	body := map[string]any{"code": "pro", "name": "pro", "currency": "USD", "billing_interval": "monthly", "prices": []map[string]any{perUnit(calls, "1", nil)}}
+	if inAdvance {
+		body["base_amount_cents"], body["base_bill_timing"] = 1000, "in_advance"
+	}
+	out := j.must(time.Time{}, http.MethodPost, "/v1/plans", body, http.StatusCreated)
+	plan, ids := flowStr(out, "id"), []string{flowStr(flowList(out, "prices")[0], "id")}
+	l := &lateJoiner{j: j, plan: plan, price: ids[0]}
+	l.early = j.cust("pp-late-early")
+	l.earlySub, l.p0, l.p1 = j.subscribe(time.Time{}, l.early, plan) // the plan is used from here
+	j.later()
+	j.editTo(plan, ids[0], "5", "next_period")
+	j.later()
+	l.late = j.cust("pp-late-late")
+	var lateP0 time.Time
+	l.lateSub, lateP0, _ = j.subscribe(time.Time{}, l.late, plan)
+	if !lateP0.Equal(l.p0) {
+		t.Fatalf("late subscriber's first period starts %v, want %v (the same day)", lateP0, l.p0)
+	}
+	first := j.before(l.p0)
+	j.ingest(time.Time{}, "pp-late-early", "calls", 10, first, nil)
+	j.ingest(time.Time{}, "pp-late-late", "calls", 10, first, nil)
+	return l
+}
+
+// usageOn sums the usage lines of the subscription's live invoices with
+// the billing reason.
+func (j *joinRig) usageOn(subID, reason string) int64 {
+	j.t.Helper()
+	var n int64
+	for _, i := range j.invoices(subID) {
+		if i.reason == reason {
+			n += i.usageCents()
+		}
+	}
+	return n
+}
+
+// TestE2E_PlanPrices_LateJoinerLeavesMidPeriod: a subscriber that joined
+// after a price edit is billed at the edited price when its period ends
+// early: by an immediate cancel, or by an immediate swap onto a plan with
+// another billing interval, which closes the period at the swap. A
+// subscriber on the plan from before the edit is billed the old price.
+//
+// Mutation: pin the windows of the cancel and the swap at the cancel
+// instant, or at the period start, and one of the two bills the other's
+// price.
+func TestE2E_PlanPrices_LateJoinerLeavesMidPeriod(t *testing.T) {
+	for _, how := range []string{"cancel", "swap_to_yearly"} {
+		t.Run(how, func(t *testing.T) {
+			joinModes(t, func(t *testing.T, onClock bool) {
+				// An immediate swap onto another interval bills the old
+				// window's usage only on an in_advance plan (on the swap's
+				// invoice, beside the new period's base).
+				swap := how == "swap_to_yearly"
+				l := newLateJoiner(t, "late joiner leaves "+how, onClock, swap)
+				j := l.j
+				reason := "subscription_cancel"
+				var yearly string
+				if swap {
+					reason = "subscription_create"
+					yearly = flowStr(j.must(time.Time{}, http.MethodPost, "/v1/plans", map[string]any{
+						"code": "yearly", "name": "yearly", "currency": "USD", "billing_interval": "yearly",
+						"base_amount_cents": 12000, "base_bill_timing": "in_advance", "prices": []map[string]any{},
+					}, http.StatusCreated), "id")
+				}
+				j.later()
+				for _, subID := range []string{l.earlySub, l.lateSub} {
+					if how == "cancel" {
+						j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/cancel", nil, http.StatusOK)
+					} else {
+						j.must(time.Time{}, http.MethodPatch, "/v1/subscriptions/"+subID+"/items/"+j.item(subID, l.plan),
+							map[string]any{"new_plan_id": yearly, "immediate": true}, http.StatusOK)
+					}
+				}
+				if got := j.usageOn(l.earlySub, reason); got != 10 {
+					t.Errorf("on the plan before the edit: %s usage %dc, want 10c (the old price) [%+v]", reason, got, j.invoices(l.earlySub))
+				}
+				if got := j.usageOn(l.lateSub, reason); got != 50 {
+					t.Errorf("joined after the edit: %s usage %dc, want 50c (the edited price) [%+v]", reason, got, j.invoices(l.lateSub))
+				}
+			})
+		})
+	}
+}
+
+// TestE2E_PlanPrices_LateJoinerThreshold: a subscriber that joined after a
+// price edit crosses its spend threshold. The threshold invoice and the
+// period close both bill at the edited price; a subscriber on the plan from
+// before the edit is billed the old price on both.
+//
+// Mutation: pin the threshold fire's windows at the fire, or at the period
+// start, and its invoice bills the other subscriber's price.
+func TestE2E_PlanPrices_LateJoinerThreshold(t *testing.T) {
+	joinModes(t, func(t *testing.T, onClock bool) {
+		l := newLateJoiner(t, "late joiner threshold", onClock, false)
+		j := l.j
+		for _, subID := range []string{l.earlySub, l.lateSub} {
+			j.must(time.Time{}, http.MethodPut, "/v1/subscriptions/"+subID+"/billing-thresholds", map[string]any{"amount_gte": 5}, http.StatusOK)
+		}
+		if onClock {
+			j.later() // the clock's catch-up scans its thresholds
+		} else {
+			now := time.Now().UTC()
+			j.ppRig.clk.Set(now)
+			if _, errs := j.srv.BillingEngine.ScanThresholds(postgres.WithLivemode(clock.WithEffectiveNow(context.Background(), now), false), 50); len(errs) != 0 {
+				t.Fatalf("threshold scan: %v", errs)
+			}
+		}
+		at := j.soon()
+		j.ingest(time.Time{}, "pp-late-early", "calls", 3, at, nil)
+		j.ingest(time.Time{}, "pp-late-late", "calls", 3, at, nil)
+		j.closeAt(l.p1.Add(time.Hour))
+
+		for _, c := range []struct {
+			what        string
+			subID       string
+			fire, cycle int64
+		}{{"on the plan before the edit", l.earlySub, 10, 3}, {"joined after the edit", l.lateSub, 50, 15}} {
+			if got := j.usageOn(c.subID, "threshold"); got != c.fire {
+				t.Errorf("%s: threshold invoice usage %dc, want %dc [%+v]", c.what, got, c.fire, j.invoices(c.subID))
+			}
+			if got := j.cycle(c.subID, l.p0).usageCents(); got != c.cycle {
+				t.Errorf("%s: cycle usage %dc, want %dc (the usage after the fire)", c.what, got, c.cycle)
+			}
+		}
 	})
 }
