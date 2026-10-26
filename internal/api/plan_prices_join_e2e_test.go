@@ -211,6 +211,61 @@ func TestE2E_PlanPrices_OverrideBeforeTheStart(t *testing.T) {
 	})
 }
 
+// TestE2E_PlanPrices_SubscribeAgainIsANewJoin: the pin belongs to the
+// subscription, not the customer. A customer cancels its subscription to a
+// plan, the plan's price is edited (and, for a second customer, an override
+// created), and the customer subscribes to the plan again the same day. The
+// new subscription pays the plan as it stands then from its start; the
+// canceled one billed the old price.
+//
+// Mutation: pin every plan at the period start, where the customer's
+// earlier subscription joined it, and the new subscription bills the old
+// price and no override.
+func TestE2E_PlanPrices_SubscribeAgainIsANewJoin(t *testing.T) {
+	joinModes(t, func(t *testing.T, onClock bool) {
+		j := newJoinRig(t, "subscribe again", onClock)
+		calls := j.meter("calls", "sum")
+		plan, ids := j.plan("pro", perUnit(calls, "10", nil))
+		edited, overridden := j.cust("pp-again-edit"), j.cust("pp-again-ovr")
+		var p0 time.Time
+		var first []string
+		for _, c := range []struct{ id, ext string }{{edited, "pp-again-edit"}, {overridden, "pp-again-ovr"}} {
+			sub, start, _ := j.subscribe(time.Time{}, c.id, plan)
+			p0 = start
+			first = append(first, sub)
+			j.ingest(time.Time{}, c.ext, "calls", 10, j.before(p0), nil)
+		}
+		j.later()
+		for _, sub := range first {
+			j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+sub+"/cancel", nil, http.StatusOK)
+			if got := j.usageOn(sub, "subscription_cancel"); got != 100 {
+				t.Errorf("canceled subscription: cancel usage %dc, want 100c (the old price) [%+v]", got, j.invoices(sub))
+			}
+		}
+
+		j.later()
+		j.editTo(plan, ids[0], "20", "next_period")
+		j.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
+			"customer_id": overridden, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
+		}, http.StatusCreated)
+		j.later()
+		editedSub, q0, q1 := j.subscribe(time.Time{}, edited, plan)
+		overriddenSub, _, _ := j.subscribe(time.Time{}, overridden, plan)
+		if !q0.Equal(p0) {
+			t.Fatalf("the new subscription's first period starts %v, want %v (the same day)", q0, p0)
+		}
+		at := j.soon()
+		j.ingest(time.Time{}, "pp-again-edit", "calls", 10, at, nil)
+		j.ingest(time.Time{}, "pp-again-ovr", "calls", 10, at, nil)
+
+		j.agreeOpen("subscribed again after an edit", edited, editedSub, 200)
+		j.agreeOpen("subscribed again after an override", overridden, overriddenSub, 40)
+		j.closeAt(q1.Add(time.Hour))
+		wantUsage(t, "subscribed again after an edit: the edited price", j.cycle(editedSub, q0), map[string]int64{ids[0]: 200})
+		wantUsage(t, "subscribed again after an override: the override", j.cycle(overriddenSub, q0), map[string]int64{ids[0]: 40})
+	})
+}
+
 // TestE2E_PlanPrices_SwapOntoAPlanAfterAChange: an immediate swap onto a
 // used plan with the same billing interval, after the plan's price was edited
 // and a price added earlier in the period, prices the plan from the swap at

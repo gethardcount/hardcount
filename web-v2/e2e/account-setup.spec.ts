@@ -316,7 +316,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   // each subscriber's next period.
   await page.goto(`/plans/${plan.id}`)
   await expect(card(page, 'Usage prices (1)').getByTestId('plan-prices-notice')).toHaveText(
-    "Price changes apply from each subscriber's next billing period. A subscriber who joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless they were on this plan earlier in that billing period. On a test clock, advance the clock first.")
+    "Price changes apply from each subscriber's next billing period. A subscriber who joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless the same subscription was on this plan earlier in that billing period. On a test clock, advance the clock first.")
 
   // Control: the list rate, 2 cents a call.
   expect(usageRate(await expectUpcomingInvoiceMatchesAPI(page, subscription.id))).toEqual([2])
@@ -333,6 +333,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   await pick(page, plan.name, new RegExp(`^${escapeRegExp(`${priceName} — list $0.02 / call`)}`))
   await add.getByLabel(/^Price per unit/).fill('0.01')
   await expect(add.getByText('List price: $0.02 / call.', { exact: false })).toBeVisible()
+  await expect(add).toContainText('If the customer subscribes to the plan or moves to it after you save, it applies from then, unless the same subscription was on the plan earlier in that billing period.')
   await add.getByLabel('Reason (optional)').fill(reason)
   const saving = apiCall(page, 'POST', /\/price-overrides$/)
   await add.getByRole('button', { name: 'Save override' }).click()
@@ -359,7 +360,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   await overrides.getByRole('button', { name: `End override on ${priceName}` }).click()
   const end = page.getByRole('dialog', { name: 'End price override' })
   await expect(end).toContainText(`${priceName} returns to list price for this customer.`)
-  await expect(end).toContainText('If the customer subscribes to the plan or moves to it after you end the override, list price applies from then, unless they were on the plan earlier in that billing period.')
+  await expect(end).toContainText('If the customer subscribes to the plan or moves to it after you end the override, list price applies from then, unless the same subscription was on the plan earlier in that billing period.')
   const ending = apiCall(page, 'DELETE', new RegExp(`/price-overrides/${saved.id}$`))
   await end.getByRole('button', { name: 'End override' }).click()
   expect((await ending).ok()).toBe(true)

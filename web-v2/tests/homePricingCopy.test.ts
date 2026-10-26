@@ -21,8 +21,11 @@ test('price changes say when they apply, before saving', () => {
   assert.match(planPricesNotice(true), /^Price changes apply from each subscriber's next billing period\./)
   // A plan is priced where the subscription first joined it in the period
   // (ADR-130 §4 step 3, amended 2026-10-26).
-  assert.match(planPricesNotice(true), /joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless they were on this plan earlier in that billing period\. On a test clock, advance the clock first\./)
+  assert.match(planPricesNotice(true), /joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless the same subscription was on this plan earlier in that billing period\. On a test clock, advance the clock first\./)
   assert.doesNotMatch(planPricesNotice(true), /midnight|later today|next period/)
+  // The pin belongs to the subscription: a customer that cancels and
+  // subscribes again is a new join.
+  assert.doesNotMatch(planPricesNotice(true), /unless they were/)
   assert.match(planPricesNotice(false), /apply at once/)
 })
 
@@ -41,8 +44,8 @@ test('removing a price names the overrides it ends', () => {
     "It is removed at once. Its events go to another price of the plan that matches them, or aren't billed if none does. Adding the price back later doesn't bring the overrides back.",
   )
   assert.match(priceRemoveSentence(true, 0), /^From each subscriber's next billing period/)
-  assert.match(priceRemoveSentence(true, 0), /joins this plan after the removal, by subscribing, moving to it or adding it, doesn't pay this price, unless they were on this plan earlier in that billing period\. On a test clock, advance the clock first\./)
-  assert.doesNotMatch(priceRemoveSentence(true, 0), /midnight|later today|still pays/)
+  assert.match(priceRemoveSentence(true, 0), /joins this plan after the removal, by subscribing, moving to it or adding it, doesn't pay this price, unless the same subscription was on this plan earlier in that billing period\. On a test clock, advance the clock first\./)
+  assert.doesNotMatch(priceRemoveSentence(true, 0), /midnight|later today|still pays|unless they were/)
   assert.match(priceRemoveSentence(true, 1), /ends 1 customer override of it/)
   assert.match(priceRemoveSentence(true, 3), /ends 3 customer overrides of it/)
   assert.match(priceRemoveSentence(true, null), /ends any customer override/)
