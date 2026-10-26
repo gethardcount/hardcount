@@ -228,9 +228,9 @@ item of #1386. Step 3 changes; the other steps stay.
   period start, so for both the pin is the period start.
 - The usage a window covers does not change. A first period still starts at
   midnight and bills usage from then (ADR-012); that usage is priced at the
-  subscription's start. Neither a usage floor (trial end, another
-  subscription's coverage end) nor a threshold invoice's watermark moves a
-  pin.
+  subscription's start. Neither another subscription's coverage end (a
+  usage floor) nor a threshold invoice's watermark moves a pin. A trial end
+  is a pin, as above: the first paid period starts there.
 - So, on a used plan, a subscription that starts after a change pays it from
   its first period: the changed rate, a price added earlier, and not a
   price removed earlier. An override created before the subscription joins
@@ -261,7 +261,8 @@ item of #1386. Step 3 changes; the other steps stay.
   while the clock still reads T gets the earlier prices. Advance the clock
   first.
 - Every pin is a stored instant (`started_at`, `trial_end_at`, a billing
-  interval's start, an item's `created_at`), so all readers agree on it. A
+  interval's start, an item's `created_at` and `plan_changed_at`), so all
+  readers agree on it. A
   subscription create, an immediate swap and an item add hold their plans
   `FOR KEY SHARE`, so a price write on those plans commits before or after
   them, never during. Section 7's commit straddle now reaches a join in the

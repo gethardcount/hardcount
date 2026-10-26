@@ -11,7 +11,7 @@ terminal.
 |---|---|
 | Dimensions | Labels on a usage event, such as `model` and `token_type`. |
 | Price | One usage rate of a plan: a meter, the labels an event must carry (`dimension_match`), and an amount per unit, tiers, or packages. |
-| Used plan | A plan a subscription has used. A price change on it applies from each subscriber's next billing period. A subscriber who joins the plan after the change pays it from the join, unless it was on the plan earlier in that period. |
+| Used plan | A plan a subscription has used. A price change on it applies from each subscriber's next billing period. A subscriber who joins the plan after the change pays it from the join, unless the same subscription was on the plan earlier in that period. |
 
 ## Ready-made recipes
 

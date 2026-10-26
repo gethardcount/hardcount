@@ -21,7 +21,7 @@ export function planLockedSentence(liveSubscriptions: number): string {
 // the operator saves.
 export function planPricesNotice(used: boolean): string {
   return used
-    ? "Price changes apply from each subscriber's next billing period. A subscriber who joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless they were on this plan earlier in that billing period. On a test clock, advance the clock first."
+    ? "Price changes apply from each subscriber's next billing period. A subscriber who joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then, unless the same subscription was on this plan earlier in that billing period. On a test clock, advance the clock first."
     : 'No one has subscribed to this plan yet, so price changes apply at once.'
 }
 
@@ -39,7 +39,7 @@ export function priceWriteToast(w: { effective: 'now' | 'next_period'; removed?:
 export function priceRemoveSentence(used: boolean, overrides: number | null): string {
   // The events it took go to the plan's next most specific price for them.
   const when = used
-    ? "From each subscriber's next billing period, its events go to another price of the plan that matches them, or aren't billed if none does. A subscriber who joins this plan after the removal, by subscribing, moving to it or adding it, doesn't pay this price, unless they were on this plan earlier in that billing period. On a test clock, advance the clock first."
+    ? "From each subscriber's next billing period, its events go to another price of the plan that matches them, or aren't billed if none does. A subscriber who joins this plan after the removal, by subscribing, moving to it or adding it, doesn't pay this price, unless the same subscription was on this plan earlier in that billing period. On a test clock, advance the clock first."
     : "It is removed at once. Its events go to another price of the plan that matches them, or aren't billed if none does."
   const ends = overrides === null
     ? ' It also ends any customer override of it.'
