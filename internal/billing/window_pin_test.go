@@ -147,6 +147,36 @@ func TestMeterUsageIntervals_EachInstantByTheItemOnTheMeterThen(t *testing.T) {
 	}
 }
 
+// An estimate over a window that starts inside a period (customer usage or a
+// preview over a chosen window) clips each stretch to the window's start.
+// The time a meter had before an item left it on the period's first day
+// still stays with that item: the item added later that day joined at its
+// add, not at the window's start, even though its interval opens at the
+// period start (ADR-012) and the plan it is on sorts first.
+//
+// Mutation: take a stretch's join from its clipped start alone, and both
+// stretches join at the window's start; plan 1 then takes 09:00 to 10:00.
+func TestMeterUsageIntervals_EstimateWindowKeepsEachInstantWithTheItemOnTheMeter(t *testing.T) {
+	d := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	pe := d.AddDate(0, 1, 0)
+	created := d.AddDate(0, 0, -20)
+	from, xLeft, yAdded := d.Add(9*time.Hour), d.Add(10*time.Hour), d.Add(11*time.Hour)
+	sub := domain.Subscription{CreatedAt: created, StartedAt: &created, Items: []domain.SubscriptionItem{{ID: "y", PlanID: "pln_1", CreatedAt: yAdded}}}
+	rows := map[string][]domain.ItemInterval{
+		"x": {{SubscriptionItemID: "x", PlanID: "pln_2", Quantity: 1, StartsAt: created, EndsAt: &xLeft, ItemCreatedAt: created}},
+		"y": {{SubscriptionItemID: "y", PlanID: "pln_1", Quantity: 1, StartsAt: d, ItemCreatedAt: yAdded}},
+	}
+	plans := map[string][]string{"pln_1": {"m"}, "pln_2": {"m"}}
+	clamped, _ := meterUsageIntervals(planStretches(sub, intervalSegmentsByItem(rows, from, pe), from, pe), plans, nil, usageFloors{})
+	want := windowsText(map[planMeter][]usageInterval{
+		{planID: "pln_2", meterID: "m"}: {{from, xLeft}},
+		{planID: "pln_1", meterID: "m"}: {{xLeft, pe}},
+	})
+	if got := windowsText(clamped); got != want {
+		t.Errorf("windows = %s, want %s", got, want)
+	}
+}
+
 // windowsText is windows merged, one key per line in key order, each instant
 // as an RFC 3339 time.
 func windowsText(windows map[planMeter][]usageInterval) string {

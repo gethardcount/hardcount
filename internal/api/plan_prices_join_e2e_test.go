@@ -802,3 +802,119 @@ func TestE2E_PlanPrices_LateJoinerThreshold(t *testing.T) {
 		}
 	})
 }
+
+// TestE2E_PlanPrices_LateJoinerExplicitWindow: an estimate over a window the
+// caller picks (customer usage with from and to, a preview with a period)
+// prices each plan at its pin of the current period, as the close does. A
+// subscriber that joined after a price edit is estimated at the edited
+// price; one on the plan from before the edit at the old price.
+//
+// Mutation: pin the estimate (estimateSegments, or customer usage's own
+// read) at the period start, and the late subscriber is estimated at the
+// old price.
+func TestE2E_PlanPrices_LateJoinerExplicitWindow(t *testing.T) {
+	joinModes(t, func(t *testing.T, onClock bool) {
+		l := newLateJoiner(t, "late joiner explicit window", onClock, false)
+		j := l.j
+		from, to := l.p0.Format(time.RFC3339), l.p1.Format(time.RFC3339)
+		for _, c := range []struct {
+			what, cust, subID string
+			want              int64
+		}{{"on the plan before the edit", l.early, l.earlySub, 10}, {"joined after the edit", l.late, l.lateSub, 50}} {
+			var usageCents int64
+			for _, tot := range flowList(j.must(time.Time{}, http.MethodGet, "/v1/customers/"+c.cust+"/usage?from="+from+"&to="+to, nil, http.StatusOK), "totals") {
+				if flowStr(tot, "currency") == "USD" {
+					usageCents += flowInt(tot, "amount_cents")
+				}
+			}
+			preview := j.must(time.Time{}, http.MethodPost, "/v1/invoices/create_preview", map[string]any{
+				"customer_id": c.cust, "subscription_id": c.subID, "period": map[string]any{"from": from, "to": to},
+			}, http.StatusOK)
+			var previewCents int64
+			for _, line := range flowList(preview, "lines") {
+				if flowStr(line, "line_type") == "usage" {
+					previewCents += flowInt(line, "amount_cents")
+				}
+			}
+			if usageCents != c.want || previewCents != c.want {
+				t.Errorf("%s: customer usage %dc, preview %dc over [%s, %s), want %dc each", c.what, usageCents, previewCents, from, to, c.want)
+			}
+		}
+	})
+}
+
+// TestE2E_PlanPrices_LateJoinerItemCap: two prices are added to a used plan,
+// one on a new meter (tokens) and one with a label on a max meter (peak).
+// A subscriber that joins the plan after the adds has an item usage cap, and
+// the cap reads the plan as it bills it: the tokens, and each peak price's
+// own peak (4 + 3). Its cap of 15 is crossed at 17 and fires. A subscriber on
+// the plan from before the adds counts one peak of 4.
+//
+// Mutation: read the meters the cap counts at the period start, and the cap
+// counts 7; read the prices that split a meter's events at the period start,
+// and it counts 14. Neither fires.
+func TestE2E_PlanPrices_LateJoinerItemCap(t *testing.T) {
+	joinModes(t, func(t *testing.T, onClock bool) {
+		j := newJoinRig(t, "late joiner item cap", onClock)
+		calls, peak, tokens := j.meter("calls", "sum"), j.meter("peak", "max"), j.meter("tokens", "sum")
+		plan, _ := j.plan("pro", perUnit(calls, "1", nil), perUnit(peak, "1", nil))
+		early := j.cust("pp-cap-early")
+		earlySub, p0, _ := j.subscribe(time.Time{}, early, plan) // the plan is used from here
+		j.later()
+		var tokensPrice string
+		for _, body := range []map[string]any{perUnit(tokens, "2", nil), perUnit(peak, "2", map[string]string{"tier": "pro"})} {
+			added := j.must(time.Time{}, http.MethodPost, "/v1/plans/"+plan+"/prices", body, http.StatusCreated)
+			if got := flowStr(added, "effective"); got != "next_period" {
+				t.Fatalf("price added to a used plan: effective %q, want next_period", got)
+			}
+			if tokensPrice == "" {
+				tokensPrice = flowStr(added, "id")
+			}
+		}
+		j.later()
+		late := j.cust("pp-cap-late")
+		lateSub, lateP0, _ := j.subscribe(time.Time{}, late, plan)
+		if !lateP0.Equal(p0) {
+			t.Fatalf("late subscriber's first period starts %v, want %v (the same day)", lateP0, p0)
+		}
+		first := j.before(p0)
+		for _, ext := range []string{"pp-cap-early", "pp-cap-late"} {
+			j.ingest(time.Time{}, ext, "tokens", 10, first, nil)
+			j.ingest(time.Time{}, ext, "peak", 4, first, map[string]string{"tier": "pro"})
+			j.ingest(time.Time{}, ext, "peak", 3, first, map[string]string{"tier": "basic"})
+		}
+		for _, subID := range []string{earlySub, lateSub} {
+			j.must(time.Time{}, http.MethodPut, "/v1/subscriptions/"+subID+"/billing-thresholds", map[string]any{
+				"item_thresholds": []map[string]any{{"subscription_item_id": j.item(subID, plan), "usage_gte": "15"}},
+			}, http.StatusOK)
+		}
+		if onClock {
+			j.later() // the clock's catch-up scans its thresholds
+		} else {
+			now := time.Now().UTC()
+			j.ppRig.clk.Set(now)
+			if _, errs := j.srv.BillingEngine.ScanThresholds(postgres.WithLivemode(clock.WithEffectiveNow(context.Background(), now), false), 50); len(errs) != 0 {
+				t.Fatalf("threshold scan: %v", errs)
+			}
+		}
+
+		count := func(subID string) []ppInvoice {
+			var fired []ppInvoice
+			for _, inv := range j.invoices(subID) {
+				if inv.reason == "threshold" {
+					fired = append(fired, inv)
+				}
+			}
+			return fired
+		}
+		if fired := count(earlySub); len(fired) != 0 {
+			t.Errorf("on the plan before the adds: %d threshold invoices, want none (its cap counts one peak of 4) [%+v]", len(fired), fired)
+		}
+		fired := count(lateSub)
+		if len(fired) != 1 {
+			t.Fatalf("joined after the adds: %d threshold invoices, want 1 (its cap counts 10 tokens and peaks of 4 and 3) [%+v]", len(fired), j.invoices(lateSub))
+		}
+		// A max meter's usage is left to the close (ADR-066 §4).
+		wantUsage(t, "joined after the adds: the cap's invoice", fired[0], map[string]int64{tokensPrice: 20})
+	})
+}
