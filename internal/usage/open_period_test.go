@@ -104,6 +104,11 @@ func TestClassify(t *testing.T) {
 	trialDay.TrialEnd = opAt(opMay.Add(18 * time.Hour))
 	trialDay.Floor = trialDay.TrialEnd
 	trialDay.Windows = map[string][]Window{"m": {{PlanID: "pln", From: *trialDay.TrialEnd, To: opJun}}}
+	// A trial that outlasts the period (to June 10): the close only
+	// advances the period, and the next one is trial time too.
+	longTrial := may
+	longTrial.TrialEnd = opAt(opJun.AddDate(0, 0, 9))
+	longTrial.Floor = longTrial.TrialEnd
 	// A cancel is scheduled for May 11.
 	canceling := may
 	canceling.Ends = opAt(opMay.AddDate(0, 0, 10))
@@ -144,6 +149,7 @@ func TestClassify(t *testing.T) {
 		{"first-day reach-back: the added item's window", opMay.Add(2 * time.Hour), "m", nil, []OpenPeriod{reachBack}, sum, InOpen},
 		{"trial-end day, before the trial end", opMay.Add(10 * time.Hour), "m", nil, []OpenPeriod{trialDay}, sum, Outside},
 		{"trial-end day, before the trial end, meter not priced", opMay.Add(10 * time.Hour), "x", nil, []OpenPeriod{trialDay}, sum, Outside},
+		{"grace: the trial outlasts the period", opJun.Add(10 * time.Minute), "m", nil, []OpenPeriod{longTrial}, sum, Outside},
 		{"trial-end day, after the trial end", opMay.Add(19 * time.Hour), "m", nil, []OpenPeriod{trialDay}, sum, InOpen},
 		{"before a scheduled cancel", opMay.AddDate(0, 0, 9), "m", nil, []OpenPeriod{canceling}, sum, InOpen},
 		{"after a scheduled cancel", opMay.AddDate(0, 0, 10).Add(20 * time.Minute), "m", nil, []OpenPeriod{canceling}, sum, Outside},
