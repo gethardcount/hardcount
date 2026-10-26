@@ -33,31 +33,26 @@ func (e *Engine) RateCurrentPeriod(ctx context.Context, sub domain.Subscription)
 }
 
 // RateWindow rates the subscription's usage over [from, to): an estimate.
-// Its plan windows (billing_intervals) are clipped to the window and each is
-// priced where it would be in the current period, in the subscription's time
-// domain: at the current period's start, or where its item joined the plan
-// in that period. Past periods are not priced at their own pins (ADR-130
-// §10). Nothing bills from this read. A subscription with no current period
-// is priced from `from`.
+// Its plan windows (billing_intervals) are clipped to the window and each
+// plan is priced at its pin of the current period, in the subscription's
+// time domain (estimateSegments). Past periods are not priced at their own
+// pins (ADR-130 §10). Nothing bills from this read. A subscription with no
+// current period is priced as if its period started at `from`.
 func (e *Engine) RateWindow(ctx context.Context, sub domain.Subscription, from, to time.Time) (domain.RatedSubscription, error) {
 	plans, err := e.itemPlans(ctx, sub)
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}
-	segsByItem, err := e.windowSegments(ctx, sub, from, to)
+	segsByItem, pins, err := e.estimateSegments(ctx, sub, from, to)
 	if err != nil {
 		return domain.RatedSubscription{}, fmt.Errorf("resolve segments: %w", err)
 	}
 	if err := e.hydrateSegmentPlans(ctx, sub, segsByItem, plans); err != nil {
 		return domain.RatedSubscription{}, err
 	}
-	pinAt := from
-	if sub.CurrentBillingPeriodStart != nil {
-		pinAt = *sub.CurrentBillingPeriodStart
-	}
 	src := e.prices()
-	stretches := planStretches(sub, segsByItem, from, to, pinAt)
-	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
+	stretches := planStretches(sub, segsByItem, from, to)
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pins)
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}
@@ -65,11 +60,11 @@ func (e *Engine) RateWindow(ctx context.Context, sub domain.Subscription, from, 
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}
-	clamped, _ := meterUsageIntervals(stretches, planMeters, alike, nil, floors)
+	clamped, _ := meterUsageIntervals(stretches, planMeters, nil, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {
-			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passEvery})
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
 		}
 	}
 	r := rater{
@@ -78,6 +73,7 @@ func (e *Engine) RateWindow(ctx context.Context, sub domain.Subscription, from, 
 		site: rateSite{preview: func(w rateWindow, err error) error {
 			return fmt.Errorf("rate meter %s [%v, %v): %w", w.meterID, w.iv.start, w.iv.end, err)
 		}},
+		pins:       pins,
 		tenantID:   sub.TenantID,
 		customerID: sub.CustomerID,
 	}

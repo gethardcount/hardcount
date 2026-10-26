@@ -22,10 +22,10 @@ import (
 // window after the write's locks, in the customer's own time: wall time read
 // with clock_timestamp(), or the customer's clock time plus 1 microsecond.
 // Not now(): that is the transaction's start, so a write that waited for a
-// lock across a period start would change the period already open. A window
-// is priced at its pin (ADR-130 §4 step 3), so an override write applies from
-// the customer's next period, or from when the customer joins the plan after
-// it.
+// lock across a period start would change the period already open. A plan
+// is priced at its pin of the period (ADR-130 §4 step 3), so an override
+// write applies from the customer's next period. A subscription whose first
+// join of the plan in a period comes after the write gets it in that period.
 
 const overrideColumns = `o.id, o.tenant_id, o.customer_id, o.price_id, o.mode, o.unit_amount_cents, o.tiers,
 	o.package_size, o.package_amount_cents, COALESCE(o.reason, ''), o.active, o.created_at, o.deactivated_at, o.updated_at`

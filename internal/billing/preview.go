@@ -216,9 +216,8 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 
 	// Usage lines per (window, price), priced by the one rater (rate.go):
 	// each stretch of the window a plan was on the subscription, by that
-	// plan's prices (ADR-130 §9). Each stretch is pinned where it would be in
-	// the subscription's current period, in its time domain: at that
-	// period's start, or where the item joined the plan in it. An estimate
+	// plan's prices (ADR-130 §9), each plan at its pin of the subscription's
+	// current period, in its time domain (estimateSegments): an estimate
 	// over an explicit window is priced at today's prices, not at each past
 	// period's own (ADR-130 §10).
 	//
@@ -226,11 +225,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	// usage no price takes and a net-negative bucket (usage corrections) are
 	// soft cases, surfaced as warnings by the rater. A partial preview built
 	// from a failed read is a lie.
-	pinStart := periodStart
-	if sub.CurrentBillingPeriodStart != nil {
-		pinStart = *sub.CurrentBillingPeriodStart
-	}
-	segsByItem, err := e.windowSegments(ctx, sub, periodStart, periodEnd)
+	segsByItem, pins, err := e.estimateSegments(ctx, sub, periodStart, periodEnd)
 	if err != nil {
 		return PreviewResult{}, fmt.Errorf("preview: resolve segments: %w", err)
 	}
@@ -238,8 +233,8 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		return PreviewResult{}, err
 	}
 	src := e.prices()
-	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, pinStart)
-	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
+	stretches := planStretches(sub, segsByItem, periodStart, periodEnd)
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pins)
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -251,15 +246,15 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		return PreviewResult{}, err
 	}
 	result.floors = floors
-	clamped, _ := meterUsageIntervals(stretches, planMeters, alike, nil, floors)
+	clamped, _ := meterUsageIntervals(stretches, planMeters, nil, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {
-			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passEvery})
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
 		}
 	}
 	// No ladder: each window is priced on its own.
-	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, nil, plans)
+	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, pins, nil, plans)
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -396,9 +391,11 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 
 	// Usage: each (plan, meter) over the windows the plan was on the
 	// subscription, from its usage floor, clamped to the threshold watermark
-	// — the close's meterUsageIntervals, each priced at its window's pin.
-	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, periodStart)
-	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
+	// — the close's meterUsageIntervals, each plan priced at its pin of the
+	// period (pinsOf).
+	stretches := planStretches(sub, segsByItem, periodStart, periodEnd)
+	pins := pinsOf(sub, stretches, periodStart)
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pins)
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -406,15 +403,15 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	meterIntervals, _ := meterUsageIntervals(stretches, planMeters, alike, wm.billedThrough, floors)
+	meterIntervals, _ := meterUsageIntervals(stretches, planMeters, wm.billedThrough, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(meterIntervals) {
 		for _, iv := range mergeUsageIntervals(meterIntervals[k]) {
-			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passEvery})
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
 		}
 	}
 	// The tier ladder continues from a threshold fire, as in the close.
-	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, newUsageLadder(wm), plans)
+	usageLines, warnings, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, pins, newUsageLadder(wm), plans)
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -496,8 +493,8 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, s
 	// The trial-end invoice covers the first paid period itself, not the
 	// one after it (the in_advance header shift does not apply).
 	result.BillingPeriodStart, result.BillingPeriodEnd = periodStart, periodEnd
-	stretches := planStretches(sub, trialConversionSegments(sub, periodStart, periodEnd), periodStart, periodEnd, periodStart)
-	planMeters, _, err := stretchMeters(ctx, src, sub, stretches)
+	stretches := planStretches(sub, trialConversionSegments(sub, periodStart, periodEnd), periodStart, periodEnd)
+	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pinsOf(sub, stretches, periodStart))
 	if err != nil {
 		return PreviewResult{}, true, err
 	}

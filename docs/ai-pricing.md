@@ -11,7 +11,7 @@ terminal.
 |---|---|
 | Dimensions | Labels on a usage event, such as `model` and `token_type`. |
 | Price | One usage rate of a plan: a meter, the labels an event must carry (`dimension_match`), and an amount per unit, tiers, or packages. |
-| Used plan | A plan a subscription has used. A price change on it applies from each subscriber's next billing period, and at once to a subscriber who joins the plan after it. |
+| Used plan | A plan a subscription has used. A price change on it applies from each subscriber's next billing period. A subscriber who joins the plan after the change pays it from the join, unless it was on the plan earlier in that period. |
 
 ## Ready-made recipes
 
@@ -118,8 +118,9 @@ takes the plan's currency.
 `now`. On a used plan it is `next_period`: each subscriber pays it from
 their next billing period, and the period already open keeps the prices it
 started with. A subscriber who joins the plan after the change pays it from
-the moment they join ([Change a price](#change-a-price)). Add one price for each kind of token you sell. Other plans
-that price the `tokens` meter are not changed.
+the moment they join ([Change a price](#change-a-price)). Add one price for
+each kind of token you sell. Other plans that price the `tokens` meter are
+not changed.
 
 ## How Velox picks the price for an event
 
@@ -159,9 +160,10 @@ bill it with a one-off invoice
 
 A price's rate changes with `PATCH /v1/plans/{id}/prices/{price_id}`, and
 `DELETE` removes it. Its meter and labels never change: for other events,
-add another price. A subscriber pays the plan's prices as they were when
-they joined the plan in the current period, or at the period's start if
-they were on it then, so:
+add another price. Each billing period of a subscription pays the plan's
+prices as they were at the period's start. If the subscription joined the
+plan during the period, it pays them as they were when it first joined the
+plan in that period. So:
 
 - On a plan no subscription has used, a change applies at once
   (`effective: now`).
@@ -178,15 +180,19 @@ they were on it then, so:
 - A customer's negotiated rate (a price override) keeps applying when the
   price's rate changes. Removing the price ends it, and the answer lists the
   overrides it ended.
-- An override follows the same rule. It applies as soon as the customer
-  joins the plan after it was created, and otherwise from the next period.
-  So one created before a subscription starts (after a trial, before the
-  trial ends), even on the same day, applies from its first period.
-- When an item leaves a plan and another item joins it later in the
-  period, each item's part bills on its own, with its own peak and tiers.
-  An item added on the period's first day bills from the period start, so
-  its part starts where the part before it ended. If those two parts are
-  on one plan and the meter's prices did not change in between, they bill
+- A subscription that leaves the plan and joins it again in the same
+  period keeps the prices of its first join for that period. That holds for
+  an item removed and added back, and for a plan change and back. A change
+  made in between applies from its next period.
+- An override follows the same rule. It applies from the subscriber's next
+  period, or from the join when the subscription first joins the plan in a
+  period after the override was created. So one created before a
+  subscription starts (after a trial, before the trial ends), even on the
+  same day, applies from its first period.
+- When an item leaves a plan and an item joins it again later in the
+  period, each part bills on its own, with its own peak and tiers. An item
+  added on the period's first day bills from the period start, so its part
+  starts where the part before it ended. On one plan those two parts bill
   as one: a `max` meter bills one peak, and tiers run on.
 - On a test clock, a change or an override takes effect just after the
   clock's current time. A subscription, an immediate plan change or an

@@ -4138,8 +4138,8 @@ type CustomerPriceOverride struct {
 
 	// CreatedAt When the override starts, in the customer's time: wall time, or
 	// its test clock's time. A subscription already on the plan gets
-	// it from its next period; one that joins the plan after this
-	// instant gets it from then.
+	// it from its next period; one that first joins the plan in a
+	// period after this instant gets it from the join.
 	CreatedAt  time.Time `json:"created_at"`
 	CustomerId string    `json:"customer_id"`
 
@@ -5646,8 +5646,8 @@ type PlanDetail struct {
 	// Used Whether a subscription has ever used the plan (canceled ones
 	// and scheduled plan changes included). On a plan no one has
 	// used, a price change applies at once; on a used plan, from
-	// each subscriber's next billing period, and at once to a
-	// subscriber who joins the plan after it.
+	// each subscriber's next billing period, and from the join for
+	// a subscriber who first joins the plan in a period after it.
 	Used bool `json:"used"`
 }
 

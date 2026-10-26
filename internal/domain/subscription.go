@@ -579,16 +579,17 @@ func (s Subscription) BillingStartedAt() *time.Time {
 	return s.StartedAt
 }
 
-// PlanJoinedAt is the instant an item joined the plan of one stretch of its
-// life (ADR-130 §4 step 3, amended 2026-10-26): the latest of runStart, where
-// the item's billing intervals on that plan began (a swap onto it, or zero
-// when unknown), the item's creation when it was added after the
-// subscription was created, and the subscription's billing start. A billing
-// interval opened by an add on a period's first day starts at the period
-// start (ADR-012), so the add's own instant is the item's creation. Items
-// created with the subscription share its created_at.
-func (s Subscription) PlanJoinedAt(itemCreatedAt, runStart time.Time) time.Time {
-	at := runStart
+// PlanJoinedAt is the instant from which an item was on the plan of one
+// stretch of its life (ADR-130 §4 step 3, amended 2026-10-26): the latest of
+// from, where the stretch begins (a billing interval's start in the window
+// read, a swap onto the plan, or zero when unknown), the item's creation
+// when it was added after the subscription was created, and the
+// subscription's billing start. A billing interval opened by an add on a
+// period's first day starts at the period start (ADR-012), so the add's own
+// instant is the item's creation. Items created with the subscription share
+// its created_at.
+func (s Subscription) PlanJoinedAt(itemCreatedAt, from time.Time) time.Time {
+	at := from
 	if b := s.BillingStartedAt(); b != nil && b.After(at) {
 		at = *b
 	}

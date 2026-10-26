@@ -298,14 +298,11 @@ func TestUsageWindow_TrialEndsAtMidnight_Unchanged(t *testing.T) {
 // TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce: a
 // spend threshold fires at 21:00 on the day the trial ended at 18:00. The
 // fire bills the usage from the trial end and says so on its line; the close
-// bills what came after the fire. The paid window opens at the trial end
-// and is priced there (ADR-130 §4 step 3, amended 2026-10-26). A price edit
-// at 18:30, after that window opened, applies from the next period on both
+// bills what came after the fire. The plan is priced at the trial end, where
+// the first paid period starts (ADR-130 §4 step 3, amended 2026-10-26). A
+// price edit at 18:30, after that, applies from the next period on both
 // invoices: neither the fire's watermark nor the trial-end floor moves the
-// window's pin.
-//
-// Mutation: pin each window at its start after the watermark, and the close
-// bills the 3 calls after the fire at the edited rate.
+// plan's pin.
 func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
@@ -357,12 +354,12 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 
 // TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit: the trial
 // ends at 18:00 on day D, and the plan's price was edited at 12:00, during
-// the trial. The first paid window opens at the trial end and is priced
-// there (ADR-130 §4 step 3, amended 2026-10-26), so the preview and the
-// first paid invoice bill the edited price.
+// the trial. The plan is priced at the trial end, where the first paid
+// period starts (ADR-130 §4 step 3, amended 2026-10-26), so the preview and
+// the first paid invoice bill the edited price.
 //
-// Mutation: pin the trial's first paid window at the subscription's start,
-// or at the period start, and both bill the old price.
+// Mutation: pin every plan at the period start, and both bill the old
+// price.
 func TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)

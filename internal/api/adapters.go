@@ -1691,6 +1691,7 @@ type usageOpenPeriods struct {
 
 type usageLiveSubscriptions interface {
 	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error)
+	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
 }
 
 type usageMeterReader interface {
@@ -1704,15 +1705,15 @@ type usageThresholdReader interface {
 
 // OpenPeriods reads every active and trialing subscription of the customer
 // (one transaction), the threshold watermarks of each one's current period,
-// and in one more transaction the meters each current item's plan prices at
-// the item's window pin and, for the plans that continue, at the period end
-// (the next period's pin), in the subscription's own time domain (ADR-130
-// §4). An item's window pin is the period start, or the instant the item
-// joined its plan in the period (domain.Subscription.PlanJoinedAt: the
-// subscription's start, an add, an immediate swap), as the close prices it.
-// The watermarks are read whether or not the subscription still has
-// thresholds: the close keys them on the period's threshold invoices, not on
-// the setting.
+// and in one more transaction the meters each current plan prices at its
+// pin of the period and, for the plans that continue, at the period end (the
+// next period's pin), in the subscription's own time domain (ADR-130 §4). A
+// plan's pin is the one the close prices it at (billing.PlanPins): the period
+// start, or the first instant in the period the subscription had an item on
+// the plan. It reads a subscription's billing intervals only when one of its
+// items joined its plan in the period. The watermarks are read whether or
+// not the subscription still has thresholds: the close keys them on the
+// period's threshold invoices, not on the setting.
 func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
 	subs, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
 	if err != nil {
@@ -1721,7 +1722,7 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 	type subPins struct {
 		sub   domain.Subscription
 		wm    usage.ThresholdWatermark
-		atPin map[string]int // plan id → index in pins, at its item's window pin
+		atPin map[string]int // plan id → index in pins, at its pin of the period
 		atEnd map[string]int // plan id → index in pins
 	}
 	var (
@@ -1738,20 +1739,16 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 		if err != nil {
 			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
 		}
+		planPins, err := billing.PlanPins(sub, start, end, func() ([]domain.ItemInterval, error) {
+			return a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
+		})
+		if err != nil {
+			return nil, err
+		}
 		for _, it := range sub.Items {
-			if it.PlanID != "" {
-				var runStart time.Time
-				if it.PlanChangedAt != nil {
-					runStart = *it.PlanChangedAt
-				}
-				at := start
-				if joined := sub.PlanJoinedAt(it.CreatedAt, runStart); joined.After(at) {
-					at = joined
-				}
-				// One live item per plan (subscription_items unique on
-				// subscription and plan), so the plan names the item.
+			if _, done := sp.atPin[it.PlanID]; it.PlanID != "" && !done {
 				sp.atPin[it.PlanID] = len(pins)
-				pins = append(pins, pricing.PlanPin{PlanID: it.PlanID, At: at, ClockID: sub.TestClockID})
+				pins = append(pins, pricing.PlanPin{PlanID: it.PlanID, At: planPins[it.PlanID], ClockID: sub.TestClockID})
 			}
 			for _, planID := range []string{it.PlanID, it.PendingPlanID} {
 				if planID == "" {

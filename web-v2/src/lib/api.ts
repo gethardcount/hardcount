@@ -212,8 +212,8 @@ export const api = {
 
   // Price overrides: a customer's negotiated rate for one plan price. Create
   // replaces an active override on the same (customer, price). A change
-  // applies from the customer's next billing period, or from when the
-  // customer joins the plan after it (ADR-130 §4).
+  // applies from the customer's next billing period, or from the join when a
+  // subscription first joins the plan in a period after it (ADR-130 §4).
   listPriceOverrides: (filter?: { customerId?: string; priceId?: string }) => {
     const qs = new URLSearchParams()
     if (filter?.customerId) qs.set('customer_id', filter.customerId)

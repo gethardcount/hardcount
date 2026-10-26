@@ -65,22 +65,6 @@ type PriceShape struct {
 	PackageAmountCents decimal.Decimal `json:"package_amount_cents"`
 }
 
-// Equal reports whether s and o bill every quantity the same: the same mode
-// and the same amounts, compared as numbers ("1" equals "1.0").
-func (s PriceShape) Equal(o PriceShape) bool {
-	if s.Mode != o.Mode || !s.UnitAmountCents.Equal(o.UnitAmountCents) || s.PackageSize != o.PackageSize ||
-		!s.PackageAmountCents.Equal(o.PackageAmountCents) || len(s.Tiers) != len(o.Tiers) {
-		return false
-	}
-	for i, t := range s.Tiers {
-		u := o.Tiers[i]
-		if (t.UpTo == nil) != (u.UpTo == nil) || (t.UpTo != nil && *t.UpTo != *u.UpTo) || !t.UnitAmountCents.Equal(u.UnitAmountCents) {
-			return false
-		}
-	}
-	return true
-}
-
 // PlanPrice is one usage price of a plan (ADR-130 §1): a meter, the events it
 // takes (DimensionMatch) and its content. Its id is stable across content
 // edits; the plan, meter and match are its identity and never change. The

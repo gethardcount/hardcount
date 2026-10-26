@@ -35,8 +35,8 @@ export interface CustomerPriceOverride {
   /**
      * When the override starts, in the customer's time: wall time, or
      * its test clock's time. A subscription already on the plan gets
-     * it from its next period; one that joins the plan after this
-     * instant gets it from then.
+     * it from its next period; one that first joins the plan in a
+     * period after this instant gets it from the join.
      */
   created_at: string;
   /** When the override ended, in the customer's time. Absent while it is active. */

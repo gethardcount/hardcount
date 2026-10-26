@@ -59,12 +59,12 @@ Words used in the Velox docs and dashboard. For the big picture, read
   billing period is priced as the plan's prices were when it started. A
   subscriber who joins the plan inside a period (a new subscription, an
   immediate plan change, an added item) is priced as the plan was when they
-  joined; after a trial, when the trial ended.
+  first joined it in that period; after a trial, when the trial ended.
   [More](adr/130-usage-prices-belong-to-the-plan.md)
 - **used plan**: A plan that a subscription has used, canceled ones
   included. A price change on a used plan applies from each subscriber's next
-  billing period, and at once to a subscriber who joins the plan after it; on
-  a plan no one has used, at once.
+  billing period, and from the join for a subscriber who first joins the plan
+  in a period after it; on a plan no one has used, at once.
 - **no_price**: Usage of a meter that no price of the customer's plan
   takes. Velox records it and bills nothing for it.
   [More](ops/runbook/usage-with-no-price.md)
