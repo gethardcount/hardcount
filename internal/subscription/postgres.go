@@ -151,6 +151,25 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 	id := postgres.NewID("vlx_sub")
 	now := clock.Now(ctx)
 
+	// A clock customer's subscription takes its clock FOR KEY SHARE before
+	// the insert (ADR-130 §8). The insert's foreign keys lock the customer
+	// first and the clock second. A test-clock teardown holds its clock FOR
+	// UPDATE and later deletes the customer, so waiting at the clock while
+	// holding the customer deadlocks it. Read first, the create waits at the
+	// clock holding nothing the teardown deletes.
+	if sub.TestClockID != "" {
+		var locked string
+		err := tx.QueryRowContext(ctx, `SELECT id FROM test_clocks WHERE id = $1 FOR KEY SHARE`, sub.TestClockID).Scan(&locked)
+		if errors.Is(err, sql.ErrNoRows) {
+			// A teardown of the clock committed while this waited for it,
+			// and deleted the customer with it.
+			return domain.Subscription{}, errs.NotFound("customer")
+		}
+		if err != nil {
+			return domain.Subscription{}, fmt.Errorf("lock test clock %s: %w", sub.TestClockID, err)
+		}
+	}
+
 	err := scanSubRow(tx.QueryRowContext(ctx, `
 		INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status,
 			billing_time, trial_start_at, trial_end_at, started_at,
@@ -208,6 +227,13 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		inserted = append(inserted, stored)
 	}
 	sub.Items = inserted
+	items := make([]itemPlan, 0, len(inserted))
+	for _, it := range inserted {
+		items = append(items, itemPlan{itemID: it.ID, planID: it.PlanID})
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, items); err != nil {
+		return domain.Subscription{}, err
+	}
 
 	// ADR-101: a start-now create IS the items' billable open — one interval
 	// per item at the (already day-snapped) period start, same tx. Draft and
@@ -382,16 +408,14 @@ func (s *PostgresStore) ListByTestClock(ctx context.Context, tenantID, clockID s
 }
 
 // ListLiveByCustomer returns every active and trialing subscription of the
-// customer, items and thresholds hydrated, and the meter ids of every plan
-// their items carry or will change to (planMeters, by plan id; a deleted
-// plan is absent), in one transaction. It backs usage ingest's open-period
-// read (usage.OpenPeriodReader), which runs before every event write, so it
-// is one narrow read: no count, no page, no second transaction per plan.
+// customer, items and thresholds hydrated, in one transaction. It backs
+// usage ingest's open-period read (usage.OpenPeriodReader), which runs
+// before every event write, so it is one narrow read: no count, no page.
 // Capped at 1000 subscriptions, far above the live ones one customer holds.
-func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, customerID string) (subs []domain.Subscription, planMeters map[string][]string, err error) {
+func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer postgres.Rollback(tx)
 
@@ -401,69 +425,27 @@ func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, custom
 		ORDER BY s.created_at ASC, s.id ASC LIMIT 1000
 	`, customerID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
+	var subs []domain.Subscription
 	for rows.Next() {
 		var sub domain.Subscription
 		if err := scanSubRow(rows, &sub); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		subs = append(subs, sub)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	_ = rows.Close()
-
-	var planIDs []string
-	seen := map[string]bool{}
 	for i := range subs {
 		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
-			return nil, nil, err
-		}
-		for _, it := range subs[i].Items {
-			for _, id := range []string{it.PlanID, it.PendingPlanID} {
-				if id != "" && !seen[id] {
-					seen[id] = true
-					planIDs = append(planIDs, id)
-				}
-			}
+			return nil, err
 		}
 	}
-	planMeters = map[string][]string{}
-	if len(planIDs) == 0 {
-		return subs, planMeters, nil
-	}
-	ids, err := json.Marshal(planIDs)
-	if err != nil {
-		return nil, nil, err
-	}
-	// meter_ids is 'null' (not '[]') for meterless plans (see
-	// FindMeterConflicts).
-	prow, err := tx.QueryContext(ctx, `
-		SELECT id, CASE WHEN jsonb_typeof(meter_ids) = 'array' THEN meter_ids ELSE '[]'::jsonb END
-		FROM plans WHERE id IN (SELECT jsonb_array_elements_text($1::jsonb))`, string(ids))
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = prow.Close() }()
-	for prow.Next() {
-		var id string
-		var raw []byte
-		if err := prow.Scan(&id, &raw); err != nil {
-			return nil, nil, err
-		}
-		var meters []string
-		if err := json.Unmarshal(raw, &meters); err != nil {
-			return nil, nil, fmt.Errorf("plan %s meter_ids: %w", id, err)
-		}
-		planMeters[id] = meters
-	}
-	if err := prow.Err(); err != nil {
-		return nil, nil, err
-	}
-	return subs, planMeters, nil
+	return subs, nil
 }
 
 func cancelSpec() transitionSpec {
@@ -2255,6 +2237,64 @@ func lockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
 	return nil
 }
 
+// itemPlan is an item and the plan a write just put on it (its plan, or
+// its pending plan).
+type itemPlan struct{ itemID, planID string }
+
+// refuseMeterOverlapTx is the double-billing guard (Service.rejectMeterOverlap)
+// again, on the write's transaction, after the write. Each item's new plan
+// must price no meter that another live item of the customer prices, its
+// own subscription's other items included.
+//
+// The service checks before the transaction, on the plans' meters as they
+// were then. A price for a new meter can commit in between: on a plan no one
+// has used it runs no overlap check, and on a used plan its check cannot see
+// an item that is not written yet. A price write holds its plan FOR UPDATE,
+// and the writer holds the plan FOR KEY SHARE (lockPlansTx) before this
+// check. So a price that committed first is read here, and one that comes
+// later waits for this transaction, then sees the item and refuses the
+// meter (pricing's 409 meter_overlap).
+func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, items []itemPlan) error {
+	itemIDs := make([]string, 0, len(items))
+	planIDs := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.planID != "" {
+			itemIDs = append(itemIDs, it.itemID)
+			planIDs = append(planIDs, it.planID)
+		}
+	}
+	if len(itemIDs) == 0 {
+		return nil
+	}
+	var meterID, code string
+	var sameSub bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT pp.meter_id, s2.code, s2.id = own.id
+		FROM unnest($1::text[], $2::text[]) AS n(item_id, plan_id)
+		JOIN subscription_items ni ON ni.id = n.item_id
+		JOIN subscriptions own ON own.id = ni.subscription_id
+		JOIN plan_prices pp ON pp.plan_id = n.plan_id
+		JOIN subscriptions s2 ON s2.customer_id = own.customer_id AND s2.status IN ('draft', 'trialing', 'active')
+		JOIN subscription_items b ON b.subscription_id = s2.id AND b.deleted_at IS NULL AND b.id <> n.item_id
+		JOIN plan_prices pb ON pb.meter_id = pp.meter_id AND (pb.plan_id = b.plan_id OR pb.plan_id = b.pending_plan_id)
+		ORDER BY pp.meter_id, s2.code
+		LIMIT 1`, postgres.StringArray(itemIDs), postgres.StringArray(planIDs)).Scan(&meterID, &code, &sameSub)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check meter overlap: %w", err)
+	}
+	if sameSub {
+		return errs.InvalidState(fmt.Sprintf(
+			"this subscription already has an item billing meter %s — usage would be invoiced twice; remove or swap the existing item instead",
+			meterID))
+	}
+	return errs.InvalidState(fmt.Sprintf(
+		"subscription %q already bills meter %s for this customer — usage would be invoiced twice; cancel that subscription first, or price both plans as items on one subscription",
+		code, meterID))
+}
+
 // itemPlanIDs is the plan of each item.
 func itemPlanIDs(items []domain.SubscriptionItem) []string {
 	ids := make([]string, 0, len(items))
@@ -2367,6 +2407,9 @@ func (s *PostgresStore) addItemInTx(ctx context.Context, tx *sql.Tx, tenantID st
 			return domain.SubscriptionItem{}, errs.AlreadyExists("plan_id",
 				fmt.Sprintf("subscription already has an item for plan %q", item.PlanID))
 		}
+		return domain.SubscriptionItem{}, err
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: stored.PlanID}}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	// ADR-101: same-tx interval open (with the day-grade 'add' clamp).
@@ -2494,6 +2537,9 @@ func (s *PostgresStore) applyItemPlanImmediatelyInTx(ctx context.Context, tx *sq
 		}
 		return domain.SubscriptionItem{}, err
 	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: newPlanID}}); err != nil {
+		return domain.SubscriptionItem{}, err
+	}
 	// ADR-101: the plan swap moves at its effective instant, same tx.
 	if err := intervalTransition(ctx, tx, stored.ID, stored.SubscriptionID, changedAt, newPlanID, nil, "plan"); err != nil {
 		return domain.SubscriptionItem{}, err
@@ -2547,6 +2593,9 @@ func (s *PostgresStore) setItemPendingPlanInTx(ctx context.Context, tx *sql.Tx, 
 		return domain.SubscriptionItem{}, errs.ErrNotFound
 	}
 	if err != nil {
+		return domain.SubscriptionItem{}, err
+	}
+	if err := refuseMeterOverlapTx(ctx, tx, []itemPlan{{itemID: stored.ID, planID: pendingPlanID}}); err != nil {
 		return domain.SubscriptionItem{}, err
 	}
 	return stored, nil
@@ -2727,12 +2776,11 @@ func (s *PostgresStore) removeItemInTx(ctx context.Context, tx *sql.Tx, itemID s
 
 // FindMeterConflicts implements the double-billing guard's conflict scan:
 // one query walks the customer's live (draft/trialing/active) subs → live
-// items → plans → unnested meter_ids, intersected with the candidate set.
-// pending_plan_id joins too — a scheduled swap starts billing its meters at
-// the next cycle boundary, so admitting an overlap against it now just
-// defers the double-bill. Tenant scoping rides the RLS tx like every other
-// reader; candidate meters travel as a jsonb array (matching how plans
-// store meter_ids) rather than pulling in a driver-specific array type.
+// items → the meters their plans have ever priced, intersected with the
+// candidate set. pending_plan_id joins too — a scheduled swap starts billing
+// its meters at the next cycle boundary, so admitting an overlap against it
+// now just defers the double-bill. Tenant scoping rides the RLS tx like
+// every other reader.
 func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, customerID, excludeItemID string, meterIDs []string) ([]MeterConflict, error) {
 	if len(meterIDs) == 0 {
 		return nil, nil
@@ -2752,13 +2800,8 @@ func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, custom
 		FROM subscriptions sub
 		JOIN subscription_items si
 		  ON si.subscription_id = sub.id AND si.deleted_at IS NULL
-		JOIN plans p
-		  ON p.id = si.plan_id OR p.id = si.pending_plan_id
-		-- meter_ids is 'null' (not '[]') for meterless plans — the pricing
-		-- store marshals a nil slice — and unnesting a scalar is an error.
-		CROSS JOIN LATERAL jsonb_array_elements_text(
-			CASE WHEN jsonb_typeof(p.meter_ids) = 'array' THEN p.meter_ids ELSE '[]'::jsonb END
-		) AS m(meter_id)
+		JOIN plan_prices m
+		  ON m.plan_id = si.plan_id OR m.plan_id = si.pending_plan_id
 		WHERE sub.customer_id = $1
 		  AND sub.status IN ('draft', 'trialing', 'active')
 		  AND si.id <> $2

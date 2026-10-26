@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. The rest is not built yet: PR-4 to PR-8 build it before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes install through a parser that turns today's YAML into plan prices. Not built yet: the base fee next-period rule (PR-7), ingest's `no_price` answer (PR-6), recipe YAML v7 (PR-5) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -209,7 +209,10 @@ back (section 6). So the winner for any event is unique: two matching
 candidates agree on every shared key, and equal key counts were refused.
 A removed price and a later tying price are never in force at one pin,
 because versions on a plan take effect in the order their writes commit
-(section 7).
+(section 7). On a plan that is never-used again after a teardown, a write
+first puts every price of the plan at its latest version from the
+beginning of time (section 5), so a price removed while the plan was used
+is removed at every pin there too.
 The check is D05's compatibility clause without the priority term
 (`internal/pricing/postgres.go:1064-1088`).
 
@@ -221,7 +224,7 @@ names it.
 
 | What | Never-used plan | Used plan |
 |---|---|---|
-| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). |
+| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period, and one that moves to the plan mid-period gets it from its next period (Risks). |
 | Base fee, if PR-7 ships | Applies at once. | Applies from each subscriber's next period. |
 | Base fee, if PR-7 is cut | Editable. | Refused while a live subscription uses the plan, as today (ADR-034). |
 | `base_bill_timing` | Editable, but not to `in_advance` at a base of 0 (section 14). | Locked. |
@@ -302,9 +305,9 @@ applies and the docs say so.
 - On a never-used plan, `valid_from` is the beginning of time.
 - A write to a used test-mode plan also writes, for every test clock of
   the account, the clock's current time plus 1 microsecond
-  (`plan_price_version_clocks`). It reads the clocks `FOR SHARE` after the
-  plan lock, which orders the write against a clock advance
-  (`MarkAdvancing`, `internal/testclock/postgres.go:228-231`). The extra
+  (`plan_price_version_clocks`). It reads the clocks `FOR SHARE`, before
+  the plan lock (section 8), which orders the write against a clock
+  advance (`MarkAdvancing`, `internal/testclock/postgres.go:228-231`). The extra
   microsecond keeps the old price for a period that opens exactly at the
   clock's time. Two writes at one clock time get equal stamps; the later
   `valid_from` wins.
@@ -332,7 +335,8 @@ applies and the docs say so.
 
 Subscription writers, price writes and override writes take rows in this
 order. Once one holds a row of one step, it takes no row of an earlier
-step. A test-clock teardown is the one exception (below).
+step. A test-clock teardown is one exception, and the clock reads of a
+price write and of a subscription create are the others (below).
 
 1. the subscription row ([ADR-115](115-one-closer-for-the-billing-period.md));
 2. plan rows in ascending id, in one statement: `FOR KEY SHARE` for
@@ -369,6 +373,27 @@ first fixes it too. A never-used write that deleted the clock's stamps
 without reading the clock deadlocked even with a clock-first teardown;
 reading the clock first fixed it.
 
+A subscription create for a clock customer is the third writer that meets
+a teardown (amended 2026-10-26, third review of #1386). Its insert's
+foreign keys lock the customer row and then the clock row. A create that
+inserted while a teardown held the clock waited there holding the
+customer, and the teardown then waited to delete that customer: a
+real-Postgres test aborted one with `40P01`. So a create reads its clock
+`FOR KEY SHARE` before the insert, waits at the clock holding nothing the
+teardown deletes, and answers 404 when the teardown took the customer.
+
+**A price write reads the test clocks before its plan** (amended
+2026-10-25, review of #1386). A teardown holds its clock `FOR UPDATE` while
+it waits to delete a subscription row. A subscription writer holding that
+row next takes its plans `FOR KEY SHARE`. A price write that held the plan
+`FOR UPDATE` while it waited for the clock closed a three-party cycle: a
+real-Postgres test aborted the teardown with `40P01`. So a price write
+takes the clocks `FOR SHARE` first, then its plan. This is safe because
+every transaction that locks a clock row exclusively (a teardown, a clock
+state change) takes the clock first and holds no plan, and `FOR SHARE`
+does not conflict with an override write's `FOR SHARE` read of its
+customer's clock.
+
 PR-0b (#1367, merged as `c234a364`) brought step 2 to every subscription
 writer. It fixed a deadlock it reproduced on main. D05's meter edit takes
 plans in ascending id. An immediate swap from plan A to plan B took B and
@@ -404,8 +429,14 @@ lock with the rule tables.
 ### 10. Customer usage, the cost dashboard and margin (PR-4)
 
 - **Current period: exact.** Each subscription is priced by the close's
-  own rater over its windows, floors, threshold watermark and ladder. The
-  customer page then matches the invoice and the live balance.
+  own rater over its windows, floors and ladder, for the whole period: usage
+  a threshold invoice already billed is counted, as the period's daily
+  chart counts it. The live balance's unbilled usage is the part the close
+  will still bill (amended 2026-10-25, second review of #1386). With two
+  subscriptions on different billing days, the response's period runs
+  from the earliest start to the latest end of their periods, and each
+  meter's daily chart is read over its own subscription's period
+  (amended 2026-10-25, review of #1386).
 - **An explicit `?from=&to=` window: an estimate,** labelled so. Each
   subscription's windows are clipped to it and priced at its current
   period's pin. Past periods are not priced at their own pins. Nothing
@@ -650,16 +681,44 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   write (section 7), and one ingest `no_price` flag can be wrong (section
   12).
 - **A test-clock teardown is outside the lock order.** It takes its clock
-  row first, which orders it against price and override writes (section
-  8).
+  row first, which orders it against price writes, override writes and
+  subscription creates on the clock (section 8).
 - **Price add against a concurrent subscription create is check-then-act.**
   A price for a meter new to a used plan runs the overlap check for every
-  customer on the plan (409 `meter_overlap`). A subscription created on
-  another plan at the same moment is not ordered with it. The same class
+  customer on the plan (409 `meter_overlap`). A writer that puts a plan on
+  an item checks again on its own transaction, after it holds the plan
+  `FOR KEY SHARE`, so a price and an item on the same plan are ordered by
+  the plan lock, used or never-used (amended 2026-10-25, second review of
+  #1386). A subscription created on another plan at the same moment is
+  not ordered with it. The same class
   as two concurrent subscription creates today; it joins ADR-100's
   deferred locks. Trigger: the first account with several operators.
 - **A new subscriber later on the day of an edit** pays the old price for
-  the first period, because the pin is the period start, a midnight.
+  the first period, because the pin is the period start, a midnight. The
+  same holds for an add and a removal: that first period does not bill a
+  price added that day, and still bills a price removed that day. It holds
+  for an override too: one created on the day the customer's subscription
+  starts, before or after it, applies from its second period, and the
+  first period bills the price's rate (third review of #1386). The
+  pricing guide, the API reference, the plan page and the customer's
+  override dialog say so. Pinning a
+  first period at the subscription's start instead was dropped in the
+  panel (a second pin rule); it is an open owner decision from the review
+  of #1386.
+- **A subscriber who moves to a plan mid-period** (an immediate swap, or an
+  added item) is priced, for the rest of that period, by the plan's prices
+  at the subscriber's period start, because every window of a period uses
+  the period's pin (section 4 step 3). A rate edited earlier in the period
+  bills at the old rate, a price removed earlier still bills, and a meter
+  the plan first priced earlier in the period bills nothing that period,
+  with no unpriced warning or counter: the plan did not price the meter at
+  the pin. An immediate swap from a plan with another billing interval is
+  the exception: it starts a new period at the swap, pinned there, so the
+  mover pays the plan's prices as they are at the swap (third review of
+  #1386). The pricing guide, the API reference and the plan page say so.
+  Pinning each window at its own start would fix this and the same-day
+  case together; it is part of the same open owner decision (second review
+  of #1386).
   (A spend threshold with `reset_billing_cycle=true` used to start a period
   at the invoice's own instant. *Removed 2026-10-23 in its own PR (#1371): a
   threshold invoice no longer starts a period, so PR-4 carries no reset

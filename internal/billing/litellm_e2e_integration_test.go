@@ -187,16 +187,22 @@ func TestLiteLLM_WedgeE2E(t *testing.T) {
 	}
 
 	// 3b. Verify the events landed with the canonical family + token roles.
-	rules, err := pricing.NewPostgresStore(db).ListMeterPricingRulesByMeter(ctx, tenantID, plan.MeterIDs[0])
-	if err != nil {
-		t.Fatalf("list rules: %v", err)
+	prices, err := pricing.NewPostgresStore(db).PlanPricesAt(ctx, tenantID, plan.ID, periodStart, "")
+	if err != nil || len(prices) == 0 {
+		t.Fatalf("plan prices: %v (%d)", err, len(prices))
 	}
-	events, err := usageStore.AggregateClaims(ctx, tenantID, cust.ID, plan.MeterIDs[0], domain.AggregationSum, domain.ClaimsOfRules(rules), periodStart, periodEnd)
+	events, err := usageStore.AggregateClaims(ctx, tenantID, cust.ID, prices[0].MeterID, domain.AggregationSum, domain.ClaimsOf(prices), periodStart, periodEnd)
 	if err != nil {
-		t.Fatalf("aggregate by rules: %v", err)
+		t.Fatalf("aggregate by price: %v", err)
 	}
-	if len(events) == 0 {
-		t.Fatal("no rule aggregations — events didn't match recipe rules (model normalization failed?)")
+	claimed := 0
+	for _, e := range events {
+		if e.PriceID != "" {
+			claimed++
+		}
+	}
+	if claimed == 0 {
+		t.Fatal("no price took an event — events didn't match the recipe prices (model normalization failed?)")
 	}
 
 	// 4. Run the cycle → invoice for the elapsed period.

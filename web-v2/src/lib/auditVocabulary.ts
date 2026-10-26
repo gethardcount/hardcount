@@ -206,7 +206,7 @@ export const DEFAULT_RESOURCE_TYPES = [
   'credit', 'credit_note', 'api_key', 'billing', 'billing_profile',
   'payment_method', 'dunning_policy', 'dunning_run', 'test_clock',
   'webhook_endpoint', 'webhook_event', 'stripe_credentials',
-  'price_override', 'rating_rule', 'meter_pricing_rule',
+  'price_override', 'plan_price',
   // Emitted by the ADR-090 in-tx writers. (The dropdown normally comes from
   // /filters — these only matter as the empty-log fallback.) Historical rows
   // from the retired catch-all used the hyphenated 'provider-cost'; the

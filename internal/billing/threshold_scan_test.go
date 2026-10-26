@@ -91,17 +91,13 @@ func setupThresholdEngine(thresholds *domain.BillingThresholds, usageQty int64) 
 				ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 				BillingInterval: domain.BillingMonthly,
 				BaseAmountCents: 4900,
-				MeterIDs:        []string{"mtr_api"},
 			},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {
-				ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingPerUnit,
-				UnitAmountCents: decimal.NewFromInt(100), // 1 cent / call (in basis-of-100 — 100 = $1)
-			},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(100)})},
 		},
 	}
 
@@ -679,12 +675,9 @@ func TestFireThreshold_ZeroTotal_AutoPaid(t *testing.T) {
 	pln := mp.plans["pln_1"]
 	pln.BaseAmountCents = 0
 	mp.plans["pln_1"] = pln
-	rule := mp.rules["rrv_api"]
-	rule.UnitAmountCents = decimal.Zero
-	// The fixture's currency normally rides the base line (plan.Currency);
-	// with base gone the $0 usage line must carry it.
-	rule.Currency = "USD"
-	mp.rules["rrv_api"] = rule
+	// A price takes the plan's currency, so the $0 usage line carries it
+	// with the base gone.
+	mp.prices["pln_1"][0].UnitAmountCents = decimal.Zero
 
 	fired, errs := engine.ScanThresholds(context.Background(), 50)
 	if len(errs) != 0 {

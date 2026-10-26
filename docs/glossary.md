@@ -34,8 +34,8 @@ Words used in the Velox docs and dashboard. For the big picture, read
 
 - **meter**: A counter for one kind of usage you charge for, such as tokens
   or API requests. Each meter has a unique `event_name`, a unit, one way to
-  combine readings (its aggregation: `sum`, `count`, `max` or `last`), and
-  optionally a default rating rule. Every price of the meter bills under its
+  combine readings (its aggregation: `sum`, `count`, `max` or `last`). A
+  meter only counts: plans price it. Every price of the meter bills under its
   aggregation, which is fixed once the meter has a usage event (held usage
   does not count). Usage events name the meter by its `event_name`.
   [More](how-velox-works.md)
@@ -45,30 +45,33 @@ Words used in the Velox docs and dashboard. For the big picture, read
   resent event is not counted twice, and it can carry dimensions.
   [More](api-surface.md)
 - **dimensions (on a usage event)**: Labels on a usage event, such as
-  `model` or `token_type`, as key-value pairs. Pricing rules match on them,
-  so one meter can be priced at many rates. Up to 16 keys, and each value is
+  `model` or `token_type`, as key-value pairs. Prices match on them, so one
+  meter can be priced at many rates. Up to 16 keys, and each value is
   a single value (text, number, true/false or null), never a list or an
   object. [More](ai-pricing.md#how-velox-picks-the-price-for-an-event)
-- **pricing rule**: A rule on a meter that picks the usage events to price.
-  It takes the events whose dimensions contain every key-value pair in its
-  `dimension_match`. It combines them into one quantity (sum, count, max or
-  last value) and prices that quantity with a rating rule. If rules overlap,
-  the highest-priority rule claims each event, so nothing counts twice.
-  [More](ai-pricing.md#how-velox-picks-the-price-for-an-event)
-- **rating rule**: A price formula that turns a usage quantity into money:
-  a price per unit (`per_unit`), graduated tiers (`graduated`), or
-  fixed-size packages (`package`; a part package bills as a whole one). It is
-  identified by its `rule_key` and has versions. Billing uses the version
-  that was active when the period opened, so a new version takes effect
-  next period. [More](adr/070-price-change-semantics.md)
+- **price**: One usage rate of a plan. It names a meter and the labels an
+  event must carry for the price to take it (`dimension_match`; none takes
+  every event). Its rate is a price per unit (`per_unit`), graduated tiers
+  (`graduated`), or fixed-size packages (`package`; a part package bills as
+  a whole one). It
+  takes the plan's currency. When an event fits more than one price of the
+  plan, the price with the most labels takes it, so nothing counts twice. A
+  billing period is priced as the plan's prices were when it started.
+  [More](adr/130-usage-prices-belong-to-the-plan.md)
+- **used plan**: A plan that a subscription has used, canceled ones
+  included. A price change on a used plan applies from each subscriber's next
+  billing period; on a plan no one has used, at once.
+- **no_price**: Usage of a meter that no price of the customer's plan
+  takes. Velox records it and bills nothing for it.
+  [More](ops/runbook/usage-with-no-price.md)
 - **plan**: A price package you sell: a currency, a billing interval
-  (monthly or yearly), a fixed base fee, and the meters it charges usage
-  for. A subscription has one or more items, each a plan with a quantity.
+  (monthly or yearly), a fixed base fee, and its usage prices. Its meters
+  are the meters it has a price for. A subscription has one or more items, each a plan with a quantity.
   A plan's status is active or archived. [More](features.md)
 - **recipe**: A ready-made pricing setup that one API call applies. The
   built-in ones are `anthropic_style`, `openai_style` and
-  `replicate_style`. A recipe creates meters, rating rules, pricing rules
-  and plans, and sets the tenant's dunning policy. It also adds a webhook
+  `replicate_style`. A recipe creates meters and a plan with its prices, and
+  sets the tenant's dunning policy. It also adds a webhook
   endpoint that stays inactive until you give it a real URL. Applying the
   same recipe again changes nothing. [More](quick-start.md#what-each-demo-step-does)
 - **idempotency key**: A unique string that makes a retry safe: the same

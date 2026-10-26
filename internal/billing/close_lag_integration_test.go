@@ -26,8 +26,8 @@ import (
 // call with clock.WithEffectiveNow, which is how the wall-clock billing run
 // sees it; no test clock is involved.
 
-// makeLastMeter makes the rig's meter a last meter with one pricing rule
-// that claims every event: the billed quantity is the latest event's in the
+// makeLastMeter makes the rig's meter a last meter. Its plan prices it with
+// one catch-all price: the billed quantity is the latest event's in the
 // period. Written past the API, which refuses an aggregation change once the
 // meter has events (ADR-130 §2): it stands for configuration made before the
 // period.
@@ -44,13 +44,6 @@ func (r *cancelRig) makeLastMeter(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	rule := r.f.seededRule(t, r.base)
-	seedPricingRule(t, r.f.db, r.base, r.f.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID:             r.f.meterID,
-		RatingRuleVersionID: rule.ID,
-		DimensionMatch:      map[string]any{},
-		Priority:            10,
-	})
 }
 
 func (r *cancelRig) ingestOne(t *testing.T, at time.Time, qty int64) {
@@ -68,8 +61,8 @@ func (r *cancelRig) ingestOne(t *testing.T, at time.Time, qty int64) {
 // boundary, and the billing run closes the period an hour after that. The
 // ended period's invoice must bill 10 (the value at the boundary), not 100.
 //
-// Mutation seam: drop the `e.timestamp < $5` bound from the claims in
-// usage/postgres.go (AggregateClaims) → the invoice bills 100.
+// Mutation seam: drop the `timestamp < $4` bound from the last-value read in
+// usage/postgres.go (AggregateForBillingPeriodByAgg) → the invoice bills 100.
 func TestLateClose_Last_BillsValueAsOfPeriodEnd(t *testing.T) {
 	r := newCancelRig(t, "close lag last")
 	r.makeLastMeter(t)
@@ -431,9 +424,9 @@ func TestCloseLag_WriteWhileBillingFails_Refused(t *testing.T) {
 func TestCloseLag_CrossIntervalSwap_OnEndedPeriod_RefusedInTx(t *testing.T) {
 	r := newCancelRig(t, "close lag swap backstop")
 	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	yearly, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
+	yearly, _, err := r.f.pricingSvc.CreatePlan(r.base, r.f.tenantID, pricing.CreatePlanInput{
 		Code: "pln_yearly", Name: "Yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
-		BaseAmountCents: 50000, MeterIDs: []string{r.f.meterID},
+		BaseAmountCents: 50000, BaseBillTiming: domain.BillInArrears, Prices: []pricing.PriceInput{{MeterID: r.f.meterID, PriceShape: perUnitShape("1")}},
 	})
 	if err != nil {
 		t.Fatalf("create yearly plan: %v", err)

@@ -751,14 +751,14 @@ type mockUsage struct {
 	// quantities per [from, to]. Key is "meterID|fromRFC3339|toRFC3339".
 	// Missing keys fall back to totals.
 	perInterval map[string]int64
-	// ruleAggs lets multi-dim tests stub per-pricing-rule buckets the way
-	// the real AggregateClaims returns them (one RuleAggregation
-	// per claimed rule). Keyed by meterID; when unset, the legacy
-	// single-bucket fallback below applies.
-	ruleAggs map[string][]domain.RuleAggregation
-	// ruleAggsByWindow stubs a meter's pricing-rule buckets for one
-	// [from, to), keyed like perInterval. Missing keys fall back to ruleAggs.
-	ruleAggsByWindow map[string][]domain.RuleAggregation
+	// priceAggs lets multi-price tests stub per-price buckets the way the
+	// real AggregateClaims returns them (one ClaimedUsage per price that
+	// took events). Keyed by meterID; when unset, the fallback below
+	// applies.
+	priceAggs map[string][]domain.ClaimedUsage
+	// priceAggsByWindow stubs a meter's price buckets for one [from, to),
+	// keyed like perInterval. Missing keys fall back to priceAggs.
+	priceAggsByWindow map[string][]domain.ClaimedUsage
 }
 
 func mockIntervalKey(meterID string, from, to time.Time) string {
@@ -793,42 +793,54 @@ func (m *mockUsage) AggregateForBillingPeriodByAgg(_ context.Context, _, _ strin
 	return result, nil
 }
 
-// AggregateClaims is a minimal stub — engine_test.go's existing
-// preview tests don't exercise the multi-dim path; the create_preview
-// integration tests cover that against real Postgres. We return one
-// aggregation per known meter so the new preview path produces the same
-// totals the legacy tests expect.
-func (m *mockUsage) AggregateClaims(_ context.Context, _, _, meterID, _ string, _ []domain.UsageClaim, from, to time.Time) ([]domain.RuleAggregation, error) {
-	if aggs, ok := m.ruleAggsByWindow[mockIntervalKey(meterID, from, to)]; ok {
+// AggregateClaims answers the stubbed buckets, else the meter's total
+// (perInterval, then totals) as the real store answers events with no
+// labels: the catch-all price of the claims takes them, and with none they
+// are unclaimed.
+func (m *mockUsage) AggregateClaims(_ context.Context, _, _, meterID, _ string, claims []domain.UsageClaim, from, to time.Time) ([]domain.ClaimedUsage, error) {
+	if aggs, ok := m.priceAggsByWindow[mockIntervalKey(meterID, from, to)]; ok {
 		return aggs, nil
 	}
-	if aggs, ok := m.ruleAggs[meterID]; ok {
+	if aggs, ok := m.priceAggs[meterID]; ok {
 		return aggs, nil
 	}
-	qty, ok := m.totals[meterID]
+	qty, ok := m.perInterval[mockIntervalKey(meterID, from, to)]
 	if !ok {
-		return nil, nil
+		if qty, ok = m.totals[meterID]; !ok {
+			return nil, nil
+		}
 	}
-	return []domain.RuleAggregation{{
-		RuleID:              "",
-		RatingRuleVersionID: "",
-		Quantity:            decimal.NewFromInt(qty),
-	}}, nil
+	priceID := ""
+	for _, c := range claims {
+		if len(c.Match) == 0 {
+			priceID = c.PriceID
+			break
+		}
+	}
+	return []domain.ClaimedUsage{{PriceID: priceID, Quantity: decimal.NewFromInt(qty)}}, nil
 }
 
 type mockPricing struct {
-	plans     map[string]domain.Plan
-	meters    map[string]domain.Meter
-	rules     map[string]domain.RatingRuleVersion
-	overrides map[string]domain.CustomerPriceOverride // key: customerID+":"+ruleKey
-	// overrideErr, when set, is returned by GetOverrideByKeyAsOf —
-	// drives the fail-loud regression (a transient override-lookup
-	// failure must ABORT the close, never bill list price; ADR-070).
+	plans  map[string]domain.Plan
+	meters map[string]domain.Meter
+	// prices are each plan's prices, by plan id. The unit fixtures have no
+	// versions: a price is in force at every pin.
+	prices    map[string][]domain.PlanPrice
+	overrides map[string]domain.CustomerPriceOverride // key: customerID+":"+priceID
+	// overrideErr, when set, is returned by GetOverrideAt — drives the
+	// fail-loud regression (a transient override-lookup failure must ABORT
+	// the close, never bill list price).
 	overrideErr error
-	// meterPricingRules drives the multi-dim fork (ADR-044): meters with
-	// entries here take the AggregateClaims path. Keyed by meterID;
-	// nil/missing keeps the meter on the legacy single-rule path.
-	meterPricingRules map[string][]domain.MeterPricingRule
+	// pricesErr, when set, is returned by PlanPricesAt.
+	pricesErr error
+}
+
+func clonePlans(p map[string]domain.Plan) map[string]domain.Plan {
+	out := make(map[string]domain.Plan, len(p))
+	for k, v := range p {
+		out[k] = v
+	}
+	return out
 }
 
 func (m *mockPricing) GetPlan(_ context.Context, _, id string) (domain.Plan, error) {
@@ -847,61 +859,43 @@ func (m *mockPricing) GetMeter(_ context.Context, _, id string) (domain.Meter, e
 	return meter, nil
 }
 
-func (m *mockPricing) GetRatingRule(_ context.Context, _, id string) (domain.RatingRuleVersion, error) {
-	r, ok := m.rules[id]
-	if !ok {
-		return domain.RatingRuleVersion{}, fmt.Errorf("rule not found")
+// PlanPricesAt is the plan's prices in claim order, as the store answers.
+func (m *mockPricing) PlanPricesAt(_ context.Context, _, planID string, _ time.Time, _ string) ([]domain.PlanPrice, error) {
+	if m.pricesErr != nil {
+		return nil, m.pricesErr
 	}
-	return r, nil
+	out := append([]domain.PlanPrice(nil), m.prices[planID]...)
+	for i := range out {
+		out[i].PlanID = planID
+	}
+	domain.ClaimOrder(out)
+	return out, nil
 }
 
-// GetRuleByKeyAsOf mirrors the store's ADR-070 resolution: highest
-// active version created at or before asOf; a key born after asOf
-// resolves to its earliest active version. Mock rules usually leave
-// CreatedAt zero, which sorts before any asOf — i.e. "always in force".
-func (m *mockPricing) GetRuleByKeyAsOf(_ context.Context, _, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
-	var best, earliest domain.RatingRuleVersion
-	foundBest, foundAny := false, false
-	for _, r := range m.rules {
-		if r.RuleKey != ruleKey {
-			continue
-		}
-		if r.LifecycleState != "" && r.LifecycleState != domain.RatingRuleActive {
-			continue
-		}
-		if !foundAny || r.Version < earliest.Version {
-			earliest = r
-			foundAny = true
-		}
-		if !r.CreatedAt.After(asOf) && (!foundBest || r.Version > best.Version) {
-			best = r
-			foundBest = true
-		}
-	}
-	if foundBest {
-		return best, nil
-	}
-	if foundAny {
-		return earliest, nil
-	}
-	return domain.RatingRuleVersion{}, errs.ErrNotFound
-}
-
-func (m *mockPricing) GetOverrideByKeyAsOf(_ context.Context, _, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error) {
+func (m *mockPricing) GetOverrideAt(_ context.Context, _, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error) {
 	if m.overrideErr != nil {
 		return domain.CustomerPriceOverride{}, m.overrideErr
 	}
-	o, ok := m.overrides[customerID+":"+ruleKey]
-	if !ok || o.CreatedAt.After(asOf) {
+	o, ok := m.overrides[customerID+":"+priceID]
+	if !ok || o.CreatedAt.After(at) {
 		return domain.CustomerPriceOverride{}, errs.ErrNotFound
 	}
 	return o, nil
 }
 
-// ListMeterPricingRulesByMeter returns the configured multi-dim rules for a
-// meter (nil for legacy single-rule meters — the default for most tests).
-func (m *mockPricing) ListMeterPricingRulesByMeter(_ context.Context, _, meterID string) ([]domain.MeterPricingRule, error) {
-	return m.meterPricingRules[meterID], nil
+// perUnit is a per_unit catch-all price of meterID at cents.
+func perUnit(id, meterID string, cents int64) domain.PlanPrice {
+	return domain.PlanPrice{ID: id, MeterID: meterID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(cents)}}
+}
+
+// priceOf is a catch-all price of meterID with shape.
+func priceOf(id, meterID string, shape domain.PriceShape) domain.PlanPrice {
+	return domain.PlanPrice{ID: id, MeterID: meterID, PriceShape: shape}
+}
+
+// priceWith is a price of meterID that takes the events match names.
+func priceWith(id, meterID string, match map[string]string, shape domain.PriceShape) domain.PlanPrice {
+	return domain.PlanPrice{ID: id, MeterID: meterID, DimensionMatch: match, PriceShape: shape}
 }
 
 type mockInvoices struct {
@@ -1506,24 +1500,19 @@ func setupEngine() (*Engine, *mockSubs, *mockUsage, *mockPricing, *mockInvoices)
 				ID: "pln_1", Name: "Pro Plan", Currency: "USD",
 				BillingInterval: domain.BillingMonthly,
 				BaseAmountCents: 4900,
-				MeterIDs:        []string{"mtr_api", "mtr_storage"},
 			},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api":     {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"},
-			"mtr_storage": {ID: "mtr_storage", Name: "Storage", Unit: "GB", RatingRuleVersionID: "rrv_storage"},
+			"mtr_api":     {ID: "mtr_api", Name: "API Calls", Unit: "calls"},
+			"mtr_storage": {ID: "mtr_storage", Name: "Storage", Unit: "GB"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {
-				ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingGraduated,
-				Tiers: []domain.RatingTier{
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {
+				priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
 					{UpTo: new(int64(1000)), UnitAmountCents: decimal.NewFromInt(10)},
 					{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
-				},
-			},
-			"rrv_storage": {
-				ID: "rrv_storage", RuleKey: "storage_gb", Version: 1, Mode: domain.PricingPerUnit,
-				UnitAmountCents: decimal.NewFromInt(2500),
+				}}),
+				perUnit("prc_storage", "mtr_storage", 2500),
 			},
 		},
 	}
@@ -1998,8 +1987,8 @@ func TestRunCycle_LineItemDetails(t *testing.T) {
 				if item.PricingMode != "graduated" {
 					t.Errorf("API pricing_mode: got %q, want graduated", item.PricingMode)
 				}
-				if item.RatingRuleVersionID != "rrv_api" {
-					t.Errorf("API rule_id: got %q, want rrv_api", item.RatingRuleVersionID)
+				if item.PriceID != "prc_api" {
+					t.Errorf("API price_id: got %q, want prc_api", item.PriceID)
 				}
 			}
 			if item.MeterID == "mtr_storage" {
@@ -2078,14 +2067,14 @@ func TestPreview_OverrideLookupTransientError_Aborts(t *testing.T) {
 func TestRunCycle_WithPriceOverride(t *testing.T) {
 	engine, _, _, pricing, invoices := setupEngine()
 
-	// Set a per-customer override: API calls flat $50 instead of graduated.
-	// Keyed by rule_key (ADR-070) — the override follows the rule across
-	// version publishes.
+	// Set a per-customer override: API calls per_unit $50 instead of
+	// graduated. Keyed by price (ADR-130 §6): the override follows the price
+	// across content edits.
 	pricing.overrides = map[string]domain.CustomerPriceOverride{
-		"cus_1:api_calls": {
-			ID: "cpo_1", CustomerID: "cus_1", RuleKey: "api_calls", RatingRuleVersionID: "rrv_api",
-			Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5000),
-			Active: true,
+		"cus_1:prc_api": {
+			ID: "cpo_1", CustomerID: "cus_1", PriceID: "prc_api",
+			PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5000)},
+			Active:     true,
 		},
 	}
 
@@ -2152,20 +2141,17 @@ func TestRunCycle_UnitAmountRoundsBankers(t *testing.T) {
 			"pln_1": {
 				ID: "pln_1", Name: "Round Plan", Currency: "USD",
 				BillingInterval: domain.BillingMonthly,
-				BaseAmountCents: 0, MeterIDs: []string{"mtr_api"},
+				BaseAmountCents: 0,
 			},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls", RatingRuleVersionID: "rrv_api"},
+			"mtr_api": {ID: "mtr_api", Name: "API Calls", Unit: "calls"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {
-				ID: "rrv_api", RuleKey: "api_calls", Version: 1, Mode: domain.PricingGraduated,
-				Tiers: []domain.RatingTier{
-					{UpTo: new(int64(1)), UnitAmountCents: decimal.NewFromInt(100)},
-					{UpTo: nil, UnitAmountCents: decimal.NewFromInt(50)},
-				},
-			},
+		prices: map[string][]domain.PlanPrice{
+			"pln_1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+				{UpTo: new(int64(1)), UnitAmountCents: decimal.NewFromInt(100)},
+				{UpTo: nil, UnitAmountCents: decimal.NewFromInt(50)},
+			}})},
 		},
 	}
 	invoices := &mockInvoices{}
@@ -2780,12 +2766,11 @@ func TestRunCycle_OneSubFailsOthersContinue(t *testing.T) {
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_ok":  {ID: "pln_ok", Name: "Flat", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 1000},
-			"pln_bad": {ID: "pln_bad", Name: "Broken", Currency: "USD", BillingInterval: domain.BillingMonthly, MeterIDs: []string{"mtr_missing"}},
+			"pln_bad": {ID: "pln_bad", Name: "Broken", Currency: "USD", BillingInterval: domain.BillingMonthly},
 		},
-		// mtr_missing references rrv_missing which isn't in rules — lookup fails
-		meters: map[string]domain.Meter{
-			"mtr_missing": {ID: "mtr_missing", Name: "Missing", RatingRuleVersionID: "rrv_missing"},
-		},
+		// pln_bad prices mtr_missing, which isn't in meters — the meter read
+		// fails.
+		prices: map[string][]domain.PlanPrice{"pln_bad": {perUnit("prc_missing", "mtr_missing", 1)}},
 	}
 	invoices := &mockInvoices{}
 	usage := &mockUsage{totals: map[string]int64{"mtr_missing": 100}}
@@ -4097,16 +4082,16 @@ func TestRunCycle_SegmentAware_UsageMetersDifferPerSegment(t *testing.T) {
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			// Zero base fees so the test isolates the usage assertion.
-			"pln_a": {ID: "pln_a", Name: "A", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_x"}},
-			"pln_b": {ID: "pln_b", Name: "B", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_y"}},
+			"pln_a": {ID: "pln_a", Name: "A", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears},
+			"pln_b": {ID: "pln_b", Name: "B", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 0, BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_x"},
-			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_y"},
+			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum"},
+			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_x": {ID: "rrv_x", RuleKey: "x_key", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5)},
-			"rrv_y": {ID: "rrv_y", RuleKey: "y_key", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(10)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_a": {perUnit("prc_x", "mtr_x", 5)},
+			"pln_b": {perUnit("prc_y", "mtr_y", 10)},
 		},
 	}
 
@@ -4208,17 +4193,17 @@ func TestRunCycle_ItemRemovedAfterPeriodEnd_BillsItsUsage(t *testing.T) {
 	pricing := &mockPricing{
 		plans: map[string]domain.Plan{
 			"pln_cur": {ID: "pln_cur", Name: "Current", Currency: "USD", BillingInterval: domain.BillingMonthly,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_x"}},
+				BaseBillTiming: domain.BillInArrears},
 			"pln_old": {ID: "pln_old", Name: "Removed", Currency: "USD", BillingInterval: domain.BillingMonthly,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_y"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
-			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_x"},
-			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum", RatingRuleVersionID: "rrv_y"},
+			"mtr_x": {ID: "mtr_x", Name: "Meter X", Unit: "unit", Aggregation: "sum"},
+			"mtr_y": {ID: "mtr_y", Name: "Meter Y", Unit: "unit", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_x": {ID: "rrv_x", RuleKey: "x_key", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(5)},
-			"rrv_y": {ID: "rrv_y", RuleKey: "y_key", Version: 1, Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(10)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_cur": {perUnit("prc_x", "mtr_x", 5)},
+			"pln_old": {perUnit("prc_y", "mtr_y", 10)},
 		},
 	}
 	usage := &mockUsage{totals: map[string]int64{"mtr_x": 100, "mtr_y": 50}}

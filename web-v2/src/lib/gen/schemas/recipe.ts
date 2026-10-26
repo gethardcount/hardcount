@@ -16,7 +16,7 @@ import type { RecipeRatingRule } from './recipeRatingRule';
 import type { RecipeWebhook } from './recipeWebhook';
 
 /**
- * A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata.
+ * A recipe template as served by list/detail: the full parsed YAML (meters, rating rules, pricing rules, plans, optional dunning policy and webhook), not just display metadata. An install turns the pricing rules into prices on its plans.
  */
 export interface Recipe {
   key: string;

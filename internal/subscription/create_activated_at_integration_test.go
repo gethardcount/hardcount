@@ -39,7 +39,7 @@ func TestCreate_StartNow_PersistsActivatedAt(t *testing.T) {
 	plan, err := pricing.NewPostgresStore(db).CreatePlan(ctx, tenantID, domain.Plan{
 		Code: "actat-monthly", Name: "ActAt Plan", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, BaseAmountCents: 2900,
-		Status: domain.PlanActive, MeterIDs: []string{},
+		Status: domain.PlanActive,
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

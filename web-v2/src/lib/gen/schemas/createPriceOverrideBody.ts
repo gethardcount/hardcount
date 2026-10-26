@@ -12,9 +12,9 @@ import type { CreatePriceOverrideBodyTiersItem } from './createPriceOverrideBody
 
 export type CreatePriceOverrideBody = {
   customer_id: string;
-  /** Any version of the rule to override. */
-  rating_rule_version_id: string;
-  /** As on `POST /v1/rating-rules`, also for the fields a mode does not use. */
+  /** The plan price to override. */
+  price_id: string;
+  /** As on PriceShape, also for the fields a mode does not use. */
   mode: CreatePriceOverrideBodyMode;
   /** Price per unit in cents, as a decimal string. Used when `mode` is `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros do not count), and at most 100 characters. A JSON number is also read. A value outside them is refused with 422 and `param` naming the field. */
   unit_amount_cents?: string;

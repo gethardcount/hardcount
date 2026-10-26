@@ -26,10 +26,13 @@ import (
 //
 //   - TestPriceShapes_ExpressibleBeforeBillUnchanged: every price that could
 //     be written before and can still be written bills exactly what it
-//     billed before. Its expected text was recorded on main (7b110a6c), so
-//     the same test passing on both builds is the proof. Its prices are
-//     written by the helpers at the bottom, the only part of this file that
-//     changes with the build.
+//     billed before. Its expected text was recorded on main (7b110a6c), when
+//     prices were rating rules on the meter, and is unchanged since: the same
+//     test passing before and after ADR-130 PR-4 moved prices to the plan is
+//     the proof. A line names its price by the name the case gave it, as it
+//     named its rating rule's key before. Its prices are written by the
+//     helpers at the bottom, the only part of this file that changes with
+//     the build.
 //   - TestPriceShapes_EachShapeBillsItsGolden: each shape, written in the
 //     API's words, bills the amounts worked out by hand in its comments. Red
 //     on main, which has none of these words.
@@ -47,7 +50,7 @@ type shapeEvent struct {
 // runPriceStory sends the events, reads every rating path, fires a spend
 // threshold, sends the events again, reads every path again and ends the
 // period (or cancels), then returns what each read and invoice billed. keys
-// names each rating rule version in the text. withMode adds each line's
+// names each price in the text. withMode adds each line's
 // pricing_mode.
 func runPriceStory(t *testing.T, lf *liveFixture, keys map[string]string, events []shapeEvent, cancel, withMode bool) string {
 	t.Helper()
@@ -79,7 +82,7 @@ func runPriceStory(t *testing.T, lf *liveFixture, keys map[string]string, events
 			}
 			sort.Strings(dm)
 			fmt.Fprintf(&out, "  line %s %q qty=%s unit=%d amount=%d%s rule=%s match=%s\n",
-				l.LineType, l.Description, l.Quantity.String(), l.UnitAmountCents, l.AmountCents, mode(l.PricingMode), l.RuleKey, strings.Join(dm, ","))
+				l.LineType, l.Description, l.Quantity.String(), l.UnitAmountCents, l.AmountCents, mode(l.PricingMode), keys[l.PriceID], strings.Join(dm, ","))
 		}
 		for _, tot := range p.Totals {
 			fmt.Fprintf(&out, "  total %+v\n", tot)
@@ -158,7 +161,7 @@ func runPriceStory(t *testing.T, lf *liveFixture, keys map[string]string, events
 		}
 		for _, l := range lines {
 			fmt.Fprintf(&out, "  line %s %q qty=%s unit=%d amount=%d%s rule=%s\n",
-				l.LineType, l.Description, l.QuantityDecimal.String(), l.UnitAmountCents, l.AmountCents, mode(l.PricingMode), keys[l.RatingRuleVersionID])
+				l.LineType, l.Description, l.QuantityDecimal.String(), l.UnitAmountCents, l.AmountCents, mode(l.PricingMode), keys[l.PriceID])
 		}
 	}
 	return out.String()
@@ -170,7 +173,7 @@ func TestPriceShapes_ExpressibleBeforeBillUnchanged(t *testing.T) {
 	}
 	cases := []struct {
 		name   string
-		price  func(t *testing.T, lf *liveFixture) map[string]string // rule id → key
+		price  func(t *testing.T, lf *liveFixture) map[string]string // price id → name
 		events []shapeEvent
 		tax    bool
 		cancel bool
@@ -178,10 +181,7 @@ func TestPriceShapes_ExpressibleBeforeBillUnchanged(t *testing.T) {
 		{
 			name: "per-unit decimal rate beside the meter's own rate",
 			price: func(t *testing.T, lf *liveFixture) map[string]string {
-				a := createRule(t, lf, shapePerUnit("model_a", "0.0035"))
-				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-					MeterID: lf.meterID, RatingRuleVersionID: a.ID, DimensionMatch: map[string]any{"model": "a"}, Priority: 10,
-				})
+				a := createRule(t, lf, map[string]string{"model": "a"}, shapePerUnit("model_a", "0.0035"))
 				return map[string]string{a.ID: "model_a"}
 			},
 			events: []shapeEvent{{"1234.5", "a"}, {"0.25", "a"}, {"999999.125", "a"}, {"33", "c"}},
@@ -229,7 +229,7 @@ func TestPriceShapes_ExpressibleBeforeBillUnchanged(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			lf := newLiveFixture(t, "Shapes unchanged "+tc.name, 0)
-			keys := map[string]string{lf.seededRule(t, lf.ctx).ID: "calls_flat"}
+			keys := map[string]string{lf.priceID: "calls_flat"}
 			for id, k := range tc.price(t, lf) {
 				keys[id] = k
 			}
@@ -249,8 +249,8 @@ func TestPriceShapes_ExpressibleBeforeBillUnchanged(t *testing.T) {
 }
 
 // TestPriceShapes_EachShapeBillsItsGolden: each shape, written in the API's
-// words (the JSON a POST /v1/rating-rules or /v1/price-overrides body
-// carries), on every rating path. The story sends the events, fires a spend
+// words (the JSON a POST /v1/plans/{plan_id}/prices or /v1/price-overrides
+// body carries), on every rating path. The story sends the events, fires a spend
 // threshold, sends them again and ends the period, so the second half shows
 // how a ladder continues past the threshold invoice. Each expected amount is
 // worked out by hand below; a line rounds once, half to even.
@@ -270,7 +270,7 @@ func TestPriceShapes_EachShapeBillsItsGolden(t *testing.T) {
 	}
 	cases := []struct {
 		name     string
-		rule     string // the meter's price, as a POST /v1/rating-rules body
+		rule     string // the plan's price, as the shape of a POST /v1/plans/{plan_id}/prices body
 		override string // a price override for the customer, as a POST /v1/price-overrides body without its ids
 		events   []shapeEvent
 		cancel   bool
@@ -280,7 +280,7 @@ func TestPriceShapes_EachShapeBillsItsGolden(t *testing.T) {
 			// 1000.5 units × 0.0035 = 3.50175 → 4 cents on each half; the
 			// flat window holds 2001 units: 7.0035 → 7.
 			name:   "per_unit at a decimal rate",
-			rule:   `{"rule_key":"calls_flat","name":"calls_flat","mode":"per_unit","currency":"USD","unit_amount_cents":"0.0035"}`,
+			rule:   `{"mode":"per_unit","unit_amount_cents":"0.0035"}`,
 			events: []shapeEvent{{"1000", ""}, {"0.5", ""}},
 			want: `open preview:
   line usage "Calls (calls)" qty=1000.5 unit=0 amount=4 mode=per_unit rule=calls_flat match=
@@ -310,7 +310,7 @@ invoice subscription_cycle: subtotal=4 tax=0 total=4
 			// 2060 units: 2750 + 1060 × 1.25 = 4075; the close bills
 			// 4075 − 2788 = 1287, so the period bills F(2060) in all.
 			name: "graduated, the last tier open, across the threshold invoice",
-			rule: `{"rule_key":"calls_flat","name":"calls_flat","mode":"graduated","currency":"USD","tiers":[
+			rule: `{"mode":"graduated","tiers":[
 				{"up_to":100,"unit_amount_cents":"5"},{"up_to":1000,"unit_amount_cents":"2.5"},{"up_to":null,"unit_amount_cents":"1.25"}]}`,
 			events: []shapeEvent{{"60", ""}, {"70", ""}, {"900", ""}},
 			want: `open preview:
@@ -340,7 +340,7 @@ invoice subscription_cycle: subtotal=1287 tax=0 total=1287
 			// 260 units: 3 packages = 361.5 → 362; the close bills
 			// 362 − 241 = 121.
 			name:   "package, a part package bills as a whole one",
-			rule:   `{"rule_key":"calls_flat","name":"calls_flat","mode":"package","currency":"USD","package_size":100,"package_amount_cents":"120.5"}`,
+			rule:   `{"mode":"package","package_size":100,"package_amount_cents":"120.5"}`,
 			events: []shapeEvent{{"60", ""}, {"70", ""}},
 			want: `open preview:
   line usage "Calls (calls)" qty=130 unit=2 amount=241 mode=package rule=calls_flat match=
@@ -370,7 +370,7 @@ invoice subscription_cycle: subtotal=121 tax=0 total=121
 			// units: 2 packages = 200. 200000.000000000002 units: 3
 			// packages = 300; the close bills 300 − 200 = 100.
 			name:   "package, a part package of 10^-12 at a large size",
-			rule:   `{"rule_key":"calls_flat","name":"calls_flat","mode":"package","currency":"USD","package_size":100000,"package_amount_cents":"100"}`,
+			rule:   `{"mode":"package","package_size":100000,"package_amount_cents":"100"}`,
 			events: []shapeEvent{{"100000.000000000001", ""}},
 			want: `open preview:
   line usage "Calls (calls)" qty=100000.000000000001 unit=0 amount=200 mode=package rule=calls_flat match=
@@ -400,7 +400,7 @@ invoice subscription_cycle: subtotal=100 tax=0 total=100
 			// 67. 120 units: 3 packages = 99.9 → 100; the cancel bills
 			// 100 − 67 = 33.
 			name:     "package override at a decimal amount, immediate cancel",
-			rule:     `{"rule_key":"calls_flat","name":"calls_flat","mode":"per_unit","currency":"USD","unit_amount_cents":"1"}`,
+			rule:     `{"mode":"per_unit","unit_amount_cents":"1"}`,
 			override: `"mode":"package","package_size":50,"package_amount_cents":"33.3","reason":"negotiated"`,
 			events:   []shapeEvent{{"20", ""}, {"40", ""}},
 			cancel:   true,
@@ -430,15 +430,15 @@ invoice subscription_cancel: subtotal=33 tax=0 total=33
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			lf := newLiveFixture(t, "Shapes golden "+tc.name, 0)
-			var in pricing.CreateRatingRuleInput
+			var in domain.PriceShape
 			if err := json.Unmarshal([]byte(tc.rule), &in); err != nil {
-				t.Fatalf("decode rule %s: %v", tc.rule, err)
+				t.Fatalf("decode price %s: %v", tc.rule, err)
 			}
-			v := publishCallsRule(t, lf, in)
-			keys := map[string]string{lf.seededRule(t, lf.ctx).ID: "calls_flat", v.ID: "calls_flat"}
+			v := publishCallsRule(t, lf, namedShape{"calls_flat", in})
+			keys := map[string]string{v.ID: "calls_flat"}
 			if tc.override != "" {
 				var oin pricing.CreateOverrideInput
-				body := `{"customer_id":"` + lf.customerID + `","rating_rule_version_id":"` + v.ID + `",` + tc.override + `}`
+				body := `{"customer_id":"` + lf.customerID + `","price_id":"` + v.ID + `",` + tc.override + `}`
 				if err := json.Unmarshal([]byte(body), &oin); err != nil {
 					t.Fatalf("decode override %s: %v", body, err)
 				}
@@ -587,8 +587,8 @@ invoice subscription_cycle: subtotal=966 tax=174 total=1140
 // The helpers below write a price that both builds can express, each in its
 // build's words. They are the only part of this file that changes.
 
-func shapePerUnit(key, cents string) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.RequireFromString(cents)}
+func shapePerUnit(name, cents string) namedShape {
+	return flatRule(name, cents)
 }
 
 // shapeTiers is a tier table: one tier up to each bound, then an open last
@@ -605,15 +605,15 @@ func shapeTiers(bounds []int64, rates ...string) []domain.RatingTier {
 	return tiers
 }
 
-func shapeGraduated(key string, bounds []int64, rates ...string) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingGraduated, Currency: "USD", Tiers: shapeTiers(bounds, rates...)}
+func shapeGraduated(name string, bounds []int64, rates ...string) namedShape {
+	return gradRule(name, shapeTiers(bounds, rates...))
 }
 
-func shapeWholePackage(key string, size, cents int64) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPackage, Currency: "USD", PackageSize: size, PackageAmountCents: decimal.NewFromInt(cents)}
+func shapeWholePackage(name string, size, cents int64) namedShape {
+	return namedShape{name, domain.PriceShape{Mode: domain.PricingPackage, PackageSize: size, PackageAmountCents: decimal.NewFromInt(cents)}}
 }
 
-func shapeGraduatedOverride(customerID, ruleID string, bounds []int64, rates ...string) pricing.CreateOverrideInput {
-	return pricing.CreateOverrideInput{CustomerID: customerID, RatingRuleVersionID: ruleID, Mode: domain.PricingGraduated,
-		Tiers: shapeTiers(bounds, rates...), Reason: "negotiated"}
+func shapeGraduatedOverride(customerID, priceID string, bounds []int64, rates ...string) pricing.CreateOverrideInput {
+	return pricing.CreateOverrideInput{CustomerID: customerID, PriceID: priceID,
+		PriceShape: domain.PriceShape{Mode: domain.PricingGraduated, Tiers: shapeTiers(bounds, rates...)}, Reason: "negotiated"}
 }

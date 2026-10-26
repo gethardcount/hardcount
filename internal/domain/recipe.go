@@ -7,8 +7,8 @@ import (
 )
 
 // RecipeInstance is the DB-backed record of a recipe being instantiated for
-// a tenant. The canonical entities a recipe creates (meters, rating rules,
-// pricing rules, plans, dunning policies, webhook endpoints) live in their
+// a tenant. The canonical entities a recipe creates (meters, plans and their
+// prices, dunning policies, webhook endpoints) live in their
 // own per-domain tables; RecipeInstance only tracks instantiation metadata
 // so we can answer "is this recipe already installed?" idempotently and
 // record what it created (CreatedObjects) for the dashboard's install badge.
@@ -34,9 +34,8 @@ type RecipeInstance struct {
 // any of these slices empty if its YAML doesn't declare that role.
 type CreatedObjects struct {
 	MeterIDs          []string `json:"meter_ids,omitempty"`
-	RatingRuleIDs     []string `json:"rating_rule_ids,omitempty"`
-	PricingRuleIDs    []string `json:"pricing_rule_ids,omitempty"`
 	PlanIDs           []string `json:"plan_ids,omitempty"`
+	PriceIDs          []string `json:"price_ids,omitempty"`
 	DunningPolicyID   string   `json:"dunning_policy_id,omitempty"`
 	WebhookEndpointID string   `json:"webhook_endpoint_id,omitempty"`
 }
@@ -128,4 +127,16 @@ type RecipeDunningPolicy struct {
 type RecipeWebhook struct {
 	Events         []string `json:"events"`
 	URLPlaceholder string   `json:"url_placeholder"`
+}
+
+// RecipePrice is one price a recipe install puts on a plan: the recipe's
+// pricing rule for the meter, with its rating rule's rate (ADR-130 §15: the
+// recipe YAML keeps rating rules and pricing rules until PR-5, and the
+// install translates them into plan prices). Prices take the plan's
+// currency.
+type RecipePrice struct {
+	PlanCode       string            `json:"plan_code"`
+	EventName      string            `json:"event_name"`
+	DimensionMatch map[string]string `json:"dimension_match"`
+	PriceShape
 }

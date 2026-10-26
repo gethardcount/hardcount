@@ -82,15 +82,14 @@ func TestRunCycle_FirstPeriod_CreationAddRow_BillsFullBase(t *testing.T) {
 		plans: map[string]domain.Plan{
 			"pln_i1": {ID: "pln_i1", Name: "I1 Multi-Meter", Currency: "USD",
 				BillingInterval: domain.BillingMonthly, BaseAmountCents: 2900,
-				BaseBillTiming: domain.BillInArrears, MeterIDs: []string{"mtr_api"}},
+				BaseBillTiming: domain.BillInArrears},
 		},
 		meters: map[string]domain.Meter{
 			"mtr_api": {ID: "mtr_api", EventName: "i1_api", Name: "I1 API Calls",
-				Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_api"},
+				Unit: "calls", Aggregation: "sum"},
 		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_api": {ID: "rrv_api", RuleKey: "i1_api_rate", Version: 1,
-				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)},
+		prices: map[string][]domain.PlanPrice{
+			"pln_i1": {priceOf("prc_api", "mtr_api", domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)})},
 		},
 	}
 	usage := &mockUsage{totals: map[string]int64{"mtr_api": 2000}}

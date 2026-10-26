@@ -16,6 +16,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/dunning"
+	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/integrations/litellm"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -40,6 +41,7 @@ type recipeTenant struct {
 	tenantID     string
 	customerID   string
 	subID        string
+	planID       string
 	meterID      string
 	pricingSvc   *pricing.Service
 	usageSvc     *usage.Service
@@ -80,8 +82,9 @@ func newRecipeTenant(t *testing.T, db *postgres.DB, name string) *recipeTenant {
 			plan = p
 		}
 	}
-	if plan.ID == "" || len(plan.MeterIDs) != 1 {
-		t.Fatalf("recipe plan not found or not on one meter: %+v", plan)
+	planMeters, err := pricingStore.PlanMeterIDs(ctx, tenantID, plan.ID)
+	if plan.ID == "" || err != nil || len(planMeters) != 1 {
+		t.Fatalf("recipe plan not found or not on one meter: %+v (meters %v, %v)", plan, planMeters, err)
 	}
 	cust, err := customerStore.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_fam", DisplayName: "Families"})
 	if err != nil {
@@ -103,7 +106,7 @@ func newRecipeTenant(t *testing.T, db *postgres.DB, name string) *recipeTenant {
 
 	return &recipeTenant{
 		t: t, db: db, ctx: ctx, authCtx: auth.WithTenantID(ctx, tenantID),
-		tenantID: tenantID, customerID: cust.ID, subID: sub.ID, meterID: plan.MeterIDs[0],
+		tenantID: tenantID, customerID: cust.ID, subID: sub.ID, planID: plan.ID, meterID: planMeters[0],
 		pricingSvc: pricingSvc, usageSvc: usageSvc, usageStore: usageStore,
 		invoiceStore: invoice.NewPostgresStore(db),
 		handler:      litellm.New(customerStore, pricingSvc, usageSvc, usageSvc),
@@ -133,23 +136,14 @@ func (rt *recipeTenant) spend(id, model string, prompt, cached, output int64) st
 	return rec.Body.String()
 }
 
-// priceRule makes a new rating rule and a pricing rule on the tokens meter.
-// The pricing rule is seeded past the meter-in-use guard: these tests check
-// which rule claims an event, and the tenant's subscription already exists.
-// A model_raw rule at 101 outranks the model rules, so the guard would refuse
-// it on a live meter (pricing/meter_edit_guard.go).
-func (rt *recipeTenant) priceRule(key, cents string, match map[string]any, priority int) {
+// priceRule adds a price for match to the recipe plan's tokens meter, in
+// force from before the period opened: these tests check which price takes
+// an event, and the tenant's subscription already exists (on a used plan an
+// added price takes part from the next period).
+func (rt *recipeTenant) priceRule(cents string, match map[string]string) {
 	rt.t.Helper()
-	rr, err := rt.pricingSvc.CreateRatingRule(rt.ctx, rt.tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: key, Name: key, Mode: domain.PricingPerUnit, Currency: "USD",
-		UnitAmountCents: decimal.RequireFromString(cents),
-	})
-	if err != nil {
-		rt.t.Fatalf("create rating rule %s: %v", key, err)
-	}
-	seedPricingRule(rt.t, rt.db, rt.ctx, rt.tenantID, pricing.UpsertMeterPricingRuleInput{
-		MeterID: rt.meterID, RatingRuleVersionID: rr.ID, DimensionMatch: match, Priority: priority,
-	})
+	p := addPrice(rt.t, rt.db, rt.ctx, rt.tenantID, rt.planID, priceOn{meterID: rt.meterID, match: match, shape: perUnitShape(cents)})
+	backdatePriceVersions(rt.t, rt.db, rt.ctx, p.ID, rt.periodStart.Add(-time.Hour))
 }
 
 // storeOldRow writes one event as the release before this change stored it.
@@ -246,7 +240,7 @@ func TestLiteLLM_ModelFamiliesE2E(t *testing.T) {
 		t.Errorf("unknown model's events: %+v, want one with model = the raw name", evs)
 	}
 	// ...until a price is added before the invoice is made.
-	rt.priceRule("opus49_input_by_hand", "0.0001", map[string]any{"model_raw": "claude-opus-4-9", "token_type": "input"}, 101)
+	rt.priceRule("0.0001", map[string]string{"model": "claude-opus-4-9", "token_type": "input"})
 
 	subtotal, lines := rt.close()
 	want := map[string]int64{
@@ -284,43 +278,51 @@ func TestLiteLLM_ModelFamiliesE2E(t *testing.T) {
 	}
 }
 
-// TestLiteLLM_StoredRowRepricedByModelRaw pins the docs' remedy for usage
-// stored before the upgrade (review F1): a Vertex Opus 4.6 call stored as
-// claude-opus-4 bills at Opus 4 prices unless a pricing rule on model_raw
-// claims it, and that rule must outrank the recipe's (priority 101). At
-// equal priority the older rule, the recipe's, wins.
+// TestLiteLLM_StoredRowRepricedByModelRaw: a Vertex Opus 4.6 call stored as
+// claude-opus-4 bills at Opus 4 prices unless a price that names model_raw
+// takes it. Priority is gone (ADR-130 §4), so such a price needs one more
+// label than the recipe's {model, token_type} price it refines; a
+// {model_raw, token_type} price beside it ties and is refused when saved,
+// naming the other price.
 func TestLiteLLM_StoredRowRepricedByModelRaw(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	for _, tc := range []struct {
-		priority  int
-		wantCents int64
-		wantDesc  string
-	}{
-		{101, 500, "Tokens (vertex_ai/claude-opus-4-6@default · input)"},
-		{100, 1500, "Tokens (claude-opus-4 · input)"},
-	} {
-		t.Run(fmt.Sprintf("priority_%d", tc.priority), func(t *testing.T) {
-			rt := newRecipeTenant(t, db, fmt.Sprintf("Stored Row Corp %d", tc.priority))
-			rt.storeOldRow("old_vertex:input", 1_000_000, map[string]any{
-				"model": "claude-opus-4", "model_raw": "vertex_ai/claude-opus-4-6@default",
-				"provider": "vertex_ai", "token_type": "input",
-			})
-			rt.priceRule("opus46_input_stored_vertex", "0.0005", map[string]any{
-				"model_raw": "vertex_ai/claude-opus-4-6@default", "token_type": "input",
-			}, tc.priority)
-			subtotal, lines := rt.close()
-			if subtotal != tc.wantCents || lines[tc.wantDesc] != tc.wantCents {
-				t.Errorf("subtotal %d¢, want %d¢ on %q. Lines:%s", subtotal, tc.wantCents, tc.wantDesc, dumpLines(lines))
-			}
+	const raw = "vertex_ai/claude-opus-4-6@default"
+	stored := func(rt *recipeTenant) {
+		rt.storeOldRow("old_vertex:input", 1_000_000, map[string]any{
+			"model": "claude-opus-4", "model_raw": raw, "provider": "vertex_ai", "token_type": "input",
 		})
 	}
+	t.Run("one more label wins", func(t *testing.T) {
+		rt := newRecipeTenant(t, db, "Stored Row Corp more")
+		stored(rt)
+		rt.priceRule("0.0005", map[string]string{"model": "claude-opus-4", "model_raw": raw, "token_type": "input"})
+		subtotal, lines := rt.close()
+		desc := "Tokens (claude-opus-4 · " + raw + " · input)"
+		if subtotal != 500 || lines[desc] != 500 {
+			t.Errorf("subtotal %d¢, want 500¢ on %q. Lines:%s", subtotal, desc, dumpLines(lines))
+		}
+	})
+	t.Run("equal labels refused", func(t *testing.T) {
+		rt := newRecipeTenant(t, db, "Stored Row Corp equal")
+		stored(rt)
+		_, err := pricing.NewPostgresStore(db).WritePrice(rt.ctx, rt.tenantID, rt.planID, pricing.PriceChange{
+			Op: pricing.PriceAdd, MeterID: rt.meterID, Match: map[string]string{"model_raw": raw, "token_type": "input"}, Shape: perUnitShape("0.0005"),
+		}, nil)
+		if errs.Code(err) != errs.CodePriceConflict || !strings.Contains(err.Error(), "vlx_prc_") {
+			t.Fatalf("a {model_raw, token_type} price beside {model, token_type}: got %v, want price_conflict naming the other price", err)
+		}
+		subtotal, lines := rt.close()
+		if subtotal != 1500 || lines["Tokens (claude-opus-4 · input)"] != 1500 {
+			t.Errorf("subtotal %d¢, want 1500¢ at the recipe's Opus 4 price. Lines:%s", subtotal, dumpLines(lines))
+		}
+	})
 }
 
 // TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule pins the docs' remedy
 // for usage stored under a raw name that now maps to a model (second review,
 // finding 3): such a row, here a Google Cloud dated Haiku 4.5 name, has no
 // price after the upgrade, while a new call with the same name bills at the
-// recipe price. A rule on model with the raw name bills the old row, and
+// recipe price. A price on model with the raw name bills the old row, and
 // only it: a new call carries the model's name in model.
 func TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -345,7 +347,7 @@ func TestLiteLLM_RawRowStoredBeforeUpgradeBilledByModelRule(t *testing.T) {
 			})
 			rt.spend("new_raw_haiku45", raw, 1_000_000, 0, 0)
 			if tc.addRule {
-				rt.priceRule("haiku45_input_stored_raw", "0.0001", map[string]any{"model": raw, "token_type": "input"}, 100)
+				rt.priceRule("0.0001", map[string]string{"model": raw, "token_type": "input"})
 			}
 			subtotal, lines := rt.close()
 			if subtotal != tc.wantSub {

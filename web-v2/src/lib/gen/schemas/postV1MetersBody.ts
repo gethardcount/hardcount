@@ -16,5 +16,4 @@ export type PostV1MetersBody = {
   unit?: string;
   /** How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event. */
   aggregation?: PostV1MetersBodyAggregation;
-  rating_rule_version_id?: string;
 };

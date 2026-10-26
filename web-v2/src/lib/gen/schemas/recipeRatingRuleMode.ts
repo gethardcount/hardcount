@@ -9,7 +9,7 @@
  */
 
 /**
- * As on RatingRule.
+ * As on PriceShape.
  */
 export type RecipeRatingRuleMode = typeof RecipeRatingRuleMode[keyof typeof RecipeRatingRuleMode];
 

@@ -23,7 +23,7 @@ import (
 // §2, amended 2026-10-24), so there is one message.
 func TestMeterAggregation_RefusalSaysWhatHoldsIt(t *testing.T) {
 	f := newMeterEditFixture(t)
-	m := f.meter(t, "agg_msg_events", "")
+	m := f.meter(t, "agg_msg_events")
 	f.event(t, m.ID)
 	f.held(t, "agg_msg_events", "held")
 	_, err := f.svc.UpdateMeter(f.ctx, f.tenantID, m.ID, pricing.UpdateMeterInput{Aggregation: ptr("max")})

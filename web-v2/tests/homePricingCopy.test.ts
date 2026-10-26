@@ -3,38 +3,54 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  basePriceZeroBlocked, deleteMatchedPriceSentence, meterInUseMessage, planLockedSentence,
+  planLockedSentence, planPricesNotice, priceRemoveSentence, priceWriteToast,
 } from '../src/lib/pricingCopy.ts'
-import { ApiError } from '../src/lib/api.ts'
 import { formatQuantity, quantityWithUnit, unitFor } from '../src/lib/usageQuantity.ts'
 import { setupChecklistState, showSimulatedTotalsNote, usageNoneYet } from '../src/lib/homeNotices.ts'
 
 test('plan lock names the server count, singular and plural, same words as the refusal', () => {
   assert.equal(
     planLockedSentence(1),
-    '1 subscription uses this plan, so its price, billing timing and meters are locked. Create a new plan with the new terms instead.',
+    '1 subscription uses this plan, so its base fee is fixed. Create a new plan with the new fee instead.',
   )
   assert.match(planLockedSentence(2), /^2 subscriptions use this plan,/)
   assert.match(planLockedSentence(1200), /^1,200 subscriptions use/)
 })
 
-test('base price back to 0 is blocked only when it is above 0 today', () => {
-  assert.equal(basePriceZeroBlocked('0', 4900), true)
-  assert.equal(basePriceZeroBlocked('', 4900), true)
-  assert.equal(basePriceZeroBlocked('0.001', 4900), true) // rounds to 0 cents
-  assert.equal(basePriceZeroBlocked('49', 4900), false)
-  assert.equal(basePriceZeroBlocked('0', 0), false) // already 0: nothing to change
+test('price changes say when they apply, before saving', () => {
+  assert.match(planPricesNotice(true), /next billing period/)
+  assert.match(planPricesNotice(true), /prices the plan had at its start/)
+  assert.match(planPricesNotice(true), /starts later today/)
+  assert.match(planPricesNotice(true), /moves to this plan or adds it partway through its period/)
+  // A move from a plan with another billing interval starts a new period at
+  // the move (applyCrossIntervalPlanSwapTx), so it is priced then.
+  assert.match(planPricesNotice(true), /usually midnight on its first day/)
+  assert.match(planPricesNotice(true), /another billing interval starts a new period then, so it gets a change at once/)
+  assert.match(planPricesNotice(false), /apply at once/)
 })
 
-test('deleting a matched price says where its events go', () => {
+test('the toast follows the server answer', () => {
+  assert.equal(priceWriteToast({ effective: 'now' }), 'Price saved.')
+  assert.equal(priceWriteToast({ effective: 'next_period' }), "Price saved, from each subscriber's next billing period.")
   assert.equal(
-    deleteMatchedPriceSentence('model=gpt-4', true),
-    "Events it matched (model=gpt-4) move to another matching price or the default price from the next invoice. Finalized invoices don't change.",
+    priceWriteToast({ effective: 'next_period', removed: true, ended_overrides: [{}, {}] }),
+    "Price removed, from each subscriber's next billing period. 2 customer overrides ended.",
   )
+})
+
+test('removing a price names the overrides it ends', () => {
   assert.equal(
-    deleteMatchedPriceSentence('model=gpt-4', false),
-    "Events it matched (model=gpt-4) go unbilled from the next invoice unless another price below matches them. Finalized invoices don't change.",
+    priceRemoveSentence(false, 0),
+    "It is removed at once. Its events go to another price of the plan that matches them, or aren't billed if none does. Adding the price back later doesn't bring the overrides back.",
   )
+  assert.match(priceRemoveSentence(true, 0), /^From each subscriber's next billing period/)
+  assert.match(priceRemoveSentence(true, 0), /starts later today/)
+  assert.match(priceRemoveSentence(true, 0), /moves to this plan or adds it partway through its period/)
+  assert.match(priceRemoveSentence(true, 0), /usually midnight on its first day/)
+  assert.match(priceRemoveSentence(true, 0), /another billing interval starts a new period then, so it doesn't pay this price/)
+  assert.match(priceRemoveSentence(true, 1), /ends 1 customer override of it/)
+  assert.match(priceRemoveSentence(true, 3), /ends 3 customer overrides of it/)
+  assert.match(priceRemoveSentence(true, null), /ends any customer override/)
 })
 
 test('quantities get thousands separators and stay exact', () => {
@@ -83,13 +99,4 @@ test('"Show setup checklist" is offered only when it would bring the pill back',
   assert.deepEqual(setupChecklistState(false, true, 5, 5), { showPill: false, offerShowAgain: false })
   // still loading: neither
   assert.deepEqual(setupChecklistState(true, false, 0, 5), { showPill: false, offerShowAgain: false })
-})
-
-test('the meter-in-use refusal is shown as the server wrote it; other errors are not', () => {
-  const msg = '2 subscriptions use meter "tokens", so the prices and aggregation that bill its usage are locked.'
-  assert.equal(meterInUseMessage(new ApiError(msg, 409, { code: 'meter_in_use' })), msg)
-  assert.equal(meterInUseMessage(new ApiError('Currency differs', 409, { code: 'invalid_state' })), null)
-  assert.equal(meterInUseMessage(new ApiError('', 409, { code: 'meter_in_use' })), null)
-  assert.equal(meterInUseMessage(new Error('boom')), null)
-  assert.equal(meterInUseMessage(undefined), null)
 })

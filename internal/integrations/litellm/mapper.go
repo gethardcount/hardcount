@@ -472,7 +472,7 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 	modelDim := fam.recipeToken
 	if !known {
 		modelDim = p.Model
-		slog.Warn("litellm: unknown model, kept under its raw name; its usage has no price until a pricing rule for that name exists (an unknown version is never priced as an older model)",
+		slog.Warn("litellm: unknown model, kept under its raw name; its usage has no price until a plan has a price for that name (an unknown version is never priced as an older model)",
 			"model", p.Model, "litellm_id", p.ID)
 	}
 	dims := map[string]any{

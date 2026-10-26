@@ -26,8 +26,8 @@ It does not carry the negative amount into a later period.
   written in the same transaction as the invoice, so a retried close writes
   it once. A close with nothing else to bill makes no invoice and still
   writes the row.
-- The rule applies to each meter, or to each pricing rule of a meter such
-  as one model of a tokens meter, on its own. Another meter's usage is not
+- The rule applies to each meter, or to each price of a meter such as one
+  model of a tokens meter, on its own. Another meter's usage is not
   reduced.
 - A common cause is a correction for usage that an earlier invoice already
   billed. The correction then lands in a later period, where there is less
@@ -47,9 +47,9 @@ curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER&from=$FROM&
 - Use the meter's `from` and `to`, not the period. They differ when a
   spend-threshold invoice already billed the start of the period, or when
   the meter was on the subscription for only part of it.
-- For a meter priced by pricing rules, `quantity` adds up only the
-  pricing rules whose usage was below zero. Group the meter's events by
-  the dimensions those rules match.
+- For a meter with several prices on the plan, `quantity` adds up only the
+  prices whose usage was below zero. Group the meter's events by the labels
+  those prices match.
 - Find the corrections (negative `quantity`) and the usage they correct.
   Their usage events may be in an earlier period.
 

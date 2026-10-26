@@ -7,6 +7,7 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
+import type { InvoiceLineItemDimensionMatch } from './invoiceLineItemDimensionMatch';
 import type { InvoiceLineItemMetadata } from './invoiceLineItemMetadata';
 import type { InvoiceLineType } from './invoiceLineType';
 
@@ -47,7 +48,10 @@ export interface InvoiceLineItem {
   currency: string;
   /** On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines. */
   pricing_mode?: string;
-  rating_rule_version_id?: string;
+  /** On a usage line, the plan price that billed it. Absent on other lines. */
+  price_id?: string;
+  /** On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines. */
+  dimension_match?: InvoiceLineItemDimensionMatch;
   /** @nullable */
   billing_period_start?: string | null;
   /** @nullable */

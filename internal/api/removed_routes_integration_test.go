@@ -36,18 +36,15 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
 	}
 
-	ruleID := flowStr(call("POST", "/v1/rating-rules", map[string]any{
-		"rule_key": "removed_calls", "name": "Removed calls", "mode": "per_unit",
-		"currency": "USD", "unit_amount_cents": 10,
-	}).want(t, 201, "create rating rule").body, "id")
 	meterID := flowStr(call("POST", "/v1/meters", map[string]any{
 		"event_name": "removed_calls", "name": "Removed calls", "unit": "call",
-		"aggregation": "sum", "rating_rule_version_id": ruleID,
+		"aggregation": "sum",
 	}).want(t, 201, "create meter").body, "id")
 	planID := flowStr(call("POST", "/v1/plans", map[string]any{
 		"code": "removed-plan", "name": "Removed Plan", "currency": "USD",
 		"billing_interval": "monthly", "base_amount_cents": 1000,
-		"base_bill_timing": "in_arrears", "meter_ids": []string{meterID},
+		"base_bill_timing": "in_arrears",
+		"prices":           []map[string]any{{"meter_id": meterID, "mode": "per_unit", "unit_amount_cents": "10"}},
 	}).want(t, 201, "create plan").body, "id")
 	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
 		"external_id": "removed-cust", "display_name": "Removed Routes Customer",
@@ -123,6 +120,24 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			method: "GET", path: "/v1/billing/preview/" + subID,
 			keptMethod: "POST", kept: "/v1/invoices/create_preview",
 			keptBody: map[string]any{"customer_id": customerID, "subscription_id": subID},
+		},
+		// ADR-130: usage prices belong to the plan.
+		{
+			name:   "rating rules",
+			method: "POST", path: "/v1/rating-rules",
+			body:       map[string]any{"rule_key": "calls", "name": "Calls", "mode": "per_unit", "currency": "USD", "unit_amount_cents": "1"},
+			keptMethod: "POST", kept: "/v1/plans/" + planID + "/prices",
+			keptBody: map[string]any{"meter_id": meterID, "dimension_match": map[string]any{"region": "eu"}, "mode": "per_unit", "unit_amount_cents": "2"},
+		},
+		{
+			name:   "meter pricing rules",
+			method: "GET", path: "/v1/meters/" + meterID + "/pricing-rules",
+			keptMethod: "GET", kept: "/v1/plans/" + planID + "/prices",
+		},
+		{
+			name:   "all meter pricing rules",
+			method: "GET", path: "/v1/meter-pricing-rules",
+			keptMethod: "GET", kept: "/v1/plans/" + planID + "/prices",
 		},
 	}
 	for _, tc := range cases {

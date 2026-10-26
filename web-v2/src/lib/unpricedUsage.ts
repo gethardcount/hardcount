@@ -1,7 +1,6 @@
 // Usage that matched no price on its meter. The server counts it in a
-// separate "unmatched" row per meter and bills nothing for it
-// (usage.CustomerUsageService.rateMeter). Its warning sentence names the
-// meter's event name and engine words ("matching no pricing rule"), so the dashboard
+// separate no_price row per meter and plan and bills nothing for it.
+// Its warning sentence names the meter's event name, so the dashboard
 // builds its own plain notice from the rows and keeps the server's words in
 // Details. Plain data so the unit tests can check it.
 
@@ -13,18 +12,18 @@ export interface UnpricedMeter {
 }
 
 export function unpricedMeters(
-  meters: { meter_id: string; meter_name: string; event_name: string; unit: string; rules: { unmatched?: boolean; quantity: string }[] }[],
+  meters: { meter_id: string; meter_name: string; event_name: string; unit: string; prices: { no_price?: boolean; quantity: string }[] }[],
 ): UnpricedMeter[] {
   const out: UnpricedMeter[] = []
   for (const m of meters) {
-    const quantity = m.rules.filter(r => r.unmatched).reduce((sum, r) => sum + Number(r.quantity), 0)
+    const quantity = m.prices.filter(r => r.no_price).reduce((sum, r) => sum + Number(r.quantity), 0)
     if (quantity > 0) out.push({ meterId: m.meter_id, meterName: m.meter_name || m.event_name, unit: m.unit, quantity })
   }
   return out
 }
 
 export const UNPRICED_TITLE = 'Some usage has no price'
-export const UNPRICED_SENTENCE = "Usage that matches no price isn't billed. Add a price for it on the meter."
+export const UNPRICED_SENTENCE = "Usage that matches no price isn't billed. Add a price for it on the plan."
 
 // "1,250 tokens on Tokens". The quantity is exact (up to 4 decimals), never
 // rounded to a friendlier number: it is the volume that is not billed.
@@ -44,12 +43,12 @@ export function unpricedLine(m: UnpricedMeter): string {
 export function meterQuantityLine(m: {
   unit: string
   total_quantity: string
-  rules: { unmatched?: boolean; quantity: string }[]
+  prices: { no_price?: boolean; quantity: string }[]
 }): string {
   const qty = (n: number) => `${n.toLocaleString('en-US', { maximumFractionDigits: 4 })}${m.unit ? ` ${m.unit}` : ''}`
   const billed = Number(m.total_quantity)
-  const notBilled = m.rules.filter(r => r.unmatched).reduce((sum, r) => sum + Number(r.quantity), 0)
-  const prices = m.rules.filter(r => !r.unmatched).length
+  const notBilled = m.prices.filter(r => r.no_price).reduce((sum, r) => sum + Number(r.quantity), 0)
+  const prices = m.prices.filter(r => !r.no_price).length
   const parts = notBilled > 0 ? [`${qty(billed)} billed`, `${qty(notBilled)} not billed`] : [qty(billed)]
   if (notBilled > 0 || prices > 1) {
     parts.push(prices === 0 ? 'no price matched' : `${prices} price${prices === 1 ? '' : 's'}`)

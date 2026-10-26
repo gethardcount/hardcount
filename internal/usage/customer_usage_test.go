@@ -12,7 +12,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/subscription"
 )
 
@@ -49,92 +48,43 @@ func (f *fakeSubLister) List(_ context.Context, filter subscription.ListFilter) 
 }
 
 type fakePricingReader struct {
-	plans      map[string]domain.Plan
-	meters     map[string]domain.Meter
-	rules      map[string]domain.RatingRuleVersion
-	pricingMap map[string][]domain.MeterPricingRule    // by meter id
-	overrides  map[string]domain.CustomerPriceOverride // key: customerID+":"+ruleKey
-}
-
-// GetRuleByKeyAsOf mirrors the store's ADR-070 resolution against the
-// fake's rules map: highest active version created at or before asOf,
-// else the earliest active version. Fixture rules with zero CreatedAt
-// are "always in force".
-func (f *fakePricingReader) GetRuleByKeyAsOf(_ context.Context, _, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error) {
-	var best, earliest domain.RatingRuleVersion
-	foundBest, foundAny := false, false
-	for _, r := range f.rules {
-		if r.RuleKey != ruleKey {
-			continue
-		}
-		if r.LifecycleState != "" && r.LifecycleState != domain.RatingRuleActive {
-			continue
-		}
-		if !foundAny || r.Version < earliest.Version {
-			earliest = r
-			foundAny = true
-		}
-		if !r.CreatedAt.After(asOf) && (!foundBest || r.Version > best.Version) {
-			best = r
-			foundBest = true
-		}
-	}
-	if foundBest {
-		return best, nil
-	}
-	if foundAny {
-		return earliest, nil
-	}
-	return domain.RatingRuleVersion{}, errs.ErrNotFound
-}
-
-func (f *fakePricingReader) GetOverrideByKeyAsOf(_ context.Context, _, customerID, ruleKey string, _ time.Time) (domain.CustomerPriceOverride, error) {
-	if o, ok := f.overrides[customerID+":"+ruleKey]; ok {
-		return o, nil
-	}
-	return domain.CustomerPriceOverride{}, errs.ErrNotFound
+	plans  map[string]domain.Plan
+	meters map[string]domain.Meter
 }
 
 func (f *fakePricingReader) GetPlan(_ context.Context, _, id string) (domain.Plan, error) {
-	if p, ok := f.plans[id]; ok {
-		return p, nil
+	p, ok := f.plans[id]
+	if !ok {
+		return domain.Plan{}, errs.ErrNotFound
 	}
-	return domain.Plan{}, errors.New("plan not found")
+	return p, nil
 }
 
 func (f *fakePricingReader) GetMeter(_ context.Context, _, id string) (domain.Meter, error) {
-	if m, ok := f.meters[id]; ok {
-		return m, nil
+	m, ok := f.meters[id]
+	if !ok {
+		return domain.Meter{}, errs.ErrNotFound
 	}
-	return domain.Meter{}, errors.New("meter not found")
+	return m, nil
 }
 
-func (f *fakePricingReader) GetRatingRule(_ context.Context, _, id string) (domain.RatingRuleVersion, error) {
-	if r, ok := f.rules[id]; ok {
-		return r, nil
-	}
-	return domain.RatingRuleVersion{}, errors.New("rating rule not found")
+// fakeRater answers each subscription's rated usage, and records which
+// read the service asked for.
+type fakeRater struct {
+	current map[string]domain.RatedSubscription
+	window  map[string]domain.RatedSubscription
+	calls   []string
 }
 
-func (f *fakePricingReader) ListMeterPricingRulesByMeter(_ context.Context, _, meterID string) ([]domain.MeterPricingRule, error) {
-	return f.pricingMap[meterID], nil
+func (f *fakeRater) RateCurrentPeriod(_ context.Context, sub domain.Subscription) (domain.RatedSubscription, error) {
+	f.calls = append(f.calls, "current:"+sub.ID)
+	return f.current[sub.ID], nil
 }
 
-// aggStore wraps memStore with a programmable AggregateClaims return.
-type aggStore struct {
-	*memStore
-	aggs map[string][]domain.RuleAggregation // by meter id
+func (f *fakeRater) RateWindow(_ context.Context, sub domain.Subscription, _, _ time.Time) (domain.RatedSubscription, error) {
+	f.calls = append(f.calls, "window:"+sub.ID)
+	return f.window[sub.ID], nil
 }
-
-func (a *aggStore) AggregateClaims(_ context.Context, _, _, meterID, _ string, _ []domain.UsageClaim, _, _ time.Time) ([]domain.RuleAggregation, error) {
-	return a.aggs[meterID], nil
-}
-
-func newAggStore() *aggStore {
-	return &aggStore{memStore: newMemStore(), aggs: map[string][]domain.RuleAggregation{}}
-}
-
-// ---------- resolvePeriod ---------
 
 func TestResolvePeriod(t *testing.T) {
 	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
@@ -318,379 +268,155 @@ func TestResolvePeriod(t *testing.T) {
 
 // ---------- Get end-to-end ---------
 
-func TestCustomerUsageService_Get_SingleMeterFlat(t *testing.T) {
-	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
-		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
-	}}
-	subs := &fakeSubLister{subs: []domain.Subscription{
-		{
-			ID:                        "sub_1",
-			TenantID:                  "t1",
-			CustomerID:                "cus_1",
-			Status:                    domain.SubscriptionActive,
-			CurrentBillingPeriodStart: &apr1,
-			CurrentBillingPeriodEnd:   &may1,
-			Items: []domain.SubscriptionItem{
-				{ID: "itm_1", PlanID: "pln_1", Quantity: 1},
-			},
-		},
-	}}
-	pricing := &fakePricingReader{
-		plans: map[string]domain.Plan{
-			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_1"}},
-		},
-		meters: map[string]domain.Meter{
-			"mtr_1": {
-				ID: "mtr_1", EventName: "tokens", Name: "Tokens",
-				Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1",
-			},
-		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_1": {
-				ID: "rrv_1", RuleKey: "tokens_flat", Mode: domain.PricingPerUnit,
-				Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-			},
-		},
-		pricingMap: map[string][]domain.MeterPricingRule{},
-	}
-	store := newAggStore()
-	store.aggs["mtr_1"] = []domain.RuleAggregation{
-		{RuleID: "", RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(1000)},
-	}
-	usageSvc := NewService(store)
-
-	svc := NewCustomerUsageService(usageSvc, customers, subs, pricing)
-	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if res.CustomerID != "cus_1" {
-		t.Errorf("customer_id: got %q", res.CustomerID)
-	}
-	if res.Period.Source != "current_billing_cycle" {
-		t.Errorf("period source: got %q", res.Period.Source)
-	}
-	if len(res.Subscriptions) != 1 {
-		t.Fatalf("subscriptions: got %d, want 1", len(res.Subscriptions))
-	}
-	if len(res.Meters) != 1 {
-		t.Fatalf("meters: got %d, want 1", len(res.Meters))
-	}
-	m := res.Meters[0]
-	if m.EventName != "tokens" || m.Currency != "USD" || m.TotalAmountCents != 1000 {
-		t.Errorf("meter: got %+v", m)
-	}
-	if len(res.Totals) != 1 || res.Totals[0].Currency != "USD" || res.Totals[0].AmountCents != 1000 {
-		t.Errorf("totals: got %+v", res.Totals)
-	}
-	if res.Warnings == nil {
-		t.Errorf("warnings: must be []string{} (non-nil for empty array on wire), got nil")
-	}
-}
-
-// The default window follows the customer's effective now (test-clock
-// frozen_time), and skips a trialing sub whose stored period — its first PAID
-// period — has not started. Customer on a clock frozen at 2027-03-10: sub A
-// active 2027-03-01 → 04-01, sub B trialing with first paid period
-// 2027-03-24 → 04-24. The default must be A's running cycle; before the fix
-// it was B's future one, so A's usage read $0. The dates are in the wall-clock
-// future, so a wall-clock "now" would also pick B: this proves the
-// clock-resolver wiring, not just resolvePeriod.
-func TestCustomerUsageService_Get_DefaultSkipsNotYetStartedTrialCycle(t *testing.T) {
-	mar1 := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	mar10 := time.Date(2027, 3, 10, 0, 0, 0, 0, time.UTC)
-	mar24 := time.Date(2027, 3, 24, 0, 0, 0, 0, time.UTC)
-	apr1 := time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)
-	apr24 := time.Date(2027, 4, 24, 0, 0, 0, 0, time.UTC)
-
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
-		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
-	}}
-	subs := &fakeSubLister{subs: []domain.Subscription{
-		{
-			ID: "sub_a", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
-			CurrentBillingPeriodStart: &mar1, CurrentBillingPeriodEnd: &apr1,
-		},
-		{
-			ID: "sub_b", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionTrialing,
-			CurrentBillingPeriodStart: &mar24, CurrentBillingPeriodEnd: &apr24,
-		},
-	}}
-	usageSvc := NewService(newAggStore())
-	usageSvc.SetResolver(&fakeResolver{frozen: map[string]time.Time{"cus_1": mar10}})
-	svc := NewCustomerUsageService(usageSvc, customers, subs, &fakePricingReader{})
-
-	ctx := postgres.WithLivemode(context.Background(), false) // test clocks are test-mode only
-	res, err := svc.Get(ctx, "t1", "cus_1", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !res.Period.From.Equal(mar1) || !res.Period.To.Equal(apr1) {
-		t.Errorf("default period: got %s → %s, want sub A's running cycle %s → %s (sub B's trial cycle starts %s, after the clock's %s)",
-			res.Period.From.Format(time.RFC3339), res.Period.To.Format(time.RFC3339),
-			mar1.Format(time.RFC3339), apr1.Format(time.RFC3339), mar24.Format(time.RFC3339), mar10.Format(time.RFC3339))
-	}
-}
-
-// The rule row carries the NOMINAL configured rate (what the invoice shows),
-// not the effective amount÷qty — the screenshot case: a flat rule at
-// 0.0015¢/token bills 1,750 tokens at 3¢ (2.625¢ rounded), whose effective rate
-// 0.001714…¢ ≠ nominal 0.0015¢. Regression lock for Activity-panel / invoice
-// unit-price consistency (ADR-054): the FE renders this backend value instead
-// of deriving amount÷qty (which rounded 0.0015¢ down to $0.0000).
-func TestCustomerUsageService_Get_RuleRowShowsNominalUnitRate(t *testing.T) {
-	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
-		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
-	}}
-	subs := &fakeSubLister{subs: []domain.Subscription{
-		{
-			ID: "sub_1", TenantID: "t1", CustomerID: "cus_1",
-			Status:                    domain.SubscriptionActive,
-			CurrentBillingPeriodStart: &apr1,
-			CurrentBillingPeriodEnd:   &may1,
-			Items:                     []domain.SubscriptionItem{{ID: "itm_1", PlanID: "pln_1", Quantity: 1}},
-		},
-	}}
-	pricing := &fakePricingReader{
-		plans: map[string]domain.Plan{
-			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_1"}},
-		},
-		meters: map[string]domain.Meter{
-			"mtr_1": {ID: "mtr_1", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1"},
-		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_1": {
-				ID: "rrv_1", RuleKey: "tokens_out", Mode: domain.PricingPerUnit,
-				Currency: "USD", UnitAmountCents: decimal.RequireFromString("0.0015"),
-			},
-		},
-		pricingMap: map[string][]domain.MeterPricingRule{},
-	}
-	store := newAggStore()
-	store.aggs["mtr_1"] = []domain.RuleAggregation{
-		{RuleID: "", RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(1750)},
-	}
-
-	svc := NewCustomerUsageService(NewService(store), customers, subs, pricing)
-	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(res.Meters) != 1 || len(res.Meters[0].Rules) != 1 {
-		t.Fatalf("want 1 meter with 1 rule, got %d meters", len(res.Meters))
-	}
-	row := res.Meters[0].Rules[0]
-	if row.AmountCents != 3 { // 1,750 × 0.0015¢ = 2.625¢ → 3¢
-		t.Fatalf("amount_cents: got %d, want 3", row.AmountCents)
-	}
-	if row.UnitAmountDecimal == nil {
-		t.Fatal("unit_amount_decimal: nil, want nominal 0.0015")
-	}
-	if *row.UnitAmountDecimal != "0.0015" {
-		t.Errorf("unit_amount_decimal: got %q, want 0.0015 (nominal, not effective 0.0017142857…)", *row.UnitAmountDecimal)
-	}
-}
-
-func TestCustomerUsageService_Get_MultiCurrencyTotals(t *testing.T) {
-	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
-		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
-	}}
-	subs := &fakeSubLister{subs: []domain.Subscription{
-		{
-			ID:                        "sub_1",
-			TenantID:                  "t1",
-			CustomerID:                "cus_1",
-			Status:                    domain.SubscriptionActive,
-			CurrentBillingPeriodStart: &apr1,
-			CurrentBillingPeriodEnd:   &may1,
-			Items: []domain.SubscriptionItem{
-				{ID: "itm_1", PlanID: "pln_usd", Quantity: 1},
-				{ID: "itm_2", PlanID: "pln_eur", Quantity: 1},
-			},
-		},
-	}}
-	pricing := &fakePricingReader{
-		plans: map[string]domain.Plan{
-			"pln_usd": {ID: "pln_usd", Name: "US Pro", Currency: "USD", MeterIDs: []string{"mtr_usd"}},
-			"pln_eur": {ID: "pln_eur", Name: "EU Pro", Currency: "EUR", MeterIDs: []string{"mtr_eur"}},
-		},
-		meters: map[string]domain.Meter{
-			"mtr_usd": {ID: "mtr_usd", EventName: "tokens_usd", Aggregation: "sum", RatingRuleVersionID: "rrv_usd"},
-			"mtr_eur": {ID: "mtr_eur", EventName: "tokens_eur", Aggregation: "sum", RatingRuleVersionID: "rrv_eur"},
-		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_usd": {ID: "rrv_usd", RuleKey: "u", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1)},
-			"rrv_eur": {ID: "rrv_eur", RuleKey: "e", Mode: domain.PricingPerUnit, Currency: "EUR", UnitAmountCents: decimal.NewFromInt(2)},
-		},
-		pricingMap: map[string][]domain.MeterPricingRule{},
-	}
-	store := newAggStore()
-	store.aggs["mtr_usd"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_usd", Quantity: decimal.NewFromInt(100)},
-	}
-	store.aggs["mtr_eur"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_eur", Quantity: decimal.NewFromInt(50)},
-	}
-	usageSvc := NewService(store)
-
-	svc := NewCustomerUsageService(usageSvc, customers, subs, pricing)
-	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(res.Totals) != 2 {
-		t.Fatalf("totals: got %d entries, want 2", len(res.Totals))
-	}
-	got := map[string]int64{}
-	for _, t := range res.Totals {
-		got[t.Currency] = t.AmountCents
-	}
-	if got["USD"] != 100 || got["EUR"] != 100 {
-		t.Errorf("totals: got %+v", got)
-	}
-}
-
-func TestCustomerUsageService_Get_CustomerNotFoundPropagates(t *testing.T) {
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{}}
-	svc := NewCustomerUsageService(
-		NewService(newMemStore()),
-		customers,
-		&fakeSubLister{},
-		&fakePricingReader{plans: map[string]domain.Plan{}, meters: map[string]domain.Meter{}, rules: map[string]domain.RatingRuleVersion{}, pricingMap: map[string][]domain.MeterPricingRule{}},
-	)
-	_, err := svc.Get(context.Background(), "t1", "cus_missing", CustomerUsagePeriod{})
-	if err == nil {
-		t.Fatal("expected customer-not-found error")
-	}
-}
-
-func TestCustomerUsageService_Get_RequiresCustomerID(t *testing.T) {
-	svc := NewCustomerUsageService(
-		NewService(newMemStore()),
-		&fakeCustomerLookup{customers: map[string]domain.Customer{}},
-		&fakeSubLister{},
-		&fakePricingReader{},
-	)
-	_, err := svc.Get(context.Background(), "t1", "   ", CustomerUsagePeriod{})
-	if err == nil {
-		t.Fatal("expected validation error for blank customer id")
-	}
-	if !errors.Is(err, errs.ErrValidation) {
-		t.Errorf("error not a validation error: %v", err)
-	}
-}
-
-func TestCustomerUsageService_Get_MultiDimRulesEchoDimensionMatch(t *testing.T) {
-	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
-		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
-	}}
-	subs := &fakeSubLister{subs: []domain.Subscription{
-		{
-			ID:                        "sub_1",
-			TenantID:                  "t1",
-			CustomerID:                "cus_1",
-			Status:                    domain.SubscriptionActive,
-			CurrentBillingPeriodStart: &apr1,
-			CurrentBillingPeriodEnd:   &may1,
-			Items: []domain.SubscriptionItem{
-				{ID: "itm_1", PlanID: "pln_1", Quantity: 1},
-			},
-		},
-	}}
-	pricing := &fakePricingReader{
-		plans: map[string]domain.Plan{
-			"pln_1": {ID: "pln_1", Name: "AI Pro", Currency: "USD", MeterIDs: []string{"mtr_tokens"}},
-		},
-		meters: map[string]domain.Meter{
-			"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Aggregation: "sum"},
-		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_in":  {ID: "rrv_in", RuleKey: "input", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(3)},
-			"rrv_out": {ID: "rrv_out", RuleKey: "output", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5)},
-		},
-		pricingMap: map[string][]domain.MeterPricingRule{
-			"mtr_tokens": {
-				{ID: "mpr_in", MeterID: "mtr_tokens", RatingRuleVersionID: "rrv_in", DimensionMatch: map[string]any{"operation": "input"}, Priority: 10},
-				{ID: "mpr_out", MeterID: "mtr_tokens", RatingRuleVersionID: "rrv_out", DimensionMatch: map[string]any{"operation": "output"}, Priority: 10},
-			},
-		},
-	}
-	store := newAggStore()
-	store.aggs["mtr_tokens"] = []domain.RuleAggregation{
-		{RuleID: "mpr_in", RatingRuleVersionID: "rrv_in", Quantity: decimal.NewFromInt(100)},
-		{RuleID: "mpr_out", RatingRuleVersionID: "rrv_out", Quantity: decimal.NewFromInt(50)},
-	}
-	usageSvc := NewService(store)
-
-	svc := NewCustomerUsageService(usageSvc, customers, subs, pricing)
-	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(res.Meters) != 1 {
-		t.Fatalf("meters: got %d, want 1", len(res.Meters))
-	}
-	rules := res.Meters[0].Rules
-	if len(rules) != 2 {
-		t.Fatalf("rules: got %d, want 2", len(rules))
-	}
-	for _, rule := range rules {
-		if rule.DimensionMatch == nil {
-			t.Errorf("rule %q dimension_match should be non-nil", rule.RuleKey)
-		}
-	}
-	// Total = 100*3 + 50*5 = 550
-	if res.Meters[0].TotalAmountCents != 550 {
-		t.Errorf("total cents: got %d, want 550", res.Meters[0].TotalAmountCents)
-	}
-}
-
-func TestCustomerUsageService_Get_FlatMeterOmitsDimensionMatch(t *testing.T) {
-	// Ensure single-rule meters emit `dimension_match` omitted (omitempty),
-	// matching the design RFC's "no dimension_match for flat single-rule".
-	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{"t1/cus_1": {ID: "cus_1"}}}
+// usageFixture is one customer with one active subscription on plan pln_1
+// (USD) whose plan prices meter mtr_tokens.
+func usageFixture(rated domain.RatedSubscription) (*CustomerUsageService, *fakeRater, *fakeSubLister) {
+	start := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
 	subs := &fakeSubLister{subs: []domain.Subscription{{
 		ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
-		CurrentBillingPeriodStart: &apr1, CurrentBillingPeriodEnd: &may1,
-		Items: []domain.SubscriptionItem{{ID: "itm_1", PlanID: "pln_1"}},
+		CurrentBillingPeriodStart: &start, CurrentBillingPeriodEnd: &end,
+		Items: []domain.SubscriptionItem{{ID: "si_1", PlanID: "pln_1"}},
 	}}}
 	pricing := &fakePricingReader{
-		plans:  map[string]domain.Plan{"pln_1": {ID: "pln_1", Name: "Flat", Currency: "USD", MeterIDs: []string{"mtr_1"}}},
-		meters: map[string]domain.Meter{"mtr_1": {ID: "mtr_1", EventName: "k", Aggregation: "sum", RatingRuleVersionID: "rrv_1"}},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_1": {ID: "rrv_1", RuleKey: "rk", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(7)},
-		},
-		pricingMap: map[string][]domain.MeterPricingRule{},
+		plans:  map[string]domain.Plan{"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD"}},
+		meters: map[string]domain.Meter{"mtr_tokens": {ID: "mtr_tokens", EventName: "tokens", Name: "Tokens", Unit: "tokens"}},
 	}
-	store := newAggStore()
-	store.aggs["mtr_1"] = []domain.RuleAggregation{{RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(10)}}
-	svc := NewCustomerUsageService(NewService(store), customers, subs, pricing)
+	rater := &fakeRater{current: map[string]domain.RatedSubscription{"sub_1": rated}, window: map[string]domain.RatedSubscription{"sub_1": rated}}
+	svc := NewCustomerUsageService(NewService(newMemStore()), &fakeCustomerLookup{customers: map[string]domain.Customer{"t1/cus_1": {ID: "cus_1"}}}, subs, pricing)
+	svc.SetRater(rater)
+	return svc, rater, subs
+}
 
+func d(s string) decimal.Decimal { return decimal.RequireFromString(s) }
+
+// The customer page prices usage through billing's rater (ADR-130 §10):
+// with no window, each subscription's current period, exactly as its close
+// would bill it; with an explicit window, an estimate. Rows are by price,
+// with the plan, and usage no price took is a no_price row outside the
+// totals.
+func TestCustomerUsage_RowsByPrice(t *testing.T) {
+	svc, rater, _ := usageFixture(domain.RatedSubscription{
+		MeterIDs: []string{"mtr_tokens"},
+		Usage: []domain.RatedUsage{
+			{PlanID: "pln_1", MeterID: "mtr_tokens", PriceID: "prc_a", DimensionMatch: map[string]string{"model": "a"}, Quantity: d("100"), AmountCents: 300, UnitAmountDecimal: d("3")},
+			{PlanID: "pln_1", MeterID: "mtr_tokens", PriceID: "prc_a", DimensionMatch: map[string]string{"model": "a"}, Quantity: d("50"), AmountCents: 150, UnitAmountDecimal: d("3")},
+			{PlanID: "pln_1", MeterID: "mtr_tokens", PriceID: "prc_all", Quantity: d("10"), AmountCents: 10, UnitAmountDecimal: d("1")},
+			{PlanID: "pln_1", MeterID: "mtr_tokens", Quantity: d("7")},
+			{PlanID: "pln_1", MeterID: "mtr_tokens", PriceID: "prc_all", Quantity: d("-2"), BelowZero: true},
+		},
+	})
 	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
-	if len(res.Meters) != 1 || len(res.Meters[0].Rules) != 1 {
-		t.Fatalf("unexpected shape: %+v", res.Meters)
+	if len(rater.calls) != 1 || rater.calls[0] != "current:sub_1" {
+		t.Errorf("rater calls = %v, want the current period of sub_1", rater.calls)
 	}
-	if res.Meters[0].Rules[0].DimensionMatch != nil {
-		t.Errorf("dimension_match should be nil for flat rule, got %+v", res.Meters[0].Rules[0].DimensionMatch)
+	if len(res.Meters) != 1 {
+		t.Fatalf("meters = %+v", res.Meters)
+	}
+	m := res.Meters[0]
+	if m.EventName != "tokens" || m.Currency != "USD" {
+		t.Errorf("meter = %+v, want tokens in the plan's USD", m)
+	}
+	if !m.TotalQuantity.Equal(d("160")) || m.TotalAmountCents != 460 {
+		t.Errorf("totals = %s / %d, want 160 / 460 (the no_price and below-zero rows left out)", m.TotalQuantity, m.TotalAmountCents)
+	}
+	if len(m.Prices) != 3 {
+		t.Fatalf("price rows = %+v, want prc_a (two windows added), prc_all and no_price", m.Prices)
+	}
+	a := m.Prices[0]
+	if a.PriceID != "prc_a" || a.PlanID != "pln_1" || !a.Quantity.Equal(d("150")) || a.AmountCents != 450 || a.UnitAmountDecimal == nil || *a.UnitAmountDecimal != "3" || a.DimensionMatch["model"] != "a" {
+		t.Errorf("prc_a row = %+v", a)
+	}
+	if np := m.Prices[2]; !np.NoPrice || np.PriceID != "" || !np.Quantity.Equal(d("7")) || np.AmountCents != 0 {
+		t.Errorf("no_price row = %+v", np)
+	}
+	if len(res.Totals) != 1 || res.Totals[0].AmountCents != 460 {
+		t.Errorf("totals = %+v, want USD 460", res.Totals)
+	}
+	var sawNoPrice, sawBelowZero bool
+	for _, w := range res.Warnings {
+		sawNoPrice = sawNoPrice || strings.Contains(w, "matches no price")
+		sawBelowZero = sawBelowZero || strings.Contains(w, "below zero")
+	}
+	if !sawNoPrice || !sawBelowZero {
+		t.Errorf("warnings = %v, want the no_price and the below-zero ones", res.Warnings)
+	}
+}
+
+// An explicit window is an estimate (ADR-130 §10): it reads RateWindow and
+// says so.
+func TestCustomerUsage_ExplicitWindowIsAnEstimate(t *testing.T) {
+	svc, rater, _ := usageFixture(domain.RatedSubscription{MeterIDs: []string{"mtr_tokens"}})
+	from := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{From: from, To: from.AddDate(0, 0, 10)})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(rater.calls) != 1 || rater.calls[0] != "window:sub_1" {
+		t.Errorf("rater calls = %v, want the window read", rater.calls)
+	}
+	if res.Period.Source != "explicit" {
+		t.Errorf("source = %q, want explicit", res.Period.Source)
+	}
+	found := false
+	for _, w := range res.Warnings {
+		found = found || strings.Contains(w, "Estimate")
+	}
+	if !found {
+		t.Errorf("warnings = %v, want the estimate note", res.Warnings)
+	}
+	if len(res.Meters) != 1 || len(res.Meters[0].Prices) != 0 {
+		t.Errorf("a meter with no usage is listed with no rows: %+v", res.Meters)
+	}
+}
+
+func TestCustomerUsage_RequiresTheRater(t *testing.T) {
+	svc, _, _ := usageFixture(domain.RatedSubscription{})
+	svc.SetRater(nil)
+	if _, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{}); err == nil {
+		t.Error("Get with no rater wired: nil error, want one")
+	}
+}
+
+func TestCustomerUsage_CustomerNotFoundPropagates(t *testing.T) {
+	svc, _, _ := usageFixture(domain.RatedSubscription{})
+	if _, err := svc.Get(context.Background(), "t1", "cus_missing", CustomerUsagePeriod{}); err == nil {
+		t.Error("unknown customer: nil error")
+	}
+	if _, err := svc.Get(context.Background(), "t1", " ", CustomerUsagePeriod{}); !errors.Is(err, errs.ErrValidation) {
+		t.Errorf("empty customer id: %v, want a validation error", err)
+	}
+}
+
+// The customer-facing cost dashboard never shows the no_price row: a
+// pricing gap is operator information. Its meter totals also leave it out.
+func TestCostDashboard_ProjectionExcludesNoPriceRows(t *testing.T) {
+	svc, _, subs := usageFixture(domain.RatedSubscription{
+		MeterIDs: []string{"mtr_tokens"},
+		Usage: []domain.RatedUsage{
+			{PlanID: "pln_1", MeterID: "mtr_tokens", PriceID: "prc_all", Quantity: d("1000"), AmountCents: 1000, UnitAmountDecimal: d("1")},
+			{PlanID: "pln_1", MeterID: "mtr_tokens", Quantity: d("5")},
+		},
+	})
+	lookup := fakeTokenLookup{cust: domain.Customer{ID: "cus_1", TenantID: "t1", Livemode: false}}
+	a := NewCostDashboardAssembler(lookup, svc, subs, &fakeCredits{})
+	a.SetLiveBalanceReader(&fakeLive{})
+	got, err := a.GetByToken(context.Background(), "vlx_pcd_whatever")
+	if err != nil {
+		t.Fatalf("GetByToken: %v", err)
+	}
+	proj := got.(CostDashboardProjection)
+	if len(proj.Usage) != 1 || len(proj.Usage[0].Prices) != 1 || proj.Usage[0].TotalQuantity != "1000" {
+		t.Fatalf("public usage = %+v, want the one priced row", proj.Usage)
+	}
+	raw, _ := json.Marshal(proj)
+	for _, leak := range []string{"prc_all", "pln_1", "price_id", "plan_id", "rule_key"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("public projection carries %q: %s", leak, raw)
+		}
 	}
 }
 
@@ -721,140 +447,44 @@ func containsField(res CustomerUsageResult, needle string) bool {
 	return strings.Contains(string(b), needle)
 }
 
-// P10 (ADR-070 slice): the usage view must price with the SAME rule the
-// invoice will bill. Pre-fix rateMeter priced the pinned version with
-// NO override lookup — a negotiated customer's running-spend read list
-// price, wrong for exactly the customers the spend-cap wedge targets.
-//
-// Mutation-verify: skip the override lookup in rateMeter — the
-// overridden assertions fail.
-func TestCustomerUsageService_Get_HonorsOverridesAndPeriodPin(t *testing.T) {
-	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	mkSub := func(cust string) domain.Subscription {
-		return domain.Subscription{
-			ID: "sub_" + cust, TenantID: "t1", CustomerID: cust,
-			Status:                    domain.SubscriptionActive,
-			CurrentBillingPeriodStart: &apr1,
-			CurrentBillingPeriodEnd:   &may1,
-			Items:                     []domain.SubscriptionItem{{ID: "itm_" + cust, PlanID: "pln_1", Quantity: 1}},
-		}
-	}
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
-		"t1/cus_neg":  {ID: "cus_neg", TenantID: "t1"},
-		"t1/cus_list": {ID: "cus_list", TenantID: "t1"},
-	}}
-	pricing := &fakePricingReader{
-		plans: map[string]domain.Plan{
-			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_1"}},
+// A row can name a plan the subscription swapped away from this period: the
+// close still bills it. Its plan comes from the rater, not the items, so the
+// meter has the plan's currency and counts in the totals; the no_price
+// warning names that plan. A row naming a plan nobody returned fails loud
+// rather than drop the meter from the totals.
+func TestCustomerUsage_RowOnAPlanSwappedAway(t *testing.T) {
+	old := domain.Plan{ID: "pln_old", Name: "Old", Currency: "USD"}
+	svc, _, _ := usageFixture(domain.RatedSubscription{
+		MeterIDs: []string{"mtr_tokens"},
+		Plans:    map[string]domain.Plan{"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD"}, "pln_old": old},
+		Usage: []domain.RatedUsage{
+			{PlanID: "pln_old", MeterID: "mtr_tokens", PriceID: "prc_old", Quantity: d("7"), AmountCents: 21, UnitAmountDecimal: d("3")},
+			{PlanID: "pln_old", MeterID: "mtr_tokens", Quantity: d("2")},
 		},
-		meters: map[string]domain.Meter{
-			"mtr_1": {ID: "mtr_1", EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: "rrv_1"},
-		},
-		rules: map[string]domain.RatingRuleVersion{
-			// v1 in force at period open (list 1c); v2 published MID-period
-			// (5c) must NOT price this window (pin-at-period-open).
-			"rrv_1": {ID: "rrv_1", RuleKey: "tokens_flat", Version: 1, LifecycleState: domain.RatingRuleActive,
-				Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-				CreatedAt: apr1.Add(-24 * time.Hour)},
-			"rrv_2": {ID: "rrv_2", RuleKey: "tokens_flat", Version: 2, LifecycleState: domain.RatingRuleActive,
-				Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
-				CreatedAt: apr1.Add(10 * 24 * time.Hour)},
-		},
-		overrides: map[string]domain.CustomerPriceOverride{
-			// Negotiated 3c/token for cus_neg only.
-			"cus_neg:tokens_flat": {ID: "cpo_1", CustomerID: "cus_neg", RuleKey: "tokens_flat",
-				Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(3), Active: true},
-		},
-		pricingMap: map[string][]domain.MeterPricingRule{},
-	}
-	store := newAggStore()
-	store.aggs["mtr_1"] = []domain.RuleAggregation{
-		{RuleID: "", RatingRuleVersionID: "rrv_1", Quantity: decimal.NewFromInt(1000)},
-	}
-	usageSvc := NewService(store)
-
-	// Negotiated customer: 1000 × 3c override — not 1c list (v1), not 5c (v2).
-	subs := &fakeSubLister{subs: []domain.Subscription{mkSub("cus_neg")}}
-	svc := NewCustomerUsageService(usageSvc, customers, subs, pricing)
-	res, err := svc.Get(context.Background(), "t1", "cus_neg", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("negotiated: %v", err)
-	}
-	if res.Meters[0].TotalAmountCents != 3000 {
-		t.Errorf("negotiated customer amount: got %d, want 3000 (override; 1000 = list v1 leak, 5000 = mid-period v2 leak)", res.Meters[0].TotalAmountCents)
-	}
-
-	// Non-overridden customer: v1 list price — the PERIOD-OPEN version,
-	// never the mid-period v2.
-	subs2 := &fakeSubLister{subs: []domain.Subscription{mkSub("cus_list")}}
-	svc2 := NewCustomerUsageService(usageSvc, customers, subs2, pricing)
-	res2, err := svc2.Get(context.Background(), "t1", "cus_list", CustomerUsagePeriod{})
-	if err != nil {
-		t.Fatalf("list-price: %v", err)
-	}
-	if res2.Meters[0].TotalAmountCents != 1000 {
-		t.Errorf("list customer amount: got %d, want 1000 (v1 at period open; 5000 means the mid-period publish repriced the window)", res2.Meters[0].TotalAmountCents)
-	}
-}
-
-// A bucket whose usage is below zero after corrections (#1193) is counted as
-// 0, as the invoice bills it, with a warning that names the meter. Before, its
-// negative quantity reached the rater, which refuses it, and the whole usage
-// view failed.
-func TestCustomerUsageService_Get_NetNegativeBucketCountsAsZero(t *testing.T) {
-	apr1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	may1 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	customers := &fakeCustomerLookup{customers: map[string]domain.Customer{
-		"t1/cus_1": {ID: "cus_1", TenantID: "t1"},
-	}}
-	subs := &fakeSubLister{subs: []domain.Subscription{{
-		ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", Status: domain.SubscriptionActive,
-		CurrentBillingPeriodStart: &apr1, CurrentBillingPeriodEnd: &may1,
-		Items: []domain.SubscriptionItem{{ID: "itm_1", PlanID: "pln_1", Quantity: 1}},
-	}}}
-	pricing := &fakePricingReader{
-		plans: map[string]domain.Plan{
-			"pln_1": {ID: "pln_1", Name: "Pro", Currency: "USD", MeterIDs: []string{"mtr_calls", "mtr_seats"}},
-		},
-		meters: map[string]domain.Meter{
-			"mtr_calls": {ID: "mtr_calls", EventName: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: "rrv_calls"},
-			"mtr_seats": {ID: "mtr_seats", EventName: "seats", Name: "Seats", Unit: "seats", Aggregation: "sum", RatingRuleVersionID: "rrv_seats"},
-		},
-		rules: map[string]domain.RatingRuleVersion{
-			"rrv_calls": {ID: "rrv_calls", RuleKey: "calls_flat", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1)},
-			"rrv_seats": {ID: "rrv_seats", RuleKey: "seats_flat", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(5)},
-		},
-		pricingMap: map[string][]domain.MeterPricingRule{},
-	}
-	store := newAggStore()
-	store.aggs["mtr_calls"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_calls", Quantity: decimal.NewFromInt(300)},
-	}
-	store.aggs["mtr_seats"] = []domain.RuleAggregation{
-		{RatingRuleVersionID: "rrv_seats", Quantity: decimal.NewFromInt(-7)},
-	}
-	svc := NewCustomerUsageService(NewService(store), customers, subs, pricing)
-
+	})
 	res, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{})
 	if err != nil {
-		t.Fatalf("Get: %v (usage below zero must not fail the usage view)", err)
+		t.Fatalf("Get: %v", err)
 	}
-	if len(res.Totals) != 1 || res.Totals[0].AmountCents != 300 {
-		t.Errorf("totals = %+v, want 300¢ (calls; seats at 0, as the invoice bills it)", res.Totals)
+	if m := res.Meters[0]; m.Currency != "USD" || m.TotalAmountCents != 21 {
+		t.Errorf("meter = %+v, want USD 21", m)
 	}
-	for _, m := range res.Meters {
-		if m.EventName == "seats" && (m.TotalAmountCents != 0 || len(m.Rules) != 0) {
-			t.Errorf("seats meter = %+v, want no priced rows and 0¢", m)
-		}
+	if len(res.Totals) != 1 || res.Totals[0].Currency != "USD" || res.Totals[0].AmountCents != 21 {
+		t.Errorf("totals = %+v, want [USD 21]", res.Totals)
 	}
-	found := false
+	var named bool
 	for _, w := range res.Warnings {
-		if strings.Contains(w, `"seats"`) && strings.Contains(w, "-7") {
-			found = true
-		}
+		named = named || strings.Contains(w, `plan "Old"`)
 	}
-	if !found {
-		t.Errorf("warnings = %q, want one naming seats and -7", res.Warnings)
+	if !named {
+		t.Errorf("warnings = %v, want the no_price one naming plan Old", res.Warnings)
+	}
+
+	svc, _, _ = usageFixture(domain.RatedSubscription{
+		MeterIDs: []string{"mtr_tokens"},
+		Usage:    []domain.RatedUsage{{PlanID: "pln_gone", MeterID: "mtr_tokens", PriceID: "prc_x", Quantity: d("1"), AmountCents: 1}},
+	})
+	if _, err := svc.Get(context.Background(), "t1", "cus_1", CustomerUsagePeriod{}); err == nil || !strings.Contains(err.Error(), "pln_gone") {
+		t.Errorf("Get with a row on an unknown plan: err = %v, want one naming pln_gone", err)
 	}
 }

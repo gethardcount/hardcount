@@ -27,9 +27,9 @@ func TestCountReleased(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	fire := start.AddDate(0, 0, 19)
-	plans := map[string]domain.Plan{
-		"pln_tokens": {ID: "pln_tokens", MeterIDs: []string{"mtr_tokens"}},
-		"pln_seats":  {ID: "pln_seats", MeterIDs: []string{"mtr_seats"}},
+	plans := map[string][]string{
+		"pln_tokens": {"mtr_tokens"},
+		"pln_seats":  {"mtr_seats"},
 	}
 	started := start.AddDate(0, -1, 0)
 	active := domain.Subscription{
@@ -77,7 +77,7 @@ func TestCountReleased(t *testing.T) {
 	for _, tc := range cases {
 		var periods []OpenPeriod
 		for _, s := range tc.subs {
-			if p, ok := OpenPeriodOf(s.s, plans, s.wm); ok {
+			if p, ok := OpenPeriodOf(s.s, plans, plans, s.wm); ok {
 				periods = append(periods, p)
 			}
 		}
@@ -87,7 +87,7 @@ func TestCountReleased(t *testing.T) {
 		}
 	}
 	// A plan the caller could not supply prices nothing.
-	p, _ := OpenPeriodOf(active, nil, ThresholdWatermark{})
+	p, _ := OpenPeriodOf(active, nil, nil, ThresholdWatermark{})
 	if in, not, _, _ := countReleased(rows, []OpenPeriod{p}, sum); in != 0 || not != 4 {
 		t.Errorf("no plans: in=%d not_on_plan=%d, want 0/4", in, not)
 	}

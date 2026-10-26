@@ -28,9 +28,9 @@ import (
 // goes red.
 
 // priceShape decodes a price from the API's JSON words.
-func priceShape(t *testing.T, raw string) domain.RatingRuleVersion {
+func priceShape(t *testing.T, raw string) domain.PriceShape {
 	t.Helper()
-	var r domain.RatingRuleVersion
+	var r domain.PriceShape
 	if err := json.Unmarshal([]byte(raw), &r); err != nil {
 		t.Fatalf("decode %s: %v", raw, err)
 	}

@@ -135,8 +135,9 @@ func (s *PostgresStore) List(ctx context.Context, tenantID string) ([]domain.Tes
 // self-documenting record the completeness arch-test asserts against.
 //
 // NOT torn down (survivors): the audit log and all tenant config — meters,
-// plans, coupons, dunning_policies, api_keys, stripe_webhook_events. Keep
-// this list in sync with TestTeardownCoversEverySimulatedTable.
+// plans and their prices, coupons, dunning_policies, api_keys,
+// stripe_webhook_events. Keep this list in sync with
+// TestTeardownCoversEverySimulatedTable.
 var clockTeardownStatements = []string{
 	// Invoice sub-graph — children first (leaves have no customer_id; keyed via parent).
 	`DELETE FROM invoice_dunning_events WHERE invoice_id IN (SELECT id FROM invoices WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1))`,
@@ -161,6 +162,9 @@ var clockTeardownStatements = []string{
 	// portal also ON DELETE CASCADE from the customer; deleted explicitly so
 	// the set is the complete self-documenting record the arch-test asserts).
 	`DELETE FROM customer_price_overrides    WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
+	// The clock's stamps on plan price versions (ADR-130 §7). The plan, its
+	// prices and their versions survive: they are tenant config.
+	`DELETE FROM plan_price_version_clocks WHERE test_clock_id = $1`,
 	`DELETE FROM customer_billing_profiles   WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM customer_discounts          WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
 	`DELETE FROM payment_methods             WHERE customer_id IN (SELECT id FROM customers WHERE test_clock_id = $1)`,
@@ -198,15 +202,22 @@ func (s *PostgresStore) Delete(ctx context.Context, tenantID, id string) error {
 	}
 	defer postgres.Rollback(tx)
 
-	// Existence first: tearing down a gone clock hits an empty customer set
+	// The clock row first, FOR UPDATE (ADR-130 §8). Teardown deletes
+	// bottom-up for the foreign keys, outside the lock order every other
+	// writer follows; a price write or override write reads this clock FOR
+	// SHARE before it touches a row teardown deletes (the clock's stamps, an
+	// override of its customer), and a subscription create reads it FOR KEY
+	// SHARE before its insert locks the customer, so one of the two waits for
+	// the other here and they cannot deadlock. Existence comes from the
+	// same read: tearing down a gone clock hits an empty customer set
 	// (harmless), but the contract is ErrNotFound.
-	var exists bool
-	if err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM test_clocks WHERE id = $1)`, id).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
+	var locked string
+	err = tx.QueryRowContext(ctx, `SELECT id FROM test_clocks WHERE id = $1 FOR UPDATE`, id).Scan(&locked)
+	if errors.Is(err, sql.ErrNoRows) {
 		return errs.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock test clock: %w", err)
 	}
 
 	for i, stmt := range clockTeardownStatements {

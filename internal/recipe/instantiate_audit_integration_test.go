@@ -60,7 +60,7 @@ func TestRecipeInstantiate_AuditSharedFate(t *testing.T) {
 		if _, err := svc.Instantiate(ctx, tenantID, "anthropic_style", nil, InstantiateOptions{}); err == nil {
 			t.Fatal("instantiate must fail when its audit emission fails (shared fate)")
 		}
-		for _, table := range []string{"recipe_instances", "plans", "meters", "rating_rule_versions", "webhook_endpoints"} {
+		for _, table := range []string{"recipe_instances", "plans", "meters", "plan_prices", "webhook_endpoints"} {
 			if n := countRows(t, f.db, tenantID, table); n != 0 {
 				t.Errorf("%s: %d rows survived a failed audit emission — the un-audited install leaked", table, n)
 			}
@@ -105,8 +105,7 @@ func TestRecipeInstantiate_AuditSharedFate(t *testing.T) {
 		// "What did this recipe install?" must be answerable from the row.
 		assertIDList(t, got.Metadata, "plan_ids", inst.CreatedObjects.PlanIDs)
 		assertIDList(t, got.Metadata, "meter_ids", inst.CreatedObjects.MeterIDs)
-		assertIDList(t, got.Metadata, "rating_rule_ids", inst.CreatedObjects.RatingRuleIDs)
-		assertIDList(t, got.Metadata, "pricing_rule_ids", inst.CreatedObjects.PricingRuleIDs)
+		assertIDList(t, got.Metadata, "price_ids", inst.CreatedObjects.PriceIDs)
 		if got.Metadata["dunning_policy_id"] != inst.CreatedObjects.DunningPolicyID {
 			t.Errorf("metadata dunning_policy_id: got %v, want %s", got.Metadata["dunning_policy_id"], inst.CreatedObjects.DunningPolicyID)
 		}

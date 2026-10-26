@@ -82,11 +82,13 @@ type OpenPeriod struct {
 	// end when it had a trial (trial usage is free), else its start. Nil
 	// means unknown, and nothing before Start is called AfterClose.
 	Floor *time.Time
-	// Meters are the meters the current plans price.
+	// Meters are the meters the current plans price at Start, the period's
+	// pin (ADR-130 §4).
 	Meters map[string]bool
 	// NextMeters are the meters priced from End on: the plans after any
-	// change pending at or before End. Nil when the subscription ends at End
-	// (cancel at period end, or cancel_at at or before End).
+	// change pending at or before End, at End, the next period's pin. Nil
+	// when the subscription ends at End (cancel at period end, or cancel_at
+	// at or before End).
 	NextMeters map[string]bool
 	// BilledThrough and PaidThrough are the subscription's threshold
 	// watermarks (ThresholdWatermark).
@@ -120,11 +122,12 @@ type MeterBuckets struct {
 	Additive bool
 }
 
-// OpenPeriodOf builds sub's OpenPeriod. plans holds the plans of sub's
-// items and of their pending changes; a plan missing from it prices
-// nothing. ok is false when sub is not active or trialing or has no current
-// period.
-func OpenPeriodOf(sub domain.Subscription, plans map[string]domain.Plan, wm ThresholdWatermark) (OpenPeriod, bool) {
+// OpenPeriodOf builds sub's OpenPeriod. atStart holds, by plan id, the
+// meters each plan of sub's items prices at the period start; atEnd, the
+// meters each plan of its items or of their pending changes prices at the
+// period end. A plan missing from them prices nothing. ok is false when sub
+// is not active or trialing or has no current period.
+func OpenPeriodOf(sub domain.Subscription, atStart, atEnd map[string][]string, wm ThresholdWatermark) (OpenPeriod, bool) {
 	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
 		return OpenPeriod{}, false
 	}
@@ -148,7 +151,7 @@ func OpenPeriodOf(sub domain.Subscription, plans map[string]domain.Plan, wm Thre
 		p.NextMeters = map[string]bool{}
 	}
 	for _, it := range sub.Items {
-		for _, id := range plans[it.PlanID].MeterIDs {
+		for _, id := range atStart[it.PlanID] {
 			p.Meters[id] = true
 		}
 		if !continues {
@@ -158,7 +161,7 @@ func OpenPeriodOf(sub domain.Subscription, plans map[string]domain.Plan, wm Thre
 		if it.PendingPlanID != "" && it.PendingPlanEffectiveAt != nil && !it.PendingPlanEffectiveAt.After(p.End) {
 			next = it.PendingPlanID
 		}
-		for _, id := range plans[next].MeterIDs {
+		for _, id := range atEnd[next] {
 			p.NextMeters[id] = true
 		}
 	}
@@ -178,8 +181,8 @@ func BucketsOf(meter domain.Meter) MeterBuckets {
 //   - at >= End (the grace before End's invoice, or a close running late):
 //     the next period counts it if the subscription continues and prices the
 //     meter from End on. Never AfterClose: the next close bills it.
-//   - Start <= at < End: InOpen if a current plan prices the meter, else
-//     NotOnPlan. When the meter is additive and at is past the floor:
+//   - Start <= at < End: InOpen if a current plan prices the meter at the
+//     period start, else NotOnPlan. When the meter is additive and at is past the floor:
 //     before PaidThrough it is AfterClose, and before BilledThrough (a
 //     threshold invoice not paid yet) it is Unsettled.
 //   - at < Start: AfterClose when a current plan prices the meter and at is

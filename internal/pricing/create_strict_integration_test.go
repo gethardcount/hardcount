@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -78,7 +80,7 @@ func TestPlanCreateAndStatus_Validated(t *testing.T) {
 		t.Fatalf("refused creates wrote %d plans", n)
 	}
 
-	rr := do(http.MethodPost, "/", body("p-ok", `"base_amount_cents":4900,"status":"active"`))
+	rr := do(http.MethodPost, "/", body("p-ok", `"base_amount_cents":4900,"base_bill_timing":"in_arrears","status":"active"`))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status active: status %d, want 201; body %s", rr.Code, rr.Body.String())
 	}
@@ -116,22 +118,33 @@ func TestPlanCreateAndStatus_Validated(t *testing.T) {
 	}
 }
 
-// TestRatingRuleAndOverrideCreate_RefuseUnknownField: the rate lives on the
-// rating rule and the price override, and validation accepts 0 as a free
-// rate. So POST /v1/rating-rules with `flat_amount` (not unit_amount_cents),
-// or a tier with `unit_amount`, and POST /v1/price-overrides with
-// `unit_amount_decimal`, each made a $0 price with a 201. The unknown key is
-// now a 422 naming it and nothing is written.
-func TestRatingRuleAndOverrideCreate_RefuseUnknownField(t *testing.T) {
+// TestPriceAndOverrideCreate_RefuseUnknownField: the rate lives on the plan
+// price and the price override, and validation accepts 0 as a free rate. So
+// a misspelt rate key (`flat_amount`, a tier's `unit_amount`,
+// `unit_amount_decimal`) would make a $0 price with a 201. The unknown key is
+// a 422 naming it and nothing is written.
+func TestPriceAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Rate Strict Create")
 
-	svc := pricing.NewService(pricing.NewPostgresStore(db))
+	store := pricing.NewPostgresStore(db)
+	svc := pricing.NewService(store)
 	h := pricing.NewHandler(svc)
-	rules, overrides := h.RatingRuleRoutes(), h.OverrideRoutes()
-	do := func(srv http.Handler, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	plans, overrides := h.PlanRoutes(), h.OverrideRoutes()
+	meter, err := svc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{EventName: "calls", Name: "Calls"})
+	if err != nil {
+		t.Fatalf("meter: %v", err)
+	}
+	plan, prices, err := svc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
+		Code: "strict", Name: "Strict", Currency: "USD", BillingInterval: domain.BillingMonthly,
+		Prices: []pricing.PriceInput{{MeterID: meter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}}},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	do := func(srv http.Handler, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rr := httptest.NewRecorder()
 		srv.ServeHTTP(rr, req.WithContext(context.WithValue(ctx, auth.TestTenantIDKey(), tenantID)))
@@ -146,26 +159,18 @@ func TestRatingRuleAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 		_ = json.Unmarshal(rr.Body.Bytes(), &env)
 		return env.Error.Param
 	}
-	ruleCount := func() int {
-		list, err := svc.ListRatingRules(ctx, pricing.RatingRuleFilter{TenantID: tenantID})
-		if err != nil {
-			t.Fatalf("list rating rules: %v", err)
-		}
-		return len(list)
-	}
+	pricePath := "/" + plan.ID + "/prices"
 
 	refusals := []struct {
-		name  string
-		srv   http.Handler
-		body  string
-		param string
+		name, path, body, param string
+		srv                     http.Handler
 	}{
-		{"rule flat_amount", rules, `{"rule_key":"r_flat","name":"r","mode":"per_unit","currency":"USD","flat_amount":2}`, "flat_amount"},
-		{"rule tier unit_amount", rules, `{"rule_key":"r_tier","name":"r","mode":"graduated","currency":"USD","tiers":[{"up_to":null,"unit_amount":"5"}]}`, "unit_amount"},
-		{"override unit_amount_decimal", overrides, `{"customer_id":"vlx_cus_x","rating_rule_version_id":"vlx_rrv_x","mode":"per_unit","unit_amount_decimal":"1.5"}`, "unit_amount_decimal"},
+		{"price flat_amount", pricePath, `{"meter_id":"` + meter.ID + `","dimension_match":{"m":"a"},"mode":"per_unit","flat_amount":2}`, "flat_amount", plans},
+		{"price tier unit_amount", pricePath, `{"meter_id":"` + meter.ID + `","dimension_match":{"m":"b"},"mode":"graduated","tiers":[{"up_to":null,"unit_amount":"5"}]}`, "unit_amount", plans},
+		{"override unit_amount_decimal", "/", `{"customer_id":"vlx_cus_x","price_id":"` + prices[0].ID + `","mode":"per_unit","unit_amount_decimal":"1.5"}`, "unit_amount_decimal", overrides},
 	}
 	for _, tc := range refusals {
-		rr := do(tc.srv, tc.body)
+		rr := do(tc.srv, tc.path, tc.body)
 		if rr.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("%s: status %d, want 422; body %s", tc.name, rr.Code, rr.Body.String())
 		}
@@ -173,10 +178,10 @@ func TestRatingRuleAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 			t.Errorf("%s: param %q, want %q", tc.name, p, tc.param)
 		}
 	}
-	if n := ruleCount(); n != 0 {
-		t.Fatalf("refused creates wrote %d rating rules", n)
+	if listed, err := svc.ListPlanPrices(ctx, tenantID, plan.ID); err != nil || len(listed) != 1 {
+		t.Fatalf("refused creates left %d prices (%v), want the 1 the plan was made with", len(listed), err)
 	}
-	overrideList, err := svc.ListOverrides(ctx, tenantID, "")
+	overrideList, err := svc.ListOverrides(ctx, tenantID, "", "")
 	if err != nil {
 		t.Fatalf("list overrides: %v", err)
 	}
@@ -185,15 +190,15 @@ func TestRatingRuleAndOverrideCreate_RefuseUnknownField(t *testing.T) {
 	}
 
 	// Control: the known body is created at the price sent.
-	rr := do(rules, `{"rule_key":"r_ok","name":"r","mode":"per_unit","currency":"USD","unit_amount_cents":"2"}`)
+	rr := do(plans, pricePath, `{"meter_id":"`+meter.ID+`","dimension_match":{"m":"a"},"mode":"per_unit","unit_amount_cents":"2"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("known body: status %d, want 201; body %s", rr.Code, rr.Body.String())
 	}
-	var rule domain.RatingRuleVersion
-	if err := json.Unmarshal(rr.Body.Bytes(), &rule); err != nil {
-		t.Fatalf("decode rule: %v", err)
+	var price domain.PlanPrice
+	if err := json.Unmarshal(rr.Body.Bytes(), &price); err != nil {
+		t.Fatalf("decode price: %v", err)
 	}
-	if rule.UnitAmountCents.String() != "2" {
-		t.Fatalf("created rule unit_amount_cents=%s, want 2", rule.UnitAmountCents)
+	if price.UnitAmountCents.String() != "2" {
+		t.Fatalf("created price unit_amount_cents=%s, want 2", price.UnitAmountCents)
 	}
 }

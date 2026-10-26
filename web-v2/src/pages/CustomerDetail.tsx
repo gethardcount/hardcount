@@ -983,7 +983,7 @@ export default function CustomerDetailPage() {
           override exists purely as unexplained math on the usage card
           and the invoice. */}
       <div className="mt-6">
-        <PriceOverridesCard customerId={id!} customerTestClockId={customer?.test_clock_id} readOnly={isArchived} />
+        <PriceOverridesCard customerId={id!} readOnly={isArchived} />
       </div>
 
       <SendSetupLinkDialog

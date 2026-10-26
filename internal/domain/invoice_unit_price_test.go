@@ -100,9 +100,9 @@ func TestDisplayUnitAmountDecimal(t *testing.T) {
 // configured rate for flat rules (even when cent-rounding makes the effective
 // rate diverge), the effective amount÷quantity for graduated/package.
 func TestDisplayUnitAmountDecimalFor(t *testing.T) {
-	flat := RatingRuleVersion{Mode: PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0015")}
-	graduated := RatingRuleVersion{Mode: PricingGraduated}
-	pkg := RatingRuleVersion{Mode: PricingPackage}
+	flat := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0015")}
+	graduated := PriceShape{Mode: PricingGraduated}
+	pkg := PriceShape{Mode: PricingPackage}
 
 	// Nominal helper: flat → configured rate; non-flat → nil.
 	if got := NominalUnitAmountDecimal(flat); got == nil || got.String() != "0.0015" {

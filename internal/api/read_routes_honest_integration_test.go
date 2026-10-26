@@ -26,19 +26,18 @@ func TestReadRoutesHonest(t *testing.T) {
 		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
 	}
 
-	ruleID := flowStr(call("POST", "/v1/rating-rules", map[string]any{
-		"rule_key": "honest_calls", "name": "Honest calls", "mode": "per_unit",
-		"currency": "USD", "unit_amount_cents": 10,
-	}).want(t, 201, "create rating rule").body, "id")
 	meterID := flowStr(call("POST", "/v1/meters", map[string]any{
 		"event_name": "honest_calls", "name": "Honest calls", "unit": "call",
-		"aggregation": "sum", "rating_rule_version_id": ruleID,
+		"aggregation": "sum",
 	}).want(t, 201, "create meter").body, "id")
-	planID := flowStr(call("POST", "/v1/plans", map[string]any{
+	plan := call("POST", "/v1/plans", map[string]any{
 		"code": "honest-plan", "name": "Honest Plan", "currency": "USD",
 		"billing_interval": "monthly", "base_amount_cents": 1000,
-		"base_bill_timing": "in_arrears", "meter_ids": []string{meterID},
-	}).want(t, 201, "create plan").body, "id")
+		"base_bill_timing": "in_arrears",
+		"prices":           []map[string]any{{"meter_id": meterID, "mode": "per_unit", "unit_amount_cents": "10"}},
+	}).want(t, 201, "create plan").body
+	planID := flowStr(plan, "id")
+	priceID := flowStr(flowList(plan, "prices")[0], "id")
 	// One instant for the clock and for "today" below: an event with no
 	// timestamp lands at the clock's frozen_time, so a second time.Now()
 	// would name the next day if midnight UTC fell between the two.
@@ -71,7 +70,7 @@ func TestReadRoutesHonest(t *testing.T) {
 			{"/v1/credits/grants/" + missing, "/v1/credits/grants/" + customerID},
 			{"/v1/customers/" + missing + "/sent-emails", "/v1/customers/" + customerID + "/sent-emails"},
 			{"/v1/customers/" + missing + "/margin", "/v1/customers/" + customerID + "/margin"},
-			{"/v1/meters/vlx_mtr_does_not_exist/pricing-rules", "/v1/meters/" + meterID + "/pricing-rules"},
+			{"/v1/plans/vlx_pln_does_not_exist/prices", "/v1/plans/" + planID + "/prices"},
 		}
 		for _, r := range routes {
 			if got := call("GET", r.unknown, nil); got.status != 404 {
@@ -135,16 +134,16 @@ func TestReadRoutesHonest(t *testing.T) {
 		}
 	})
 
-	// D-14: a non-graduated rule reads tiers as [], not null, and
+	// D-14: a non-graduated price reads tiers as [], not null, and
 	// an item with no metadata leaves the field out instead of sending
 	// "e30=" (base64 of "{}").
 	t.Run("empty values read as empty", func(t *testing.T) {
-		rule := call("GET", "/v1/rating-rules/"+ruleID, nil).want(t, 200, "read rating rule")
-		if !bytes.Contains(rule.raw, []byte(`"tiers":[]`)) {
-			t.Errorf("rating rule tiers is not []: %s", rule.raw)
+		prices := call("GET", "/v1/plans/"+planID+"/prices", nil).want(t, 200, "read plan prices")
+		if !bytes.Contains(prices.raw, []byte(`"tiers":[]`)) {
+			t.Errorf("plan price tiers is not []: %s", prices.raw)
 		}
 		override := call("POST", "/v1/price-overrides", map[string]any{
-			"customer_id": customerID, "rating_rule_version_id": ruleID,
+			"customer_id": customerID, "price_id": priceID,
 			"mode": "per_unit", "unit_amount_cents": 5, "reason": "honest test",
 		}).want(t, 201, "create price override")
 		if !bytes.Contains(override.raw, []byte(`"tiers":[]`)) {

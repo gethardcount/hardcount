@@ -185,13 +185,13 @@ var (
 	// usageUnpricedQuantity is the operator's signal for usage that matched
 	// no price and was left off an invoice (#981). It is a signal, not a
 	// record: it resets on restart and is not per customer. The per-customer
-	// view is the unmatched row of GET /v1/customers/{id}/usage. meter_id
+	// view is the no_price row of GET /v1/customers/{id}/usage. meter_id
 	// is bounded by the meters a tenant creates. mode is live or test, as on
 	// velox_parked_invoices; test-clock simulations are not counted.
 	usageUnpricedQuantity = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_usage_unpriced_quantity_total",
-			Help: "Usage quantity that matched no pricing rule on a meter with no default price, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by meter. Test-clock simulations are not counted. Bill it with a one-off invoice; add a price so later invoices include it.",
+			Help: "Usage quantity that matched no price of its subscription's plan, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by meter. Test-clock simulations are not counted. Bill it with a one-off invoice; add a price to the plan so later invoices include it.",
 		},
 		[]string{"meter_id", "mode"},
 	)

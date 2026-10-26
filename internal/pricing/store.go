@@ -9,126 +9,147 @@ import (
 )
 
 type Store interface {
-	// Rating rules. CreateRatingRule/Tx allocate the version number in
-	// SQL (MAX(version)+1 per (tenant, rule_key)) — the caller's Version
-	// field is ignored, so concurrent publishes can't race a Go-side
-	// read-modify-write into a spurious 409.
-	CreateRatingRule(ctx context.Context, tenantID string, rule domain.RatingRuleVersion) (domain.RatingRuleVersion, error)
-	CreateRatingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.RatingRuleVersion) (domain.RatingRuleVersion, error)
-	GetRatingRule(ctx context.Context, tenantID, id string) (domain.RatingRuleVersion, error)
-	// GetRuleByKeyAsOf resolves the version in force at asOf: the
-	// highest active version created at or before asOf, or the earliest
-	// active version when the key was born after asOf (a rule created
-	// mid-period has no prior price to preserve — its first version is
-	// the period's price; ADR-070). errs.ErrNotFound when the key has
-	// no active versions at all.
-	GetRuleByKeyAsOf(ctx context.Context, tenantID, ruleKey string, asOf time.Time) (domain.RatingRuleVersion, error)
-	ListRatingRules(ctx context.Context, filter RatingRuleFilter) ([]domain.RatingRuleVersion, error)
-
 	// Meters
 	CreateMeter(ctx context.Context, tenantID string, m domain.Meter) (domain.Meter, error)
 	CreateMeterTx(ctx context.Context, tx *sql.Tx, tenantID string, m domain.Meter) (domain.Meter, error)
 	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
 	GetMeterByEventName(ctx context.Context, tenantID, eventName string) (domain.Meter, error)
+	// GetMeterByEventNameTx reads the meter on tx and holds it FOR KEY SHARE
+	// until tx ends, so an aggregation PATCH (which takes the meter FOR
+	// UPDATE) waits for tx. The recipe install reads the meters it adopts
+	// this way (ADR-130 §15).
+	GetMeterByEventNameTx(ctx context.Context, tx *sql.Tx, eventName string) (domain.Meter, error)
 	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
-	UpdateMeter(ctx context.Context, tenantID string, m domain.Meter) (domain.Meter, error)
-	// UpdateMeterAudited runs the caller-supplied audit emission on the SAME
-	// transaction as the meter UPDATE (ADR-090 in-tx emission): the patched
-	// row and its audit row commit or roll back together. The service builds
-	// the emission (it owns audit-row content); the store owns the tx and
-	// exposes it. emit receives the UPDATE's RETURNING row — the values that
-	// actually landed, read inside the tx, never a pre-tx snapshot. It runs
-	// only when a row was updated (a missing meter returns ErrNotFound and
-	// emits nothing). nil emit = unaudited write.
-	//
-	// guard, when non-nil, runs first on the same transaction, before the
-	// UPDATE; an error from it aborts the patch (the D05 meter-in-use guard).
+	// UpdateMeterAudited runs guard, then the UPDATE, then emit, on one
+	// transaction (ADR-090 in-tx emission): the patched row and its audit
+	// row commit or roll back together. emit receives the UPDATE's
+	// RETURNING row and runs only when a row was updated. guard, when
+	// non-nil, runs first and aborts the patch on an error.
 	UpdateMeterAudited(ctx context.Context, tenantID string, m domain.Meter, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, out domain.Meter) error) (domain.Meter, error)
-
-	// Plans
-	CreatePlan(ctx context.Context, tenantID string, p domain.Plan) (domain.Plan, error)
-	CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan) (domain.Plan, error)
-	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
-	ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error)
-	UpdatePlan(ctx context.Context, tenantID string, p domain.Plan) (domain.Plan, error)
-
-	// Per-customer price overrides — keyed by rule_key, resolved as-of
-	// the billing period's open (ADR-070).
-	CreateOverride(ctx context.Context, tenantID string, o domain.CustomerPriceOverride) (domain.CustomerPriceOverride, error)
-	GetOverrideByKeyAsOf(ctx context.Context, tenantID, customerID, ruleKey string, asOf time.Time) (domain.CustomerPriceOverride, error)
-	DeactivateOverride(ctx context.Context, tenantID, id string) error
-	CountActiveOverridesByRuleKey(ctx context.Context, tenantID, ruleKey string) (int, error)
-	ListOverrides(ctx context.Context, tenantID, customerID string) ([]domain.CustomerPriceOverride, error)
-
-	// Meter pricing rules — N-rules-per-meter dispatch via dimension_match.
-	// See docs/dev/design/multi-dim-meters.md.
-	// guard, when non-nil, runs first on the upsert's transaction; an error
-	// from it aborts the write.
-	UpsertMeterPricingRule(ctx context.Context, tenantID string, rule domain.MeterPricingRule, guard func(tx *sql.Tx) error) (domain.MeterPricingRule, error)
-	UpsertMeterPricingRuleTx(ctx context.Context, tx *sql.Tx, tenantID string, rule domain.MeterPricingRule) (domain.MeterPricingRule, error)
-	GetMeterPricingRule(ctx context.Context, tenantID, id string) (domain.MeterPricingRule, error)
-	ListMeterPricingRulesByMeter(ctx context.Context, tenantID, meterID string) ([]domain.MeterPricingRule, error)
-	DeleteMeterPricingRule(ctx context.Context, tenantID, id string) error
-	// DeleteMeterPricingRuleAudited runs the caller-supplied audit emission
-	// on the SAME transaction as the DELETE (ADR-090). emit receives the
-	// DELETED row (RETURNING) — so the audit row carries the rule's true
-	// meter_id, read inside the tx, rather than a URL segment the caller
-	// could have mismatched. It runs ONLY when a row was actually removed;
-	// deleting a nonexistent rule returns ErrNotFound and emits nothing.
-	// nil emit = unaudited delete. guard, when non-nil, runs first on the
-	// same transaction; an error from it aborts the delete.
-	DeleteMeterPricingRuleAudited(ctx context.Context, tenantID, id string, guard func(tx *sql.Tx) error, emit func(tx *sql.Tx, deleted domain.MeterPricingRule) error) error
-
-	// ListMeterPricingRules lists every binding for the tenant (dashboard
-	// rule→meter resolution; read-only).
-	ListMeterPricingRules(ctx context.Context, tenantID string) ([]domain.MeterPricingRule, error)
-
-	// Currency-coherence reads (ADR-100). "In-scope plans" = non-archived
-	// plans plus archived plans still carrying non-terminal subscriptions;
-	// key currency = latest ACTIVE version (engine resolution), Mixed when
-	// a key's active versions span currencies.
-	PlanCurrenciesBoundToRuleKey(ctx context.Context, tenantID, ruleKey string) ([]planCurrency, error)
-	PlanCurrenciesWiringMeters(ctx context.Context, tenantID string, meterIDs []string) ([]planCurrency, error)
-	MeterBoundKeyCurrencies(ctx context.Context, tenantID string, meterIDs []string) ([]keyCurrency, error)
-	RuleKeyResolvedCurrency(ctx context.Context, tenantID, ruleVersionID string) (keyCurrency, error)
-
-	// The meter-in-use guard's reads (D05). Each runs on the caller's
-	// transaction, so the guard and the edit it gates commit together.
-	//
 	// LockMeterTx locks the meter row FOR UPDATE and returns it as committed
-	// now. Every guarded edit on a meter takes it first, so two edits on one
-	// meter run one after the other and each sees the other's result.
+	// now. An aggregation change takes it first, so it waits for every
+	// in-flight write of an event of the meter (the event's foreign key
+	// holds KEY SHARE on the meter row).
 	LockMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (domain.Meter, error)
-	// MeterHasUsageTx reports whether the meter has usage events (rows in
-	// usage_events). Once it has, its aggregation is fixed (ADR-130 §2);
-	// held rows do not count. Read after LockMeterTx, it sees every event
-	// whose insert the lock waited for.
+	// MeterHasUsageTx reports whether the meter has usage events. Once it
+	// has, its aggregation is fixed (ADR-130 §2); held rows do not count.
 	MeterHasUsageTx(ctx context.Context, tx *sql.Tx, m domain.Meter) (bool, error)
 	// MeterHasUsage is MeterHasUsageTx on its own transaction, for reads.
 	MeterHasUsage(ctx context.Context, tenantID string, m domain.Meter) (bool, error)
-	// CountSubsUsingMeterTx locks every plan whose meter_ids holds the meter
-	// (FOR UPDATE), then counts the draft, trialing and active subscriptions
-	// that bill it: an item on such a plan, or an item change to or from
-	// one since the subscription's current period started. The plan lock is
-	// what orders the count against a subscription being created or moved
-	// onto such a plan: the subscription writer takes FOR KEY SHARE on each
-	// plan it references, which waits for this lock. A writer that
-	// references more than one plan takes them in ascending id, as this
-	// does, right after its subscription row (D08 §4.21).
-	CountSubsUsingMeterTx(ctx context.Context, tx *sql.Tx, meterID string) (int, error)
-	// GetMeterPricingRuleByPairTx returns the meter's rule bound to the rating
-	// rule version, or errs.ErrNotFound.
-	GetMeterPricingRuleByPairTx(ctx context.Context, tx *sql.Tx, meterID, ratingRuleVersionID string) (domain.MeterPricingRule, error)
-	// CountRulesOutrankedTx counts the meter's rules with priority at or below
-	// priority that one event could match together with match: no key the
-	// two share has different values. A new rule could take such a rule's
-	// events.
-	CountRulesOutrankedTx(ctx context.Context, tx *sql.Tx, meterID string, match map[string]any, priority int) (int, error)
+
+	// Plans
+	// CreatePlanWithPrices creates the plan and its prices on one
+	// transaction.
+	CreatePlanWithPrices(ctx context.Context, tenantID string, p domain.Plan, prices []PriceChange) (domain.Plan, []domain.PlanPrice, error)
+	CreatePlanTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.Plan) (domain.Plan, error)
+	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
+	ListPlans(ctx context.Context, tenantID string) ([]domain.Plan, error)
+	// UpdatePlan locks the plan FOR UPDATE, hands guard the plan as locked
+	// and whether a subscription ever used it, and writes what guard
+	// returns, all on one transaction.
+	UpdatePlan(ctx context.Context, tenantID, id string, guard func(locked domain.Plan, used bool) (domain.Plan, error)) (domain.Plan, error)
+	// PlanUsed reports whether any subscription ever referenced the plan
+	// (ADR-130 §5).
+	PlanUsed(ctx context.Context, tenantID, planID string) (bool, error)
+
+	// Plan prices (price_store.go).
+	PriceStore
+	// Customer price overrides (override.go).
+	OverrideStore
 }
 
-type RatingRuleFilter struct {
-	TenantID       string
-	RuleKey        string
-	LifecycleState string
-	LatestOnly     bool
+// PriceStore holds plan prices, their versions and the test-clock stamps of
+// those versions (ADR-130 §1, §7).
+type PriceStore interface {
+	// WritePrice applies one change to a plan's prices: the chokepoint every
+	// price writer goes through. It locks the plan, decides "used", checks
+	// the change, writes the version (and clock stamps), ends the overrides
+	// of a removed price and runs emit, all in one transaction.
+	WritePrice(ctx context.Context, tenantID, planID string, ch PriceChange, emit func(tx *sql.Tx, r PriceWrite) error) (PriceWrite, error)
+	// WritePricesTx adds prices to a plan created on tx (POST /v1/plans, the
+	// recipe install). The plan is new, so it is never used: every price
+	// takes one version from the beginning of time.
+	WritePricesTx(ctx context.Context, tx *sql.Tx, planID string, adds []PriceChange) ([]domain.PlanPrice, error)
+	// ListPrices returns the prices of the plans that take part from now on,
+	// each with its latest content, by plan id.
+	ListPrices(ctx context.Context, tenantID string, planIDs []string) (map[string][]domain.PlanPrice, error)
+	// PlanPricesAt returns the plan's prices that take part at `at` in the
+	// time domain of clockID ("" is wall time), each with its version in
+	// force then, in claim order (domain.ClaimOrder) per meter.
+	PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error)
+	// PlanMeterIDs returns every meter the plan has ever had a price for,
+	// removed prices included (ADR-130 §16 of the design: the overlap guard
+	// reads the conservative set).
+	PlanMeterIDs(ctx context.Context, tenantID, planID string) ([]string, error)
+}
+
+// OverrideStore holds customer price overrides (ADR-130 §6).
+type OverrideStore interface {
+	// WriteOverride closes the customer's active override of the price, if
+	// any, and inserts o, after the locks of ADR-130 §8, stamped in the
+	// customer's own time.
+	WriteOverride(ctx context.Context, tenantID string, o domain.CustomerPriceOverride) (domain.CustomerPriceOverride, error)
+	// DeactivateOverride ends the override, stamped like WriteOverride.
+	DeactivateOverride(ctx context.Context, tenantID, id string) (domain.CustomerPriceOverride, error)
+	// GetOverrideAt returns the customer's override of the price in force at
+	// `at` (created_at <= at < deactivated_at), or errs.ErrNotFound.
+	GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error)
+	// ListOverrides returns the active overrides, optionally of one customer
+	// and of one price.
+	ListOverrides(ctx context.Context, tenantID, customerID, priceID string) ([]domain.CustomerPriceOverride, error)
+}
+
+// PriceOp is the kind of a price change.
+type PriceOp int
+
+const (
+	PriceAdd PriceOp = iota
+	PriceEdit
+	PriceRemove
+)
+
+// PriceChange is one change to a plan's prices. An add names the meter and
+// match (the identity) and the shape; an edit names the price and the new
+// shape; a removal names the price.
+type PriceChange struct {
+	Op      PriceOp
+	PriceID string
+	MeterID string
+	Match   map[string]string
+	Shape   domain.PriceShape
+}
+
+// Effective is when a price write applies (ADR-130 §5).
+type Effective string
+
+const (
+	// EffectiveNow: the plan has never been used, so the write applies at
+	// once.
+	EffectiveNow Effective = "now"
+	// EffectiveNextPeriod: the plan is used, so each subscriber pays the
+	// new content from their next billing period.
+	EffectiveNextPeriod Effective = "next_period"
+)
+
+// EndedOverride is a customer override a price removal ended.
+type EndedOverride struct {
+	ID         string `json:"id"`
+	CustomerID string `json:"customer_id"`
+}
+
+// PriceWrite is the result of a price write.
+type PriceWrite struct {
+	// Price is the price with the content the write gave it; for a removal,
+	// the content it had.
+	Price     domain.PlanPrice
+	Effective Effective
+	Removed   bool
+	// Before is the content the price had from now on before the write, nil
+	// for a new price or a price added back.
+	Before *domain.PriceShape
+	// ReAdded is true when an add named a removed price's meter and match:
+	// the write appended to that price, which keeps its id.
+	ReAdded bool
+	// EndedOverrides are the overrides a removal ended.
+	EndedOverrides []EndedOverride
 }

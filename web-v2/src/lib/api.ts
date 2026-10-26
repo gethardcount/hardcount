@@ -178,27 +178,11 @@ export const api = {
     apiRequest<{ data: Meter[] }>('GET', '/meters'),
   getMeter: (id: string) =>
     apiRequest<Meter>('GET', `/meters/${id}`),
-  createMeter: (data: { event_name: string; name: string; unit?: string; aggregation?: string; rating_rule_version_id?: string }) =>
+  createMeter: (data: { event_name: string; name: string; unit?: string; aggregation?: string }) =>
     apiRequest<Meter>('POST', '/meters', data),
-  // "" clears the default binding; unmatched-dimension usage goes unbilled again.
   // aggregation is refused (409 meter_has_usage) once the meter has usage events.
-  updateMeter: (id: string, data: { rating_rule_version_id?: string; aggregation?: string; name?: string; unit?: string }) =>
+  updateMeter: (id: string, data: { aggregation?: string; name?: string; unit?: string }) =>
     apiRequest<Meter>('PATCH', `/meters/${id}`, data),
-  listAllMeterPricingRules: () =>
-    apiRequest<{ data: MeterPricingRule[] }>('GET', '/meter-pricing-rules'),
-  listMeterPricingRules: (meterId: string) =>
-    apiRequest<{ data: MeterPricingRule[] }>('GET', `/meters/${meterId}/pricing-rules`),
-  createMeterPricingRule: (
-    meterId: string,
-    data: {
-      rating_rule_version_id: string
-      dimension_match: Record<string, string | number | boolean>
-      priority: number
-    },
-  ) =>
-    apiRequest<MeterPricingRule>('POST', `/meters/${meterId}/pricing-rules`, data),
-  deleteMeterPricingRule: (meterId: string, ruleId: string) =>
-    apiRequest<{ status: string }>('DELETE', `/meters/${meterId}/pricing-rules/${ruleId}`),
   customerUsage: (customerId: string, params?: { from?: string; to?: string }) => {
     const qs = new URLSearchParams()
     if (params?.from) qs.set('from', params.from)
@@ -208,29 +192,35 @@ export const api = {
   },
   listPlans: () =>
     apiRequest<{ data: Plan[] }>('GET', '/plans'),
-  // live_subscription_count: subscriptions that lock the plan's price,
-  // billing timing and meters (only on this endpoint, not the list).
+  // used and live_subscription_count are only on this endpoint, not the list.
   getPlan: (id: string) =>
-    apiRequest<Plan & { live_subscription_count: number }>('GET', `/plans/${id}`),
-  createPlan: (data: { code: string; name: string; currency: string; billing_interval: string; base_amount_cents: number; base_bill_timing?: BillTiming; meter_ids?: string[] }) =>
-    apiRequest<Plan>('POST', '/plans', data),
-  updatePlan: (id: string, data: Partial<{ name: string; status: string; base_amount_cents: number; base_bill_timing: BillTiming; meter_ids: string[] }>) =>
-    apiRequest<Plan>('PATCH', `/plans/${id}`, data),
-  listRatingRules: () =>
-    apiRequest<{ data: RatingRule[] }>('GET', '/rating-rules'),
-  getRatingRule: (id: string) =>
-    apiRequest<RatingRule>('GET', `/rating-rules/${id}`),
-  createRatingRule: (data: { rule_key: string; name: string; mode: string; currency: string; unit_amount_cents?: string; tiers?: PriceTier[]; package_size?: number; package_amount_cents?: string }) =>
-    apiRequest<RatingRule>('POST', '/rating-rules', data),
+    apiRequest<PlanDetail>('GET', `/plans/${id}`),
+  createPlan: (data: { code: string; name: string; currency: string; billing_interval: string; base_amount_cents: number; base_bill_timing?: BillTiming; prices?: PriceInput[] }) =>
+    apiRequest<PlanDetail>('POST', '/plans', data),
+  updatePlan: (id: string, data: Partial<{ name: string; status: string; base_amount_cents: number; base_bill_timing: BillTiming }>) =>
+    apiRequest<PlanDetail>('PATCH', `/plans/${id}`, data),
 
-  // Price overrides (ADR-070): negotiated per-customer prices, keyed by
-  // rule_key so they survive version publishes. Create is an upsert — a
-  // second override on the same (customer, rule) replaces the first from
-  // the customer's next billing period. All rate changes (create, replace,
-  // delete) take effect at the next period open, never mid-period.
-  listPriceOverrides: (customerId?: string) =>
-    apiRequest<{ data: PriceOverride[] }>('GET', `/price-overrides${customerId ? `?customer_id=${customerId}` : ''}`),
-  createPriceOverride: (data: { customer_id: string; rating_rule_version_id: string; mode: string; unit_amount_cents?: string; tiers?: PriceTier[]; package_size?: number; package_amount_cents?: string; reason?: string }) =>
+  // A plan's usage prices (ADR-130). On a plan no subscription has used, a
+  // write applies at once (effective "now"); on a used plan, from each
+  // subscriber's next billing period ("next_period").
+  addPlanPrice: (planId: string, data: PriceInput) =>
+    apiRequest<PriceWrite>('POST', `/plans/${planId}/prices`, data),
+  updatePlanPrice: (planId: string, priceId: string, data: PriceShape) =>
+    apiRequest<PriceWrite>('PATCH', `/plans/${planId}/prices/${priceId}`, data),
+  removePlanPrice: (planId: string, priceId: string) =>
+    apiRequest<PriceWrite>('DELETE', `/plans/${planId}/prices/${priceId}`),
+
+  // Price overrides: a customer's negotiated rate for one plan price. Create
+  // replaces an active override on the same (customer, price). Every change
+  // applies from the customer's next billing period, never mid-period.
+  listPriceOverrides: (filter?: { customerId?: string; priceId?: string }) => {
+    const qs = new URLSearchParams()
+    if (filter?.customerId) qs.set('customer_id', filter.customerId)
+    if (filter?.priceId) qs.set('price_id', filter.priceId)
+    const q = qs.toString()
+    return apiRequest<{ data: PriceOverride[] }>('GET', `/price-overrides${q ? '?' + q : ''}`)
+  },
+  createPriceOverride: (data: { customer_id: string; price_id: string; reason?: string } & PriceShape) =>
     apiRequest<PriceOverride>('POST', '/price-overrides', data),
   deletePriceOverride: (id: string) =>
     apiRequest<void>('DELETE', `/price-overrides/${id}`),
@@ -1184,9 +1174,8 @@ export interface Meter {
   event_name: string
   name: string
   unit: string
-  // One aggregation for the meter; every pricing rule bills under it.
+  // One aggregation for the meter; every price of it bills under it.
   aggregation: string
-  rating_rule_version_id: string
   created_at: string
   // Set when one meter is created, fetched or updated (not on the list):
   // whether the meter has usage events. Once it has, its aggregation is
@@ -1204,13 +1193,60 @@ export interface Plan {
   billing_interval: string
   status: string
   base_amount_cents: number
-  // ADR-031: when the recurring base bills. Defaults to 'in_arrears'
-  // on existing plans. 'in_advance' opts the plan into first-invoice-
-  // on-create + cancel-proration. Usage lines are always arrears.
+  // ADR-031: when the recurring base bills. 'in_advance' opts the plan
+  // into first-invoice-on-create + cancel-proration. A plan with no base
+  // fee is 'in_arrears'. Usage lines are always arrears.
   base_bill_timing: BillTiming
-  meter_ids: string[]
+  // The plan's usage prices from now on. A plan's meters are the meters it
+  // has a price for.
+  prices: PlanPrice[]
   tax_code?: string
   created_at: string
+}
+
+// Get, create and update plan answer these too.
+export interface PlanDetail extends Plan {
+  // Whether a subscription ever used the plan: a price change then applies
+  // from each subscriber's next period instead of at once.
+  used: boolean
+  // Subscriptions that are not canceled. While above 0 the base fee is fixed.
+  live_subscription_count: number
+}
+
+// How a price bills a quantity. Rates are decimal cents as strings.
+export interface PriceShape {
+  mode: string
+  unit_amount_cents?: string
+  tiers?: PriceTier[]
+  package_size?: number
+  package_amount_cents?: string
+}
+
+export interface PriceInput extends PriceShape {
+  meter_id: string
+  dimension_match?: Record<string, string>
+}
+
+// One usage price of a plan. Its meter and dimension_match are its identity;
+// it takes the plan's currency.
+export interface PlanPrice {
+  id: string
+  plan_id: string
+  meter_id: string
+  dimension_match: Record<string, string>
+  mode: string
+  unit_amount_cents: string
+  tiers: PriceTier[]
+  package_size: number
+  package_amount_cents: string
+  created_at: string
+  updated_at: string
+}
+
+export interface PriceWrite extends PlanPrice {
+  effective: 'now' | 'next_period'
+  removed?: boolean
+  ended_overrides?: { id: string; customer_id: string }[]
 }
 
 // One graduated tier. up_to is null on the open last tier, and only there.
@@ -1219,14 +1255,12 @@ export interface PriceTier {
   unit_amount_cents: string
 }
 
-// A negotiated per-customer price (ADR-070). rule_key is the identity —
-// the deal follows the rule across version publishes; rating_rule_version_id
-// only records which version the operator was looking at (provenance).
+// A customer's negotiated rate for one plan price. It keeps applying when the
+// price's rate changes and ends when the price is removed.
 export interface PriceOverride {
   id: string
-  rule_key: string
   customer_id: string
-  rating_rule_version_id: string
+  price_id: string
   mode: string
   unit_amount_cents: string
   tiers?: PriceTier[]
@@ -1234,24 +1268,6 @@ export interface PriceOverride {
   package_amount_cents: string
   reason?: string
   active: boolean
-  created_at: string
-}
-
-export interface RatingRule {
-  id: string
-  rule_key: string
-  name: string
-  version: number
-  mode: string
-  currency: string
-  // Amounts are decimal cents serialized as strings (Stripe
-  // unit_amount_decimal model) so sub-cent prices bill exactly. A package
-  // bills ceil(quantity / package_size) packages at package_amount_cents.
-  unit_amount_cents: string
-  tiers?: PriceTier[]
-  package_size: number
-  package_amount_cents: string
-  lifecycle_state: string
   created_at: string
 }
 
@@ -1263,8 +1279,8 @@ export interface UsageEvent {
   // String-encoded NUMERIC(38, 12) — decimal precision for fractional GPU-hours
   // and partial tokens. Coerce via Number() / parseFloat() at display time.
   quantity: string
-  // Free-form dimensions per docs/dev/design/multi-dim-meters.md, subset-matched
-  // by pricing rules.
+  // Free-form dimensions per docs/dev/design/multi-dim-meters.md. A price
+  // takes an event whose dimensions include the price's dimension_match.
   dimensions?: Record<string, string | number | boolean>
   idempotency_key: string
   timestamp: string
@@ -1298,16 +1314,6 @@ export interface UsageMeterTotal {
   customers: number
   peak: string
   daily: { date: string; value: string }[]
-}
-
-// A pricing rule has no aggregation of its own: it bills under its meter's.
-export interface MeterPricingRule {
-  id: string
-  meter_id: string
-  rating_rule_version_id: string
-  dimension_match: Record<string, string | number | boolean>
-  priority: number
-  created_at: string
 }
 
 // CustomerUsage — response of GET /v1/customers/{id}/usage. Live shape from
@@ -1354,13 +1360,15 @@ export interface CustomerUsageMeter {
   currency: string
   total_quantity: string
   total_amount_cents: number
-  rules: CustomerUsageRule[]
+  prices: CustomerUsagePrice[]
 }
 
-export interface CustomerUsageRule {
-  rating_rule_version_id: string
-  rule_key: string
-  dimension_match?: Record<string, string | number | boolean>
+// One (plan, price) that took usage, or a no_price row per plan for the usage
+// no price of that plan took.
+export interface CustomerUsagePrice {
+  price_id?: string
+  plan_id: string
+  dimension_match?: Record<string, string>
   quantity: string
   amount_cents: number
   // Per-unit price in DECIMAL CENTS (nominal rate for flat rules, effective
@@ -1368,10 +1376,9 @@ export interface CustomerUsageRule {
   // formatRate so sub-cent rates never collapse to $0.00. Absent on the
   // FE-synthesized "__other__" catch-all bucket.
   unit_amount_decimal?: string
-  // True on the bucket of events that matched NO pricing rule (meter has no
-  // default binding): billed nothing by the engine. Rendered as a warning row
-  // — usually a mislabeled dimension value on a matrix-priced meter.
-  unmatched?: boolean
+  // True on the usage no price of the plan took: billed nothing. Rendered as
+  // a warning row — usually a label value no price names.
+  no_price?: boolean
 }
 
 export type CustomerTaxStatus = 'standard' | 'exempt' | 'reverse_charge'
@@ -1480,9 +1487,8 @@ export interface InvoicePreviewLine {
   line_type: string
   description: string
   meter_id?: string
-  rating_rule_version_id?: string
-  rule_key?: string
-  dimension_match?: Record<string, unknown>
+  price_id?: string
+  dimension_match?: Record<string, string>
   currency: string
   quantity: string
   unit_amount_cents: number

@@ -3,6 +3,7 @@ package pricing_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -12,85 +13,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/pricing"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
-
-func TestPostgresStore_RatingRules(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	store := pricing.NewPostgresStore(db)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Test")
-
-	// Create flat rule
-	rule, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "api_calls", Name: "API Calls", Version: 1,
-		LifecycleState: domain.RatingRuleDraft, Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(500),
-	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if rule.ID == "" {
-		t.Fatal("ID should be generated")
-	}
-
-	// Get
-	got, err := store.GetRatingRule(ctx, tenantID, rule.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if !got.UnitAmountCents.Equal(decimal.NewFromInt(500)) {
-		t.Errorf("flat_amount: got %s", got.UnitAmountCents)
-	}
-
-	// Create graduated rule with tiers
-	grad, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "storage", Name: "Storage", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingGraduated,
-		Currency: "USD",
-		Tiers: []domain.RatingTier{
-			{UpTo: new(int64(100)), UnitAmountCents: decimal.NewFromInt(10)},
-			{UpTo: nil, UnitAmountCents: decimal.NewFromInt(5)},
-		},
-	})
-	if err != nil {
-		t.Fatalf("create graduated: %v", err)
-	}
-
-	// Verify tiers persisted
-	gotGrad, _ := store.GetRatingRule(ctx, tenantID, grad.ID)
-	if len(gotGrad.Tiers) != 2 {
-		t.Fatalf("tiers: got %d, want 2", len(gotGrad.Tiers))
-	}
-	if up := gotGrad.Tiers[0].UpTo; up == nil || *up != 100 {
-		t.Errorf("tier[0].up_to: got %v, want 100", up)
-	}
-	if up := gotGrad.Tiers[1].UpTo; up != nil {
-		t.Errorf("tier[1].up_to: got %d, want null (the open last tier)", *up)
-	}
-
-	// List
-	all, err := store.ListRatingRules(ctx, pricing.RatingRuleFilter{TenantID: tenantID})
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(all) != 2 {
-		t.Errorf("list count: got %d, want 2", len(all))
-	}
-
-	// Version allocation happens in SQL (ADR-070): re-creating an
-	// existing key ignores the caller's Version and lands as the key's
-	// next version — a publish, never a unique violation.
-	dup, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "api_calls", Name: "Dup", Version: 1,
-		LifecycleState: domain.RatingRuleDraft, Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(10),
-	})
-	if err != nil {
-		t.Fatalf("re-create existing key: %v", err)
-	}
-	if dup.Version != 2 {
-		t.Errorf("re-created key version: got %d, want 2 (SQL MAX+1, caller's Version ignored)", dup.Version)
-	}
-}
 
 func TestPostgresStore_Meters(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -147,197 +69,118 @@ func TestPostgresStore_Plans(t *testing.T) {
 	plan, err := store.CreatePlan(ctx, tenantID, domain.Plan{
 		Code: "pro", Name: "Pro Plan", Currency: "USD",
 		BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
-		BaseAmountCents: 4900, MeterIDs: []string{"mtr_1", "mtr_2"},
+		BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance,
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-
 	got, err := store.GetPlan(ctx, tenantID, plan.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Code != "pro" {
-		t.Errorf("code: got %q", got.Code)
-	}
-	if got.BaseAmountCents != 4900 {
-		t.Errorf("base_amount: got %d", got.BaseAmountCents)
-	}
-	if len(got.MeterIDs) != 2 {
-		t.Errorf("meter_ids: got %d, want 2", len(got.MeterIDs))
+	if got.Code != "pro" || got.BaseAmountCents != 4900 || got.BaseBillTiming != domain.BillInAdvance {
+		t.Errorf("got %+v", got)
 	}
 
-	// Update
-	got.Name = "Pro Plus"
-	got.BaseAmountCents = 5900
-	updated, err := store.UpdatePlan(ctx, tenantID, got)
+	updated, err := store.UpdatePlan(ctx, tenantID, plan.ID, func(locked domain.Plan, used bool) (domain.Plan, error) {
+		if used {
+			t.Error("a new plan reads as used")
+		}
+		locked.Name = "Pro Plus"
+		locked.BaseAmountCents = 5900
+		return locked, nil
+	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if updated.Name != "Pro Plus" {
-		t.Errorf("updated name: got %q", updated.Name)
+	if updated.Name != "Pro Plus" || updated.BaseAmountCents != 5900 {
+		t.Errorf("updated: got %+v", updated)
 	}
-	if updated.BaseAmountCents != 5900 {
-		t.Errorf("updated base: got %d", updated.BaseAmountCents)
+	if _, err := store.UpdatePlan(ctx, tenantID, "vlx_pln_missing", func(p domain.Plan, _ bool) (domain.Plan, error) { return p, nil }); err != errs.ErrNotFound {
+		t.Errorf("unknown plan: got %v, want ErrNotFound", err)
 	}
 }
 
-// TestPostgresStore_MeterPricingRules covers the multi-dim meters
-// foundation: the (meter, rating-rule) UNIQUE key drives upsert, the
-// priority-DESC list ordering matches the runtime resolution order, the
-// JSONB dimension_match round-trips, and RLS isolates tenants.
-func TestPostgresStore_MeterPricingRules(t *testing.T) {
+// TestPostgresStore_PlanPrices: a plan's prices round-trip with their
+// shapes (a graduated price's open last tier stays null), list in creation
+// order, resolve in claim order (the most labels first), and are invisible
+// to another tenant, with no tenant filter in the query: row-level security
+// filters them.
+func TestPostgresStore_PlanPrices(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := pricing.NewPostgresStore(db)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Multi-Dim Test")
+	tenantID := testutil.CreateTestTenant(t, db, "Prices")
+	other := testutil.CreateTestTenant(t, db, "Other")
 
-	// Seed: one meter, two rating rules.
-	rrv1, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "tokens_default", Name: "Tokens default", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
-	})
+	meter, err := store.CreateMeter(ctx, tenantID, domain.Meter{EventName: "tokens", Name: "Tokens", Unit: "tokens", Aggregation: "sum"})
 	if err != nil {
-		t.Fatalf("seed rrv1: %v", err)
+		t.Fatalf("meter: %v", err)
 	}
-	rrv2, err := store.CreateRatingRule(ctx, tenantID, domain.RatingRuleVersion{
-		RuleKey: "tokens_cached", Name: "Tokens cached", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("seed rrv2: %v", err)
+	upTo := int64(1000)
+	shapes := []pricing.PriceChange{
+		{Op: pricing.PriceAdd, MeterID: meter.ID, Shape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.RequireFromString("0.0003")}},
+		{Op: pricing.PriceAdd, MeterID: meter.ID, Match: map[string]string{"model": "a"}, Shape: domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
+			{UpTo: &upTo, UnitAmountCents: decimal.Zero}, {UpTo: nil, UnitAmountCents: decimal.NewFromInt(2)},
+		}}},
+		{Op: pricing.PriceAdd, MeterID: meter.ID, Match: map[string]string{"model": "a", "token_type": "input"}, Shape: domain.PriceShape{Mode: domain.PricingPackage, PackageSize: 1000, PackageAmountCents: decimal.RequireFromString("0.2")}},
 	}
-	meter, err := store.CreateMeter(ctx, tenantID, domain.Meter{
-		EventName: "tokens", Name: "Tokens", Unit: "tokens",
-		Aggregation: "sum", RatingRuleVersionID: rrv1.ID,
-	})
+	plan, prices, err := store.CreatePlanWithPrices(ctx, tenantID, domain.Plan{
+		Code: "pro", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
+	}, shapes)
 	if err != nil {
-		t.Fatalf("seed meter: %v", err)
+		t.Fatalf("create plan with prices: %v", err)
+	}
+	if len(prices) != 3 {
+		t.Fatalf("prices = %d, want 3", len(prices))
 	}
 
-	// Insert default rule (no dimension match, low priority).
-	defRule, err := store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
-		MeterID: meter.ID, RatingRuleVersionID: rrv1.ID,
-		DimensionMatch: map[string]any{}, Priority: 0,
-	}, nil)
-	if err != nil {
-		t.Fatalf("upsert default: %v", err)
-	}
-	if defRule.ID == "" || defRule.CreatedAt.IsZero() {
-		t.Errorf("expected ID and created_at populated, got %+v", defRule)
-	}
-
-	// Insert specific rule, higher priority.
-	specRule, err := store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
-		MeterID: meter.ID, RatingRuleVersionID: rrv2.ID,
-		DimensionMatch: map[string]any{"model": "gpt-4", "cached": true}, Priority: 100,
-	}, nil)
-	if err != nil {
-		t.Fatalf("upsert specific: %v", err)
-	}
-
-	// List ordering: priority DESC (specific first, default last).
-	rules, err := store.ListMeterPricingRulesByMeter(ctx, tenantID, meter.ID)
+	listed, err := store.ListPrices(ctx, tenantID, []string{plan.ID})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(rules) != 2 {
-		t.Fatalf("got %d rules, want 2", len(rules))
+	got := listed[plan.ID]
+	if len(got) != 3 || got[0].ID != prices[0].ID || got[1].ID != prices[1].ID || got[2].ID != prices[2].ID {
+		t.Fatalf("listed %+v, want the three in creation order", got)
 	}
-	if rules[0].ID != specRule.ID {
-		t.Errorf("priority ordering: got %s first, want %s (specific)", rules[0].ID, specRule.ID)
+	if !got[0].UnitAmountCents.Equal(decimal.RequireFromString("0.0003")) || len(got[0].DimensionMatch) != 0 {
+		t.Errorf("per_unit price = %+v", got[0])
 	}
-	if rules[1].ID != defRule.ID {
-		t.Errorf("priority ordering: got %s last, want %s (default)", rules[1].ID, defRule.ID)
+	if len(got[1].Tiers) != 2 || got[1].Tiers[0].UpTo == nil || *got[1].Tiers[0].UpTo != 1000 || got[1].Tiers[1].UpTo != nil {
+		t.Errorf("graduated tiers = %+v, want up_to 1000 then null", got[1].Tiers)
 	}
-	// Dimension match round-trip via JSONB.
-	if got := rules[0].DimensionMatch["model"]; got != "gpt-4" {
-		t.Errorf("dimension_match round-trip: got %v, want gpt-4", got)
-	}
-	if got := rules[0].DimensionMatch["cached"]; got != true {
-		t.Errorf("dimension_match bool round-trip: got %v, want true", got)
+	if got[2].PackageSize != 1000 || !got[2].PackageAmountCents.Equal(decimal.RequireFromString("0.2")) || got[2].DimensionMatch["token_type"] != "input" {
+		t.Errorf("package price = %+v", got[2])
 	}
 
-	// Upsert idempotency: re-issuing the same (meter, rrv) pair updates
-	// the same row instead of inserting a duplicate.
-	updated, err := store.UpsertMeterPricingRule(ctx, tenantID, domain.MeterPricingRule{
-		MeterID: meter.ID, RatingRuleVersionID: rrv2.ID,
-		DimensionMatch: map[string]any{"model": "gpt-4-turbo"}, Priority: 200,
-	}, nil)
+	at, err := store.PlanPricesAt(ctx, tenantID, plan.ID, time.Now().UTC(), "")
 	if err != nil {
-		t.Fatalf("upsert update: %v", err)
+		t.Fatalf("prices at: %v", err)
 	}
-	if updated.ID != specRule.ID {
-		t.Errorf("upsert created a new row instead of updating: first=%s now=%s", specRule.ID, updated.ID)
+	if len(at) != 3 || at[0].ID != prices[2].ID || at[1].ID != prices[1].ID || at[2].ID != prices[0].ID {
+		t.Errorf("claim order = %v, want the 2-label price, the 1-label price, then {}", at)
 	}
-	if updated.Priority != 200 || updated.DimensionMatch["model"] != "gpt-4-turbo" {
-		t.Errorf("updated fields not persisted: match=%v priority=%d", updated.DimensionMatch, updated.Priority)
+	if meters, err := store.PlanMeterIDs(ctx, tenantID, plan.ID); err != nil || len(meters) != 1 || meters[0] != meter.ID {
+		t.Errorf("plan meters = %v, %v; want [%s]", meters, err, meter.ID)
 	}
 
-	// Delete and verify.
-	if err := store.DeleteMeterPricingRule(ctx, tenantID, defRule.ID); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	_, err = store.GetMeterPricingRule(ctx, tenantID, defRule.ID)
-	if err == nil || err != errs.ErrNotFound {
-		t.Errorf("expected ErrNotFound after delete, got %v", err)
-	}
-	left, _ := store.ListMeterPricingRulesByMeter(ctx, tenantID, meter.ID)
-	if len(left) != 1 {
-		t.Errorf("after delete: got %d rules, want 1", len(left))
-	}
-}
-
-// TestPostgresStore_MeterPricingRules_RLS verifies tenant A cannot see
-// or mutate tenant B's pricing rules.
-func TestPostgresStore_MeterPricingRules_RLS(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	store := pricing.NewPostgresStore(db)
-	ctx := postgres.WithLivemode(context.Background(), false)
-
-	tenantA := testutil.CreateTestTenant(t, db, "Tenant A")
-	tenantB := testutil.CreateTestTenant(t, db, "Tenant B")
-
-	// Seed minimal data in tenant A.
-	rrvA, _ := store.CreateRatingRule(ctx, tenantA, domain.RatingRuleVersion{
-		RuleKey: "a_rule", Name: "A", Version: 1,
-		LifecycleState: domain.RatingRuleActive, Mode: domain.PricingPerUnit,
-		Currency: "USD", UnitAmountCents: decimal.NewFromInt(5),
-	})
-	meterA, _ := store.CreateMeter(ctx, tenantA, domain.Meter{
-		EventName: "tokens", Name: "Tokens", Unit: "tokens",
-		Aggregation: "sum", RatingRuleVersionID: rrvA.ID,
-	})
-	ruleA, err := store.UpsertMeterPricingRule(ctx, tenantA, domain.MeterPricingRule{
-		MeterID: meterA.ID, RatingRuleVersionID: rrvA.ID,
-		DimensionMatch: map[string]any{},
-	}, nil)
+	// Row-level security: the other tenant reads no row of any of the
+	// three tables, with no tenant filter in the query.
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, other)
 	if err != nil {
-		t.Fatalf("seed tenant A rule: %v", err)
+		t.Fatal(err)
 	}
-
-	// Tenant B cannot see A's rule by id.
-	if _, err := store.GetMeterPricingRule(ctx, tenantB, ruleA.ID); err != errs.ErrNotFound {
-		t.Errorf("RLS: tenant B should not see tenant A's rule, got err=%v", err)
+	defer postgres.Rollback(tx)
+	for _, table := range []string{"plan_prices", "plan_price_versions", "plan_price_version_clocks"} {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("tenant B sees %d rows of %s", n, table)
+		}
 	}
-
-	// Tenant B's list-by-meter must not include A's rule.
-	listed, err := store.ListMeterPricingRulesByMeter(ctx, tenantB, meterA.ID)
-	if err != nil {
-		t.Fatalf("list by meter under tenantB: %v", err)
-	}
-	if len(listed) != 0 {
-		t.Errorf("RLS: tenantB saw %d rules under tenantA's meter, want 0", len(listed))
-	}
-
-	// Tenant B's delete must report not-found instead of removing it.
-	if err := store.DeleteMeterPricingRule(ctx, tenantB, ruleA.ID); err != errs.ErrNotFound {
-		t.Errorf("RLS: tenantB delete should be NotFound, got %v", err)
-	}
-	// And the rule still exists for tenant A.
-	if _, err := store.GetMeterPricingRule(ctx, tenantA, ruleA.ID); err != nil {
-		t.Errorf("rule must still exist for tenantA after RLS-blocked delete: %v", err)
+	if byPlan, err := store.ListPrices(ctx, other, []string{plan.ID}); err != nil || len(byPlan[plan.ID]) != 0 {
+		t.Errorf("tenant B lists %v, %v; want nothing", byPlan, err)
 	}
 }

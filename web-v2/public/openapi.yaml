@@ -23,7 +23,7 @@ tags:
   - name: Customers
     description: Customers, billing profiles, payment methods and per-customer views.
   - name: Pricing
-    description: Meters, rating rules, plans, pricing rules and price overrides.
+    description: Meters, plans, prices and price overrides.
   - name: Subscriptions
     description: Subscriptions, their items, trials, pauses and cancellations.
   - name: Usage
@@ -239,7 +239,7 @@ components:
           enum: [sum, count, max, last]
           description: |
             How the meter rolls its events into one quantity per billing
-            period. Every pricing rule of the meter bills under it. `last`
+            period. Every price of the meter bills under it. `last`
             is the latest event by timestamp, then by id. Fixed once the
             meter has a usage event (see `has_usage`).
         has_usage:
@@ -250,8 +250,6 @@ components:
             does not count until it is released. Returned when you create,
             get or update one meter; the meter list leaves it out. A create
             or update that succeeded leaves it out if it could not be read.
-        rating_rule_version_id:
-          type: string
         created_at:
           type: string
           format: date-time
@@ -286,14 +284,18 @@ components:
           enum: [in_advance, in_arrears]
           description: |
             When the recurring base fee is invoiced relative to the period it covers.
-            in_arrears (default): base + usage billed at period end.
+            in_arrears: base + usage billed at period end.
             in_advance: base billed at period start (day 1 on create; cycle-close invoice
             carries upcoming period's base + elapsed period's usage). Usage lines are
-            always arrears regardless of this flag. See ADR-031.
-        meter_ids:
+            always arrears regardless of this field. A plan with no base fee is
+            in_arrears. See ADR-031.
+        prices:
           type: array
+          description: |
+            The plan's usage prices from now on. A plan's meters are the
+            meters it has a price for.
           items:
-            type: string
+            $ref: "#/components/schemas/PlanPrice"
         description:
           type: string
         tax_code:
@@ -306,19 +308,35 @@ components:
           type: string
           format: date-time
 
-    RatingRule:
+    PlanDetail:
+      description: A plan as Get, Create and Update plan answer it.
+      allOf:
+        - $ref: "#/components/schemas/Plan"
+        - type: object
+          required: [prices, used, live_subscription_count]
+          properties:
+            used:
+              type: boolean
+              description: |
+                Whether a subscription has ever used the plan (canceled ones
+                and scheduled plan changes included). On a plan no one has
+                used, a price change applies at once; on a used plan, from
+                each subscriber's next billing period.
+            live_subscription_count:
+              type: integer
+              description: |
+                Subscriptions on this plan that are not canceled. While it
+                is above 0, `base_amount_cents` cannot change (see Update
+                plan).
+
+    PriceShape:
       type: object
+      description: |
+        How a price bills a quantity. Send only the mode's fields: a field the
+        mode does not use must be 0 or left out (`tiers`: `[]` or left out),
+        or the request is refused with 422 and `param` naming it.
+      required: [mode]
       properties:
-        id:
-          type: string
-        tenant_id:
-          type: string
-        rule_key:
-          type: string
-        name:
-          type: string
-        version:
-          type: integer
         mode:
           type: string
           enum: [per_unit, graduated, package]
@@ -327,32 +345,150 @@ components:
             bills each tier's part of the quantity at that tier's rate.
             `package` bills ceil(quantity ÷ `package_size`) ×
             `package_amount_cents`: a part package bills as a whole one.
-        currency:
-          type: string
         unit_amount_cents:
           type: string
           description: >-
             Price per unit in cents, as a decimal string (e.g. "0.0003" =
-            $3.00 per 1,000,000 units), returned as stored. The limits on a
-            new rate are on `POST /v1/rating-rules`. Invoice line amounts
-            and totals still round to whole cents.
+            $3.00 per 1,000,000 units). Used when `mode` is `per_unit`. 0 or
+            more, under 10^18, at most 12 decimal places (trailing zeros do
+            not count), and at most 100 characters. A JSON number is also
+            read. A value outside them is refused with 422 and `param`
+            naming the field. Invoice line amounts round to whole cents.
+        tiers:
+          type: array
+          description: >-
+            Used when `mode` is `graduated`. Each `up_to` is a whole number
+            above the one before. The last tier has `up_to: null` (no upper
+            bound), and only the last. Otherwise 422 with `param` `tiers`.
+            A tier's rate takes the limits of `unit_amount_cents`; a refusal
+            names `tiers[i].unit_amount_cents` (i counts from 0).
+          items:
+            $ref: "#/components/schemas/PriceTier"
+        package_size:
+          type: integer
+          format: int64
+          description: Used when `mode` is `package`. Must be above 0.
+        package_amount_cents:
+          type: string
+          description: >-
+            Price of one package in cents, as a decimal string (e.g. "0.2"
+            with `package_size` 1000 = $0.002 per 1,000 units), with the
+            limits of `unit_amount_cents`. Used when `mode` is `package`.
+
+    PlanPrice:
+      type: object
+      description: |
+        One usage price of a plan: a meter, the events it takes
+        (`dimension_match`) and its rate. The price takes the plan's
+        currency. Its id stays the same when its rate changes; its meter
+        and `dimension_match` are its identity and never change.
+      required: [id, plan_id, meter_id, dimension_match, mode, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          example: vlx_prc_1a2b3c4d5e6f7890abcdef12
+        plan_id:
+          type: string
+        meter_id:
+          type: string
+        dimension_match:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            The labels an event must carry for this price to take it, for
+            example `{"model": "claude-opus-4.5", "token_type": "input"}`.
+            `{}` takes every event of the meter. Of the prices whose labels
+            an event carries, the one with the most labels takes it.
+        mode:
+          type: string
+          enum: [per_unit, graduated, package]
+          description: As on PriceShape.
+        unit_amount_cents:
+          type: string
+          description: Price per unit in cents, as a decimal string.
         tiers:
           type: array
           description: Empty (`[]`) unless `mode` is `graduated`.
           items:
             $ref: "#/components/schemas/PriceTier"
-        lifecycle_state:
-          type: string
-          enum: [draft, active, archived]
         package_size:
           type: integer
           format: int64
         package_amount_cents:
           type: string
-          description: Price of one package in cents, as a decimal string (e.g. "0.2" = $0.002).
+          description: Price of one package in cents, as a decimal string.
         created_at:
           type: string
           format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          description: When the content shown was saved.
+
+    PriceWrite:
+      description: |
+        The answer to a price write: the price, and when the write applies.
+        `now`: no subscription has used the plan, so it applies at once.
+        `next_period`: each subscriber pays the new content from their next
+        billing period; the current period keeps the prices it started with.
+        A period is priced by the prices in force at its start, and a
+        subscription that starts without a trial has a first period from
+        midnight of its first day. So one that starts later on the day of
+        the write gets it from its second period: its first period still
+        bills a price removed that day and does not bill one added that day.
+        A subscription that moves to the plan mid-period (an immediate plan
+        change or an added item) gets it from its next period too: the rest
+        of its current period is priced by the plan's prices at that
+        period's start. An immediate change from a plan with another
+        billing interval is the exception: it starts a new period at the
+        change, so it gets the write at once.
+      allOf:
+        - $ref: "#/components/schemas/PlanPrice"
+        - type: object
+          required: [effective]
+          properties:
+            effective:
+              type: string
+              enum: [now, next_period]
+            removed:
+              type: boolean
+              description: True on the answer to a removal.
+            ended_overrides:
+              type: array
+              description: |
+                On a removal, the customer overrides of the price it ended.
+                Each ends when the removal takes effect for its customer.
+              items:
+                type: object
+                required: [id, customer_id]
+                properties:
+                  id:
+                    type: string
+                  customer_id:
+                    type: string
+
+    PriceInput:
+      description: One price to add to a plan.
+      allOf:
+        - type: object
+          required: [meter_id]
+          properties:
+            meter_id:
+              type: string
+            dimension_match:
+              type: object
+              maxProperties: 16
+              additionalProperties:
+                type: string
+              description: |
+                The labels an event must carry for the price to take it.
+                Values are strings of 1 to 100 characters, keys too; at
+                most 16 labels. Omitted or `{}` takes every event of the
+                meter. Two prices of one plan and meter that could both take
+                one event with the same number of labels are refused (409
+                `price_conflict`).
+        - $ref: "#/components/schemas/PriceShape"
 
     PriceTier:
       type: object
@@ -1334,8 +1470,14 @@ components:
         pricing_mode:
           type: string
           description: "On a usage line, the shape of its price: `per_unit`, `graduated` or `package`. Absent on other lines."
-        rating_rule_version_id:
+        price_id:
           type: string
+          description: On a usage line, the plan price that billed it. Absent on other lines.
+        dimension_match:
+          type: object
+          additionalProperties:
+            type: string
+          description: On a usage line, the labels its price takes. Absent for a price that takes every event, and on other lines.
         billing_period_start:
           type: string
           format: date-time
@@ -1444,7 +1586,7 @@ components:
                 format: int64
               attributed:
                 type: boolean
-                description: True only when a pricing rule pins this model — margin is never heuristically allocated.
+                description: True only when the price that billed the usage names this model — margin is never heuristically allocated.
               margin_bps:
                 type: integer
                 format: int64
@@ -1629,6 +1771,9 @@ components:
 
     RecipeRatingRule:
       type: object
+      description: >-
+        A rate in the recipe's YAML. An install puts it on the plan as the
+        price of each pricing rule that names it.
       required: [key, mode, currency, unit_amount_cents, package_amount_cents]
       properties:
         key:
@@ -1638,12 +1783,12 @@ components:
         mode:
           type: string
           enum: [per_unit, graduated, package]
-          description: As on RatingRule.
+          description: As on PriceShape.
         currency:
           type: string
         unit_amount_cents:
           type: string
-          description: Price per unit in cents, as a decimal string (see RatingRule.unit_amount_cents).
+          description: Price per unit in cents, as a decimal string (see PriceShape.unit_amount_cents).
         tiers:
           type: array
           items:
@@ -1657,6 +1802,11 @@ components:
 
     RecipePricingRule:
       type: object
+      description: >-
+        One price of the recipe's YAML: the meter, the events it takes and
+        the rating rule that gives its rate. An install puts it on each plan
+        that names the meter. `priority` is not used: the price with the
+        most labels takes an event.
       required: [event_name, rating_rule_key, dimension_match, priority]
       properties:
         event_name:
@@ -1689,10 +1839,10 @@ components:
         base_bill_timing:
           type: string
           enum: [in_advance, in_arrears]
-          description: Optional; empty defaults to in_arrears at plan creation (ADR-031).
+          description: Optional when the base fee is 0; the plan is then in_arrears (ADR-031).
         event_names:
           type: array
-          description: The recipe meters the plan bills.
+          description: The recipe meters the plan prices.
           items:
             type: string
 
@@ -1747,16 +1897,15 @@ components:
       description: >-
         Per-role count of objects a recipe will produce when instantiated.
         Recipes create no product entity — there is no `products` count.
-      required: [meters, rating_rules, pricing_rules, plans, dunning_policies, webhook_endpoints]
+      required: [meters, plans, prices, dunning_policies, webhook_endpoints]
       properties:
         meters:
           type: integer
-        rating_rules:
-          type: integer
-        pricing_rules:
-          type: integer
         plans:
           type: integer
+        prices:
+          type: integer
+          description: The prices the install puts on its plans.
         dunning_policies:
           type: integer
         webhook_endpoints:
@@ -1765,24 +1914,20 @@ components:
     RecipeCreatedObjects:
       type: object
       description: >-
-        Per-role map of entity IDs a recipe apply produced (including ADOPTED
-        catalog objects — apply reconnects to an existing meter/rule graph
-        rather than duplicating it, ADR-085). Every field is omitted when
-        empty; clients must guard reads.
+        Per-role map of entity IDs a recipe apply produced (including
+        ADOPTED meters — apply reconnects to an existing meter rather than
+        duplicating it, ADR-085). Every field is omitted when empty; clients
+        must guard reads.
       properties:
         meter_ids:
           type: array
           items:
             type: string
-        rating_rule_ids:
-          type: array
-          items:
-            type: string
-        pricing_rule_ids:
-          type: array
-          items:
-            type: string
         plan_ids:
+          type: array
+          items:
+            type: string
+        price_ids:
           type: array
           items:
             type: string
@@ -1826,7 +1971,8 @@ components:
       description: >-
         A recipe template as served by list/detail: the full parsed YAML
         (meters, rating rules, pricing rules, plans, optional dunning policy
-        and webhook), not just display metadata.
+        and webhook), not just display metadata. An install turns the
+        pricing rules into prices on its plans.
       required: [key, version, name, summary, overridable, meters, rating_rules, pricing_rules, plans]
       properties:
         key:
@@ -1896,24 +2042,20 @@ components:
         always present (possibly empty); optional singletons (dunning,
         webhook) are emitted as 0-or-1-length arrays so clients iterate
         without null guards.
-      required: [meters, rating_rules, pricing_rules, plans, dunning_policies, webhook_endpoints]
+      required: [meters, plans, prices, dunning_policies, webhook_endpoints]
       properties:
         meters:
           type: array
           items:
             $ref: "#/components/schemas/RecipeMeter"
-        rating_rules:
-          type: array
-          items:
-            $ref: "#/components/schemas/RecipeRatingRule"
-        pricing_rules:
-          type: array
-          items:
-            $ref: "#/components/schemas/RecipePricingRule"
         plans:
           type: array
           items:
             $ref: "#/components/schemas/RecipePlan"
+        prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecipePrice"
         dunning_policies:
           type: array
           items:
@@ -1922,6 +2064,23 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RecipeWebhook"
+
+    RecipePrice:
+      description: One price an install puts on a recipe plan. It takes the plan's currency.
+      allOf:
+        - type: object
+          required: [plan_code, event_name, dimension_match]
+          properties:
+            plan_code:
+              type: string
+            event_name:
+              type: string
+              description: The recipe meter the price is on.
+            dimension_match:
+              type: object
+              additionalProperties:
+                type: string
+        - $ref: "#/components/schemas/PriceShape"
 
     RecipePreviewResult:
       type: object
@@ -2053,6 +2212,13 @@ components:
           type: string
         period:
           type: object
+          description: |
+            The window the response covers. With no `from` and `to`
+            (`current_billing_cycle`), each subscription is rated over its
+            own current billing period, and the period runs from the
+            earliest start to the latest end of those periods. A meter's
+            totals and daily `buckets` cover its own subscription's whole
+            period, including usage a threshold invoice already billed.
           required: [from, to, source]
           properties:
             from:
@@ -2126,7 +2292,7 @@ components:
 
     CustomerUsageMeter:
       type: object
-      required: [meter_id, event_name, meter_name, unit, currency, total_quantity, total_amount_cents, rules]
+      required: [meter_id, event_name, meter_name, unit, currency, total_quantity, total_amount_cents, prices]
       properties:
         meter_id:
           type: string
@@ -2144,20 +2310,26 @@ components:
         total_amount_cents:
           type: integer
           format: int64
-        rules:
+        prices:
           type: array
-          description: One row per pricing rule that claimed events.
+          description: |
+            One row per (plan, price) that took usage, and a `no_price` row
+            per plan for the usage no price of that plan took. Two plans can
+            price one meter differently.
           items:
             type: object
-            required: [rating_rule_version_id, rule_key, quantity, amount_cents]
+            required: [plan_id, quantity, amount_cents]
             properties:
-              rating_rule_version_id:
+              price_id:
                 type: string
-              rule_key:
+                description: Absent on a `no_price` row.
+              plan_id:
                 type: string
               dimension_match:
                 type: object
-                additionalProperties: true
+                additionalProperties:
+                  type: string
+                description: The labels the price takes. Absent for a price that takes every event.
               quantity:
                 type: string
                 description: Decimal string.
@@ -2167,12 +2339,11 @@ components:
               unit_amount_decimal:
                 type: string
                 description: Price per unit in cents, as a decimal string; the same figure the invoice line shows.
-              unmatched:
+              no_price:
                 type: boolean
                 description: |
-                  True for events that matched no pricing rule. Velox
-                  bills nothing for them, and they are left out of the
-                  meter's totals.
+                  True for usage no price of the plan took. Velox bills
+                  nothing for it, and it is left out of the meter's totals.
 
     CustomerOverview:
       type: object
@@ -3483,53 +3654,28 @@ components:
                 type: integer
                 format: int64
 
-    MeterPricingRule:
-      type: object
-      required: [id, meter_id, rating_rule_version_id, dimension_match, priority, created_at, updated_at]
-      properties:
-        id:
-          type: string
-        tenant_id:
-          type: string
-        meter_id:
-          type: string
-        rating_rule_version_id:
-          type: string
-        dimension_match:
-          type: object
-          additionalProperties: true
-          description: Dimensions an event must have for this rule to bill it. `{}` matches every event. The rule bills them under the meter's `aggregation`.
-        priority:
-          type: integer
-          description: Rules are tried highest first.
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
     CustomerPriceOverride:
       type: object
-      required: [id, rule_key, customer_id, rating_rule_version_id, mode, active, created_at, updated_at]
+      description: |
+        A customer's negotiated rate for one plan price. It keeps applying
+        when the price's rate changes, and ends when the price is removed.
+        It takes the plan's currency.
+      required: [id, customer_id, price_id, mode, active, created_at, updated_at]
       properties:
         id:
           type: string
           example: vlx_cpo_1a2b3c4d5e6f7890
         tenant_id:
           type: string
-        rule_key:
-          type: string
-          description: The rating rule this override replaces the price of, across all its versions.
         customer_id:
           type: string
-        rating_rule_version_id:
+        price_id:
           type: string
-          description: The rule version named when the override was created. For reference only.
+          description: The plan price this override replaces the rate of, for this customer.
         mode:
           type: string
           enum: [per_unit, graduated, package]
-          description: As on RatingRule.
+          description: As on PriceShape.
         unit_amount_cents:
           type: string
           description: Price per unit in cents, as a decimal string.
@@ -3551,6 +3697,14 @@ components:
         created_at:
           type: string
           format: date-time
+          description: |
+            When the override starts, in the customer's time: wall time, or
+            its test clock's time. A billing period is priced at its start,
+            so the override applies from the customer's next period.
+        deactivated_at:
+          type: string
+          format: date-time
+          description: When the override ended, in the customer's time. Absent while it is active.
         updated_at:
           type: string
           format: date-time
@@ -3688,12 +3842,8 @@ components:
                 type: string
                 description: |
                   The meter's aggregation (`sum`, `count`, `max`, `last`),
-                  which every pricing rule of the meter bills under. `mixed`
-                  when a `max` or `last` meter is billed in more than one
-                  part (several rules, or a rule plus the events no rule
-                  claims), since peaks of the parts added up are not one
-                  peak: `value` is then the plain sum, which billing does not
-                  use. Empty when unknown.
+                  which every price of the meter bills under. Empty when
+                  unknown.
               value:
                 type: string
                 description: |
@@ -5047,14 +5197,14 @@ components:
           type: string
         meter_unit:
           type: string
-        rating_rule_version_id:
+        price_id:
           type: string
-        rule_key:
-          type: string
+          description: On a usage line, the plan price that priced it.
         dimension_match:
           type: object
-          additionalProperties: true
-          description: For a meter with several pricing rules, the dimension values this line's rule matches.
+          additionalProperties:
+            type: string
+          description: On a usage line, the labels its price takes. Absent for a price that takes every event.
         currency:
           type: string
         quantity:
@@ -5979,15 +6129,16 @@ paths:
                         currency: { type: string }
                         total_quantity: { type: string }
                         total_amount_cents: { type: integer, format: int64 }
-                        rules:
+                        prices:
                           type: array
+                          description: One row per price that took usage this period.
                           items:
                             type: object
                             properties:
-                              rule_key: { type: string }
                               dimension_match:
                                 type: object
                                 additionalProperties: { type: string }
+                                description: The labels the price takes. Absent for a price that takes every event.
                               quantity: { type: string }
                               amount_cents: { type: integer, format: int64 }
                               unit_amount_decimal:
@@ -6012,9 +6163,10 @@ paths:
                     type: integer
                     format: int64
                     description: >
-                      Projected METERED cost for the current period, in cents.
-                      Recurring base fees are not included — an in_advance base
-                      is already invoiced at period open.
+                      The metered cost of the current billing period so far,
+                      in cents, including usage a threshold invoice already
+                      billed. Recurring base fees are not included — an
+                      in_advance base is already invoiced at period open.
                   credits:
                     type: array
                     description: >
@@ -6028,12 +6180,11 @@ paths:
                       `estimated_remaining_cents` is the balance minus that,
                       never below zero. These three are the same figures
                       `GET /v1/credits/balance/{customer_id}/live` returns.
-                      `unbilled_usage_cents` can differ from
-                      `projected_total_cents`: it leaves out usage a threshold
-                      invoice already billed and usage sent before a trial's
-                      first paid period, and counts each subscription over its
-                      own period. It is an estimate: tax, base fees billed at
-                      period end and unpaid invoices are not subtracted.
+                      `unbilled_usage_cents` differs from
+                      `projected_total_cents` after a threshold invoice: it
+                      leaves out the usage that invoice billed. It is an
+                      estimate: tax, base fees billed at period end and unpaid
+                      invoices are not subtracted.
                     items:
                       type: object
                       properties:
@@ -6296,8 +6447,6 @@ paths:
                   enum: [sum, count, max, last]
                   default: sum
                   description: How the meter rolls its events into one quantity per billing period. Fixed once the meter has a usage event.
-                rating_rule_version_id:
-                  type: string
       responses:
         "201":
           description: Meter created
@@ -6325,29 +6474,18 @@ paths:
   /v1/meters/{id}:
     patch:
       tags: [Pricing]
-      summary: Update meter (incl. the default rating-rule binding)
+      summary: Update meter
       description: |
-        Fields omitted are left unchanged. `rating_rule_version_id` sets
-        the meter's DEFAULT rating rule — the rate applied to usage no
-        dimension pricing rule claims (the remedy for silently-unbilled
-        unmatched usage); pass an empty string to clear it. The rule must
-        exist on the tenant.
+        Fields omitted are left unchanged. A meter only counts: its prices
+        are on the plans (`/v1/plans/{id}/prices`).
 
         `aggregation` can change until the meter has a usage event, then
         it is fixed: a change is refused with 409 `meter_has_usage`. Usage
         events are counted under the aggregation the meter has; to count
         differently, make a new meter with another event name. Held usage
         for its `event_name` does not fix it: it is counted under the
-        meter's aggregation once released.
-
-        While a draft, trialing or active subscription uses the meter,
-        pointing the default at another rating rule, or clearing it, is
-        refused with 409 `meter_in_use`: the change would reprice the
-        billing period already open. A first default, or another version of
-        the same rating rule, is allowed. To change a rate, publish a new
-        version of the rating rule; it applies from each subscription's next
-        period (on a test clock, it can apply to the current simulated
-        period). `name` and `unit` can always change.
+        meter's aggregation once released. `name` and `unit` can always
+        change, at once.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
@@ -6369,9 +6507,6 @@ paths:
                 aggregation:
                   type: string
                   enum: [sum, count, max, last]
-                rating_rule_version_id:
-                  type: string
-                  description: Default rating rule; empty string clears.
       responses:
         "200":
           description: Updated meter
@@ -6384,18 +6519,14 @@ paths:
         "409":
           description: |
             `meter_has_usage`: the meter has usage events, so its
-            `aggregation` cannot change. `meter_in_use`: subscriptions use the meter and
-            the change would reprice their current period. The message gives
-            the number of subscriptions. `invalid_state`: the new default's
-            currency conflicts with the meter's other prices or with a plan
-            that uses the meter, or another write changed the meter during
-            this one.
+            `aggregation` cannot change. `invalid_state`: another write
+            changed the meter during this one.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: Validation failure (unknown rule id, bad aggregation)
+          description: Validation failure (bad aggregation, an empty name, or an unknown field)
 
     get:
       tags: [Pricing]
@@ -6420,217 +6551,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-
-  /v1/meters/{meter_id}/pricing-rules:
-    get:
-      tags: [Pricing]
-      summary: List a meter's pricing rules
-      description: |
-        Every pricing rule on the meter, highest priority first, then oldest
-        first. At billing time each usage event is billed by the first rule
-        in this order whose `dimension_match` it matches.
-      operationId: listMeterPricingRules
-      parameters:
-        - name: meter_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Pricing rules
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/MeterPricingRule"
-        "404":
-          description: No meter with this ID in this tenant and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    post:
-      tags: [Pricing]
-      summary: Create or update a meter pricing rule
-      description: |
-        Binds a rating rule to the part of the meter's usage whose dimensions
-        match `dimension_match`. The rule is identified by the meter and
-        `rating_rule_version_id`: posting the same pair again updates
-        `dimension_match` and `priority` on the existing rule and keeps its
-        id. Both cases return 201. The meter id in the path is used; a
-        `meter_id` in the body is ignored. A rule has no aggregation of its
-        own: it bills its events under the meter's `aggregation`.
-
-        While a draft, trialing or active subscription uses the meter, the
-        change must not reprice the billing period already open, or it is
-        refused with 409 `meter_in_use`. Updating a rule is refused, unless
-        nothing changes. A new rule is allowed only when the meter has no
-        default rating rule and every rule that could match the same events
-        has a higher priority: then it prices only usage no rule prices
-        now. To change a rate, publish a new version of the rating rule; it
-        applies from each subscription's next period (on a test clock, it
-        can apply to the current simulated period).
-      operationId: upsertMeterPricingRule
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: meter_id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [rating_rule_version_id]
-              properties:
-                rating_rule_version_id:
-                  type: string
-                  description: The rating rule that prices the matched usage. Must exist in this tenant and mode.
-                dimension_match:
-                  type: object
-                  additionalProperties: true
-                  maxProperties: 16
-                  description: |
-                    Event dimensions this rule claims, for example
-                    `{"model": "gpt-4o", "token_type": "input"}`. Values must be
-                    strings, numbers or booleans. Omitted or `{}` matches every event.
-                priority:
-                  type: integer
-                  default: 0
-                  description: Higher wins when an event matches more than one rule.
-      responses:
-        "201":
-          description: The created or updated rule
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MeterPricingRule"
-        "400":
-          description: "`invalid_request`: the body is not valid JSON."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "409":
-          description: |
-            `meter_in_use`: subscriptions use the meter and the rule would
-            reprice their current period. The message gives the number of
-            subscriptions. `invalid_state`: the rating rule's currency
-            differs from the meter's other prices or from a plan that uses
-            the meter, or the rule has versions in more than one currency.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: |
-            `validation_error`: unknown meter or rating rule, a field the
-            body does not define (such as `aggregation_mode`: a rule bills
-            under its meter's aggregation), more than 16 `dimension_match`
-            keys, or a non-scalar `dimension_match` value.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/meters/{meter_id}/pricing-rules/{id}:
-    get:
-      tags: [Pricing]
-      summary: Get a meter pricing rule
-      description: The rule is looked up by `id` alone; `meter_id` is not checked against it.
-      operationId: getMeterPricingRule
-      parameters:
-        - name: meter_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: The rule
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MeterPricingRule"
-        "404":
-          description: "`not_found`: no rule with this id."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    delete:
-      tags: [Pricing]
-      summary: Delete a meter pricing rule
-      description: |
-        Removes the rule. Usage already invoiced is not changed; the next
-        invoices bill the meter's usage without this rule. The rule is
-        looked up by `id` alone; `meter_id` is not checked against it.
-        Refused with 409 `meter_in_use` while a draft, trialing or active
-        subscription uses the meter: the rule's usage would move to another
-        price, or to none, in the billing period already open.
-      operationId: deleteMeterPricingRule
-      parameters:
-        - name: meter_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: Deleted
-        "404":
-          description: "`not_found`: no rule with this id."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "409":
-          description: |
-            `meter_in_use`: subscriptions use the meter. The message gives
-            the number of subscriptions.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/meter-pricing-rules:
-    get:
-      tags: [Pricing]
-      summary: List all meter pricing rules
-      description: Every pricing rule on every meter in this tenant and mode, highest priority first.
-      operationId: listAllMeterPricingRules
-      responses:
-        "200":
-          description: Pricing rules
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/MeterPricingRule"
 
   /v1/credit-notes:
     post:
@@ -7556,12 +7476,17 @@ paths:
                   type: string
                   enum: [in_advance, in_arrears]
                   description: |
-                    Optional. Defaults to in_arrears. See Plan.base_bill_timing
-                    for semantics (ADR-031).
-                meter_ids:
+                    Required when `base_amount_cents` is above 0. With a base
+                    of 0 it may be left out, and the plan is in_arrears;
+                    `in_advance` with a base of 0 is refused. See
+                    Plan.base_bill_timing (ADR-031).
+                prices:
                   type: array
+                  description: |
+                    The plan's usage prices, created with it in one request.
+                    Each takes the plan's currency.
                   items:
-                    type: string
+                    $ref: "#/components/schemas/PriceInput"
                 status:
                   type: string
                   enum: [active]
@@ -7574,16 +7499,31 @@ paths:
                     `default_product_tax_code`.
       responses:
         "201":
-          description: Plan created
+          description: Plan created, with its prices
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Plan"
+                $ref: "#/components/schemas/PlanDetail"
+        "409":
+          description: |
+            `price_exists`: two prices name the same meter and
+            `dimension_match`. `price_conflict`: two prices on one meter
+            could both take one event with the same number of labels, so
+            neither would win; the message names the other price, and
+            `param` names the second one. Nothing is created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: |
-            A field failed validation, `status` is set to anything but
-            `active` (a plan is created active; archive it with PATCH), or
-            the body has an unknown field (`param` names it; the body must use only the fields listed here).
+            A field failed validation (a price names an unknown meter, a
+            rate is outside its limits, `base_bill_timing` is missing with a
+            base fee above 0 or is `in_advance` with a base of 0), `status`
+            is set to anything but `active` (a plan is created active;
+            archive it with PATCH), or the body has an unknown field
+            (`param` names it, `prices[i].` first for a price; the body must
+            use only the fields listed here).
           content:
             application/json:
               schema:
@@ -7618,22 +7558,11 @@ paths:
             type: string
       responses:
         "200":
-          description: The plan
+          description: The plan, with its prices
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/Plan"
-                  - type: object
-                    required: [live_subscription_count]
-                    properties:
-                      live_subscription_count:
-                        type: integer
-                        description: |
-                          Subscriptions on this plan that are not canceled.
-                          While it is above 0, `base_amount_cents`,
-                          `base_bill_timing` and `meter_ids` cannot change
-                          (see Update plan).
+                $ref: "#/components/schemas/PlanDetail"
         "404":
           description: "`not_found`: no plan with this id in this tenant and mode."
           content:
@@ -7646,14 +7575,15 @@ paths:
       description: |
         A field left out keeps its current value. To clear `description`
         or `tax_code`, send an empty string. `code`, `currency` and
-        `billing_interval` cannot be changed and are ignored.
+        `billing_interval` cannot be changed and are ignored. The plan's
+        usage prices change through `/v1/plans/{id}/prices`.
 
-        `base_amount_cents`, `base_bill_timing` and `meter_ids` change what
-        subscriptions are billed. Changing any of them is refused while a
-        subscription that is not canceled uses the plan
-        (`live_subscription_count` on Get plan): create a new plan instead. `base_amount_cents` can only be set to a value above 0.
-        Every meter in `meter_ids` must have a price (a default rating rule
-        or a pricing rule) in the plan's currency.
+        `base_amount_cents` cannot change while a subscription that is not
+        canceled uses the plan (`live_subscription_count` on Get plan):
+        create a new plan instead. It can be set to 0. `base_bill_timing`
+        cannot change once a subscription has used the plan (`used`). A
+        plan with no base fee must be `in_arrears`. `name`, `description`,
+        `tax_code` and `status` change at once.
       operationId: updatePlan
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -7678,15 +7608,10 @@ paths:
                 base_amount_cents:
                   type: integer
                   format: int64
-                  description: Ignored when 0 or less.
+                  description: 0 or more. Omit to keep the current base fee.
                 base_bill_timing:
                   type: string
                   enum: [in_advance, in_arrears]
-                meter_ids:
-                  type: array
-                  items:
-                    type: string
-                  description: Replaces the plan's meters. Omit to keep them.
                 status:
                   type: string
                   enum: [active, archived]
@@ -7695,11 +7620,11 @@ paths:
                   description: Stripe product tax code. Omit to keep the current code; an empty string clears it, and the base fee then uses the tenant's `default_product_tax_code`.
       responses:
         "200":
-          description: The updated plan
+          description: The updated plan, with its prices
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Plan"
+                $ref: "#/components/schemas/PlanDetail"
         "400":
           description: "`invalid_request`: the body is not valid JSON."
           content:
@@ -7714,18 +7639,20 @@ paths:
                 $ref: "#/components/schemas/Error"
         "409":
           description: |
-            `invalid_state`: a meter in `meter_ids` is priced in a currency
-            other than the plan's.
+            `invalid_state`: another write changed the plan's base fee
+            during this one.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `validation_error`: a billing field changed while live
-            subscriptions use the plan (param `plan`), an unknown or unpriced
-            meter in `meter_ids`, an invalid `base_bill_timing`, a `status`
-            other than `active` or `archived`, or an invalid `tax_code`.
+            `validation_error`: the base fee changed while live
+            subscriptions use the plan (param `plan`), `base_bill_timing`
+            changed on a used plan or is `in_advance` with a base of 0, a
+            negative base fee, a `status` other than `active` or
+            `archived`, an invalid `tax_code`, or an unknown field such as
+            `meter_ids` (a plan's meters are its prices' meters).
           content:
             application/json:
               schema:
@@ -7738,123 +7665,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v1/rating-rules:
-    post:
-      tags: [Pricing]
-      summary: Create rating rule
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [rule_key, name, mode, currency]
-              properties:
-                rule_key:
-                  type: string
-                name:
-                  type: string
-                mode:
-                  type: string
-                  enum: [per_unit, graduated, package]
-                  description: >-
-                    `per_unit` bills quantity × `unit_amount_cents`.
-                    `graduated` bills each tier's part of the quantity at
-                    that tier's rate. `package` bills ceil(quantity ÷
-                    `package_size`) × `package_amount_cents`: a part package
-                    bills as a whole one.
-                    Send only the mode's fields: a field the mode does not
-                    use must be 0 or left out (`tiers`: `[]` or left out).
-                    Otherwise 422 with `param` naming it.
-                currency:
-                  type: string
-                unit_amount_cents:
-                  type: string
-                  description: >-
-                    Price per unit in cents, as a decimal string (e.g.
-                    "0.0003" = $3.00 per 1,000,000 units). Used when `mode` is
-                    `per_unit`. 0 or more, under 10^18, at most 12 decimal places (trailing zeros
-                    do not count), and at most 100 characters. A JSON number
-                    is also read. A value outside them is refused with 422
-                    and `param` naming the field.
-                tiers:
-                  type: array
-                  description: >-
-                    Used when `mode` is `graduated`. Each `up_to` is a whole
-                    number above the one before. The last tier has
-                    `up_to: null` (no upper bound), and only the last.
-                    Otherwise 422 with `param` `tiers`.
-                  items:
-                    type: object
-                    properties:
-                      up_to:
-                        type: integer
-                        format: int64
-                        nullable: true
-                      unit_amount_cents:
-                        type: string
-                        description: >-
-                          Price per unit in cents in this tier, as a decimal
-                          string, with the limits of `unit_amount_cents`. A
-                          refusal names `tiers[i].unit_amount_cents` (i counts
-                          from 0).
-                package_size:
-                  type: integer
-                  format: int64
-                  description: Used when `mode` is `package`. Must be above 0.
-                package_amount_cents:
-                  type: string
-                  description: >-
-                    Price of one package in cents, as a decimal string (e.g.
-                    "0.2" with `package_size` 1000 = $0.002 per 1,000 units),
-                    with the limits of `unit_amount_cents`. Used when `mode`
-                    is `package`.
-      responses:
-        "201":
-          description: Rating rule created
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RatingRule"
-        "400":
-          description: The body is not valid JSON.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "422":
-          description: |
-            A field failed validation, or the body has an unknown field at
-            any depth (`param` names it; the body must use only the fields
-            listed here).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+  /v1/plans/{id}/prices:
     get:
       tags: [Pricing]
-      summary: List rating rules
+      summary: List a plan's prices
+      description: The plan's usage prices from now on, in the order they were added.
+      operationId: listPlanPrices
       parameters:
-        - name: rule_key
-          in: query
-          description: Only versions of this rule.
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
-        - name: lifecycle_state
-          in: query
-          schema:
-            type: string
-            enum: [draft, active, archived]
-        - name: latest
-          in: query
-          description: When true, only the newest version of each rule.
-          schema:
-            type: boolean
       responses:
         "200":
-          description: Rating rule list
+          description: Prices
           content:
             application/json:
               schema:
@@ -7864,29 +7689,172 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: "#/components/schemas/RatingRule"
-
-  /v1/rating-rules/{id}:
-    get:
+                      $ref: "#/components/schemas/PlanPrice"
+        "404":
+          description: "`not_found`: no plan with this id in this tenant and mode."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
       tags: [Pricing]
-      summary: Get rating rule
-      description: Returns one rating rule version by its id.
-      operationId: getRatingRule
+      summary: Add a price to a plan
+      description: |
+        On a plan no subscription has used, the price applies at once
+        (`effective: now`). On a used plan it applies from each
+        subscriber's next billing period (`effective: next_period`); until
+        then the plan's other prices bill the meter's usage as before.
+
+        A price that names a removed price's meter and `dimension_match`
+        adds that price back under its id. Its old customer overrides do
+        not come back.
+      operationId: addPlanPrice
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriceInput"
+      responses:
+        "201":
+          description: The price, and when it applies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceWrite"
+        "400":
+          description: "`invalid_request`: the body is not valid JSON."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "`not_found`: no plan with this id in this tenant and mode."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `price_exists`: the plan already has a price on this meter with
+            this `dimension_match`; edit it instead. `price_conflict`: a
+            price on the plan and meter could take the same events with the
+            same number of labels, so neither would win; the message names
+            it. Add a label to make one more specific, or give a shared
+            label another value. `meter_overlap`: the meter is new to a used
+            plan, and a customer on the plan already has it on another item,
+            of the same subscription or another one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            `validation_error`: an unknown meter, a label that is not a
+            string or breaks the limits, a rate outside its limits, a price
+            shape that cannot be billed, or an unknown field (`param` names
+            it).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/plans/{id}/prices/{price_id}:
+    patch:
+      tags: [Pricing]
+      summary: Change a price's rate
+      description: |
+        Changes the price's shape. Its meter and `dimension_match` are its
+        identity and cannot change: add a price for other events instead.
+        On a plan no subscription has used, the change applies at once; on
+        a used plan, from each subscriber's next billing period. The current
+        period keeps the price it started with. Customer overrides of the
+        price keep applying.
+      operationId: updatePlanPrice
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: price_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PriceShape"
+      responses:
+        "200":
+          description: The price, and when the change applies
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceWrite"
+        "400":
+          description: "`invalid_request`: the body is not valid JSON."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "`not_found`: no such plan, or no such price on it (a removed price included)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            `validation_error`: a rate outside its limits, a price shape
+            that cannot be billed, `meter_id` or `dimension_match` (the
+            price's identity), or another unknown field (`param` names it).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags: [Pricing]
+      summary: Remove a price from a plan
+      description: |
+        On a plan no subscription has used, the price is gone at once. On a
+        used plan it takes no part from each subscriber's next billing
+        period; the current period keeps it. The removal ends every customer
+        override of the price, each when the removal takes effect for its
+        customer, and the answer names them (`ended_overrides`). Adding the
+        price back later keeps its id but not the overrides.
+      operationId: removePlanPrice
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+        - name: price_id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: The rating rule version
+          description: The removed price, when the removal applies, and the overrides it ended
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RatingRule"
+                $ref: "#/components/schemas/PriceWrite"
         "404":
-          description: "`not_found`: no rating rule with this id in this tenant and mode."
+          description: "`not_found`: no such plan, or no such price on it (a removed price included)."
           content:
             application/json:
               schema:
@@ -8768,8 +8736,8 @@ paths:
           description: |
             Code `already_exists`: the subscription already has an item for
             this plan. Code `invalid_state`: the subscription is `canceled`;
-            the plan is archived; the plan's meters overlap
-            another live subscription of the customer; or the plan's
+            the plan is archived; the plan's meters (the meters it has a
+            price for) overlap another live subscription of the customer; or the plan's
             currency differs from the subscription's. Code
             `unpaid_invoice_blocks_change`: the invoice for the current
             period is unpaid (a written-off invoice is unpaid); settle or
@@ -8877,8 +8845,9 @@ paths:
         "409":
           description: |
             Code `invalid_state`: the subscription is not `active`, the new
-            plan is archived, its meters overlap another live subscription
-            of the customer, or its currency differs. Code
+            plan is archived, its meters (the meters it has a price for)
+            overlap another live subscription of the customer, or its
+            currency differs. Code
             `unpaid_invoice_blocks_change`: an increase would charge against
             an unpaid invoice for the current period (a written-off invoice
             is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
@@ -9066,7 +9035,7 @@ paths:
                 dimensions:
                   type: object
                   additionalProperties: true
-                  description: Scalar dimension values used for pricing-rule dispatch (e.g. {"model", "token_type"}).
+                  description: Scalar labels of the event (e.g. {"model", "token_type"}). A price takes an event whose labels include the price's `dimension_match`.
                 idempotency_key:
                   type: string
                   maxLength: 255
@@ -9350,7 +9319,7 @@ paths:
                   type: object
                   additionalProperties: true
                   maxProperties: 16
-                  description: Scalar dimension values used to pick the pricing rule.
+                  description: Scalar labels of the event. A price takes an event whose labels include the price's `dimension_match`.
                 idempotency_key:
                   type: string
                   maxLength: 255
@@ -11580,9 +11549,9 @@ paths:
       description: |
         Rated usage revenue vs stamped provider COGS for a window (ADR-079).
         A usage unit-economics view — base fees, credits, and taxes are not
-        included. Per-model margin renders only where pricing rules pin the
-        model; other revenue is reported unattributed, never allocated by
-        heuristic.
+        included. Per-model margin renders only where the price that billed
+        the usage names the model; other revenue is reported unattributed,
+        never allocated by heuristic.
 
         The window is `[from, to)`: `from` inclusive, `to` exclusive. A
         missing bound defaults to the last 30 days ending at the customer's
@@ -12111,10 +12080,11 @@ paths:
       tags: [Recipes]
       summary: Instantiate recipe (idempotent apply)
       description: |
-        Applies the recipe for the tenant under one transaction: rating
-        rules and meters are adopted-or-created, pricing rules bound, a
-        fresh born-unique plan generated, optional dunning policy and
-        (inactive) webhook endpoint created, then the install badge written.
+        Applies the recipe for the tenant under one transaction: meters are
+        adopted-or-created, a fresh born-unique plan is generated with the
+        recipe's prices, optional dunning policy and (inactive) webhook
+        endpoint created, then the install badge written. Adopting a meter
+        other plans price changes none of their prices.
         Idempotent per (tenant, livemode): re-posting an installed recipe
         returns the EXISTING instance — 201 both times, never a 409, never
         a duplicate plan (ADR-085; badge livemode-scoped per m0157).
@@ -12147,10 +12117,7 @@ paths:
           description: >-
             An existing meter with the same `event_name` diverges from the
             recipe (aggregation mismatch) — reconcile the meter before
-            instantiating. Or `meter_in_use`: subscriptions use that meter,
-            and a recipe pricing rule would reprice their current period
-            (the meter has a default rating rule, or the rule outranks one
-            that matches the same events). Nothing is installed.
+            instantiating. Nothing is installed.
         "422":
           description: Overrides failed the recipe's overridable schema
 
@@ -12973,13 +12940,20 @@ paths:
       tags: [Pricing]
       summary: Create a customer price override
       description: |
-        Gives one customer its own price for one rating rule. The override
-        is keyed by the rule's `rule_key`, so it keeps applying after a new
-        version of the rule is published. If the customer already has an
-        active override for that rule, it is closed and replaced by this one.
-        A new or replaced price applies from the customer's next billing
-        period; the current period keeps the price it opened with. The
-        override's currency is the rule's currency.
+        Gives one customer its own rate for one plan price. The override is
+        keyed by the price, so it keeps applying when the price's rate
+        changes; removing the price ends it. If the customer already has an
+        active override for that price, it is closed and replaced by this
+        one. A new or replaced rate applies from the customer's next
+        billing period, in the customer's time (its test clock's, if it has
+        one); the current period keeps the rate it started with. A
+        subscription that starts without a trial has a first period from
+        midnight of its first day. So an override created on the day the
+        customer's subscription starts, before or after it, applies from
+        its second period: the first period bills the price's rate. To
+        bill the first period at the override, create it on an earlier day.
+        The override takes the plan's currency. A plan swap does not carry
+        it: the new plan's price is another price.
       operationId: createPriceOverride
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -12989,19 +12963,19 @@ paths:
           application/json:
             schema:
               type: object
-              required: [customer_id, rating_rule_version_id, mode]
+              required: [customer_id, price_id, mode]
               properties:
                 customer_id:
                   type: string
-                rating_rule_version_id:
+                price_id:
                   type: string
-                  description: Any version of the rule to override.
+                  description: The plan price to override.
                 mode:
                   type: string
                   enum: [per_unit, graduated, package]
                   description: >-
-                    As on `POST /v1/rating-rules`, also for the fields a mode
-                    does not use.
+                    As on PriceShape, also for the fields a mode does not
+                    use.
                 unit_amount_cents:
                   type: string
                   description: >-
@@ -13063,14 +13037,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: "`already_exists`: another request created an override for the same customer and rule at the same moment. Retry."
+          description: |
+            `already_exists`: another request created an override for the
+            same customer and price at the same moment. Retry.
+            `invalid_state`: the price was removed from its plan.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
           description: |
-            `validation_error`: a missing field, an unknown rating rule, a
+            `validation_error`: a missing field, an unknown price, a
             rate that is not a number or is outside its limits, a price
             shape that cannot be billed (bad
             tier table, package size of 0), or an unknown field at any depth
@@ -13093,6 +13070,11 @@ paths:
           schema:
             type: string
           description: Only this customer's overrides.
+        - name: price_id
+          in: query
+          schema:
+            type: string
+          description: Only this price's overrides.
       responses:
         "200":
           description: Overrides
@@ -13113,8 +13095,8 @@ paths:
       summary: End a customer price override
       description: |
         Marks the override inactive. The row is kept. The customer goes back
-        to the rule's normal price from the next billing period; the current
-        period keeps the price it opened with.
+        to the price's rate from its next billing period, in the customer's
+        time; the current period keeps the rate it started with.
       operationId: deletePriceOverride
       parameters:
         - name: id

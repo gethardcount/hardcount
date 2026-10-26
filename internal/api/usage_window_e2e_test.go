@@ -53,7 +53,7 @@ func (r *lagRig) newPlan(code, timing string, base int64) string {
 	r.t.Helper()
 	p := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
 		"code": code, "name": code, "currency": "USD", "billing_interval": "monthly",
-		"base_amount_cents": base, "base_bill_timing": timing, "meter_ids": []string{r.meterID},
+		"base_amount_cents": base, "base_bill_timing": timing, "prices": centPrices([]string{r.meterID}),
 	}, http.StatusCreated)
 	return p["id"].(string)
 }
@@ -298,18 +298,23 @@ func TestUsageWindow_TrialEndsAtMidnight_Unchanged(t *testing.T) {
 // TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce: a
 // spend threshold fires at 21:00 on the day the trial ended at 18:00. The
 // fire bills the usage from the trial end and says so on its line; the close
-// bills what came after the fire. A price published at 12:00, after the
-// period opened, applies from the next period on both invoices (ADR-070): the
-// fire's window opens at the trial end but its rule is pinned at the period
+// bills what came after the fire. A price edit at 12:00, after the
+// period opened, applies from the next period on both invoices (ADR-130): the
+// fire's window opens at the trial end but its price is pinned at the period
 // start.
 func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	trialEnd := dayAt(18, 0)
 	r.newTrialEndingAt(trialEnd)
-	r.must(http.MethodPost, "/v1/rating-rules", dayAt(12, 0), map[string]any{
-		"rule_key": "calls", "name": "Calls repriced", "mode": "per_unit", "currency": "USD", "unit_amount_cents": 2,
-	}, http.StatusCreated)
+	plan := r.must(http.MethodGet, "/v1/plans/"+r.planA, dayAt(12, 0), nil, http.StatusOK)
+	priceID := flowStr(flowList(plan, "prices")[0], "id")
+	r.must(http.MethodPatch, "/v1/plans/"+r.planA+"/prices/"+priceID, dayAt(12, 0), map[string]any{
+		"mode": "per_unit", "unit_amount_cents": "2",
+	}, http.StatusOK)
+	// The database stamps the edit with its own clock; put it at 12:00 of
+	// the simulated day, after the period opened.
+	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(12, 0), priceID)
 	r.ingest(dayAt(10, 0), 40)
 	r.ingest(dayAt(19, 0), 7)
 	r.expireTrials(dayAt(19, 45))

@@ -58,6 +58,7 @@ A dunning run is the automatic retries after a failed payment.
 - [ ] With `stripe listen` running, open the customer's setup link (Add payment method) and save card `0341` in Checkout → the card is listed on the customer. Do this before you advance the clock.
 - [ ] Advance the clock past the renewal → the renewal invoice is declined and a dunning run starts.
 - [ ] Open the invoice link in the payment-failed email and pay with `4242` → the invoice is paid, and the dunning run shows recovered.
+- [ ] Price change on a test clock: give the plan a usage price and send usage. Change the price on the plan's page → before you save, the page says the change applies from each subscriber's next billing period. Advance the clock past the renewal → that invoice bills the old price; send usage and advance again → the next invoice bills the new one. Its PDF usage line names the meter and the price's label values, with the new rate.
 
 ## Email, PDF, LiteLLM
 

@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
-
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
@@ -45,14 +43,8 @@ func setupMaxLastEngine(thresholds *domain.BillingThresholds) (*Engine, *thresho
 	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	mp := engine.pricing.(*mockPricing)
-	mp.rules["rrv_max"] = domain.RatingRuleVersion{
-		ID: "rrv_max", RuleKey: "gpu_peak", Version: 1, Mode: domain.PricingPerUnit,
-		UnitAmountCents: decimal.NewFromInt(100), Currency: "USD",
-	}
-	mp.meters["mtr_gpu"] = domain.Meter{ID: "mtr_gpu", Name: "GPU Peak", Unit: "gpus", Aggregation: domain.AggregationMax, RatingRuleVersionID: "rrv_max"}
-	pln := mp.plans["pln_1"]
-	pln.MeterIDs = []string{"mtr_api", "mtr_gpu"}
-	mp.plans["pln_1"] = pln
+	mp.meters["mtr_gpu"] = domain.Meter{ID: "mtr_gpu", Name: "GPU Peak", Unit: "gpus", Aggregation: domain.AggregationMax}
+	mp.prices["pln_1"] = append(mp.prices["pln_1"], perUnit("prc_max", "mtr_gpu", 100))
 	mu := engine.usage.(*mockUsage)
 	mu.totals["mtr_gpu"] = 50
 	return engine, subs, invoices
@@ -86,7 +78,7 @@ func TestFireThreshold_ResetFalse_DropsMaxBucket_SubtotalSplit(t *testing.T) {
 	}
 	var lineSum int64
 	for _, li := range invoices.lineItems {
-		if li.RatingRuleVersionID == "rrv_max" {
+		if li.PriceID == "prc_max" {
 			t.Errorf("max bucket line rode the threshold invoice: %+v", li)
 		}
 		lineSum += li.AmountCents
@@ -188,7 +180,7 @@ func TestBillOnePeriod_DeferredMaxBucket_BilledExactlyOnceAtClose(t *testing.T) 
 	})
 	invoices.lineItems = append(invoices.lineItems, domain.InvoiceLineItem{
 		InvoiceID: "vlx_inv_fire", LineType: domain.LineTypeUsage,
-		MeterID: "mtr_api", RatingRuleVersionID: "rrv_api", AmountCents: 40000,
+		MeterID: "mtr_api", PriceID: "prc_api", AmountCents: 40000,
 	})
 
 	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
@@ -210,10 +202,10 @@ func TestBillOnePeriod_DeferredMaxBucket_BilledExactlyOnceAtClose(t *testing.T) 
 		if li.InvoiceID != cycleInvoiceID || li.LineType != domain.LineTypeUsage {
 			continue
 		}
-		switch li.RatingRuleVersionID {
-		case "rrv_api":
+		switch li.PriceID {
+		case "prc_api":
 			sumLines++
-		case "rrv_max":
+		case "prc_max":
 			maxLines++
 		}
 	}

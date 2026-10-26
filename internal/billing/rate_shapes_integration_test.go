@@ -16,19 +16,19 @@ import (
 	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
-// TestRateShapes_EveryPathComparedByTheDifferential feeds the same-build
-// differential of the one rater (legacy_rater_test.go, ADR-130 PR-1) the
-// pricing shapes the other fixtures do not reach on every path: package
-// prices, decimal rates with fractional quantities, a multi-dimension meter
-// that mixes package, graduated and the meter's own rate, a graduated
-// customer override, a tax-inclusive tenant whose tiers continue across a
-// threshold invoice, and a test-clock subscription. Each case runs every
-// rating entry point through its public caller: the preview (close mirror
-// and flat window), the live balance, the spend-threshold evaluation and
-// fire, then the preview and live balance after the fire, and the period
-// close or an immediate cancel. The differential compares each call and fails
-// the test binary on any difference; this test checks it saw them.
-func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
+// TestRateShapes_PreviewEqualsTheInvoice: every path that prices a period's
+// usage prices it through one rater (ADR-130 §4, PR-1), so the preview of a
+// period equals what its invoice bills, and the live balance counts the same
+// amount. Each case is a pricing shape the other fixtures do not reach on
+// every path: package prices, decimal rates with fractional quantities, a
+// multi-dimension meter that mixes package, graduated and a catch-all price,
+// a graduated customer override, a tax-inclusive tenant whose tiers continue
+// across a threshold invoice, and a test-clock subscription. Each case
+// previews the open period (close mirror), reads the live balance, fires a
+// spend threshold, previews again, and ends the period or cancels: the
+// close-mirror preview just before the end must equal the final invoice's
+// usage, and the live balance must equal that preview.
+func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration: skipped in -short mode")
 	}
@@ -58,24 +58,18 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 			cancel: true,
 		},
 		{
-			name: "multi-dimension: package, graduated and the meter's own rate",
+			name: "multi-dimension: package, graduated and a catch-all price",
 			price: func(t *testing.T, lf *liveFixture) {
-				pkg := createRule(t, lf, packageRule("model_a_pkg", 50, "120.5"))
-				grad := createRule(t, lf, gradRule("model_b_grad", []domain.RatingTier{
+				createRule(t, lf, map[string]string{"model": "a"}, packageRule("model_a_pkg", 50, "120.5"))
+				createRule(t, lf, map[string]string{"model": "b"}, gradRule("model_b_grad", []domain.RatingTier{
 					{UpTo: new(int64(200)), UnitAmountCents: decimal.RequireFromString("2.5")},
 					{UpTo: nil, UnitAmountCents: decimal.RequireFromString("0.5")},
 				}))
-				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-					MeterID: lf.meterID, RatingRuleVersionID: pkg.ID, DimensionMatch: map[string]any{"model": "a"}, Priority: 10,
-				})
-				seedPricingRule(t, lf.db, lf.ctx, lf.tenantID, pricing.UpsertMeterPricingRuleInput{
-					MeterID: lf.meterID, RatingRuleVersionID: grad.ID, DimensionMatch: map[string]any{"model": "b"}, Priority: 10,
-				})
 			},
 			events: []event{
 				{qty: "70", dims: map[string]any{"model": "a"}},
 				{qty: "150", dims: map[string]any{"model": "b"}},
-				{qty: "33", dims: map[string]any{"model": "c"}}, // no rule: the meter's own flat 1¢
+				{qty: "33", dims: map[string]any{"model": "c"}}, // the catch-all price: 1¢
 			},
 		},
 		{
@@ -86,11 +80,11 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 					{UpTo: nil, UnitAmountCents: decimal.NewFromInt(1)},
 				}))
 				o, err := lf.pricingSvc.CreateOverride(lf.ctx, lf.tenantID, pricing.CreateOverrideInput{
-					CustomerID: lf.customerID, RatingRuleVersionID: v2.ID, Mode: domain.PricingGraduated,
-					Tiers: []domain.RatingTier{
+					CustomerID: lf.customerID, PriceID: v2.ID,
+					PriceShape: domain.PriceShape{Mode: domain.PricingGraduated, Tiers: []domain.RatingTier{
 						{UpTo: new(int64(300)), UnitAmountCents: decimal.RequireFromString("3.25")},
 						{UpTo: nil, UnitAmountCents: decimal.RequireFromString("0.75")},
-					},
+					}},
 					Reason: "negotiated",
 				})
 				if err != nil {
@@ -121,13 +115,8 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 			testClock: true,
 		},
 	}
-	entries := []string{"preview, close mirror", "preview, flat window", "live balance", "spend-threshold evaluation", "period close", "immediate cancel"}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			before := map[string]int{}
-			for _, e := range entries {
-				before[e] = billing.RateDifferentialCompared(e)
-			}
 			lf := newLiveFixture(t, "Rate Shapes "+tc.name, 0)
 			ctx := lf.ctx
 			tc.price(t, lf)
@@ -159,20 +148,33 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 			}
 
 			previews := billing.NewPreviewService(lf.engine, customer.NewPostgresStore(lf.db), lf.subStore)
-			readAll := func() {
+			// readAll previews the period as its close will bill it and reads
+			// the live balance; the two must agree. It returns the preview's
+			// usage amount.
+			readAll := func(stage string) int64 {
 				t.Helper()
-				if _, err := previews.CreatePreview(ctx, lf.tenantID, billing.CreatePreviewRequest{CustomerID: lf.customerID, SubscriptionID: lf.subID}); err != nil {
-					t.Fatalf("preview: %v", err)
+				p, err := previews.CreatePreview(ctx, lf.tenantID, billing.CreatePreviewRequest{CustomerID: lf.customerID, SubscriptionID: lf.subID})
+				if err != nil {
+					t.Fatalf("%s preview: %v", stage, err)
+				}
+				var usageCents int64
+				for _, l := range p.Lines {
+					if l.LineType == "usage" {
+						usageCents += l.AmountCents
+					}
 				}
 				if _, err := previews.CreatePreview(ctx, lf.tenantID, billing.CreatePreviewRequest{
 					CustomerID: lf.customerID, SubscriptionID: lf.subID,
 					Period: billing.CreatePreviewPeriod{From: lf.cycleStart, To: time.Now().UTC()},
 				}); err != nil {
-					t.Fatalf("preview, explicit window: %v", err)
+					t.Fatalf("%s preview, explicit window: %v", stage, err)
 				}
-				lf.liveAll(t)
+				if live := lf.live(t).UnbilledUsageCents; live != usageCents {
+					t.Errorf("%s: live balance counts %d unbilled, the preview %d: one rater, one number", stage, live, usageCents)
+				}
+				return usageCents
 			}
-			readAll()
+			readAll("open")
 
 			if !tc.testClock {
 				if _, err := lf.subSvc.SetBillingThresholds(ctx, lf.tenantID, lf.subID, subscription.BillingThresholdsInput{
@@ -191,11 +193,35 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 				for i, ev := range tc.events {
 					insertUsageAt(t, lf, fireEnd.Add(time.Duration(i+1)*100*time.Millisecond), ev.qty, ev.dims)
 				}
-				readAll()
+				if wait := time.Until(fireEnd.Add(time.Duration(len(tc.events)+1) * 100 * time.Millisecond)); wait > 0 {
+					time.Sleep(wait)
+				}
+				previewed := readAll("after fire")
 
 				periodEnd := fireEnd.Add(2 * time.Second).Truncate(time.Microsecond)
 				if wait := time.Until(periodEnd.Add(500 * time.Millisecond)); wait > 0 {
 					time.Sleep(wait)
+				}
+				// usageBilled is what an invoice billed for usage: the gross
+				// line amount, which a tax-inclusive tenant's preview shows.
+				usageBilled := func(inv domain.Invoice) int64 {
+					t.Helper()
+					lines, err := lf.invStore.ListLineItems(ctx, lf.tenantID, inv.ID)
+					if err != nil {
+						t.Fatalf("list lines: %v", err)
+					}
+					var n int64
+					for _, l := range lines {
+						if l.LineType != domain.LineTypeUsage {
+							continue
+						}
+						if tc.taxInclusive {
+							n += l.TotalAmountCents
+						} else {
+							n += l.AmountCents
+						}
+					}
+					return n
 				}
 				if tc.cancel {
 					canceledAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -204,65 +230,31 @@ func TestRateShapes_EveryPathComparedByTheDifferential(t *testing.T) {
 					if err != nil {
 						t.Fatalf("get sub: %v", err)
 					}
-					if inv, err := lf.engine.BillFinalOnImmediateCancel(ctx, sub); err != nil || inv.ID == "" {
+					inv, err := lf.engine.BillFinalOnImmediateCancel(ctx, sub)
+					if err != nil || inv.ID == "" {
 						t.Fatalf("cancel final invoice: inv=%q err=%v", inv.ID, err)
+					}
+					if got := usageBilled(inv); got != previewed {
+						t.Errorf("the cancel billed %d for usage, the preview said %d", got, previewed)
 					}
 				} else {
 					bypassExec(t, lf, `UPDATE subscriptions SET current_billing_period_end = $1, next_billing_at = $1 WHERE id = $2`, periodEnd, lf.subID)
 					if generated, failures := lf.engine.RunCycleForTenant(ctx, lf.tenantID, 50); len(failures) > 0 || generated != 1 {
 						t.Fatalf("period close: generated=%d failures=%v, want 1", generated, failures)
 					}
-				}
-			}
-
-			want := []string{"preview, close mirror", "preview, flat window", "live balance"}
-			if !tc.testClock {
-				want = append(want, "spend-threshold evaluation")
-				if tc.cancel {
-					want = append(want, "immediate cancel")
-				} else {
-					want = append(want, "period close")
-				}
-			}
-			for _, e := range want {
-				if billing.RateDifferentialCompared(e) == before[e] {
-					t.Errorf("the differential compared no %s call", e)
+					var closed domain.Invoice
+					for _, inv := range lf.listInvoices(t, ctx) {
+						if inv.BillingReason == domain.BillingReasonSubscriptionCycle {
+							closed = inv
+						}
+					}
+					if got := usageBilled(closed); got != previewed {
+						t.Errorf("the close billed %d for usage, the preview said %d", got, previewed)
+					}
 				}
 			}
 		})
 	}
-}
-
-func flatRule(key, cents string) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.RequireFromString(cents)}
-}
-
-func gradRule(key string, tiers []domain.RatingTier) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingGraduated, Currency: "USD", Tiers: tiers}
-}
-
-func packageRule(key string, size int64, cents string) pricing.CreateRatingRuleInput {
-	return pricing.CreateRatingRuleInput{RuleKey: key, Name: key, Mode: domain.PricingPackage, Currency: "USD",
-		PackageSize: size, PackageAmountCents: decimal.RequireFromString(cents)}
-}
-
-func createRule(t *testing.T, lf *liveFixture, in pricing.CreateRatingRuleInput) domain.RatingRuleVersion {
-	t.Helper()
-	v, err := lf.pricingSvc.CreateRatingRule(lf.ctx, lf.tenantID, in)
-	if err != nil {
-		t.Fatalf("create rating rule %s: %v", in.RuleKey, err)
-	}
-	backdateRuleVersion(t, lf.thresholdFixture, lf.ctx, v.ID, lf.cycleStart.Add(-2*time.Hour))
-	return v
-}
-
-// publishCallsRule publishes a new version of the fixture meter's rule key,
-// in force from before the period opened (the old version is moved earlier).
-func publishCallsRule(t *testing.T, lf *liveFixture, in pricing.CreateRatingRuleInput) domain.RatingRuleVersion {
-	t.Helper()
-	v1 := lf.seededRule(t, lf.ctx)
-	backdateRuleVersion(t, lf.thresholdFixture, lf.ctx, v1.ID, lf.cycleStart.Add(-3*time.Hour))
-	return createRule(t, lf, in)
 }
 
 func bypassExec(t *testing.T, lf *liveFixture, query string, args ...any) {

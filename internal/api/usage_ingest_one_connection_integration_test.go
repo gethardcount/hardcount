@@ -58,7 +58,7 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	}
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{
 		subs:       releaseSubs{meterID: meter.ID, start: now.Add(-2 * time.Hour), end: now.Add(24 * time.Hour)},
-		pricing:    pricingStore,
+		pricing:    releasePricing{PostgresStore: pricingStore, meterID: meter.ID},
 		thresholds: releaseThresholds{at: now.Add(-30 * time.Minute)},
 	})
 	in := func(key string) usage.IngestInput {

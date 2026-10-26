@@ -135,21 +135,15 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	rule, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "calls_flat", Name: "Calls", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create rating rule: %v", err)
-	}
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		EventName: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum", RatingRuleVersionID: rule.ID,
+		EventName: "calls", Name: "Calls", Unit: "calls", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	plan, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
+	plan, _, err := pricingSvc.CreatePlan(ctx, tenantID, pricing.CreatePlanInput{
 		Code: "pro-adv-usage", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
-		BaseAmountCents: reliefBaseCents, BaseBillTiming: domain.BillInAdvance, MeterIDs: []string{meter.ID},
+		BaseAmountCents: reliefBaseCents, BaseBillTiming: domain.BillInAdvance, Prices: []pricing.PriceInput{{MeterID: meter.ID, PriceShape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}}},
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)

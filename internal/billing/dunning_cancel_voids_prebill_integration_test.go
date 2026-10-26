@@ -101,14 +101,14 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 		t.Fatalf("create customer: %v", err)
 	}
 	plans := pricing.NewService(pricingStore)
-	plan, err := plans.CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
+	plan, _, err := plans.CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
 		Code: "pro-adv", Name: "Pro", Currency: "USD", BillingInterval: domain.BillingMonthly,
 		BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance,
 	})
 	if err != nil {
 		t.Fatalf("create plan: %v", err)
 	}
-	r.yearly, err = plans.CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
+	r.yearly, _, err = plans.CreatePlan(ctx, r.tenantID, pricing.CreatePlanInput{
 		Code: "pro-adv-yearly", Name: "Pro yearly", Currency: "USD", BillingInterval: domain.BillingYearly,
 		BaseAmountCents: 49000, BaseBillTiming: domain.BillInAdvance,
 	})

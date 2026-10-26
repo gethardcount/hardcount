@@ -11,7 +11,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/creditnote"
 	"github.com/sagarsuperuser/velox/internal/customer"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/invoice"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
@@ -29,11 +28,14 @@ import (
 //
 //   - W, a draft activation on plan hi, holds hi and is about to number its
 //     day-1 invoice;
-//   - the meter edit (D05) holds lo and waits for hi;
+//   - a writer of plan content that takes both plans in ascending id, in one
+//     statement (ADR-130 §8 step 2), holds lo and waits for hi;
 //   - the swap off lo holds the sequence row and waits for lo;
 //   - W waits for the sequence row.
 //
-// Postgres aborts one of them with a deadlock error (40P01).
+// Postgres aborts one of them with a deadlock error (40P01). The plan writer
+// is a test transaction: D05's meter edit took plans this way until ADR-130
+// deleted it, and the order is the rule for any writer that takes several.
 func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	admin := testutil.AdminPool(t)
@@ -47,32 +49,20 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 
 	tenantID := testutil.CreateTestTenant(t, db, "Swap Plan Lock Order")
 	pricingSvc := pricing.NewService(pricingStore)
-	pricingSvc.SetSubscriptionPlanUsageReader(subStore)
-	// A default price, so that clearing it is an edit the D05 guard checks.
-	defaultPrice, err := pricingSvc.CreateRatingRule(ctx, tenantID, pricing.CreateRatingRuleInput{
-		RuleKey: "swap-lockord-default", Name: "swap-lockord", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(1),
-	})
-	if err != nil {
-		t.Fatalf("create default price: %v", err)
-	}
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
-		EventName: "swap-lockord", Name: "swap-lockord", Unit: "tokens", Aggregation: "sum", RatingRuleVersionID: defaultPrice.ID,
+		EventName: "swap-lockord", Name: "swap-lockord", Unit: "tokens", Aggregation: "sum",
 	})
 	if err != nil {
 		t.Fatalf("create meter: %v", err)
 	}
-	// Two monthly plans that list the meter; lo is the lower id.
+	// Two monthly plans that price the meter; lo is the lower id.
 	var monthly []domain.Plan
 	for _, code := range []string{"swap-lockord-one", "swap-lockord-two"} {
-		p, err := pricingStore.CreatePlan(ctx, tenantID, domain.Plan{
+		p, _ := createPlanWithPrices(t, db, ctx, tenantID, domain.Plan{
 			Code: code, Name: code, Currency: "USD",
 			BillingInterval: domain.BillingMonthly, Status: domain.PlanActive,
 			BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance,
-			MeterIDs: []string{meter.ID},
-		})
-		if err != nil {
-			t.Fatalf("create plan %s: %v", code, err)
-		}
+		}, priceOn{meterID: meter.ID, shape: domain.PriceShape{Mode: domain.PricingPerUnit, UnitAmountCents: decimal.NewFromInt(1)}})
 		monthly = append(monthly, p)
 	}
 	lo, hi := monthly[0], monthly[1]
@@ -170,15 +160,22 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 		t.Fatal("the activation never reached its invoice")
 	}
 
-	// 2. The meter edit locks lo and waits for hi. Clearing the default
-	// price is an edit the D05 guard checks.
+	// 2. The plan writer locks lo and waits for hi.
 	editDone := make(chan error, 1)
 	go func() {
-		none := ""
-		_, err := pricingSvc.UpdateMeter(ctx, tenantID, meter.ID, pricing.UpdateMeterInput{RatingRuleVersionID: &none})
-		editDone <- err
+		editDone <- func() error {
+			tx, err := admin.BeginTx(ctx, nil)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = tx.Rollback() }()
+			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM plans WHERE id = ANY($1) ORDER BY id FOR UPDATE /* plan writer */`, postgres.StringArray([]string{lo.ID, hi.ID})); err != nil {
+				return err
+			}
+			return tx.Commit()
+		}()
 	}()
-	testutil.WaitForLockWaiter(t, ctx, admin, "meter_ids @>")
+	testutil.WaitForLockWaiter(t, ctx, admin, "/* plan writer */")
 
 	// 3. The swap off lo waits for lo.
 	swapDone := make(chan error, 1)
@@ -209,11 +206,11 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 		case editErr = <-editDone:
 		case swapErr = <-swapDone:
 		case <-time.After(20 * time.Second):
-			t.Fatal("the activation, the meter edit or the swap never finished")
+			t.Fatal("the activation, the plan writer or the swap never finished")
 		}
 	}
 	if postgres.IsDeadlock(wErr) || postgres.IsDeadlock(editErr) || postgres.IsDeadlock(swapErr) {
-		t.Fatalf("deadlock (40P01): activation err=%v, meter edit err=%v, swap err=%v", wErr, editErr, swapErr)
+		t.Fatalf("deadlock (40P01): activation err=%v, plan writer err=%v, swap err=%v", wErr, editErr, swapErr)
 	}
 	if wErr != nil {
 		t.Fatalf("activation: %v", wErr)
@@ -221,8 +218,8 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 	if swapErr != nil {
 		t.Fatalf("swap: %v", swapErr)
 	}
-	if editErr != nil && errs.Code(editErr) != errs.CodeMeterInUse {
-		t.Fatalf("meter edit: want success or meter_in_use, got %v", editErr)
+	if editErr != nil {
+		t.Fatalf("plan writer: %v", editErr)
 	}
 	notes, err := cnSvc.List(ctx, creditnote.ListFilter{TenantID: tenantID, InvoiceID: funding.ID})
 	if err != nil {

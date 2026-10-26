@@ -109,8 +109,9 @@ func TestService_Preview_RendersTemplates(t *testing.T) {
 	if got := rendered.Objects.Plans[0].Currency; got != "EUR" {
 		t.Errorf("plan.currency: got %q, want EUR", got)
 	}
-	if got := rendered.Objects.RatingRules[0].Currency; got != "EUR" {
-		t.Errorf("rating_rule.currency: got %q, want EUR", got)
+	// A price carries no currency: it takes its plan's (ADR-130 §11).
+	if len(rendered.Objects.Prices) == 0 || rendered.Objects.Prices[0].PlanCode != "ai_eur" {
+		t.Errorf("prices: got %d, the first on plan %q; want the recipe's prices on ai_eur", len(rendered.Objects.Prices), firstPlanCode(rendered.Objects.Prices))
 	}
 	if rendered.Warnings == nil {
 		t.Error("Warnings must be non-nil so JSON serializes as [] not null")
@@ -215,9 +216,14 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		if !ok {
 			t.Fatalf("creates not an object: %T", raw["creates"])
 		}
-		for _, k := range []string{"meters", "rating_rules", "pricing_rules", "plans", "dunning_policies", "webhook_endpoints"} {
+		for _, k := range []string{"meters", "plans", "prices", "dunning_policies", "webhook_endpoints"} {
 			if _, ok := creates[k]; !ok {
 				t.Errorf("creates missing %q", k)
+			}
+		}
+		for _, k := range []string{"rating_rules", "pricing_rules"} {
+			if _, ok := creates[k]; ok {
+				t.Errorf("creates still counts %q", k)
 			}
 		}
 	})
@@ -264,9 +270,14 @@ func TestWireShape_SnakeCase(t *testing.T) {
 		if !ok {
 			t.Fatalf("objects not an object: %T", raw["objects"])
 		}
-		for _, k := range []string{"meters", "rating_rules", "pricing_rules", "plans", "dunning_policies", "webhook_endpoints"} {
+		for _, k := range []string{"meters", "plans", "prices", "dunning_policies", "webhook_endpoints"} {
 			if _, ok := objects[k]; !ok {
 				t.Errorf("preview.objects missing %q", k)
+			}
+		}
+		for _, k := range []string{"rating_rules", "pricing_rules"} {
+			if _, ok := objects[k]; ok {
+				t.Errorf("preview.objects still lists %q", k)
 			}
 		}
 		if _, isSlice := raw["warnings"].([]any); !isSlice {
@@ -283,21 +294,47 @@ func mapKeys(m map[string]any) []string {
 	return out
 }
 
-func TestRatingRuleFromRecipe(t *testing.T) {
-	got := ratingRuleFromRecipe(domain.RecipeRatingRule{
-		Key: "tier1", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.NewFromInt(100),
-	})
-	if got.RuleKey != "tier1" {
-		t.Errorf("RuleKey: got %q", got.RuleKey)
+func firstPlanCode(prices []domain.RecipePrice) string {
+	if len(prices) == 0 {
+		return ""
 	}
-	if got.Name != "tier1" {
-		t.Errorf("Name should default to Key: got %q", got.Name)
+	return prices[0].PlanCode
+}
+
+// TestRecipePrices: the install translates the recipe's pricing rules into
+// prices on each plan that names the meter, each with its rating rule's rate
+// and its dimension_match (ADR-130 §15, PR-4).
+func TestRecipePrices(t *testing.T) {
+	r := domain.Recipe{
+		Key: "r",
+		RatingRules: []domain.RecipeRatingRule{
+			{Key: "in", Mode: domain.PricingPerUnit, Currency: "USD", UnitAmountCents: decimal.RequireFromString("0.0003")},
+			{Key: "out", Mode: domain.PricingPackage, Currency: "USD", PackageSize: 1000, PackageAmountCents: decimal.RequireFromString("0.2")},
+		},
+		PricingRules: []domain.RecipePricingRule{
+			{EventName: "tokens", RatingRuleKey: "in", DimensionMatch: map[string]any{"token_type": "input"}},
+			{EventName: "tokens", RatingRuleKey: "out", DimensionMatch: map[string]any{"token_type": "output"}},
+			{EventName: "seats", RatingRuleKey: "in"},
+		},
+		Plans: []domain.RecipePlan{{Code: "p", EventNames: []string{"tokens"}}},
 	}
-	if got.Version != 0 {
-		t.Errorf("Version: got %d, want 0 (allocated in SQL by the store — MAX+1 per key, so reinstall lands the next version instead of 409ing; ADR-070)", got.Version)
+	got, err := recipePrices(r)
+	if err != nil {
+		t.Fatalf("recipePrices: %v", err)
 	}
-	if got.LifecycleState != domain.RatingRuleActive {
-		t.Errorf("LifecycleState: got %q, want active", got.LifecycleState)
+	if len(got) != 2 {
+		t.Fatalf("prices = %+v, want 2 (the plan names tokens only)", got)
+	}
+	if got[0].PlanCode != "p" || got[0].EventName != "tokens" || got[0].DimensionMatch["token_type"] != "input" ||
+		got[0].Mode != domain.PricingPerUnit || !got[0].UnitAmountCents.Equal(decimal.RequireFromString("0.0003")) {
+		t.Errorf("first price = %+v", got[0])
+	}
+	if got[1].Mode != domain.PricingPackage || got[1].PackageSize != 1000 || !got[1].PackageAmountCents.Equal(decimal.RequireFromString("0.2")) {
+		t.Errorf("second price = %+v", got[1])
+	}
+	r.PricingRules[0].RatingRuleKey = "missing"
+	if _, err := recipePrices(r); err == nil {
+		t.Error("a pricing rule naming an unknown rating rule must be refused")
 	}
 }
 

@@ -32,16 +32,17 @@ flowchart LR
    under **Customers**.
 
 2. **A meter counts it.** A meter is a counter for one kind of usage,
-   such as tokens. Rules on the meter (pricing rules) pick events by their
-   labels. So one Tokens meter can keep a separate count for each model and token type.
+   such as tokens.
 
-   **You see:** **Pricing**, then the meter. Its page shows the default
-   price and the prices for specific values, such as one model.
+   **You see:** **Pricing**, then the meter. Its page lists the plans that
+   price it.
 
-3. **A price turns the count into money.** Each price is a rating
-   rule: a rate per unit, tiers, or packages. A plan puts a base fee and
-   the meters it charges together. A subscription puts a customer on a plan
-   and sets their billing period, such as each month.
+3. **A plan's prices turn the count into money.** A plan has a base fee
+   and a price for each meter it charges: a rate per unit, tiers, or
+   packages. A price can take only the events with certain labels, so one
+   Tokens meter can have a rate for each model and token type. A
+   subscription puts a customer on a plan and sets their billing period,
+   such as each month.
 
    **You see:** the plan under **Pricing**, the subscription under
    **Subscriptions**, and the bill so far under "Upcoming invoices" on the

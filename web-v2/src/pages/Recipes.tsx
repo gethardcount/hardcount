@@ -127,7 +127,7 @@ function RecipeCard({ recipe, onConfigure }: { recipe: RecipeListItem; onConfigu
 
         <div className="flex flex-wrap gap-1.5 mt-4">
           {c.meters > 0 && <Chip n={c.meters} label="usage meter" />}
-          {c.rating_rules > 0 && <Chip n={c.rating_rules} label="price" />}
+          {c.prices > 0 && <Chip n={c.prices} label="price" />}
           {c.plans > 0 && <Chip n={c.plans} label="plan" />}
           {c.dunning_policies > 0 && <Chip n={c.dunning_policies} label="retry policy" />}
           {c.webhook_endpoints > 0 && <Chip n={c.webhook_endpoints} label="notification endpoint" />}
@@ -379,18 +379,21 @@ function ObjectsList({ preview }: { preview: RecipePreviewResult }) {
     enabled: (preview.objects.dunning_policies?.length ?? 0) > 0,
   })
   const currentPolicies = policiesData?.data
-  // Rules don't carry their meter; the bindings do. rule key → meter unit so
-  // each price renders in that meter's units (tokens vs seconds vs calls).
+  // Each price renders in its meter's units (tokens vs seconds vs calls) and
+  // its plan's currency.
   const unitByEventName = new Map((preview.objects.meters ?? []).map(m => [m.event_name, m.unit]))
-  const unitByRuleKey = new Map(
-    (preview.objects.pricing_rules ?? []).map(pr => [pr.rating_rule_key, unitByEventName.get(pr.event_name) ?? '']),
-  )
+  const currencyByPlan = new Map((preview.objects.plans ?? []).map(p => [p.code, p.currency]))
+  const labels = (m: Record<string, string> | undefined) =>
+    Object.entries(m ?? {}).map(([k, v]) => `${k}=${v}`).join(', ')
 
   const sections: { label: string; items: string[] }[] = []
   if (preview.objects.meters?.length) sections.push({ label: 'What gets counted', items: preview.objects.meters.map(m => `${m.name} (${meterAggregationLabel(m.aggregation).toLowerCase()} of ${m.unit})`) })
-  if (preview.objects.rating_rules?.length) sections.push({
+  if (preview.objects.prices?.length) sections.push({
     label: 'Prices',
-    items: preview.objects.rating_rules.map(r => `${r.name || r.key} — ${priceRate(r, unitByRuleKey.get(r.key) ?? '')}`),
+    items: preview.objects.prices.map(p =>
+      `${p.event_name}${labels(p.dimension_match) ? ` (${labels(p.dimension_match)})` : ''} — ` +
+      priceRate({ ...p, currency: currencyByPlan.get(p.plan_code) }, unitByEventName.get(p.event_name) ?? ''),
+    ),
   })
   if (preview.objects.plans?.length) sections.push({
     label: 'Plan',

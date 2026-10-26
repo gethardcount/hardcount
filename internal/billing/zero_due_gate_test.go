@@ -24,10 +24,7 @@ func setupZeroCycleEngine(t *testing.T) (*Engine, *thresholdMockSubs, *mockInvoi
 	pln := mp.plans["pln_1"]
 	pln.BaseAmountCents = 0
 	mp.plans["pln_1"] = pln
-	rule := mp.rules["rrv_api"]
-	rule.UnitAmountCents = decimal.Zero
-	rule.Currency = "USD"
-	mp.rules["rrv_api"] = rule
+	mp.prices["pln_1"][0].UnitAmountCents = decimal.Zero
 	return engine, subs, invoices
 }
 
