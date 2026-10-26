@@ -271,7 +271,8 @@ function DeleteOverrideDialog({ override, name, onClose, onDeleted }: {
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           <strong className="text-foreground">List price applies from the next billing period.</strong>{' '}
-          The period already in progress still bills the negotiated rate it started with.
+          The period already in progress still bills the negotiated rate it started with. If the customer
+          subscribes to the plan or moves to it after you end the override, list price applies from then.
         </p>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

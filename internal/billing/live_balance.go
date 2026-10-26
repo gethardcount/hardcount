@@ -295,7 +295,7 @@ func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription,
 	}
 	src := e.prices()
 	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, periodStart)
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return currentPeriod{}, err
 	}
@@ -307,7 +307,7 @@ func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription,
 	if err != nil {
 		return currentPeriod{}, err
 	}
-	clamped, full := meterUsageIntervals(stretches, planMeters, wm.billedThrough, floors)
+	clamped, full := meterUsageIntervals(stretches, planMeters, alike, wm.billedThrough, floors)
 
 	// The closer's two passes: every bucket except a deferred one over the
 	// clamped windows, then the deferred ones over the full windows. The full

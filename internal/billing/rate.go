@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -217,17 +218,18 @@ func pricesOn(prices []domain.PlanPrice, meterID string) []domain.PlanPrice {
 // prices at the pin: the meters with a price that takes part then (ADR-130
 // §4 step 4). A meter whose prices were all removed before the pin is not on
 // the plan for that window, and neither is a meter whose first price comes
-// later.
-func stretchMeters(ctx context.Context, src PriceSource, tenantID string, stretches []planStretch) (map[planPin][]string, error) {
+// later. alike is pricedAlike of them, for the subscription's customer:
+// every reader that bills windows passes it to meterUsageIntervals.
+func stretchMeters(ctx context.Context, src PriceSource, sub domain.Subscription, stretches []planStretch) (planMeters map[planPin][]string, alike alikePins, err error) {
 	out := map[planPin][]string{}
 	for _, s := range stretches {
 		k := planPin{planID: s.planID, pin: s.pin}
 		if _, ok := out[k]; ok {
 			continue
 		}
-		prices, err := src.PlanPrices(ctx, tenantID, s.planID, s.pin)
+		prices, err := src.PlanPrices(ctx, sub.TenantID, s.planID, s.pin)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		seen := map[string]bool{}
 		meters := []string{}
@@ -240,7 +242,97 @@ func stretchMeters(ctx context.Context, src PriceSource, tenantID string, stretc
 		sort.Strings(meters)
 		out[k] = meters
 	}
+	if alike, err = pricedAlike(ctx, src, sub.TenantID, sub.CustomerID, out); err != nil {
+		return nil, nil, err
+	}
+	return out, alike, nil
+}
+
+// alikePins maps a window key of a period to the key's pin it is billed
+// under, when the two differ: the earliest pin of the same plan and meter at
+// which the meter's prices, each with the customer's override in force
+// applied, are the same as at its own pin. Windows of one plan and meter
+// priced alike are one window, so a max meter bills its peak once and tiers
+// run on across them: an item that leaves a plan and an item added on it
+// later in the period, with no change to the meter's prices in between, bill
+// as one item would. A key with no entry is billed under its own pin.
+type alikePins map[planMeter]ratePin
+
+// pricedAlike is the alikePins of planMeters, for customerID. It reads each
+// (plan, pin) through src, as the rater does, so a read error fails the
+// rating.
+func pricedAlike(ctx context.Context, src PriceSource, tenantID, customerID string, planMeters map[planPin][]string) (alikePins, error) {
+	type planMeterID struct{ planID, meterID string }
+	pins := map[planMeterID][]ratePin{}
+	for pp, meters := range planMeters {
+		for _, m := range meters {
+			k := planMeterID{pp.planID, m}
+			pins[k] = append(pins[k], pp.pin)
+		}
+	}
+	out := alikePins{}
+	keys := slices.SortedFunc(maps.Keys(pins), func(a, b planMeterID) int {
+		if a.planID != b.planID {
+			return strings.Compare(a.planID, b.planID)
+		}
+		return strings.Compare(a.meterID, b.meterID)
+	})
+	for _, k := range keys {
+		ps := pins[k]
+		if len(ps) < 2 {
+			continue
+		}
+		slices.SortFunc(ps, func(a, b ratePin) int { return a.at.Compare(b.at) })
+		type priced struct {
+			pin    ratePin
+			prices []domain.PlanPrice
+		}
+		var seen []priced
+		for _, pin := range ps {
+			prices, err := meterPricesAt(ctx, src, tenantID, customerID, k.planID, k.meterID, pin)
+			if err != nil {
+				return nil, err
+			}
+			alike := false
+			for _, e := range seen {
+				if samePrices(e.prices, prices) {
+					out[planMeter{planID: k.planID, meterID: k.meterID, pin: pin}] = e.pin
+					alike = true
+					break
+				}
+			}
+			if !alike {
+				seen = append(seen, priced{pin, prices})
+			}
+		}
+	}
 	return out, nil
+}
+
+// meterPricesAt is the plan's prices of meterID at pin, in claim order, each
+// with the customer's override in force then applied.
+func meterPricesAt(ctx context.Context, src PriceSource, tenantID, customerID, planID, meterID string, pin ratePin) ([]domain.PlanPrice, error) {
+	all, err := src.PlanPrices(ctx, tenantID, planID, pin)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.PlanPrice
+	for _, p := range pricesOn(all, meterID) {
+		got, err := src.Price(ctx, tenantID, customerID, p, pin)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got)
+	}
+	return out, nil
+}
+
+// samePrices reports whether a and b price every event the same: the same
+// prices in the same order, each taking the same events with the same shape.
+func samePrices(a, b []domain.PlanPrice) bool {
+	return slices.EqualFunc(a, b, func(x, y domain.PlanPrice) bool {
+		return x.ID == y.ID && maps.Equal(x.DimensionMatch, y.DimensionMatch) && x.Equal(y.PriceShape)
+	})
 }
 
 // meterSet is the meters of planMeters, each once, in id order.

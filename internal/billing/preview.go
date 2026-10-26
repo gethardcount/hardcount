@@ -239,7 +239,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	}
 	src := e.prices()
 	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, pinStart)
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -251,7 +251,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 		return PreviewResult{}, err
 	}
 	result.floors = floors
-	clamped, _ := meterUsageIntervals(stretches, planMeters, nil, floors)
+	clamped, _ := meterUsageIntervals(stretches, planMeters, alike, nil, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {
@@ -398,7 +398,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	// subscription, from its usage floor, clamped to the threshold watermark
 	// — the close's meterUsageIntervals, each priced at its window's pin.
 	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, periodStart)
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return PreviewResult{}, err
 	}
@@ -406,7 +406,7 @@ func (e *Engine) previewAsClose(ctx context.Context, sub domain.Subscription, pl
 	if err != nil {
 		return PreviewResult{}, err
 	}
-	meterIntervals, _ := meterUsageIntervals(stretches, planMeters, wm.billedThrough, floors)
+	meterIntervals, _ := meterUsageIntervals(stretches, planMeters, alike, wm.billedThrough, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(meterIntervals) {
 		for _, iv := range mergeUsageIntervals(meterIntervals[k]) {
@@ -497,7 +497,7 @@ func (e *Engine) previewTrialEnd(ctx context.Context, sub domain.Subscription, s
 	// one after it (the in_advance header shift does not apply).
 	result.BillingPeriodStart, result.BillingPeriodEnd = periodStart, periodEnd
 	stretches := planStretches(sub, trialConversionSegments(sub, periodStart, periodEnd), periodStart, periodEnd, periodStart)
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, _, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return PreviewResult{}, true, err
 	}

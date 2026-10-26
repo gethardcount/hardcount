@@ -57,7 +57,7 @@ func (e *Engine) RateWindow(ctx context.Context, sub domain.Subscription, from, 
 	}
 	src := e.prices()
 	stretches := planStretches(sub, segsByItem, from, to, pinAt)
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}
@@ -65,7 +65,7 @@ func (e *Engine) RateWindow(ctx context.Context, sub domain.Subscription, from, 
 	if err != nil {
 		return domain.RatedSubscription{}, err
 	}
-	clamped, _ := meterUsageIntervals(stretches, planMeters, nil, floors)
+	clamped, _ := meterUsageIntervals(stretches, planMeters, alike, nil, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {

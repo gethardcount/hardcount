@@ -64,7 +64,7 @@ func TestMeterUsageIntervals_FloorsBothMaps_WatermarkOnlyClamped(t *testing.T) {
 	m := planMeter{planID: "p", meterID: "m", pin: pin}
 	segs := map[string][]baseSegment{"it": {{start: d, end: pe, planID: "p"}}}
 
-	clamped, full := meterUsageIntervals(planStretches(sub, segs, d, pe, d), plans, &wm, usageFloors{trialEnd: &trialEnd})
+	clamped, full := meterUsageIntervals(planStretches(sub, segs, d, pe, d), plans, nil, &wm, usageFloors{trialEnd: &trialEnd})
 	if len(clamped) != 1 || len(full) != 1 {
 		t.Errorf("windows clamped %v, full %v: want one key each, at the period start's pin", clamped, full)
 	}
@@ -77,7 +77,7 @@ func TestMeterUsageIntervals_FloorsBothMaps_WatermarkOnlyClamped(t *testing.T) {
 
 	// A window wholly before the floor drops out of both maps.
 	early := map[string][]baseSegment{"it": {{start: d, end: d.Add(10 * time.Hour), planID: "p"}}}
-	clamped, full = meterUsageIntervals(planStretches(sub, early, d, pe, d), plans, &wm, usageFloors{trialEnd: &trialEnd})
+	clamped, full = meterUsageIntervals(planStretches(sub, early, d, pe, d), plans, nil, &wm, usageFloors{trialEnd: &trialEnd})
 	if len(clamped[m]) != 0 || len(full[m]) != 0 {
 		t.Errorf("a segment wholly in the trial: clamped %v, full %v; want both empty", clamped[m], full[m])
 	}
@@ -136,7 +136,7 @@ func TestMeterUsageIntervals_OneWindowPerInstant(t *testing.T) {
 			x := planMeter{planID: "p", meterID: "m", pin: pinX}
 			y := planMeter{planID: addedPlan, meterID: "m", pin: pinY}
 
-			clamped, full := meterUsageIntervals(planStretches(sub, segs, d, pe, d), plans, &wm, usageFloors{})
+			clamped, full := meterUsageIntervals(planStretches(sub, segs, d, pe, d), plans, nil, &wm, usageFloors{})
 			want := func(what string, got []usageInterval, s, e time.Time) {
 				t.Helper()
 				got = mergeUsageIntervals(got)

@@ -5262,7 +5262,9 @@ export const getAddPlanPriceUrl = (id: string,) => {
  * On a plan no subscription has used, the price applies at once
  * (`effective: now`). On a used plan it applies from each
  * subscriber's next billing period (`effective: next_period`); until
- * then the plan's other prices bill the meter's usage as before.
+ * then the plan's other prices bill the meter's usage as before. A
+ * subscriber who joins the plan after the add pays it at once (see
+ * `PriceWrite`).
  *
  * A price that names a removed price's meter and `dimension_match`
  * adds that price back under its id. Its old customer overrides do
@@ -5344,8 +5346,9 @@ export const getUpdatePlanPriceUrl = (id: string,
  * identity and cannot change: add a price for other events instead.
  * On a plan no subscription has used, the change applies at once; on
  * a used plan, from each subscriber's next billing period. The current
- * period keeps the price it started with. Customer overrides of the
- * price keep applying.
+ * period keeps the price it started with. A subscriber who joins the
+ * plan after the change pays it at once (see `PriceWrite`). Customer
+ * overrides of the price keep applying.
  * @summary Change a price's rate
  */
 export const updatePlanPrice = async (id: string,
@@ -5422,10 +5425,12 @@ export const getRemovePlanPriceUrl = (id: string,
 /**
  * On a plan no subscription has used, the price is gone at once. On a
  * used plan it takes no part from each subscriber's next billing
- * period; the current period keeps it. The removal ends every customer
- * override of the price, each when the removal takes effect for its
- * customer, and the answer names them (`ended_overrides`). Adding the
- * price back later keeps its id but not the overrides.
+ * period; the current period keeps it. A subscriber who joins the plan
+ * after the removal does not pay it (see `PriceWrite`). The removal
+ * ends every customer override of the price, each when the removal
+ * takes effect for its customer, and the answer names them
+ * (`ended_overrides`). Adding the price back later keeps its id but not
+ * the overrides.
  * @summary Remove a price from a plan
  */
 export const removePlanPrice = async (id: string,
@@ -15316,7 +15321,10 @@ export const getDeletePriceOverrideUrl = (id: string,) => {
 /**
  * Marks the override inactive. The row is kept. The customer goes back
  * to the price's rate from its next billing period, in the customer's
- * time; the current period keeps the rate it started with.
+ * time; the current period keeps the rate it started with. If the
+ * customer joins the plan after the override ends (a new subscription,
+ * an immediate plan change, an added item), they pay the price's rate
+ * from then.
  * @summary End a customer price override
  */
 export const deletePriceOverride = async (id: string, options?: RequestInit): Promise<DeletePriceOverride200> => {

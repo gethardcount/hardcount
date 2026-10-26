@@ -554,7 +554,7 @@ func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription
 	for _, it := range sub.Items {
 		itemPins[it.ID] = itemPin(sub, stretches, it, periodStart)
 	}
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return thresholdUsage{}, err
 	}
@@ -562,7 +562,7 @@ func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription
 	if err != nil {
 		return thresholdUsage{}, err
 	}
-	clamped, _ := meterUsageIntervals(stretches, planMeters, nil, floors)
+	clamped, _ := meterUsageIntervals(stretches, planMeters, alike, nil, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {

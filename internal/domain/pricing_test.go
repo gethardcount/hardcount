@@ -537,3 +537,32 @@ func TestComputeAmountCents_Graduated_EmptyTiers_Validation(t *testing.T) {
 		t.Errorf("expected ErrInvalidPricingConfig for empty tiers, got %v", err)
 	}
 }
+
+// PriceShape.Equal compares amounts as numbers and tiers bound by bound.
+func TestPriceShape_Equal(t *testing.T) {
+	ten, eleven := int64(10), int64(11)
+	grad := func(upTo *int64, above string) PriceShape {
+		return PriceShape{Mode: PricingGraduated, Tiers: RatingTiers{{UpTo: upTo, UnitAmountCents: decimal.Zero}, {UnitAmountCents: decimal.RequireFromString(above)}}}
+	}
+	unit := func(c string) PriceShape {
+		return PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.RequireFromString(c)}
+	}
+	for _, c := range []struct {
+		name string
+		a, b PriceShape
+		want bool
+	}{
+		{"same digits", unit("1"), unit("1"), true},
+		{"other digits, same number", unit("1"), unit("1.000"), true},
+		{"other rate", unit("1"), unit("2"), false},
+		{"other mode", unit("1"), PriceShape{Mode: PricingPackage, PackageSize: 1, PackageAmountCents: decimal.NewFromInt(1)}, false},
+		{"same tiers", grad(&ten, "2"), grad(&ten, "2.0"), true},
+		{"other bound", grad(&ten, "2"), grad(&eleven, "2"), false},
+		{"open and bounded", grad(&ten, "2"), grad(nil, "2"), false},
+		{"other tier rate", grad(&ten, "2"), grad(&ten, "3"), false},
+	} {
+		if got := c.a.Equal(c.b); got != c.want {
+			t.Errorf("%s: Equal = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

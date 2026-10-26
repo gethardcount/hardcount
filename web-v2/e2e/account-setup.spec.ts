@@ -359,6 +359,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   await overrides.getByRole('button', { name: `End override on ${priceName}` }).click()
   const end = page.getByRole('dialog', { name: 'End price override' })
   await expect(end).toContainText(`${priceName} returns to list price for this customer.`)
+  await expect(end).toContainText('If the customer subscribes to the plan or moves to it after you end the override, list price applies from then.')
   const ending = apiCall(page, 'DELETE', new RegExp(`/price-overrides/${saved.id}$`))
   await end.getByRole('button', { name: 'End override' }).click()
   expect((await ending).ok()).toBe(true)

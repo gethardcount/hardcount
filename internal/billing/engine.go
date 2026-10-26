@@ -1183,14 +1183,19 @@ func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, f
 // splitting it double-bills. With no watermark full is empty and only
 // clamped is used.
 //
+// A window whose meter is priced alike at an earlier pin of its plan is
+// billed under that pin (alike, from pricedAlike), so the two are one window.
 // A meter's usage at one instant is in one window (oneWindowPerInstant).
 // Callers still run mergeUsageIntervals on each key.
-func meterUsageIntervals(stretches []planStretch, planMeters map[planPin][]string, billedThrough *time.Time, floors usageFloors) (clamped, full map[planMeter][]usageInterval) {
+func meterUsageIntervals(stretches []planStretch, planMeters map[planPin][]string, alike alikePins, billedThrough *time.Time, floors usageFloors) (clamped, full map[planMeter][]usageInterval) {
 	clamped = map[planMeter][]usageInterval{}
 	full = map[planMeter][]usageInterval{}
 	for _, st := range stretches {
 		for _, mid := range planMeters[planPin{planID: st.planID, pin: st.pin}] {
 			k := planMeter{planID: st.planID, meterID: mid, pin: st.pin}
+			if pin, ok := alike[k]; ok {
+				k.pin = pin
+			}
 			s := floors.start(mid, st.start, st.end)
 			if billedThrough != nil && st.end.After(s) {
 				full[k] = append(full[k], usageInterval{s, st.end})
@@ -2922,7 +2927,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// prices.
 	src := e.prices()
 	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, periodStart)
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -2960,7 +2965,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	meterIntervals, meterIntervalsFull := meterUsageIntervals(stretches, planMeters, thresholdBilledThrough, floors)
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(stretches, planMeters, alike, thresholdBilledThrough, floors)
 
 	// Usage is read once per window (one read covers every meter for a
 	// window; a meter with several prices reads its buckets per window) and
@@ -4030,7 +4035,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	// items bring in meters a now-removed plan priced.
 	src := e.prices()
 	stretches := planStretches(sub, segsByItem, periodStart, canceledAt, periodStart)
-	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
+	planMeters, alike, err := stretchMeters(ctx, src, sub, stretches)
 	if err != nil {
 		return nil, 0, fmt.Errorf("cancel: %w", err)
 	}
@@ -4048,7 +4053,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	if err != nil {
 		return nil, 0, err
 	}
-	meterIntervals, meterIntervalsFull := meterUsageIntervals(stretches, planMeters, wm.billedThrough, floors)
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(stretches, planMeters, alike, wm.billedThrough, floors)
 
 	// The lines read usage through reads, once per window, and are priced by
 	// the one rater, with the same passes and ladder as the period close.

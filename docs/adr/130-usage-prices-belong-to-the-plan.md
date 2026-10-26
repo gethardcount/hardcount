@@ -251,6 +251,17 @@ item of #1386. Step 3 changes; the other steps stay.
   merged, so without this rule the time before the removal was billed once
   per window (review of #1388). Across two plans that double bill was older
   than this amendment; the same rule ends it.
+- Two windows of one plan and meter that are priced alike are one window.
+  Priced alike means the meter's prices at the two pins are the same, each
+  with the customer's override in force applied: the same prices, events
+  and shapes. The later window is billed under the earlier pin. So an item
+  that leaves a plan and an item added on it later in the period, with no
+  change to that meter's prices in between, bill as one item would: a `max`
+  or `last` meter bills its peak once, and graduated tiers run on. Each
+  meter is compared on its own, so an edit to another meter of the plan
+  does not split them. When the meter's prices differ, the windows stay
+  apart, and each bills its own peak and starts its own tiers (second
+  review of #1388).
 - Every pin is a stored instant (`started_at`, `trial_end_at`, a billing
   interval's start, an item's `created_at`), so all readers agree on it. A
   subscription create, an immediate swap and an item add hold their plans
