@@ -12,11 +12,13 @@ import (
 )
 
 // A subscriber pays a plan as it stands when they join it (ADR-130 §4 step 3,
-// amended 2026-10-26). Each window of a billing period is priced at its own
-// start: a new subscription's first window at the instant it starts, a window
-// opened by an immediate plan swap at the swap, an item added mid-period at
-// the add. A window that started before a price change keeps the prices it
-// started with until the subscription's next period.
+// amended 2026-10-26). Each plan of a billing period is priced at one pin:
+// the later of the period start and the first instant in the period the
+// subscription had an item on the plan. A new subscription joins at its
+// start, an immediate plan swap at the swap, an added item at the add. A
+// subscriber on the plan from before a price change keeps the prices it had
+// until its next period, and one that leaves the plan and joins it again in
+// the period keeps its first pin.
 //
 // Each story runs in wall time and on a test clock. The readers of the open
 // period (the preview, customer usage, the live balance) must say what the
@@ -318,13 +320,12 @@ func (j *joinRig) subscribeItems(customerID string, planIDs ...string) (string, 
 // plan, and an item on the same plan is added later that day, after the
 // plan's price was edited. The added item bills from the period start (the
 // day rule of ADR-012), so its window reaches back over the first item's.
-// Each event is billed once: the events before the first item left at the
-// prices its window started with, the events after the add at the plan as
-// it stood at the add.
+// The subscription was on the plan first at the period start, so the whole
+// period is priced there, and each event is billed once: every call at 1c.
 //
-// Mutation: keep the windows of one meter with different pins apart without
-// taking the earlier window's time out of the later one, and the events
-// before the first item left are billed twice (once at each pin).
+// Mutation: pin the plan where its current item joined it, and the calls
+// after the add bill at 5c. Bill the overlap twice, and the calls before the
+// first item left bill twice.
 func TestE2E_PlanPrices_ItemOffAndBackOnTheFirstDay(t *testing.T) {
 	for _, how := range []string{"removed", "swapped_off"} {
 		t.Run(how, func(t *testing.T) {
@@ -359,9 +360,9 @@ func TestE2E_PlanPrices_ItemOffAndBackOnTheFirstDay(t *testing.T) {
 				j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
 				j.ingest(time.Time{}, "pp-off-back", "calls", 10, j.soon(), nil)
 
-				j.agreeOpen("item off and back on the plan", cust, subID, 60)
+				j.agreeOpen("item off and back on the plan", cust, subID, 20)
 				j.closeAt(p1.Add(time.Hour))
-				wantUsage(t, "each event once: 10 at 1c before the item left, 10 at 5c after the add", j.cycle(subID, p0), map[string]int64{callsA: 60})
+				wantUsage(t, "each event once, at the plan's prices of the period start: 20 calls at 1c", j.cycle(subID, p0), map[string]int64{callsA: 20})
 			})
 		})
 	}
@@ -414,14 +415,13 @@ func (j *joinRig) between() time.Time {
 // TestE2E_PlanPrices_MeterMovesPlansAndBackOnTheFirstDay: on the first day
 // of a period a meter moves from plan A (1c) to plan C (3c) and back: A's
 // item is removed, C's added, C's removed and A's added again. The added
-// items bill from the period start (ADR-012). A's second window is priced as
-// its first, but each event is billed by the plan that priced the meter
-// when it came: before the move and after the move back by plan A, in
-// between by plan C.
+// items bill from the period start (ADR-012). Each event is billed by the
+// plan that priced the meter when it came: before the move and after the
+// move back by plan A, in between by plan C.
 //
-// Mutation: bill A's second window under its first window's pin before
-// taking earlier windows' time out of later ones, and plan A's first window
-// takes the whole period: C's events bill at 1c.
+// Mutation: give the overlapping time to the window of the plan pinned
+// first instead of the item that joined first, and plan A takes the whole
+// period: C's events bill at 1c.
 func TestE2E_PlanPrices_MeterMovesPlansAndBackOnTheFirstDay(t *testing.T) {
 	joinModes(t, func(t *testing.T, onClock bool) {
 		j := newJoinRig(t, "meter moves plans and back", onClock)
@@ -454,14 +454,14 @@ func TestE2E_PlanPrices_MeterMovesPlansAndBackOnTheFirstDay(t *testing.T) {
 
 // TestE2E_PlanPrices_PriceChangesAndBackOnTheFirstDay: on the first day of a
 // period a plan's calls price is edited from 1c to 5c, the subscription's
-// item on the plan is removed and another added (at 5c), that one is removed,
-// the price is edited back to 1c and a third item is added. The added items
-// bill from the period start (ADR-012). The third item is priced as the
-// first, but the events in between are billed at the 5c they came at.
+// item on the plan is removed and another added, that one is removed, the
+// price is edited back to 1c and a third item is added. The added items bill
+// from the period start (ADR-012). The subscription was on the plan first at
+// the period start, so the plan is priced there for the whole period: every
+// call bills at 1c, once.
 //
-// Mutation: bill the third item's window under the first item's pin before
-// taking earlier windows' time out of later ones, and the first item's
-// window takes the whole period: the 5c events bill at 1c.
+// Mutation: pin the plan where an item last joined it, or price each item at
+// its own join, and the calls of the second item bill at 5c.
 func TestE2E_PlanPrices_PriceChangesAndBackOnTheFirstDay(t *testing.T) {
 	joinModes(t, func(t *testing.T, onClock bool) {
 		j := newJoinRig(t, "price changes and back", onClock)
@@ -489,9 +489,9 @@ func TestE2E_PlanPrices_PriceChangesAndBackOnTheFirstDay(t *testing.T) {
 		j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
 		j.ingest(time.Time{}, "pp-price-back", "calls", 10, j.soon(), nil)
 
-		j.agreeOpen("price changed and back", cust, subID, 70)
+		j.agreeOpen("price changed and back", cust, subID, 30)
 		j.closeAt(p1.Add(time.Hour))
-		wantUsage(t, "each event at the price it came at: 10 at 1c, 10 at 5c, 10 at 1c", j.cycle(subID, p0), map[string]int64{callsA: 70})
+		wantUsage(t, "every event once, at the plan's prices of the period start: 30 calls at 1c", j.cycle(subID, p0), map[string]int64{callsA: 30})
 	})
 }
 
@@ -505,16 +505,14 @@ func graduated(meterID string, free int64, freeCents, aboveCents string) map[str
 
 // TestE2E_PlanPrices_ItemOffAndBackPricedAlike: an item leaves a plan on the
 // first day of a period, by removal or by an immediate swap to another plan,
-// and an item on the same plan is added later that day. The prices of the
-// plan's peak (max) and calls (graduated) meters did not change in between,
-// so each of those meters bills one window over the period: the peak once,
+// and an item on the same plan is added later that day. The added item bills
+// from the period start (ADR-012), so the plan's peak (max) and calls
+// (graduated) meters each bill one window over the period: the peak once,
 // and the calls' free tier once. A price edit of another meter of the plan in
 // between does not split them.
 //
-// Mutation: keep windows of one plan and meter with different pins apart,
-// and the peak bills twice and the free tier is granted twice. Compare a
-// plan's prices as a whole instead of each meter's, and the other meter's
-// edit splits them too.
+// Mutation: key a window by its item's own join as well as its plan and
+// meter, and the peak bills twice and the free tier is granted twice.
 func TestE2E_PlanPrices_ItemOffAndBackPricedAlike(t *testing.T) {
 	for _, how := range []string{"removed", "swapped_off"} {
 		t.Run(how, func(t *testing.T) {
@@ -608,6 +606,62 @@ func TestE2E_PlanPrices_ItemOffAndBackLaterInThePeriod(t *testing.T) {
 	}
 	if got[peakA] != 20 || peakLines != 2 || got[callsA] != 0 {
 		t.Errorf("peak %dc on %d lines, calls %dc; want each part on its own: peak 20c on 2 lines (10 each), calls 0c (10 free in each part)", got[peakA], peakLines, got[callsA])
+	}
+}
+
+// TestE2E_PlanPrices_BackOnThePlanLaterInThePeriod: on a test clock, a
+// subscription leaves a plan on day 3 of a period, by removing its item or by
+// an immediate swap to another plan, the plan's calls price is edited from
+// 1c to 5c, and on day 6 the subscription joins the plan again, by adding an
+// item or by swapping back. It was on the plan first at the period start,
+// so the period is priced there: the calls after the return bill at 1c. The
+// edit applies from the next period.
+//
+// Mutation: pin the plan where the subscription joined it last, and the
+// calls after the return bill at 5c.
+func TestE2E_PlanPrices_BackOnThePlanLaterInThePeriod(t *testing.T) {
+	for _, how := range []string{"readded", "swapped_back"} {
+		t.Run(how, func(t *testing.T) {
+			j := newJoinRig(t, "back on the plan "+how, true)
+			calls, tokens := j.meter("calls", "sum"), j.meter("tokens", "sum")
+			planA, aIDs := j.plan("plan_a", perUnit(calls, "1", nil))
+			planB, _ := j.plan("plan_b", perUnit(tokens, "2", nil))
+			callsA := aIDs[0]
+			cust := j.cust("pp-back-later")
+			var subID string
+			var p0, p1 time.Time
+			if how == "readded" {
+				subID, p0, p1 = j.subscribeItems(cust, planA, planB)
+			} else {
+				subID, p0, p1 = j.subscribeItems(cust, planA)
+			}
+			j.ingest(time.Time{}, "pp-back-later", "calls", 10, j.before(p0), nil)
+
+			j.now = p0.Add(3 * 24 * time.Hour)
+			j.advance(j.clk, j.now)
+			itemA := j.item(subID, planA)
+			if how == "readded" {
+				j.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+subID+"/items/"+itemA, nil, http.StatusNoContent)
+			} else {
+				j.must(time.Time{}, http.MethodPatch, "/v1/subscriptions/"+subID+"/items/"+itemA,
+					map[string]any{"new_plan_id": planB, "immediate": true}, http.StatusOK)
+			}
+			j.later()
+			j.editTo(planA, callsA, "5", "next_period")
+			j.now = p0.Add(6 * 24 * time.Hour)
+			j.advance(j.clk, j.now)
+			if how == "readded" {
+				j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
+			} else {
+				j.must(time.Time{}, http.MethodPatch, "/v1/subscriptions/"+subID+"/items/"+itemA,
+					map[string]any{"new_plan_id": planA, "immediate": true}, http.StatusOK)
+			}
+			j.ingest(time.Time{}, "pp-back-later", "calls", 10, j.soon(), nil)
+
+			j.agreeOpen("back on the plan later in the period", cust, subID, 20)
+			j.closeAt(p1.Add(time.Hour))
+			wantUsage(t, "the plan at the period start's prices: 20 calls at 1c", j.cycle(subID, p0), map[string]int64{callsA: 20})
+		})
 	}
 }
 
