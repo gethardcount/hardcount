@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 )
@@ -22,7 +20,7 @@ import (
 // no invoice. What changed is that the caller and the operator are told:
 // the single-ingest and backfill 201 carry billing_status "after_close", the
 // batch and LiteLLM answers count after_close rows, and
-// velox_usage_after_close_total{origin} counts them.
+// velox_usage_unbilled_total{reason="after_close", origin} counts them.
 //
 // The flag must never be false: a flagged event must really be billed on no
 // invoice. Each test that flags an event checks the invoices too, and each
@@ -32,28 +30,12 @@ import (
 // The rig is the close-lag rig: the real server over HTTP. April is
 // P0 = [Apr 1, May 1) and B = May 1.
 
-const afterCloseMetric = "velox_usage_after_close_total"
+const afterCloseMetric = unbilledMetric + `{reason="after_close"}`
 
-// afterCloseCount reads velox_usage_after_close_total{origin}.
+// afterCloseCount reads velox_usage_unbilled_total{reason="after_close", origin}.
 func afterCloseCount(t *testing.T, origin string) float64 {
 	t.Helper()
-	mfs, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		t.Fatalf("gather metrics: %v", err)
-	}
-	for _, mf := range mfs {
-		if mf.GetName() != afterCloseMetric {
-			continue
-		}
-		for _, m := range mf.GetMetric() {
-			for _, lp := range m.GetLabel() {
-				if lp.GetName() == "origin" && lp.GetValue() == origin {
-					return m.GetCounter().GetValue()
-				}
-			}
-		}
-	}
-	return 0
+	return unbilledCount(t, "after_close", origin)
 }
 
 // doH is do with the response headers.
