@@ -16,17 +16,12 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * `now`: no subscription has used the plan, so it applies at once.
  * `next_period`: each subscriber pays the new content from their next
  * billing period; the current period keeps the prices it started with.
- * A period is priced by the prices in force at its start, and a
- * subscription that starts without a trial has a first period from
- * midnight of its first day. So one that starts later on the day of
- * the write gets it from its second period: its first period still
- * bills a price removed that day and does not bill one added that day.
- * A subscription that moves to the plan mid-period (an immediate plan
- * change or an added item) gets it from its next period too: the rest
- * of its current period is priced by the plan's prices at that
- * period's start. An immediate change from a plan with another
- * billing interval is the exception: it starts a new period at the
- * change, so it gets the write at once.
+ * A subscriber who joins the plan after the write gets it at once: a
+ * subscription that starts after it (after a trial, from the trial's
+ * end), an immediate plan change onto the plan, or an item added on
+ * it. Each is priced from that moment by the plan's prices then, so a
+ * subscription that starts later on the day of the write bills a price
+ * added that day and not one removed that day.
  */
 export type PriceWrite = PlanPrice & {
   effective: PriceWriteEffective;

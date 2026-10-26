@@ -41,8 +41,8 @@ type UsageRater interface {
 	// close would bill it with no threshold invoice: usage a threshold
 	// invoice already billed is counted.
 	RateCurrentPeriod(ctx context.Context, sub domain.Subscription) (domain.RatedSubscription, error)
-	// RateWindow is an estimate over [from, to), priced at the
-	// subscription's current-period pin.
+	// RateWindow is an estimate over [from, to), each window priced at the
+	// pin it has in the subscription's current period.
 	RateWindow(ctx context.Context, sub domain.Subscription, from, to time.Time) (domain.RatedSubscription, error)
 }
 

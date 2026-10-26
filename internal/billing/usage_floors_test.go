@@ -48,17 +48,25 @@ func TestUsageFloors_Start(t *testing.T) {
 // meterUsageIntervals applies the floors to the clamped AND the full map: the
 // full map carries deferred max/last buckets (ADR-066 §4), and trial usage is
 // nobody's in those either. The watermark clamps only the clamped map.
+// Neither moves the window's pin: the windows keep the period start's pin.
+//
+// Mutation: pin each window at its start after the floor and the watermark,
+// and the windows are keyed at the watermark's pin.
 func TestMeterUsageIntervals_FloorsBothMaps_WatermarkOnlyClamped(t *testing.T) {
 	d := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
 	pe := d.AddDate(0, 1, 0)
 	trialEnd := d.Add(18 * time.Hour)
 	wm := d.Add(21 * time.Hour)
 	sub := domain.Subscription{Items: []domain.SubscriptionItem{{ID: "it", PlanID: "p"}}}
-	plans := map[string][]string{"p": {"m"}}
-	m := planMeter{planID: "p", meterID: "m"}
+	pin := windowPin(sub, d, time.Time{})
+	plans := map[planPin][]string{{planID: "p", pin: pin}: {"m"}}
+	m := planMeter{planID: "p", meterID: "m", pin: pin}
 	segs := map[string][]baseSegment{"it": {{start: d, end: pe, planID: "p"}}}
 
-	clamped, full := meterUsageIntervals(sub, segs, plans, d, pe, &wm, usageFloors{trialEnd: &trialEnd})
+	clamped, full := meterUsageIntervals(planStretches(sub, segs, d, pe, d), plans, &wm, usageFloors{trialEnd: &trialEnd})
+	if len(clamped) != 1 || len(full) != 1 {
+		t.Errorf("windows clamped %v, full %v: want one key each, at the period start's pin", clamped, full)
+	}
 	if got := clamped[m]; len(got) != 1 || !got[0].start.Equal(wm) || !got[0].end.Equal(pe) {
 		t.Errorf("clamped = %v, want [[watermark, period end)]", got)
 	}
@@ -68,7 +76,7 @@ func TestMeterUsageIntervals_FloorsBothMaps_WatermarkOnlyClamped(t *testing.T) {
 
 	// A window wholly before the floor drops out of both maps.
 	early := map[string][]baseSegment{"it": {{start: d, end: d.Add(10 * time.Hour), planID: "p"}}}
-	clamped, full = meterUsageIntervals(sub, early, plans, d, pe, &wm, usageFloors{trialEnd: &trialEnd})
+	clamped, full = meterUsageIntervals(planStretches(sub, early, d, pe, d), plans, &wm, usageFloors{trialEnd: &trialEnd})
 	if len(clamped[m]) != 0 || len(full[m]) != 0 {
 		t.Errorf("a segment wholly in the trial: clamped %v, full %v; want both empty", clamped[m], full[m])
 	}

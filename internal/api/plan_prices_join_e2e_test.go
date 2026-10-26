@@ -148,6 +148,7 @@ func TestE2E_PlanPrices_SubscribeAfterAChange(t *testing.T) {
 			t.Fatalf("removal on a used plan: effective %q, want next_period", flowStr(w, "effective"))
 		}
 		tokensPrice := flowStr(j.must(time.Time{}, http.MethodPost, "/v1/plans/"+plan+"/prices", perUnit(tokens, "2", nil), http.StatusCreated), "id")
+		j.later()
 		j.must(time.Time{}, http.MethodPatch, "/v1/subscriptions/"+earlySub+"/items/"+j.item(earlySub, plan), map[string]any{"quantity": 2}, http.StatusOK)
 
 		j.later()

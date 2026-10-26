@@ -18,14 +18,11 @@ test('plan lock names the server count, singular and plural, same words as the r
 })
 
 test('price changes say when they apply, before saving', () => {
-  assert.match(planPricesNotice(true), /next billing period/)
-  assert.match(planPricesNotice(true), /prices the plan had at its start/)
-  assert.match(planPricesNotice(true), /starts later today/)
-  assert.match(planPricesNotice(true), /moves to this plan or adds it partway through its period/)
-  // A move from a plan with another billing interval starts a new period at
-  // the move (applyCrossIntervalPlanSwapTx), so it is priced then.
-  assert.match(planPricesNotice(true), /usually midnight on its first day/)
-  assert.match(planPricesNotice(true), /another billing interval starts a new period then, so it gets a change at once/)
+  assert.match(planPricesNotice(true), /^Price changes apply from each subscriber's next billing period\./)
+  // A window that opens after a change is priced at its own start (ADR-130
+  // §4 step 3, amended 2026-10-26).
+  assert.match(planPricesNotice(true), /joins this plan after a change, by subscribing, moving to it or adding it, pays the new prices from then/)
+  assert.doesNotMatch(planPricesNotice(true), /midnight|later today|next period/)
   assert.match(planPricesNotice(false), /apply at once/)
 })
 
@@ -44,10 +41,8 @@ test('removing a price names the overrides it ends', () => {
     "It is removed at once. Its events go to another price of the plan that matches them, or aren't billed if none does. Adding the price back later doesn't bring the overrides back.",
   )
   assert.match(priceRemoveSentence(true, 0), /^From each subscriber's next billing period/)
-  assert.match(priceRemoveSentence(true, 0), /starts later today/)
-  assert.match(priceRemoveSentence(true, 0), /moves to this plan or adds it partway through its period/)
-  assert.match(priceRemoveSentence(true, 0), /usually midnight on its first day/)
-  assert.match(priceRemoveSentence(true, 0), /another billing interval starts a new period then, so it doesn't pay this price/)
+  assert.match(priceRemoveSentence(true, 0), /joins this plan after the removal, by subscribing, moving to it or adding it, doesn't pay this price/)
+  assert.doesNotMatch(priceRemoveSentence(true, 0), /midnight|later today|still pays/)
   assert.match(priceRemoveSentence(true, 1), /ends 1 customer override of it/)
   assert.match(priceRemoveSentence(true, 3), /ends 3 customer overrides of it/)
   assert.match(priceRemoveSentence(true, null), /ends any customer override/)

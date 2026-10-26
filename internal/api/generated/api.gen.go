@@ -4137,8 +4137,9 @@ type CustomerPriceOverride struct {
 	Active bool `json:"active"`
 
 	// CreatedAt When the override starts, in the customer's time: wall time, or
-	// its test clock's time. A billing period is priced at its start,
-	// so the override applies from the customer's next period.
+	// its test clock's time. A subscription already on the plan gets
+	// it from its next period; one that joins the plan after this
+	// instant gets it from then.
 	CreatedAt  time.Time `json:"created_at"`
 	CustomerId string    `json:"customer_id"`
 

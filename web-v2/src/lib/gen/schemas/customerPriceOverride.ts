@@ -34,8 +34,9 @@ export interface CustomerPriceOverride {
   active: boolean;
   /**
      * When the override starts, in the customer's time: wall time, or
-     * its test clock's time. A billing period is priced at its start,
-     * so the override applies from the customer's next period.
+     * its test clock's time. A subscription already on the plan gets
+     * it from its next period; one that joins the plan after this
+     * instant gets it from then.
      */
   created_at: string;
   /** When the override ended, in the customer's time. Absent while it is active. */

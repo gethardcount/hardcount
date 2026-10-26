@@ -6305,13 +6305,11 @@ export interface paths {
          *     active override for that price, it is closed and replaced by this
          *     one. A new or replaced rate applies from the customer's next
          *     billing period, in the customer's time (its test clock's, if it has
-         *     one); the current period keeps the rate it started with. A
-         *     subscription that starts without a trial has a first period from
-         *     midnight of its first day. So an override created on the day the
-         *     customer's subscription starts, before or after it, applies from
-         *     its second period: the first period bills the price's rate. To
-         *     bill the first period at the override, create it on an earlier day.
-         *     The override takes the plan's currency. A plan swap does not carry
+         *     one); the current period keeps the rate it started with. It applies
+         *     at once when the customer joins the plan after it is created: an
+         *     override created before a subscription starts (after a trial,
+         *     before the trial ends), even on the same day, applies from its
+         *     first period. The override takes the plan's currency. A plan swap does not carry
          *     it: the new plan's price is another price.
          */
         post: operations["createPriceOverride"];
@@ -7019,17 +7017,12 @@ export interface components {
          *     `now`: no subscription has used the plan, so it applies at once.
          *     `next_period`: each subscriber pays the new content from their next
          *     billing period; the current period keeps the prices it started with.
-         *     A period is priced by the prices in force at its start, and a
-         *     subscription that starts without a trial has a first period from
-         *     midnight of its first day. So one that starts later on the day of
-         *     the write gets it from its second period: its first period still
-         *     bills a price removed that day and does not bill one added that day.
-         *     A subscription that moves to the plan mid-period (an immediate plan
-         *     change or an added item) gets it from its next period too: the rest
-         *     of its current period is priced by the plan's prices at that
-         *     period's start. An immediate change from a plan with another
-         *     billing interval is the exception: it starts a new period at the
-         *     change, so it gets the write at once.
+         *     A subscriber who joins the plan after the write gets it at once: a
+         *     subscription that starts after it (after a trial, from the trial's
+         *     end), an immediate plan change onto the plan, or an item added on
+         *     it. Each is priced from that moment by the plan's prices then, so a
+         *     subscription that starts later on the day of the write bills a price
+         *     added that day and not one removed that day.
          */
         PriceWrite: components["schemas"]["PlanPrice"] & {
             /** @enum {string} */
@@ -9233,8 +9226,9 @@ export interface components {
             /**
              * Format: date-time
              * @description When the override starts, in the customer's time: wall time, or
-             *     its test clock's time. A billing period is priced at its start,
-             *     so the override applies from the customer's next period.
+             *     its test clock's time. A subscription already on the plan gets
+             *     it from its next period; one that joins the plan after this
+             *     instant gets it from then.
              */
             created_at: string;
             /**

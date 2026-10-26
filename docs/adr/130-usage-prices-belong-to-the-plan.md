@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes install through a parser that turns today's YAML into plan prices. Not built yet: the base fee next-period rule (PR-7), ingest's `no_price` answer (PR-6), recipe YAML v7 (PR-5) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes install through a parser that turns today's YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each window is priced at its own start. Not built yet: the base fee next-period rule (PR-7), ingest's `no_price` answer (PR-6), recipe YAML v7 (PR-5) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -42,7 +42,7 @@ settings.
 | `dimension_match` | The labels an event must carry for a price to take it, such as `{"model": "claude-opus-4.5", "token_type": "input"}`. Labels are an event's dimensions. Values are strings. `{}` matches every event of the meter. |
 | specificity | The number of keys in a `dimension_match`. The matching price with the most keys wins. |
 | billing period | The dates one subscription invoice covers: a month or a year. A period normally starts at midnight in the account's billing timezone. |
-| pin | The instant whose prices price a whole billing period: the period's start. |
+| pin | The instant whose prices price a window: the period's start, or the window's own start when it opens inside the period (section 4 step 3, amended 2026-10-26). |
 | window | A stretch of a billing period during which a subscription was on one plan. A mid-period plan change splits the period into two windows. |
 | used plan | A plan that a subscription has ever referenced, canceled ones included. |
 | version | Velox's internal record of a price's content from one instant on. A removal is a version that says "removed from here on" (a tombstone). Versions never appear in the API. |
@@ -199,6 +199,59 @@ is a break. v0.9.0 is also a clean break: there is no upgrade from Velox
 8. An override for the customer and the winning price, in force at the
    pin, replaces that price's rate.
 
+**Amendment (2026-10-26, D08 PR-4b, #1388): a subscriber pays the plan as
+it stands when they join it.** The product owner decided this on the open
+item of #1386. Step 3 changes; the other steps stay.
+
+- The pin is per window, not per period: the later of the period start and
+  the instant the subscription's item joined the window's plan. A window
+  that was open at the period start is priced at the period start, as
+  before. A window that opens inside the period is priced at its own start:
+  - a new subscription's first window at the subscription's start
+    (`started_at`), or at its trial end after a trial;
+  - a window opened by an immediate swap onto the plan at the swap;
+  - an item added mid-period at the add. An add on a period's first day
+    opens its billing interval at the period start (ADR-012), so the add's
+    instant is read from the item's `created_at`. An item counts as added
+    when its `created_at` is after the subscription's; items created with
+    the subscription share its `created_at`.
+- A quantity change does not open a window: the pin comes from where the
+  item's run of intervals on that plan began. A swap from a plan with
+  another billing interval starts a period at the swap, and a scheduled
+  swap applies at a period start, so for both the period start is the
+  window start.
+- The usage a window covers does not change. A first period still starts at
+  midnight and bills usage from then (ADR-012); that usage is priced at the
+  subscription's start. Neither a usage floor (trial end, another
+  subscription's coverage end) nor a threshold invoice's watermark moves a
+  pin.
+- So, on a used plan, a subscription that starts after a change pays it from
+  its first period: the changed rate, a price added earlier, and not a
+  price removed earlier. An override created before a window starts applies
+  to it. A change or override made after a window started still applies from
+  the subscription's next period.
+- Every reader prices a window at the same pin: the close, an immediate
+  cancel, the threshold invoice and its item caps, the previews, the live
+  balance and customer usage. Ingest reads each current item's plan at the
+  item's window pin, from the item's last swap (`plan_changed_at`), its
+  `created_at` and the subscription's start.
+- On a test clock the pin is in simulated time. A version written at clock
+  time T takes effect at T + 1 µs (section 7), so a subscription created
+  while the clock still reads T pays the earlier price. Advance the clock,
+  then subscribe.
+- Every pin is a stored instant (`started_at`, `trial_end_at`, a billing
+  interval's start, an item's `created_at`), so all readers agree on it. A
+  subscription create, an immediate swap and an item add hold their plans
+  `FOR KEY SHARE`, so a price write on those plans commits before or after
+  them, never during. Section 7's commit straddle now reaches a window that
+  starts in the milliseconds before a write commits, as it reached a period
+  start.
+- No schema change: every instant was already stored. The billing interval
+  read also returns its item's `created_at`.
+- This is the "second pin rule" the panel dropped (panel record). It came
+  back because a period-start pin billed a new subscriber the old price for
+  a whole first period.
+
 **Ties are refused when a price is saved.** Under a lock on the plan row,
 a new or changed price is compared with the prices on the same plan and
 meter that take part from now on. Two prices with the same number of keys
@@ -224,7 +277,7 @@ names it.
 
 | What | Never-used plan | Used plan |
 |---|---|---|
-| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period, and one that moves to the plan mid-period gets it from its next period (Risks). |
+| Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period, and one that moves to the plan mid-period gets it from its next period (Risks). *Amended 2026-10-26 (section 4): a window that opens after the write, by a new subscription, a swap onto the plan or an added item, gets it at once.* |
 | Base fee, if PR-7 ships | Applies at once. | Applies from each subscriber's next period. |
 | Base fee, if PR-7 is cut | Editable. | Refused while a live subscription uses the plan, as today (ADR-034). |
 | `base_bill_timing` | Editable, but not to `in_advance` at a base of 0 (section 14). | Locked. |
@@ -440,7 +493,9 @@ lock with the rule tables.
 - **An explicit `?from=&to=` window: an estimate,** labelled so. Each
   subscription's windows are clipped to it and priced at its current
   period's pin. Past periods are not priced at their own pins. Nothing
-  bills from this read.
+  bills from this read. (Amended 2026-10-26: each window is priced at the
+  pin it would have in the current period, its start when it opened in that
+  period, section 4.)
 - Margin reads the explicit-window estimate and attributes revenue by the
   winning price's `dimension_match.model`.
 - The public cost dashboard reads the current period: exact.
@@ -693,6 +748,10 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   not ordered with it. The same class
   as two concurrent subscription creates today; it joins ADR-100's
   deferred locks. Trigger: the first account with several operators.
+- *Resolved 2026-10-26 (section 4 amendment): the two items below no longer
+  hold. A new subscriber, a swap onto the plan and an added item pay the
+  plan as it stands when they join it, and an override created before a
+  window starts applies to it.*
 - **A new subscriber later on the day of an edit** pays the old price for
   the first period, because the pin is the period start, a midnight. The
   same holds for an add and a removal: that first period does not bill a
@@ -756,7 +815,7 @@ it.
 | [044](044-canonical-ai-token-metering-model.md) | Decision 4: token prices are plan prices on the `tokens` meter, most specific wins, no priority (PR-4). |
 | [045](045-decimal-per-unit-pricing-rates.md) | `package_amount_cents` becomes a decimal too, `flat` becomes `per_unit` and overage goes (PR-3). Rates take at most 12 decimal places: built in #1378, ahead of PR-3. |
 | [066](066-threshold-money-semantics.md) | Decision 4's rule-bucket granularity becomes the meter (PR-2). The ladder seed keys on price id, so the ambiguous-config failure goes (PR-4). The package clamp goes (PR-3). The fire prices per plan window (PR-4). |
-| [070](070-price-change-semantics.md) | Decision 1: overrides key on the price, not `rule_key`. Decision 4's earliest-version fallback and test-clock caveat go. Decision 5's currency guard goes. The 2026-10-23 meter-in-use amendment is replaced. Customer usage over an explicit window is priced at each subscription's current pin (section 10). All in PR-4. The period-start pin stays. |
+| [070](070-price-change-semantics.md) | Decision 1: overrides key on the price, not `rule_key`. Decision 4's earliest-version fallback and test-clock caveat go. Decision 5's currency guard goes. The 2026-10-23 meter-in-use amendment is replaced. Customer usage over an explicit window is priced at each subscription's current pin (section 10). All in PR-4. The period-start pin stays. Amended 2026-10-26 (PR-4b): a window that opens inside a period is priced at its own start (section 4). |
 | [085](085-recipe-idempotent-apply.md) | Rule adoption, the rule conformance check, the currency taken from adopted rules and the 2026-10-23 amendment go (PR-4); recipes no longer create a dunning policy or webhook endpoint (PR-5). |
 | [096](096-unpriced-meter-plan-attach-guard.md) | The plan-attach guard and the meter-in-use guard that replaced the last-price guard go: a plan's meters are its prices' meters (PR-4). The WARN and counter stay; ingest adds `no_price` (PR-6). |
 | [100](100-currency-coherence-guard-ring.md) | G1, G2, G2b, the override currency clause and G4's recipe probe go; prices take the plan's currency (PR-4). |

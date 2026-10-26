@@ -582,15 +582,15 @@ type PricingReader interface {
 	GetPlan(ctx context.Context, tenantID, id string) (domain.Plan, error)
 	GetMeter(ctx context.Context, tenantID, id string) (domain.Meter, error)
 	// PlanPricesAt is the ONE price resolution every rating path shares
-	// (ADR-130 §4): the plan's prices that take part at `at`, the start of
-	// the period being priced, in the subscription's time domain (clockID,
+	// (ADR-130 §4): the plan's prices that take part at `at`, the pin of the
+	// window being priced, in the subscription's time domain (clockID,
 	// "" for wall time), each with its version in force then, in claim
 	// order. Close, cancel, threshold fire, preview and live balance agree
 	// by construction, and an edit saved mid-close cannot mix versions
 	// inside one invoice.
 	PlanPricesAt(ctx context.Context, tenantID, planID string, at time.Time, clockID string) ([]domain.PlanPrice, error)
 	// GetOverrideAt resolves the customer's negotiated price in force at
-	// the period start. errs.ErrNotFound = no override (list price); ANY
+	// the window's pin. errs.ErrNotFound = no override (list price); ANY
 	// other error aborts the rating path — a transient DB failure must
 	// never silently bill list price.
 	GetOverrideAt(ctx context.Context, tenantID, customerID, priceID string, at time.Time) (domain.CustomerPriceOverride, error)
@@ -1055,6 +1055,12 @@ type baseSegment struct {
 	start, end time.Time
 	planID     string
 	quantity   int64
+	// runStart is where the item's billing intervals on planID began, before
+	// clipping: a quantity change does not start a new run, a plan change
+	// does. itemCreatedAt is the item's creation. Together they give the
+	// instant the item joined the plan (domain.Subscription.PlanJoinedAt),
+	// which pins the segment's usage window (ADR-130 §4 step 3).
+	runStart, itemCreatedAt time.Time
 }
 
 // usageInterval is one [start, end) range during which a meter was
@@ -1151,21 +1157,21 @@ func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, f
 	return f, nil
 }
 
-// meterUsageIntervals builds, per (plan, meter), the windows a closer bills
-// usage over. Each item x segment contributes [seg.start, seg.end] to every
-// meter its segment's plan prices (planMeters, read at the period start), so
-// a meter is billed only for the time a plan pricing it was on the
-// subscription, and each stretch by its own plan (ADR-130 §9): a mid-period
-// plan swap, item add or item removal splits the period. segsByItem also
-// holds items that left the subscription during the window. Every closer
-// that bills a period's usage by segment calls this: the period close
-// (buildLineItems), the immediate cancel and the cross-interval swap
-// (buildCancelLineItems), the threshold invoice (readThresholdUsage), the
-// previews and the live credit read (unbilledUsageCents).
+// meterUsageIntervals builds, per (plan, meter, pin), the windows a closer
+// bills usage over. Each stretch (planStretches) contributes [start, end] to
+// every meter its plan prices at the stretch's pin (planMeters, from
+// stretchMeters), so a meter is billed only for the time a plan pricing it
+// was on the subscription, and each stretch by its own plan at its own pin
+// (ADR-130 §4 step 3, §9): a mid-period plan swap, item add or item removal
+// splits the period. Every closer that bills a period's usage by segment
+// calls this: the period close (buildLineItems), the immediate cancel and
+// the cross-interval swap (buildCancelLineItems), the threshold invoice
+// (readThresholdUsage), the previews, the live credit read
+// (unbilledUsageCents) and customer usage.
 //
 // floors moves each window's start first (usageFloors.start), in both maps:
 // trial usage and another subscription's usage are nobody's here, whatever
-// the bucket.
+// the bucket. Neither a floor nor the watermark moves a window's pin.
 //
 // TWO maps (ADR-066 §4): clamped carries the watermark-CLAMPED windows that
 // additive (sum/count) buckets bill from; usage in
@@ -1176,15 +1182,15 @@ func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, f
 // the residual window drops a pre-fire peak (partial-window mis-bill), and
 // splitting it double-bills. With no watermark full is empty and only
 // clamped is used. Intervals are not merged; callers run mergeUsageIntervals.
-func meterUsageIntervals(sub domain.Subscription, segsByItem map[string][]baseSegment, planMeters map[string][]string, periodStart, periodEnd time.Time, billedThrough *time.Time, floors usageFloors) (clamped, full map[planMeter][]usageInterval) {
+func meterUsageIntervals(stretches []planStretch, planMeters map[planPin][]string, billedThrough *time.Time, floors usageFloors) (clamped, full map[planMeter][]usageInterval) {
 	clamped = map[planMeter][]usageInterval{}
 	full = map[planMeter][]usageInterval{}
-	addPlanInterval := func(planID string, start, end time.Time) {
-		for _, mid := range planMeters[planID] {
-			k := planMeter{planID: planID, meterID: mid}
-			s := floors.start(mid, start, end)
-			if billedThrough != nil && end.After(s) {
-				full[k] = append(full[k], usageInterval{s, end})
+	for _, st := range stretches {
+		for _, mid := range planMeters[planPin{planID: st.planID, pin: st.pin}] {
+			k := planMeter{planID: st.planID, meterID: mid, pin: st.pin}
+			s := floors.start(mid, st.start, st.end)
+			if billedThrough != nil && st.end.After(s) {
+				full[k] = append(full[k], usageInterval{s, st.end})
 			}
 			// Clamp to the threshold watermark. Intervals fully inside the
 			// billed window drop out entirely. Nil watermark = no threshold
@@ -1192,34 +1198,10 @@ func meterUsageIntervals(sub domain.Subscription, segsByItem map[string][]baseSe
 			if billedThrough != nil && s.Before(*billedThrough) {
 				s = *billedThrough
 			}
-			if !end.After(s) {
+			if !st.end.After(s) {
 				continue
 			}
-			clamped[k] = append(clamped[k], usageInterval{s, end})
-		}
-	}
-	present := make(map[string]struct{}, len(sub.Items))
-	for _, it := range sub.Items {
-		present[it.ID] = struct{}{}
-		segments := segsByItem[it.ID]
-		if len(segments) == 0 {
-			// Item present at period_end but no segments (e.g. zero-duration
-			// boundary swap collapsed by the helper, or a trialing
-			// subscription, which has no intervals yet). Treat the item's
-			// plan as on the subscription for the full period.
-			addPlanInterval(it.PlanID, periodStart, periodEnd)
-			continue
-		}
-		for _, seg := range segments {
-			addPlanInterval(seg.planID, seg.start, seg.end)
-		}
-	}
-	for itemID, segments := range segsByItem {
-		if _, stillPresent := present[itemID]; stillPresent {
-			continue
-		}
-		for _, seg := range segments {
-			addPlanInterval(seg.planID, seg.start, seg.end)
+			clamped[k] = append(clamped[k], usageInterval{s, st.end})
 		}
 	}
 	return clamped, full
@@ -2863,11 +2845,13 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 		return nil, 0, nil, err
 	}
 	// Every meter the invoice bills: the meters each plan of the period
-	// prices at the period start, the current items' plans and the ones only
-	// a segment carries. A meter that was on plan_A (now swapped out or
-	// removed) bills its [seg.start, seg.end) window at plan_A's prices.
+	// prices at each of its stretches' pins, the current items' plans and the
+	// ones only a segment carries. A meter that was on plan_A (now swapped
+	// out or removed) bills its [seg.start, seg.end) window at plan_A's
+	// prices.
 	src := e.prices()
-	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pinFor(sub, periodStart))
+	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, periodStart)
+	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -2905,7 +2889,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, planMeters, periodStart, periodEnd, thresholdBilledThrough, floors)
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(stretches, planMeters, thresholdBilledThrough, floors)
 
 	// Usage is read once per window (one read covers every meter for a
 	// window; a meter with several prices reads its buckets per window) and
@@ -2914,7 +2898,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 	// with one tier ladder per price continuing from that invoice (P21,
 	// ADR-066 amendment).
 	reads := newWindowUsage(e, sub, meters)
-	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, src, reads, rateSite{}, meterIntervals, meterIntervalsFull, wm, periodStart, invoiceCurrency, "", "cycle", unpriced, belowZero)
+	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, src, reads, rateSite{}, meterIntervals, meterIntervalsFull, wm, invoiceCurrency, "", "cycle", unpriced, belowZero)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -3970,12 +3954,12 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	}
 
 	// Build usage lines: every meter each plan of [periodStart, canceledAt]
-	// prices at the period start. Same windows and prices the cycle path
-	// uses; only the period end differs. The full `plans` map (current
-	// items' plans + hydrated segment plans) brings in meters a now-removed
-	// plan priced.
+	// prices at each of its stretches' pins. Same windows and prices the
+	// cycle path uses; only the period end differs. Segments of removed
+	// items bring in meters a now-removed plan priced.
 	src := e.prices()
-	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pinFor(sub, periodStart))
+	stretches := planStretches(sub, segsByItem, periodStart, canceledAt, periodStart)
+	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
 	if err != nil {
 		return nil, 0, fmt.Errorf("cancel: %w", err)
 	}
@@ -3993,12 +3977,12 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	if err != nil {
 		return nil, 0, err
 	}
-	meterIntervals, meterIntervalsFull := meterUsageIntervals(sub, segsByItem, planMeters, periodStart, canceledAt, wm.billedThrough, floors)
+	meterIntervals, meterIntervalsFull := meterUsageIntervals(stretches, planMeters, wm.billedThrough, floors)
 
 	// The lines read usage through reads, once per window, and are priced by
 	// the one rater, with the same passes and ladder as the period close.
 	reads := newWindowUsage(e, sub, meters)
-	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, src, reads, rateSite{cancel: true}, meterIntervals, meterIntervalsFull, wm, periodStart, invoiceCurrency, usageSuffix, "cancel", unpriced, belowZero)
+	usageLines, usageSubtotal, err := e.rateCloseUsage(ctx, sub, src, reads, rateSite{cancel: true}, meterIntervals, meterIntervalsFull, wm, invoiceCurrency, usageSuffix, "cancel", unpriced, belowZero)
 	if err != nil {
 		return nil, 0, err
 	}

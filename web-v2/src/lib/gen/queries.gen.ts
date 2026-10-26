@@ -15124,13 +15124,11 @@ export const getCreatePriceOverrideUrl = () => {
  * active override for that price, it is closed and replaced by this
  * one. A new or replaced rate applies from the customer's next
  * billing period, in the customer's time (its test clock's, if it has
- * one); the current period keeps the rate it started with. A
- * subscription that starts without a trial has a first period from
- * midnight of its first day. So an override created on the day the
- * customer's subscription starts, before or after it, applies from
- * its second period: the first period bills the price's rate. To
- * bill the first period at the override, create it on an earlier day.
- * The override takes the plan's currency. A plan swap does not carry
+ * one); the current period keeps the rate it started with. It applies
+ * at once when the customer joins the plan after it is created: an
+ * override created before a subscription starts (after a trial,
+ * before the trial ends), even on the same day, applies from its
+ * first period. The override takes the plan's currency. A plan swap does not carry
  * it: the new plan's price is another price.
  * @summary Create a customer price override
  */

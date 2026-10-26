@@ -512,7 +512,7 @@ func (e *Engine) healStrandedZeroDue(ctx context.Context, tenantID string, inv d
 // thresholdUsage is the usage a spend-threshold invoice bills over
 // [periodStart, now): the close's own windows (ADR-130 §9), one per stretch
 // of the period a plan was on the subscription and per meter it prices, each
-// from its meter's usage floor, priced at the period start by its own plan.
+// from its meter's usage floor, priced by its own plan at its window's pin.
 // Before PR-4 it priced one flat window with the current items' plans, which
 // priced pre-swap usage at the new plan's rates. No ladder: the evaluation
 // runs only while the period has no threshold invoice (the fire-once probe).
@@ -521,8 +521,10 @@ type thresholdUsage struct {
 	leftOut  []leftOutBucket
 	currency string
 	floors   usageFloors
-	// planMeters are the meters each plan prices at the period start.
-	planMeters map[string][]string
+	// planMeters are the meters each plan prices at each window's pin, and
+	// itemPins the pin of each current item's plan.
+	planMeters map[planPin][]string
+	itemPins   map[string]ratePin
 	plans      map[string]domain.Plan
 	src        PriceSource
 }
@@ -547,8 +549,12 @@ func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription
 		return thresholdUsage{}, err
 	}
 	src := e.prices()
-	pin := pinFor(sub, periodStart)
-	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pin)
+	stretches := planStretches(sub, segsByItem, periodStart, now, periodStart)
+	itemPins := make(map[string]ratePin, len(sub.Items))
+	for _, it := range sub.Items {
+		itemPins[it.ID] = itemPin(sub, stretches, it, periodStart)
+	}
+	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
 	if err != nil {
 		return thresholdUsage{}, err
 	}
@@ -556,20 +562,20 @@ func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription
 	if err != nil {
 		return thresholdUsage{}, err
 	}
-	clamped, _ := meterUsageIntervals(sub, segsByItem, planMeters, periodStart, now, nil, floors)
+	clamped, _ := meterUsageIntervals(stretches, planMeters, nil, floors)
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {
-			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passEvery})
 		}
 	}
-	lines, _, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, periodStart, nil, plans)
+	lines, _, leftOut, err := e.ratePreviewUsage(ctx, sub, src, windows, nil, plans)
 	if err != nil {
 		return thresholdUsage{}, err
 	}
 	return thresholdUsage{
 		lines: lines, leftOut: leftOut, currency: plans[sub.Items[0].PlanID].Currency,
-		floors: floors, planMeters: planMeters, plans: plans, src: src,
+		floors: floors, planMeters: planMeters, itemPins: itemPins, plans: plans, src: src,
 	}, nil
 }
 
@@ -671,12 +677,12 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 	// Per-item caps: sum the running quantity across the meters each item's
 	// plan prices, during [floor, now), the window the fire bills each meter
 	// over. Every event of those meters counts, priced or not. Item to meter
-	// is via the plan's prices at the period start. One currency per
+	// is via the item's plan's prices at its window's pin. One currency per
 	// subscription, so summing across plans is safe.
 	if !eval.CrossedAny && len(bt.ItemThresholds) > 0 {
-		pin := pinFor(sub, periodStart)
 		itemRunning := make(map[string]decimal.Decimal, len(sub.Items))
 		for _, it := range sub.Items {
+			pin := tu.itemPins[it.ID]
 			// Read errors fail this subscription's evaluation (it retries
 			// next tick; other subscriptions are unaffected). Skipping the
 			// item, a meter, or a meter's usage under-counted the running
@@ -686,7 +692,7 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 				return thresholdEval{}, fmt.Errorf("item threshold: prices of plan %s for item %s: %w", it.PlanID, it.ID, err)
 			}
 			total := decimal.Zero
-			for _, meterID := range tu.planMeters[it.PlanID] {
+			for _, meterID := range tu.planMeters[planPin{planID: it.PlanID, pin: pin}] {
 				meter, mErr := e.pricing.GetMeter(ctx, sub.TenantID, meterID)
 				if mErr != nil {
 					return thresholdEval{}, fmt.Errorf("item threshold: get meter %s: %w", meterID, mErr)

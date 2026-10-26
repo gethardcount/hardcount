@@ -44,19 +44,111 @@ type PriceSource interface {
 	Price(ctx context.Context, tenantID, customerID string, price domain.PlanPrice, pin ratePin) (domain.PlanPrice, error)
 }
 
-// ratePin is the instant a billing period's prices are read at: the start of
-// the period being priced, for every window of it and every reader of it
-// (ADR-130 §4 step 3). testClockID names the subscription's time domain (""
-// is wall time): a test-clock subscription compares its simulated pin with
-// each version's stamp for its clock (ADR-130 §7).
+// ratePin is the instant a window's prices are read at, the same for every
+// reader of that window (ADR-130 §4 step 3, amended 2026-10-26): the later of
+// the period start and the instant the subscription's item joined the
+// window's plan. A window open before the period started is priced at the
+// period start, so a change made after a window started applies from the
+// next period. A window that opens in the period is priced at its own start:
+// a new subscription's first window at the subscription's start (its trial
+// end after a trial), a window opened by an immediate swap at the swap, an
+// item added mid-period at the add. testClockID names the subscription's
+// time domain ("" is wall time): a test-clock subscription compares its
+// simulated pin with each version's stamp for its clock (ADR-130 §7).
 type ratePin struct {
 	at          time.Time
 	testClockID string
 }
 
-// pinFor is sub's pin for the period that starts at periodStart.
-func pinFor(sub domain.Subscription, periodStart time.Time) ratePin {
-	return ratePin{at: periodStart, testClockID: sub.TestClockID}
+// windowPin is the pin of a window of sub whose item joined its plan at
+// joined, in a period that started at floor (for an estimate over an
+// explicit window, the current period's start). The instant is in UTC so
+// that equal pins are equal map keys.
+func windowPin(sub domain.Subscription, floor, joined time.Time) ratePin {
+	at := floor
+	if joined.After(at) {
+		at = joined
+	}
+	return ratePin{at: at.UTC(), testClockID: sub.TestClockID}
+}
+
+// planStretch is one stretch of a period during which one item of the
+// subscription was on one plan, and the pin its usage windows are priced at.
+type planStretch struct {
+	itemID, planID string
+	start, end     time.Time
+	pin            ratePin
+}
+
+// planStretches is every stretch of [start, end] during which an item of sub
+// was on a plan: each segment of segsByItem (billing_intervals, items that
+// left during the window included), pinned where its item joined the plan,
+// at pinFloor or later. With no intervals read (segsByItem nil: a trialing
+// subscription, which has none until its conversion opens one per item at
+// the period start), each current item is on its plan for the whole of
+// [start, end]. With intervals read, a current item with no segment had no
+// billable time in the window (added after it, as in a close run late) and
+// has no stretch: giving it the whole window would bill the window's usage
+// a second time, at its own pin.
+func planStretches(sub domain.Subscription, segsByItem map[string][]baseSegment, start, end, pinFloor time.Time) []planStretch {
+	var out []planStretch
+	add := func(itemID string, seg baseSegment) {
+		if seg.planID == "" {
+			return
+		}
+		joined := sub.PlanJoinedAt(seg.itemCreatedAt, seg.runStart)
+		out = append(out, planStretch{itemID: itemID, planID: seg.planID, start: seg.start, end: seg.end, pin: windowPin(sub, pinFloor, joined)})
+	}
+	present := make(map[string]bool, len(sub.Items))
+	for _, it := range sub.Items {
+		present[it.ID] = true
+		segs := segsByItem[it.ID]
+		if segsByItem == nil {
+			var runStart time.Time
+			if it.PlanChangedAt != nil {
+				runStart = *it.PlanChangedAt
+			}
+			add(it.ID, baseSegment{start: start, end: end, planID: it.PlanID, runStart: runStart, itemCreatedAt: it.CreatedAt})
+			continue
+		}
+		for _, seg := range segs {
+			add(it.ID, seg)
+		}
+	}
+	for _, itemID := range slices.Sorted(maps.Keys(segsByItem)) {
+		if present[itemID] {
+			continue
+		}
+		for _, seg := range segsByItem[itemID] {
+			add(itemID, seg)
+		}
+	}
+	return out
+}
+
+// itemPin is the pin of item it's current plan in a period that started at
+// periodStart: the pin of its latest stretch on that plan. An item whose
+// stretch on the plan has not begun inside the stretches' bounds (a swap
+// stamped a moment after the read's end) is pinned by the same rule from the
+// item itself: where it joined the plan (its last immediate swap, its add,
+// the subscription's billing start).
+func itemPin(sub domain.Subscription, stretches []planStretch, it domain.SubscriptionItem, periodStart time.Time) ratePin {
+	var pin ratePin
+	found := false
+	var latest time.Time
+	for _, s := range stretches {
+		if s.itemID == it.ID && s.planID == it.PlanID && (!found || !s.start.Before(latest)) {
+			pin, found, latest = s.pin, true, s.start
+		}
+	}
+	if found {
+		return pin
+	}
+	var runStart time.Time
+	if it.PlanChangedAt != nil {
+		runStart = *it.PlanChangedAt
+	}
+	return windowPin(sub, periodStart, sub.PlanJoinedAt(it.CreatedAt, runStart))
 }
 
 // planPrices is the PriceSource over plan prices. It reads each plan's
@@ -121,45 +213,58 @@ func pricesOn(prices []domain.PlanPrice, meterID string) []domain.PlanPrice {
 	return out
 }
 
-// planMetersAt is, for each plan, the meters it prices at the pin: the
-// meters with a price that takes part then (ADR-130 §4 step 4). A meter
-// whose prices were all removed before the pin is not on the plan for that
-// period, and neither is a meter whose first price comes later.
-func planMetersAt(ctx context.Context, src PriceSource, tenantID string, plans map[string]domain.Plan, pin ratePin) (map[string][]string, error) {
-	out := make(map[string][]string, len(plans))
-	for _, planID := range slices.Sorted(maps.Keys(plans)) {
-		prices, err := src.PlanPrices(ctx, tenantID, planID, pin)
+// stretchMeters is, for each (plan, pin) of stretches, the meters the plan
+// prices at the pin: the meters with a price that takes part then (ADR-130
+// §4 step 4). A meter whose prices were all removed before the pin is not on
+// the plan for that window, and neither is a meter whose first price comes
+// later.
+func stretchMeters(ctx context.Context, src PriceSource, tenantID string, stretches []planStretch) (map[planPin][]string, error) {
+	out := map[planPin][]string{}
+	for _, s := range stretches {
+		k := planPin{planID: s.planID, pin: s.pin}
+		if _, ok := out[k]; ok {
+			continue
+		}
+		prices, err := src.PlanPrices(ctx, tenantID, s.planID, s.pin)
 		if err != nil {
 			return nil, err
 		}
 		seen := map[string]bool{}
+		meters := []string{}
 		for _, p := range prices {
 			if !seen[p.MeterID] {
 				seen[p.MeterID] = true
-				out[planID] = append(out[planID], p.MeterID)
+				meters = append(meters, p.MeterID)
 			}
 		}
-		sort.Strings(out[planID])
+		sort.Strings(meters)
+		out[k] = meters
 	}
 	return out, nil
+}
+
+// meterSet is the meters of planMeters, each once, in id order.
+func meterSet(planMeters map[planPin][]string) []string {
+	seen := map[string]bool{}
+	for _, meters := range planMeters {
+		for _, m := range meters {
+			seen[m] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(seen))
 }
 
 // readMeters reads every meter of planMeters once. An unreadable meter is an
 // error (retried per ADR-119): defaulting its aggregation to "sum" billed a
 // max or last meter as its total.
-func (e *Engine) readMeters(ctx context.Context, tenantID string, planMeters map[string][]string) (map[string]domain.Meter, error) {
+func (e *Engine) readMeters(ctx context.Context, tenantID string, planMeters map[planPin][]string) (map[string]domain.Meter, error) {
 	meters := map[string]domain.Meter{}
-	for _, planID := range slices.Sorted(maps.Keys(planMeters)) {
-		for _, meterID := range planMeters[planID] {
-			if _, ok := meters[meterID]; ok {
-				continue
-			}
-			m, err := e.pricing.GetMeter(ctx, tenantID, meterID)
-			if err != nil {
-				return nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
-			}
-			meters[meterID] = m
+	for _, meterID := range meterSet(planMeters) {
+		m, err := e.pricing.GetMeter(ctx, tenantID, meterID)
+		if err != nil {
+			return nil, fmt.Errorf("get meter %s aggregation: %w", meterID, err)
 		}
+		meters[meterID] = m
 	}
 	return meters, nil
 }
@@ -180,10 +285,11 @@ const (
 )
 
 // rateWindow is one stretch of a billing period over which one plan's prices
-// for one meter price its usage, and the pass that prices it.
+// for one meter, read at pin, price its usage, and the pass that prices it.
 type rateWindow struct {
 	planID  string
 	meterID string
+	pin     ratePin
 	iv      usageInterval
 	pass    ratePass
 }
@@ -270,11 +376,12 @@ type ratedBucket struct {
 	meter  domain.Meter
 	agg    domain.ClaimedUsage
 	priced bool
-	price  domain.PlanPrice // in force at the pin, override applied
+	price  domain.PlanPrice // in force at the window's pin, override applied
 	amount int64
 }
 
-// rateUsageWindows prices each window's usage buckets in order, at pin.
+// rateUsageWindows prices each window's usage buckets in order, each at its
+// window's pin.
 //
 // ladder continues a bucket's tiers from what a threshold invoice already
 // billed this period (ADR-066 amendment 2026-10-11), keyed by price id; nil
@@ -283,7 +390,7 @@ type ratedBucket struct {
 //
 // It returns the buckets in order. On a failure it returns the buckets
 // before it too, so a closer logs what it left out up to there.
-func (r rater) rateUsageWindows(ctx context.Context, windows []rateWindow, pin ratePin, ladder *usageLadder) ([]ratedBucket, error) {
+func (r rater) rateUsageWindows(ctx context.Context, windows []rateWindow, ladder *usageLadder) ([]ratedBucket, error) {
 	var out []ratedBucket
 	meters := map[string]domain.Meter{}
 	for _, w := range windows {
@@ -298,7 +405,7 @@ func (r rater) rateUsageWindows(ctx context.Context, windows []rateWindow, pin r
 			}
 			meters[w.meterID] = meter
 		}
-		all, err := r.prices.PlanPrices(ctx, r.tenantID, w.planID, pin)
+		all, err := r.prices.PlanPrices(ctx, r.tenantID, w.planID, w.pin)
 		if err != nil {
 			return out, r.site.fail(w, err)
 		}
@@ -322,7 +429,7 @@ func (r rater) rateUsageWindows(ctx context.Context, windows []rateWindow, pin r
 			byID[p.ID] = p
 		}
 		for _, agg := range aggs {
-			b, ok, err := r.rateBucket(ctx, w, meter, byID, agg, pin, ladder)
+			b, ok, err := r.rateBucket(ctx, w, meter, byID, agg, ladder)
 			if err != nil {
 				return out, r.site.fail(w, err)
 			}
@@ -336,7 +443,7 @@ func (r rater) rateUsageWindows(ctx context.Context, windows []rateWindow, pin r
 
 // rateBucket prices one bucket of window w. ok is false for a bucket that is
 // not this pass's to price: empty, or routed to the closer's other pass.
-func (r rater) rateBucket(ctx context.Context, w rateWindow, meter domain.Meter, prices map[string]domain.PlanPrice, agg domain.ClaimedUsage, pin ratePin, ladder *usageLadder) (ratedBucket, bool, error) {
+func (r rater) rateBucket(ctx context.Context, w rateWindow, meter domain.Meter, prices map[string]domain.PlanPrice, agg domain.ClaimedUsage, ladder *usageLadder) (ratedBucket, bool, error) {
 	qty := agg.Quantity
 	if qty.IsZero() {
 		return ratedBucket{}, false, nil
@@ -361,14 +468,14 @@ func (r rater) rateBucket(ctx context.Context, w rateWindow, meter domain.Meter,
 	}
 	listed, ok := prices[agg.PriceID]
 	if !ok {
-		return ratedBucket{}, false, fmt.Errorf("usage of meter %s is claimed by price %s, which plan %s does not have at the period start", w.meterID, agg.PriceID, w.planID)
+		return ratedBucket{}, false, fmt.Errorf("usage of meter %s is claimed by price %s, which plan %s does not have at the window's pin", w.meterID, agg.PriceID, w.planID)
 	}
-	// The price in force at the pin, the period start, for every window and
-	// every caller: a preview equals the invoice across a mid-period edit,
-	// and a threshold invoice agrees with the later close. A failure fails
-	// the rating, here as in the close: the threshold fire persists these
-	// lines as an invoice, and a skipped bucket would be billed by nobody.
-	price, err := r.prices.Price(ctx, r.tenantID, r.customerID, listed, pin)
+	// The price in force at the window's pin, for every caller: a preview
+	// equals the invoice across a mid-period edit, and a threshold invoice
+	// agrees with the later close. A failure fails the rating, here as in
+	// the close: the threshold fire persists these lines as an invoice, and a
+	// skipped bucket would be billed by nobody.
+	price, err := r.prices.Price(ctx, r.tenantID, r.customerID, listed, w.pin)
 	if err != nil {
 		if r.site.preview != nil {
 			return ratedBucket{}, false, fmt.Errorf("resolve pricing for meter %q price %s: %w", meter.EventName, listed.ID, err)
@@ -494,13 +601,16 @@ func (b ratedBucket) previewLeftOut() (string, leftOutBucket) {
 	return fmt.Sprintf("meter %q: %s %s matched no price of the plan — not billed", b.meter.EventName, qty.String(), b.meter.Unit), out
 }
 
-// planMeter is one meter of one plan: the key of a closer's windows.
+// planMeter is one meter of one plan, read at one pin: the key of a closer's
+// windows. Windows of one plan and meter with different pins are priced
+// apart, so they are never merged.
 type planMeter struct {
 	planID, meterID string
+	pin             ratePin
 }
 
 // sortedPlanMeters is the keys of windows in meter id order, then plan id,
-// so a failure names the same meter on every run and every retry.
+// then pin, so a failure names the same meter on every run and every retry.
 func sortedPlanMeters(sets ...map[planMeter][]usageInterval) []planMeter {
 	seen := map[planMeter]bool{}
 	var out []planMeter
@@ -516,7 +626,10 @@ func sortedPlanMeters(sets ...map[planMeter][]usageInterval) []planMeter {
 		if out[i].meterID != out[j].meterID {
 			return out[i].meterID < out[j].meterID
 		}
-		return out[i].planID < out[j].planID
+		if out[i].planID != out[j].planID {
+			return out[i].planID < out[j].planID
+		}
+		return out[i].pin.at.Before(out[j].pin.at)
 	})
 	return out
 }
@@ -528,7 +641,7 @@ func sortedPlanMeters(sets ...map[planMeter][]usageInterval) []planMeter {
 // share it. Each priced bucket is a line in currency whose description ends
 // with suffix; each bucket left out is logged under logPrefix and added to
 // unpriced or belowZero.
-func (e *Engine) rateCloseUsage(ctx context.Context, sub domain.Subscription, src PriceSource, reads *windowUsage, site rateSite, clamped, full map[planMeter][]usageInterval, wm thresholdWatermark, periodStart time.Time, currency, suffix, logPrefix string, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, error) {
+func (e *Engine) rateCloseUsage(ctx context.Context, sub domain.Subscription, src PriceSource, reads *windowUsage, site rateSite, clamped, full map[planMeter][]usageInterval, wm thresholdWatermark, currency, suffix, logPrefix string, unpriced unpricedUsage, belowZero netNegativeUsage) ([]domain.InvoiceLineItem, int64, error) {
 	// Every (plan, meter) with a billable window. When a watermark exists, a
 	// key whose clamped windows vanished (all its usage inside the threshold
 	// invoice's window) can still owe a full-window bill for a deferred
@@ -536,16 +649,16 @@ func (e *Engine) rateCloseUsage(ctx context.Context, sub domain.Subscription, sr
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped, full) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {
-			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passClamped})
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passClamped})
 		}
 		if wm.exists() {
 			for _, iv := range mergeUsageIntervals(full[k]) {
-				windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passFull})
+				windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passFull})
 			}
 		}
 	}
 	r := rater{prices: closeMeters{PriceSource: src, meters: reads.meters}, reads: reads, site: site, tenantID: sub.TenantID, customerID: sub.CustomerID}
-	buckets, err := r.rateUsageWindows(ctx, windows, pinFor(sub, periodStart), newUsageLadder(wm))
+	buckets, err := r.rateUsageWindows(ctx, windows, newUsageLadder(wm))
 	var lines []domain.InvoiceLineItem
 	var subtotal int64
 	for _, b := range buckets {
@@ -566,15 +679,15 @@ func (e *Engine) rateCloseUsage(ctx context.Context, sub domain.Subscription, sr
 	return lines, subtotal, nil
 }
 
-// ratePreviewUsage prices a preview's windows, every bucket, at the period
-// start. Each line takes its plan's currency. A failure names the window's
-// meter.
-func (e *Engine) ratePreviewUsage(ctx context.Context, sub domain.Subscription, src PriceSource, windows []rateWindow, periodStart time.Time, ladder *usageLadder, plans map[string]domain.Plan) ([]PreviewLine, []string, []leftOutBucket, error) {
+// ratePreviewUsage prices a preview's windows, every bucket, each at its
+// window's pin. Each line takes its plan's currency. A failure names the
+// window's meter.
+func (e *Engine) ratePreviewUsage(ctx context.Context, sub domain.Subscription, src PriceSource, windows []rateWindow, ladder *usageLadder, plans map[string]domain.Plan) ([]PreviewLine, []string, []leftOutBucket, error) {
 	site := rateSite{preview: func(w rateWindow, err error) error {
 		return fmt.Errorf("preview meter %q: %w", w.meterID, err)
 	}}
 	r := rater{prices: src, reads: claimReads{usage: e.usage, tenantID: sub.TenantID, customerID: sub.CustomerID}, site: site, tenantID: sub.TenantID, customerID: sub.CustomerID}
-	buckets, err := r.rateUsageWindows(ctx, windows, pinFor(sub, periodStart), ladder)
+	buckets, err := r.rateUsageWindows(ctx, windows, ladder)
 	if err != nil {
 		return nil, nil, nil, err
 	}

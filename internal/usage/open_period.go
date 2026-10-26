@@ -82,8 +82,9 @@ type OpenPeriod struct {
 	// end when it had a trial (trial usage is free), else its start. Nil
 	// means unknown, and nothing before Start is called AfterClose.
 	Floor *time.Time
-	// Meters are the meters the current plans price at Start, the period's
-	// pin (ADR-130 §4).
+	// Meters are the meters the current items' plans price at each item's
+	// window pin: Start, or where the item joined its plan in the period
+	// (ADR-130 §4 step 3).
 	Meters map[string]bool
 	// NextMeters are the meters priced from End on: the plans after any
 	// change pending at or before End, at End, the next period's pin. Nil
@@ -122,12 +123,13 @@ type MeterBuckets struct {
 	Additive bool
 }
 
-// OpenPeriodOf builds sub's OpenPeriod. atStart holds, by plan id, the
-// meters each plan of sub's items prices at the period start; atEnd, the
-// meters each plan of its items or of their pending changes prices at the
-// period end. A plan missing from them prices nothing. ok is false when sub
-// is not active or trialing or has no current period.
-func OpenPeriodOf(sub domain.Subscription, atStart, atEnd map[string][]string, wm ThresholdWatermark) (OpenPeriod, bool) {
+// OpenPeriodOf builds sub's OpenPeriod. atPin holds, by plan id, the meters
+// each plan of sub's items prices at its item's window pin (the period
+// start, or where the item joined the plan in the period); atEnd, the meters
+// each plan of its items or of their pending changes prices at the period
+// end. A plan missing from them prices nothing. ok is false when sub is not
+// active or trialing or has no current period.
+func OpenPeriodOf(sub domain.Subscription, atPin, atEnd map[string][]string, wm ThresholdWatermark) (OpenPeriod, bool) {
 	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
 		return OpenPeriod{}, false
 	}
@@ -140,18 +142,13 @@ func OpenPeriodOf(sub domain.Subscription, atStart, atEnd map[string][]string, w
 		Meters:             map[string]bool{},
 		ThresholdWatermark: wm,
 	}
-	switch {
-	case sub.TrialEndAt != nil:
-		p.Floor = sub.TrialEndAt
-	case sub.StartedAt != nil:
-		p.Floor = sub.StartedAt
-	}
+	p.Floor = sub.BillingStartedAt()
 	continues := !sub.CancelAtPeriodEnd && (sub.CancelAt == nil || sub.CancelAt.After(p.End))
 	if continues {
 		p.NextMeters = map[string]bool{}
 	}
 	for _, it := range sub.Items {
-		for _, id := range atStart[it.PlanID] {
+		for _, id := range atPin[it.PlanID] {
 			p.Meters[id] = true
 		}
 		if !continues {

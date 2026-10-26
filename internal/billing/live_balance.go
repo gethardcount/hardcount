@@ -220,6 +220,9 @@ type currentPeriod struct {
 	buckets      []ratedBucket
 	plans        map[string]domain.Plan
 	planCurrency string
+	// meterIDs are the meters the period's plans price at their windows'
+	// pins.
+	meterIDs []string
 }
 
 // periodPart is how much of the current period rateCurrentPeriod rates.
@@ -241,9 +244,9 @@ const (
 //
 //   - Each meter is counted over the windows a plan pricing it was on the
 //     subscription (meterUsageIntervals, the close's own builder), each by
-//     its own plan's prices at the period start. After a mid-period swap the
+//     its own plan's prices at its window's pin. After a mid-period swap the
 //     outgoing plan's window counts up to the swap at its prices and the
-//     incoming plan's from it at its own. A window starts no earlier than
+//     incoming plan's from it at its own, read at the swap. A window starts no earlier than
 //     the trial end or another subscription's coverage end of the meter that
 //     day (usageFloors).
 //   - No threshold invoice this period: every bucket over those windows.
@@ -291,8 +294,8 @@ func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription,
 		}
 	}
 	src := e.prices()
-	pin := pinFor(sub, periodStart)
-	planMeters, err := planMetersAt(ctx, src, sub.TenantID, plans, pin)
+	stretches := planStretches(sub, segsByItem, periodStart, periodEnd, periodStart)
+	planMeters, err := stretchMeters(ctx, src, sub.TenantID, stretches)
 	if err != nil {
 		return currentPeriod{}, err
 	}
@@ -304,7 +307,7 @@ func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription,
 	if err != nil {
 		return currentPeriod{}, err
 	}
-	clamped, full := meterUsageIntervals(sub, segsByItem, planMeters, periodStart, periodEnd, wm.billedThrough, floors)
+	clamped, full := meterUsageIntervals(stretches, planMeters, wm.billedThrough, floors)
 
 	// The closer's two passes: every bucket except a deferred one over the
 	// clamped windows, then the deferred ones over the full windows. The full
@@ -314,13 +317,13 @@ func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription,
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped, full) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {
-			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passClamped})
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passClamped})
 		}
 		if !wm.exists() || !nonAdditive(meters[k.meterID].Aggregation) {
 			continue
 		}
 		for _, iv := range mergeUsageIntervals(full[k]) {
-			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passFull})
+			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, pin: k.pin, iv: iv, pass: passFull})
 		}
 	}
 	r := rater{
@@ -332,11 +335,11 @@ func (e *Engine) rateCurrentPeriod(ctx context.Context, sub domain.Subscription,
 		tenantID:   sub.TenantID,
 		customerID: sub.CustomerID,
 	}
-	buckets, err := r.rateUsageWindows(ctx, windows, pin, newUsageLadder(wm))
+	buckets, err := r.rateUsageWindows(ctx, windows, newUsageLadder(wm))
 	if err != nil {
 		return currentPeriod{}, err
 	}
-	out := currentPeriod{buckets: buckets, plans: plans}
+	out := currentPeriod{buckets: buckets, plans: plans, meterIDs: meterSet(planMeters)}
 	if len(sub.Items) > 0 {
 		out.planCurrency = plans[sub.Items[0].PlanID].Currency
 	}

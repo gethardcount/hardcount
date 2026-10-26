@@ -436,6 +436,9 @@ type ItemInterval struct {
 	Quantity           int64      `json:"quantity"`
 	StartsAt           time.Time  `json:"starts_at"`
 	EndsAt             *time.Time `json:"ends_at,omitempty"`
+	// ItemCreatedAt is the item's created_at: the instant an item added
+	// to the subscription was added (Subscription.PlanJoinedAt).
+	ItemCreatedAt time.Time `json:"-"`
 }
 
 // MeterCoverageEnd is an instant at which a subscription stopped covering a
@@ -565,6 +568,35 @@ var ErrTrialCancelDue = errors.New("trial has a cancel schedule due — route to
 // schedule was cleared, the trial extended, or another site already
 // canceled. The caller treats the sub as NOT handled this pass.
 var ErrTrialCancelConflict = errors.New("trial-end cancel conflicted — re-read and route")
+
+// BillingStartedAt is the instant the subscription began to bill: its trial
+// end when it had a trial (trial usage is free), else its start. Nil before
+// it started (a draft).
+func (s Subscription) BillingStartedAt() *time.Time {
+	if s.TrialEndAt != nil {
+		return s.TrialEndAt
+	}
+	return s.StartedAt
+}
+
+// PlanJoinedAt is the instant an item joined the plan of one stretch of its
+// life (ADR-130 §4 step 3, amended 2026-10-26): the latest of runStart, where
+// the item's billing intervals on that plan began (a swap onto it, or zero
+// when unknown), the item's creation when it was added after the
+// subscription was created, and the subscription's billing start. A billing
+// interval opened by an add on a period's first day starts at the period
+// start (ADR-012), so the add's own instant is the item's creation. Items
+// created with the subscription share its created_at.
+func (s Subscription) PlanJoinedAt(itemCreatedAt, runStart time.Time) time.Time {
+	at := runStart
+	if b := s.BillingStartedAt(); b != nil && b.After(at) {
+		at = *b
+	}
+	if itemCreatedAt.After(s.CreatedAt) && itemCreatedAt.After(at) {
+		at = itemCreatedAt
+	}
+	return at
+}
 
 // DeriveCancelEffectiveAt computes CancelEffectiveAt from the schedule
 // fields (ADR-069). Called from the subscription store's row scan — the one

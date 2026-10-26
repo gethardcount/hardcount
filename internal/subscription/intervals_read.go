@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -22,9 +23,10 @@ func (s *PostgresStore) ListItemIntervals(ctx context.Context, tenantID, subscri
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT subscription_item_id, plan_id, quantity, starts_at, ends_at
-		FROM billing_intervals
-		WHERE subscription_id = $1
+		SELECT bi.subscription_item_id, bi.plan_id, bi.quantity, bi.starts_at, bi.ends_at, si.created_at
+		FROM billing_intervals bi
+		LEFT JOIN subscription_items si ON si.id = bi.subscription_item_id
+		WHERE bi.subscription_id = $1
 	`, subscriptionID)
 	if err != nil {
 		return nil, err
@@ -34,9 +36,16 @@ func (s *PostgresStore) ListItemIntervals(ctx context.Context, tenantID, subscri
 	var intervals []domain.ItemInterval
 	for rows.Next() {
 		var iv domain.ItemInterval
-		if err := rows.Scan(&iv.SubscriptionItemID, &iv.PlanID, &iv.Quantity, &iv.StartsAt, &iv.EndsAt); err != nil {
+		var itemCreated *time.Time
+		if err := rows.Scan(&iv.SubscriptionItemID, &iv.PlanID, &iv.Quantity, &iv.StartsAt, &iv.EndsAt, &itemCreated); err != nil {
 			return nil, err
 		}
+		// The rater pins an added item's window at its creation (ADR-130
+		// §4 step 3). An interval whose item row is gone cannot be pinned.
+		if itemCreated == nil {
+			return nil, fmt.Errorf("billing interval of subscription %s names item %s, which does not exist", subscriptionID, iv.SubscriptionItemID)
+		}
+		iv.ItemCreatedAt = *itemCreated
 		intervals = append(intervals, iv)
 	}
 	if err := rows.Err(); err != nil {

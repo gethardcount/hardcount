@@ -84,12 +84,19 @@ func (e *Engine) windowSegments(ctx context.Context, sub domain.Subscription, wi
 // clip each row to the window, drop empty slices, merge adjacent
 // equal-(plan, qty) slices. No policy here — the day-grade decisions
 // were made at write time; this is the "dumb intersection" the ADR
-// promises.
+// promises. Each segment carries where its item's run of intervals on its
+// plan began, from the unclipped rows (rows are start-ordered): a row on
+// the plan of the row before it, starting where that one ended, continues
+// the run (a quantity change); any other row starts one.
 func intervalSegmentsByItem(rowsByItem map[string][]domain.ItemInterval, windowStart, windowEnd time.Time) map[string][]baseSegment {
 	out := make(map[string][]baseSegment, len(rowsByItem))
 	for itemID, rows := range rowsByItem {
 		var segs []baseSegment
-		for _, iv := range rows {
+		var runStart time.Time
+		for i, iv := range rows {
+			if i == 0 || iv.PlanID != rows[i-1].PlanID || rows[i-1].EndsAt == nil || !rows[i-1].EndsAt.Equal(iv.StartsAt) {
+				runStart = iv.StartsAt
+			}
 			start := iv.StartsAt
 			if start.Before(windowStart) {
 				start = windowStart
@@ -101,7 +108,7 @@ func intervalSegmentsByItem(rowsByItem map[string][]domain.ItemInterval, windowS
 			if !end.After(start) {
 				continue
 			}
-			segs = append(segs, baseSegment{start: start, end: end, planID: iv.PlanID, quantity: iv.Quantity})
+			segs = append(segs, baseSegment{start: start, end: end, planID: iv.PlanID, quantity: iv.Quantity, runStart: runStart, itemCreatedAt: iv.ItemCreatedAt})
 		}
 		if merged := mergeEqualAdjacent(segs); len(merged) > 0 {
 			out[itemID] = merged
