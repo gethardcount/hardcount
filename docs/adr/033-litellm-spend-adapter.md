@@ -103,6 +103,14 @@ The handler returns 200 with `{accepted, skipped, errors[]}` even when some rows
 > cache-write split is written the old way, and only the old-way rows
 > that call writes are counted.
 
+> **Amendment (2026-10-27): every unbilled row is counted by why.** Beside
+> `after_close`, the 200 counts accepted rows no price of the plan takes
+> (`no_price`, such as a model no price names), rows whose meter the plan
+> does not price (`not_on_plan`) and rows no subscription covered
+> (`outside_subscription`). The counter is now
+> `velox_usage_unbilled_total{reason, origin}`; only `after_close` rows log
+> a WARN line ([ADR-120 amendment 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-every-unbilled-event-says-why-adr-130-pr-6-d07)).
+
 > **Amendment (2026-10-22): bill on token counts, not call type.** The
 > adapter billed only eight call types (chat, text completion, embedding)
 > and answered 200 for the rest, so `/v1/messages` (Claude Code),

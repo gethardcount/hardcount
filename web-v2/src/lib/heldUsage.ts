@@ -93,8 +93,11 @@ export function releaseSummary(r: HeldUsageReleaseResult): { title: string; desc
     : `Released ${rowsWord(recorded)}`
   const parts: string[] = []
   if (r.in_open_period > 0) parts.push(`${r.in_open_period.toLocaleString('en-US')} fall in the current billing period and will be invoiced.`)
+  if (r.no_price > 0) {
+    parts.push(`${r.no_price.toLocaleString('en-US')} fall in the current billing period, but no price on the subscription's plan matches them, so no invoice charges them.`)
+  }
   if (r.not_on_plan > 0) {
-    parts.push(`${r.not_on_plan.toLocaleString('en-US')} fall in the current billing period, but the subscription's plan has no price for their meter, so no invoice charges them.`)
+    parts.push(`${r.not_on_plan.toLocaleString('en-US')} are for a meter the subscription's plan has no price for, so no invoice charges them.`)
   }
   if (r.pending_threshold_invoice > 0) {
     parts.push(`${r.pending_threshold_invoice.toLocaleString('en-US')} fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet. If it is paid or written off, no invoice charges them. If it is voided before the period's invoice is built, the period's invoice does.`)

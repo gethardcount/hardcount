@@ -653,14 +653,24 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// after_close counts written rows whose period was already invoiced:
-	// stored, billed on no invoice (ADR-120).
-	respond.JSON(w, r, http.StatusCreated, map[string]any{
-		"ingested":     res.Inserted,
-		"deduplicated": res.Deduplicated,
-		"after_close":  res.AfterClose,
-		"total":        len(events),
+	respond.JSON(w, r, http.StatusCreated, batchResponse{
+		Ingested:       res.Inserted,
+		Deduplicated:   res.Deduplicated,
+		Total:          len(events),
+		UnbilledCounts: res.Unbilled,
+		Results:        res.Results,
 	})
+}
+
+// batchResponse is the batch 201. The counts by billing_status count written
+// rows no invoice will bill (open_period.go); results holds each event's
+// result at its index in the request.
+type batchResponse struct {
+	Ingested     int `json:"ingested"`
+	Deduplicated int `json:"deduplicated"`
+	Total        int `json:"total"`
+	UnbilledCounts
+	Results []BatchEventResult `json:"results"`
 }
 
 // respondBatchRejected writes the batch 422 the spec documents: every

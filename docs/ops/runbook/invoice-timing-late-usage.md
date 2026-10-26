@@ -41,7 +41,8 @@ invoice of a cancel scheduled for a date, and to `POST /v1/billing/run`.
   arrives later is not on the period-end invoice either (sum and count
   meters). Velox says so when it writes such an event: the answer carries
   `billing_status: "after_close"` (an `after_close` count on a batch or a
-  LiteLLM delivery), `velox_usage_after_close_total` counts it, and a WARN
+  LiteLLM delivery), `velox_usage_unbilled_total{reason="after_close"}`
+  counts it, and a WARN
   line names the customer, meter and timestamp. There is no list of such
   events yet.
 - **What is not flagged.** Usage on a canceled subscription. And usage
@@ -102,7 +103,7 @@ For usage that missed an invoice, look for the after-close signal:
 
 ```bash
 # How many events arrived after their period's invoice, by origin:
-curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep velox_usage_after_close_total
+curl -sS "$API/metrics" -H "Authorization: Bearer $METRICS_TOKEN" | grep 'velox_usage_unbilled_total{reason="after_close"
 # Which ones: the WARN line per event.
 #   {"level":"WARN","msg":"usage event arrived after its period was invoiced — stored, billed on no invoice","customer_id":...,"meter_id":...,"timestamp":...}
 ```

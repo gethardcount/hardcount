@@ -47,6 +47,11 @@ first. Every shipped change, with its date, is in the
 - **Done:** a recipe file holds only meters and plans with their
   prices, and an install creates nothing else: no dunning policy and no
   webhook endpoint.
+- **Done:** the answer to a usage event says when Velox stores it but
+  will not bill it, and why: no price of the plan takes it, the plan does
+  not price its meter, no subscription covers its time, or its period was
+  already invoiced. A batch answer gives each event's status
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §12).
 - **Planned:** a base fee change that waits for each subscriber's next
   period may follow
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
@@ -55,10 +60,6 @@ Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
 
 Also now, in v0.9.0 or right after it:
 
-- The answer to a usage event says when Velox stores it but will not bill
-  it: the customer's plan does not price that meter, or no subscription
-  covers the event's time. It already says so for usage that arrives after its period was
-  invoiced. A batch answer will give each event's status.
 - A secret API key that can only send usage, for LiteLLM and other
   gateways.
 

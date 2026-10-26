@@ -112,7 +112,7 @@ func (f ingestAggFixture) hold(t *testing.T, key string, at time.Time) {
 	}
 }
 
-// afterCloseTotal reads velox_usage_after_close_total{origin}.
+// afterCloseTotal reads velox_usage_unbilled_total{reason="after_close", origin}.
 func afterCloseTotal(t *testing.T, origin domain.UsageEventOrigin) float64 {
 	t.Helper()
 	mfs, err := prometheus.DefaultGatherer.Gather()
@@ -120,14 +120,16 @@ func afterCloseTotal(t *testing.T, origin domain.UsageEventOrigin) float64 {
 		t.Fatalf("gather metrics: %v", err)
 	}
 	for _, mf := range mfs {
-		if mf.GetName() != "velox_usage_after_close_total" {
+		if mf.GetName() != "velox_usage_unbilled_total" {
 			continue
 		}
 		for _, m := range mf.GetMetric() {
+			labels := map[string]string{}
 			for _, l := range m.GetLabel() {
-				if l.GetName() == "origin" && l.GetValue() == string(origin) {
-					return m.GetCounter().GetValue()
-				}
+				labels[l.GetName()] = l.GetValue()
+			}
+			if labels["reason"] == usage.BillingStatusAfterClose && labels["origin"] == string(origin) {
+				return m.GetCounter().GetValue()
 			}
 		}
 	}
@@ -201,7 +203,7 @@ func ingestDoors() []ingestDoor {
 			if len(errs) != 0 {
 				t.Fatalf("batch: %v", errs)
 			}
-			return res.Inserted, res.AfterClose, keys
+			return res.Inserted, res.Unbilled.AfterClose, keys
 		}},
 		{"backfill", domain.UsageOriginBackfill, func(t *testing.T, f ingestAggFixture, at time.Time) (int, int, []string) {
 			ev, err := f.svc.Backfill(f.ctx, f.tenantID, in(f, "backfill-"+f.eventName, at))
@@ -232,7 +234,7 @@ func ingestDoors() []ingestDoor {
 			if err != nil {
 				t.Fatalf("ingest call: %v", err)
 			}
-			return res.Inserted, res.AfterClose, keys
+			return res.Inserted, res.Unbilled.AfterClose, keys
 		}},
 	}
 }
@@ -240,7 +242,7 @@ func ingestDoors() []ingestDoor {
 // At every ingest door, an aggregation PATCH that commits after the
 // ingest's open-period read and before its insert decides the after_close
 // signals: the answer's billing_status (or after_close count),
-// velox_usage_after_close_total and the "billed on no invoice" WARN. The
+// velox_usage_unbilled_total{reason="after_close"} and the "billed on no invoice" WARN. The
 // event is before a paid threshold invoice's end: under sum the close does
 // not count it (after_close), under max it does (not flagged).
 //
@@ -260,9 +262,11 @@ func TestIngest_AfterCloseFollowsTheAggregationTheEventIsCountedUnder(t *testing
 				now := time.Now().UTC().Truncate(time.Second)
 				at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 				meters := map[string]bool{f.meter.ID: true}
+				catchAll := usage.PriceSet{f.meter.ID: {{}}}
 				r := &patchBeforeTheInsert{f: f, to: tc.to, paused: newPausedAudit(), patchDone: make(chan struct{}), period: usage.OpenPeriod{
 					Start: now.Add(-2 * time.Hour), End: now.Add(24 * time.Hour), Floor: at(-3 * time.Hour),
-					Meters: meters, NextMeters: meters,
+					Meters: meters, Next: []usage.PriceSet{catchAll},
+					Spans:              []usage.PlanSpan{{PlanID: "pln", From: now.Add(-2 * time.Hour), To: now.Add(24 * time.Hour), Prices: catchAll}},
 					ThresholdWatermark: usage.ThresholdWatermark{BilledThrough: at(-30 * time.Minute), PaidThrough: at(-30 * time.Minute)},
 				}}
 				f.psvc.SetAuditLogger(r.paused)
@@ -297,7 +301,7 @@ func TestIngest_AfterCloseFollowsTheAggregationTheEventIsCountedUnder(t *testing
 					t.Errorf("after_close in the answer = %d, want %d: the events are counted under %s", flagged, want, m.Aggregation)
 				}
 				if got := afterCloseTotal(t, door.origin) - before; got != float64(want) {
-					t.Errorf("velox_usage_after_close_total{origin=%q} moved by %v, want %d", door.origin, got, want)
+					t.Errorf("velox_usage_unbilled_total{reason=\"after_close\",origin=%q} moved by %v, want %d", door.origin, got, want)
 				}
 				if got := logs.afterCloseWarns(f.meter.ID); got != want {
 					t.Errorf("after_close WARN lines = %d, want %d", got, want)

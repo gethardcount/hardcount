@@ -1,7 +1,7 @@
 # ADR-122: LiteLLM usage for an unknown customer is held and released by its key, never re-timed
 
 **Date:** 2026-10-17
-**Status:** Accepted
+**Status:** Accepted (amended 2026-10-27: release counts follow the plan stretches and count `no_price`)
 
 ## Summary
 
@@ -110,8 +110,12 @@ release it once with an honest statement of what it will bill.
    active subscription's current period on a meter its plan prices
    (`in_open_period`), inside that period on a meter no plan on it prices
    (`not_on_plan`, never invoiced), and outside it
-   (`outside_open_period`). The plan check reads each item's current plan,
-   so a row from before a mid-period plan change is judged by the new plan. The second kind is not billed by a subscription
+   (`outside_open_period`). The plan check read each item's current plan,
+   so a row from before a mid-period plan change was judged by the new plan.
+   Since 2026-10-27 (ADR-120 amendment of that date) it reads the plan
+   stretches the close bills by, so such a row is judged by the plan it was
+   on, and a row that plan prices but no price of it takes counts as
+   `no_price`. The second kind is not billed by a subscription
    invoice unless that period's invoice is not built yet; the operator bills
    it with a one-off invoice, as for any late usage (ADR-120). Since
    2026-10-22 the counts follow ADR-120's after-close rule, spend-threshold

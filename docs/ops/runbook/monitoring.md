@@ -70,7 +70,8 @@ alerting tier: what should page someone, and what is only informational.
 | `velox_auth_login_total{outcome="throttled"}` | rate > 0 for 15m | Someone keeps guessing dashboard passwords, or `TRUST_PROXY` is wrong. See [Sign-in throttled](sign-in-throttled.md) |
 | `velox_auth_login_total{outcome="error"}` | any increase | Sign-in failed on the server side, usually the database. Everyone is refused while it lasts |
 | `increase(velox_usage_unpriced_quantity_total{mode="live"}[1d])` by `meter_id` | > 0 | An invoice was built without usage that matched no price. That usage is not billed unless you bill it. See [Usage with no price](usage-with-no-price.md) |
-| `increase(velox_usage_after_close_total[1d])` by `origin` | > 0 | Usage arrived after its period's invoice was built: stored, billed on no invoice unless you bill it. A WARN line names each event. See [Invoice timing and late usage](invoice-timing-late-usage.md) |
+| `increase(velox_usage_unbilled_total{reason="after_close"}[1d])` by `origin` | > 0 | Usage arrived after its period's invoice was built: stored, billed on no invoice unless you bill it. A WARN line names each event. See [Invoice timing and late usage](invoice-timing-late-usage.md) |
+| `increase(velox_usage_unbilled_total{reason=~"no_price\|not_on_plan\|outside_subscription"}[1d])` by `reason` | > 0 | Usage was stored that no invoice will bill: no price takes it (`no_price`), its meter is not on the plan (`not_on_plan`), or no subscription covered it (`outside_subscription`). The answer that wrote each event says which. See [Usage with no price](usage-with-no-price.md) |
 
 Notes on three rows:
 

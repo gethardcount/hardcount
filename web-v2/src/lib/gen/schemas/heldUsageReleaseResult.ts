@@ -33,19 +33,25 @@ export interface HeldUsageReleaseResult {
   more_to_release: number;
   /**
      * Released rows inside an active subscription's current billing
-     * period whose meter the subscription's plan prices. That period's
-     * invoice counts them. A row after the period end, released before
-     * that period's invoice is built, counts here when the subscription
-     * continues and its plan from then on prices the meter. Rows of a
-     * sum or count meter stamped before the end of this period's
-     * spend-threshold invoice are not counted here: see
+     * period that a price of the subscription's plan takes. That
+     * period's invoice counts them. A row after the period end,
+     * released before that period's invoice is built, counts here when
+     * the subscription continues and a price of its plan from then on
+     * takes it. Rows of a sum or count meter stamped before the end of
+     * this period's spend-threshold invoice are not counted here: see
      * `pending_threshold_invoice` and `outside_open_period`.
      */
   in_open_period: number;
   /**
      * Released rows inside an active subscription's current billing
-     * period whose meter no plan on that subscription prices. No
-     * invoice charges them.
+     * period whose meter the plan prices, but that no price of the
+     * plan takes (their dimensions do not include any price's
+     * `dimension_match`). No invoice charges them.
+     */
+  no_price: number;
+  /**
+     * Released rows in a subscription's time whose meter the
+     * subscription's plan does not price. No invoice charges them.
      */
   not_on_plan: number;
   /**
@@ -57,8 +63,9 @@ export interface HeldUsageReleaseResult {
      */
   pending_threshold_invoice: number;
   /**
-     * Released rows outside every current billing period: before the
-     * subscription started, or in an earlier period. Also rows of a
+     * Released rows outside every subscription's time (before it
+     * started, in a free trial, or after it ended), and rows in an
+     * earlier period of a plan that prices their meter. Also rows of a
      * sum or count meter stamped before the end of this period's paid
      * spend-threshold invoice. A subscription invoice does not count
      * them unless that period's invoice has not been built yet. Bill

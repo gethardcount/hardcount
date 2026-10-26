@@ -144,8 +144,12 @@ not changed.
 
 **Usage that no price takes is not billed.** The usual cause is a new model
 name. Velox makes and sends the invoice without that usage. You see it in
-four places:
+five places:
 
+- the answer that sent the event: `billing_status: "no_price"` on its 201,
+  or a `no_price` count on a batch or a LiteLLM delivery, counted in
+  `velox_usage_unbilled_total{reason="no_price"}`. A price saved in the
+  same instant a billing period starts can make one such answer wrong;
 - the "not billed" row of the customer's usage, on the customer page and
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
   you pass `from` and `to`), marked `no_price`;

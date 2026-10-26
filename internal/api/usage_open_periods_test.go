@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/pricing"
+	"github.com/sagarsuperuser/velox/internal/usage"
 )
 
 // openPeriodsSubs answers one active subscription with two items, one of
@@ -20,16 +22,18 @@ func (s openPeriodsSubs) ListLiveByCustomer(context.Context, string, string) ([]
 		ID: "sub_open", Status: domain.SubscriptionActive,
 		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &s.start,
 		Items: []domain.SubscriptionItem{
-			{PlanID: "pln_a", PendingPlanID: "pln_b", PendingPlanEffectiveAt: &s.end},
-			{PlanID: "pln_c"},
+			{ID: "it_a", PlanID: "pln_a", PendingPlanID: "pln_b", PendingPlanEffectiveAt: &s.end},
+			{ID: "it_c", PlanID: "pln_c"},
 		},
 	}}, nil
 }
 
-// ListItemIntervals is not read: every item joined its plan before the
-// period.
+// ListItemIntervals answers both items on their plans since the period start.
 func (s openPeriodsSubs) ListItemIntervals(context.Context, string, string) ([]domain.ItemInterval, error) {
-	return nil, errors.New("billing intervals read for a subscription whose items joined before the period")
+	return []domain.ItemInterval{
+		{SubscriptionItemID: "it_a", PlanID: "pln_a", Quantity: 1, StartsAt: s.start},
+		{SubscriptionItemID: "it_c", PlanID: "pln_c", Quantity: 1, StartsAt: s.start},
+	}, nil
 }
 
 type noWatermarks struct{}
@@ -39,8 +43,8 @@ func (noWatermarks) ThresholdWatermarks(context.Context, string, string, time.Ti
 }
 
 // countingPricing counts the reads of plan prices. pln_a prices mtr_a from
-// the period start on and mtr_a2 from its end; pln_b prices mtr_b; pln_c
-// prices mtr_c.
+// the period start on and mtr_a2 from its end; pln_b prices mtr_b for model
+// x only; pln_c prices mtr_c.
 type countingPricing struct {
 	end   time.Time
 	reads *int
@@ -50,35 +54,35 @@ func (p countingPricing) GetMeterTx(context.Context, *sql.Tx, string) (domain.Me
 	panic("not read by OpenPeriods")
 }
 
-func (p countingPricing) meterAt(planID string, at time.Time) string {
+func (p countingPricing) priceAt(planID string, at time.Time) pricing.PriceMatch {
 	switch {
 	case planID == "pln_a" && at.Before(p.end):
-		return "mtr_a"
+		return pricing.PriceMatch{MeterID: "mtr_a", Match: map[string]string{}}
 	case planID == "pln_a":
-		return "mtr_a2"
+		return pricing.PriceMatch{MeterID: "mtr_a2", Match: map[string]string{}}
 	case planID == "pln_b":
-		return "mtr_b"
+		return pricing.PriceMatch{MeterID: "mtr_b", Match: map[string]string{"model": "x"}}
 	default:
-		return "mtr_c"
+		return pricing.PriceMatch{MeterID: "mtr_c", Match: map[string]string{}}
 	}
 }
 
-func (p countingPricing) MetersPricedAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]string, error) {
+func (p countingPricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]pricing.PriceMatch, error) {
 	*p.reads++
-	out := make([][]string, len(pins))
+	out := make([][]pricing.PriceMatch, len(pins))
 	for i, pin := range pins {
-		out[i] = []string{p.meterAt(pin.PlanID, pin.At)}
+		out[i] = []pricing.PriceMatch{p.priceAt(pin.PlanID, pin.At)}
 	}
 	return out, nil
 }
 
-// Ingest reads a customer's open periods on every event. The meters each
-// plan prices at each pin are one read, however many items, pins and pending
+// Ingest reads a customer's open periods on every event. The prices each
+// plan has at each pin are one read, however many items, pins and pending
 // changes the subscriptions have.
 //
 // Mutation: read each (plan, pin) on its own, and the subscription below
 // costs five reads.
-func TestUsageOpenPeriods_ReadsPlanMetersOnce(t *testing.T) {
+func TestUsageOpenPeriods_ReadsPlanPricesOnce(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, 0)
 	reads := 0
@@ -106,13 +110,14 @@ func TestUsageOpenPeriods_ReadsPlanMetersOnce(t *testing.T) {
 	if len(p.Meters) != 2 {
 		t.Errorf("Meters = %v, want mtr_a and mtr_c", p.Meters)
 	}
-	for _, m := range []string{"mtr_b", "mtr_c"} {
-		if !p.NextMeters[m] {
-			t.Errorf("NextMeters = %v, want %s (priced from the period end)", p.NextMeters, m)
+	next := map[string]string{}
+	for _, ps := range p.Next {
+		for m, matches := range ps {
+			next[m] = fmt.Sprint(matches)
 		}
 	}
-	if len(p.NextMeters) != 2 {
-		t.Errorf("NextMeters = %v, want mtr_b and mtr_c", p.NextMeters)
+	if want := map[string]string{"mtr_b": "[map[model:x]]", "mtr_c": "[map[]]"}; fmt.Sprint(next) != fmt.Sprint(want) {
+		t.Errorf("prices from the period end = %v, want %v (pln_b after its pending change, and pln_c)", next, want)
 	}
 }
 
@@ -158,7 +163,7 @@ func (s joinedSubs) ListLiveByCustomer(context.Context, string, string) ([]domai
 func (s joinedSubs) ListItemIntervals(_ context.Context, _, subID string) ([]domain.ItemInterval, error) {
 	s.reads[subID]++
 	if subID != "sub_new" {
-		return nil, errors.New("billing intervals read for a subscription whose items joined before the period")
+		return []domain.ItemInterval{{SubscriptionItemID: "it_old", PlanID: "pln_old", Quantity: 1, StartsAt: s.start.AddDate(0, -2, 0)}}, nil
 	}
 	started, gone, added, back, swapped := s.times()
 	return []domain.ItemInterval{
@@ -181,23 +186,24 @@ func (p pinRecorder) GetMeterTx(context.Context, *sql.Tx, string) (domain.Meter,
 	panic("not read by OpenPeriods")
 }
 
-func (p pinRecorder) MetersPricedAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]string, error) {
-	out := make([][]string, len(pins))
+func (p pinRecorder) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]pricing.PriceMatch, error) {
+	out := make([][]pricing.PriceMatch, len(pins))
 	for i, pin := range pins {
 		if pin.At.Before(p.end) {
 			p.pins[pin.PlanID] = pin.At
 		}
-		out[i] = []string{"mtr_" + pin.PlanID}
+		out[i] = []pricing.PriceMatch{{MeterID: "mtr_" + pin.PlanID, Match: map[string]string{}}}
 	}
 	return out, nil
 }
 
-// Ingest reads the meters of each current plan at its pin of the period,
-// the one the close prices it at (ADR-130 §4 step 3, amended 2026-10-26): the
-// first instant in the period the subscription had an item on the plan, a
-// subscription's start, an add, a swap. A plan left and joined again in the
-// period keeps the first join. A plan joined before the period is read at
-// the period start, and then the billing intervals are not read.
+// Ingest reads the prices of each plan of the period at its pin of the
+// period, the one the close prices it at (ADR-130 §4 step 3, amended
+// 2026-10-26): the first instant in the period the subscription had an item
+// on the plan, a subscription's start, an add, a swap. A plan left and
+// joined again in the period keeps the first join, and a plan swapped away
+// from is read too. A plan joined before the period is read at the period
+// start.
 //
 // Mutation: read every plan at the period start, and the plans of sub_new
 // are read at midnight. Pin a plan at its current item's join, and pln_back
@@ -216,6 +222,7 @@ func TestUsageOpenPeriods_PinsEachPlanWhereItWasFirstJoined(t *testing.T) {
 		"pln_start":   started,
 		"pln_added":   added,
 		"pln_swapped": swapped,
+		"pln_prev":    started,
 		"pln_back":    started,
 		"pln_old":     start,
 	}
@@ -224,7 +231,64 @@ func TestUsageOpenPeriods_PinsEachPlanWhereItWasFirstJoined(t *testing.T) {
 			t.Errorf("plan %s read at %v, want %v", plan, got, at)
 		}
 	}
-	if subs.reads["sub_new"] != 1 || subs.reads["sub_old"] != 0 {
-		t.Errorf("billing-interval reads = %v, want sub_new once and sub_old never", subs.reads)
+	if len(rec.pins) != len(want) {
+		t.Errorf("plans read = %v, want %v", rec.pins, want)
+	}
+}
+
+// Ingest classifies an event by the plan stretches the close bills the
+// period by, read from the billing intervals of every active subscription:
+// a plan swapped away from and an item removed in the period keep their
+// stretches, and an item added on the period's first day bills from the
+// period start (ADR-012).
+//
+// Mutation: read billing intervals only when an item joined its plan in the
+// period → sub_old's stretch is missing; build spans from the current items
+// → pln_prev and it_gone's pln_back stretch are missing.
+func TestUsageOpenPeriods_SpansAreTheClosesStretches(t *testing.T) {
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	subs := joinedSubs{start: start, end: end, reads: map[string]int{}}
+	a := usageOpenPeriods{subs: subs, pricing: pinRecorder{end: end, pins: map[string]time.Time{}}, thresholds: noWatermarks{}}
+	got, err := a.OpenPeriods(context.Background(), "ten_open", "cus_open")
+	if err != nil {
+		t.Fatalf("OpenPeriods: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("open periods = %d, want 2", len(got))
+	}
+	_, gone, _, _, swapped := subs.times()
+	spans := func(p usage.OpenPeriod) []string {
+		var out []string
+		for _, sp := range p.Spans {
+			var meters []string
+			for m := range sp.Prices {
+				meters = append(meters, m)
+			}
+			slices.Sort(meters)
+			out = append(out, fmt.Sprintf("%s [%s, %s) %v", sp.PlanID, sp.From.Format("02 15:04"), sp.To.Format("02 15:04"), meters))
+		}
+		slices.Sort(out)
+		return out
+	}
+	f := func(t time.Time) string { return t.Format("02 15:04") }
+	wantNew := []string{
+		fmt.Sprintf("pln_added [%s, %s) [mtr_pln_added]", f(start), f(end)),
+		fmt.Sprintf("pln_back [%s, %s) [mtr_pln_back]", f(start), f(end)),
+		fmt.Sprintf("pln_back [%s, %s) [mtr_pln_back]", f(start), f(gone)),
+		fmt.Sprintf("pln_prev [%s, %s) [mtr_pln_prev]", f(start), f(swapped)),
+		fmt.Sprintf("pln_start [%s, %s) [mtr_pln_start]", f(start), f(end)),
+		fmt.Sprintf("pln_swapped [%s, %s) [mtr_pln_swapped]", f(swapped), f(end)),
+	}
+	slices.Sort(wantNew)
+	if g := spans(got[0]); fmt.Sprint(g) != fmt.Sprint(wantNew) {
+		t.Errorf("sub_new spans =\n%v\nwant\n%v", g, wantNew)
+	}
+	wantOld := []string{fmt.Sprintf("pln_old [%s, %s) [mtr_pln_old]", f(start), f(end))}
+	if g := spans(got[1]); fmt.Sprint(g) != fmt.Sprint(wantOld) {
+		t.Errorf("sub_old spans = %v, want %v", g, wantOld)
+	}
+	if subs.reads["sub_new"] != 1 || subs.reads["sub_old"] != 1 {
+		t.Errorf("billing-interval reads = %v, want each subscription once", subs.reads)
 	}
 }

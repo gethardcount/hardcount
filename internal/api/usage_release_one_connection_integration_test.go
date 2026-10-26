@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -28,27 +27,27 @@ func (s releaseSubs) ListLiveByCustomer(context.Context, string, string) ([]doma
 	return []domain.Subscription{{
 		ID: "sub_release", Status: domain.SubscriptionActive,
 		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &started,
-		Items: []domain.SubscriptionItem{{PlanID: "pln_release"}},
+		Items: []domain.SubscriptionItem{{ID: "si_release", PlanID: "pln_release"}},
 	}}, nil
 }
 
-// ListItemIntervals is not read: the item joined its plan before the period.
+// ListItemIntervals answers the item on its plan since before the period.
 func (s releaseSubs) ListItemIntervals(context.Context, string, string) ([]domain.ItemInterval, error) {
-	return nil, errors.New("billing intervals read for a subscription whose items joined before the period")
+	return []domain.ItemInterval{{SubscriptionItemID: "si_release", PlanID: "pln_release", Quantity: 1, StartsAt: s.start.Add(-time.Hour)}}, nil
 }
 
 // releasePricing reads meters from the store and answers that plan
-// pln_release prices meterID.
+// pln_release prices meterID for every event.
 type releasePricing struct {
 	*pricing.PostgresStore
 	meterID string
 }
 
-func (p releasePricing) MetersPricedAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]string, error) {
-	out := make([][]string, len(pins))
+func (p releasePricing) PriceMatchesAt(_ context.Context, _ string, pins []pricing.PlanPin) ([][]pricing.PriceMatch, error) {
+	out := make([][]pricing.PriceMatch, len(pins))
 	for i, pin := range pins {
 		if pin.PlanID == "pln_release" {
-			out[i] = []string{p.meterID}
+			out[i] = []pricing.PriceMatch{{MeterID: p.meterID, Match: map[string]string{}}}
 		}
 	}
 	return out, nil

@@ -1937,15 +1937,24 @@ func (e TestClockStatus) Valid() bool {
 	}
 }
 
-// Defines values for UsageEventBillingStatus.
+// Defines values for UsageBillingStatus.
 const (
-	AfterClose UsageEventBillingStatus = "after_close"
+	AfterClose          UsageBillingStatus = "after_close"
+	NoPrice             UsageBillingStatus = "no_price"
+	NotOnPlan           UsageBillingStatus = "not_on_plan"
+	OutsideSubscription UsageBillingStatus = "outside_subscription"
 )
 
-// Valid indicates whether the value is a known member of the UsageEventBillingStatus enum.
-func (e UsageEventBillingStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the UsageBillingStatus enum.
+func (e UsageBillingStatus) Valid() bool {
 	switch e {
 	case AfterClose:
+		return true
+	case NoPrice:
+		return true
+	case NotOnPlan:
+		return true
+	case OutsideSubscription:
 		return true
 	default:
 		return false
@@ -1985,6 +1994,24 @@ func (e UsageEventProviderCostSource) Valid() bool {
 	case Observed:
 		return true
 	case Table:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UsageEventBatchEventResultStatus.
+const (
+	Deduplicated UsageEventBatchEventResultStatus = "deduplicated"
+	Ingested     UsageEventBatchEventResultStatus = "ingested"
+)
+
+// Valid indicates whether the value is a known member of the UsageEventBatchEventResultStatus enum.
+func (e UsageEventBatchEventResultStatus) Valid() bool {
+	switch e {
+	case Deduplicated:
+		return true
+	case Ingested:
 		return true
 	default:
 		return false
@@ -4558,12 +4585,12 @@ type HeldUsageReleaseResult struct {
 	Deduplicated int `json:"deduplicated"`
 
 	// InOpenPeriod Released rows inside an active subscription's current billing
-	// period whose meter the subscription's plan prices. That period's
-	// invoice counts them. A row after the period end, released before
-	// that period's invoice is built, counts here when the subscription
-	// continues and its plan from then on prices the meter. Rows of a
-	// sum or count meter stamped before the end of this period's
-	// spend-threshold invoice are not counted here: see
+	// period that a price of the subscription's plan takes. That
+	// period's invoice counts them. A row after the period end,
+	// released before that period's invoice is built, counts here when
+	// the subscription continues and a price of its plan from then on
+	// takes it. Rows of a sum or count meter stamped before the end of
+	// this period's spend-threshold invoice are not counted here: see
 	// `pending_threshold_invoice` and `outside_open_period`.
 	InOpenPeriod int `json:"in_open_period"`
 
@@ -4571,13 +4598,19 @@ type HeldUsageReleaseResult struct {
 	// takes at most 5,000 rows. Release again to take them.
 	MoreToRelease int `json:"more_to_release"`
 
-	// NotOnPlan Released rows inside an active subscription's current billing
-	// period whose meter no plan on that subscription prices. No
-	// invoice charges them.
+	// NoPrice Released rows inside an active subscription's current billing
+	// period whose meter the plan prices, but that no price of the
+	// plan takes (their dimensions do not include any price's
+	// `dimension_match`). No invoice charges them.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Released rows in a subscription's time whose meter the
+	// subscription's plan does not price. No invoice charges them.
 	NotOnPlan int `json:"not_on_plan"`
 
-	// OutsideOpenPeriod Released rows outside every current billing period: before the
-	// subscription started, or in an earlier period. Also rows of a
+	// OutsideOpenPeriod Released rows outside every subscription's time (before it
+	// started, in a free trial, or after it ended), and rows in an
+	// earlier period of a plan that prices their meter. Also rows of a
 	// sum or count meter stamped before the end of this period's paid
 	// spend-threshold invoice. A subscription invoice does not count
 	// them unless that period's invoice has not been built yet. Bill
@@ -5392,6 +5425,22 @@ type LitellmSpendResult struct {
 	// exist yet. Not billed until released with
 	// `POST /v1/usage-events/held/release`.
 	Held int `json:"held"`
+
+	// NoPrice Of `accepted`, the events no price of the subscription's plan
+	// takes (`billing_status: no_price`): stored, billed on no
+	// invoice. A model no price names lands here. A replay never
+	// counts here.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `accepted`, the events whose meter the subscription's plan
+	// does not price (`billing_status: not_on_plan`). A replay never
+	// counts here.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `accepted`, the events no subscription of the customer
+	// covered (`billing_status: outside_subscription`). A replay
+	// never counts here.
+	OutsideSubscription int `json:"outside_subscription"`
 
 	// Skipped Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
 	Skipped int `json:"skipped"`
@@ -6608,18 +6657,72 @@ type UsageAggregate struct {
 	TotalUnits string `json:"total_units"`
 }
 
+// UsageBillingStatus Sent only on the answer that wrote the event, when no invoice will
+// bill it. The event is stored all the same.
+//
+//   - `after_close`: a subscription whose plan prices this meter already
+//     invoiced the event's time. Bill it with a one-off invoice if it
+//     should be charged. A spend-threshold invoice counts only once it
+//     is paid: until then it can be voided, and then the period's
+//     invoice bills the event.
+//   - `no_price`: the event's time is in a subscription's current
+//     billing period, and the plan prices this meter, but no price of
+//     the plan takes the event's `dimensions`. A price takes an event
+//     whose dimensions include all of its `dimension_match`, compared
+//     as strings: the number `1` is not the string `"1"`. A price you
+//     add now applies from the next period.
+//   - `not_on_plan`: a subscription covered the event's time, but its
+//     plan has no price for this meter.
+//   - `outside_subscription`: no active or trialing subscription of the
+//     customer covered the event's time. The customer has none, or the
+//     time is before one started, in a free trial, or after one ended.
+//
+// `not_on_plan` and `outside_subscription` describe the customer's
+// subscriptions when the event arrived. A subscription created later
+// that day, or an item added on the first day of a billing period,
+// bills from the start of that day, so it can bill the event after
+// all. A price saved in the same instant a billing period starts can
+// make one `no_price` or `not_on_plan` answer wrong.
+//
+// Absent when an invoice will bill the event, or still can (a
+// spend-threshold invoice not paid yet). Absent on a replay and on a
+// read.
+type UsageBillingStatus string
+
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
-	// BillingStatus Sent only on the 201 that wrote the event. `after_close`: a
-	// subscription that prices this meter already invoiced the
-	// event's time, so the event is stored but billed on no invoice,
-	// now or later. Bill it with a one-off invoice if it should be
-	// charged. A spend-threshold invoice counts only once it is
-	// paid: until then it can be voided, and then the period's
-	// invoice bills the event. Absent otherwise, which is not a promise that the event
-	// will be billed. Never sent on a replay or a read.
-	BillingStatus UsageEventBillingStatus `json:"billing_status,omitempty"`
-	CustomerId    string                  `json:"customer_id"`
+	// BillingStatus Sent only on the answer that wrote the event, when no invoice will
+	// bill it. The event is stored all the same.
+	//
+	// - `after_close`: a subscription whose plan prices this meter already
+	//   invoiced the event's time. Bill it with a one-off invoice if it
+	//   should be charged. A spend-threshold invoice counts only once it
+	//   is paid: until then it can be voided, and then the period's
+	//   invoice bills the event.
+	// - `no_price`: the event's time is in a subscription's current
+	//   billing period, and the plan prices this meter, but no price of
+	//   the plan takes the event's `dimensions`. A price takes an event
+	//   whose dimensions include all of its `dimension_match`, compared
+	//   as strings: the number `1` is not the string `"1"`. A price you
+	//   add now applies from the next period.
+	// - `not_on_plan`: a subscription covered the event's time, but its
+	//   plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer covered the event's time. The customer has none, or the
+	//   time is before one started, in a free trial, or after one ended.
+	//
+	// `not_on_plan` and `outside_subscription` describe the customer's
+	// subscriptions when the event arrived. A subscription created later
+	// that day, or an item added on the first day of a billing period,
+	// bills from the start of that day, so it can bill the event after
+	// all. A price saved in the same instant a billing period starts can
+	// make one `no_price` or `not_on_plan` answer wrong.
+	//
+	// Absent when an invoice will bill the event, or still can (a
+	// spend-threshold invoice not paid yet). Absent on a replay and on a
+	// read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
+	CustomerId    string             `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
 	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
@@ -6649,16 +6752,6 @@ type UsageEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// UsageEventBillingStatus Sent only on the 201 that wrote the event. `after_close`: a
-// subscription that prices this meter already invoiced the
-// event's time, so the event is stored but billed on no invoice,
-// now or later. Bill it with a one-off invoice if it should be
-// charged. A spend-threshold invoice counts only once it is
-// paid: until then it can be voided, and then the period's
-// invoice bills the event. Absent otherwise, which is not a promise that the event
-// will be billed. Never sent on a replay or a read.
-type UsageEventBillingStatus string
-
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 type UsageEventOrigin string
 
@@ -6667,6 +6760,79 @@ type UsageEventOrigin string
 // `not_applicable` (the meter has no costed dimensions). Absent when
 // the cost is unknown.
 type UsageEventProviderCostSource string
+
+// UsageEventBatchEventResult defines model for UsageEventBatchEventResult.
+type UsageEventBatchEventResult struct {
+	// BillingStatus Sent only on the answer that wrote the event, when no invoice will
+	// bill it. The event is stored all the same.
+	//
+	// - `after_close`: a subscription whose plan prices this meter already
+	//   invoiced the event's time. Bill it with a one-off invoice if it
+	//   should be charged. A spend-threshold invoice counts only once it
+	//   is paid: until then it can be voided, and then the period's
+	//   invoice bills the event.
+	// - `no_price`: the event's time is in a subscription's current
+	//   billing period, and the plan prices this meter, but no price of
+	//   the plan takes the event's `dimensions`. A price takes an event
+	//   whose dimensions include all of its `dimension_match`, compared
+	//   as strings: the number `1` is not the string `"1"`. A price you
+	//   add now applies from the next period.
+	// - `not_on_plan`: a subscription covered the event's time, but its
+	//   plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer covered the event's time. The customer has none, or the
+	//   time is before one started, in a free trial, or after one ended.
+	//
+	// `not_on_plan` and `outside_subscription` describe the customer's
+	// subscriptions when the event arrived. A subscription created later
+	// that day, or an item added on the first day of a billing period,
+	// bills from the start of that day, so it can bill the event after
+	// all. A price saved in the same instant a billing period starts can
+	// make one `no_price` or `not_on_plan` answer wrong.
+	//
+	// Absent when an invoice will bill the event, or still can (a
+	// spend-threshold invoice not paid yet). Absent on a replay and on a
+	// read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
+
+	// Status `ingested`: the batch wrote the event. `deduplicated`: an event
+	// with its `idempotency_key` was already stored, earlier or in
+	// this batch, so it was not stored again.
+	Status UsageEventBatchEventResultStatus `json:"status"`
+}
+
+// UsageEventBatchEventResultStatus `ingested`: the batch wrote the event. `deduplicated`: an event
+// with its `idempotency_key` was already stored, earlier or in
+// this batch, so it was not stored again.
+type UsageEventBatchEventResultStatus string
+
+// UsageEventBatchResult defines model for UsageEventBatchResult.
+type UsageEventBatchResult struct {
+	// AfterClose Of `ingested`, the events answered `billing_status` `after_close`.
+	AfterClose int `json:"after_close"`
+
+	// Deduplicated Idempotency replays — already ingested, counted as success.
+	Deduplicated int `json:"deduplicated"`
+
+	// Ingested Newly written events.
+	Ingested int `json:"ingested"`
+
+	// NoPrice Of `ingested`, the events answered `billing_status` `no_price`.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `ingested`, the events answered `billing_status` `not_on_plan`.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `ingested`, the events answered `billing_status` `outside_subscription`.
+	OutsideSubscription int `json:"outside_subscription"`
+
+	// Results One entry per event, in the order sent: `results[i]` is the
+	// request's event `i`.
+	Results []UsageEventBatchEventResult `json:"results"`
+
+	// Total Events in the request.
+	Total int `json:"total"`
+}
 
 // WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
 type WebhookDeliveryReplayResult struct {

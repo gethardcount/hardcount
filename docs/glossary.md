@@ -66,8 +66,15 @@ Words used in the Velox docs and dashboard. For the big picture, read
   billing period, and from the join for a subscriber who first joins the plan
   in a period after it; on a plan no one has used, at once.
 - **no_price**: Usage of a meter that no price of the customer's plan
-  takes. Velox records it and bills nothing for it.
+  takes. Velox records it and bills nothing for it. Ingest answers such an
+  event with `billing_status: "no_price"`.
   [More](ops/runbook/usage-with-no-price.md)
+- **billing_status (on an ingest answer)**: Why no invoice will bill an
+  event Velox just stored: `after_close` (its period was already
+  invoiced), `no_price`, `not_on_plan` (the plan has no price for its
+  meter) or `outside_subscription` (no subscription covered its time).
+  Absent when an invoice will bill it. Only the answer that wrote the event
+  carries it. [More](api-surface.md#usage-that-will-not-be-billed)
 - **plan**: A price package you sell: a currency, a billing interval
   (monthly or yearly), a fixed base fee, and its usage prices. Its meters
   are the meters it has a price for. A subscription has one or more items, each a plan with a quantity.

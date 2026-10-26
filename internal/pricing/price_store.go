@@ -174,11 +174,20 @@ type PlanPin struct {
 	ClockID string
 }
 
-// MetersPricedAt returns, for each pin, the meters its plan prices then (the
-// meters of PlanPricesAt), in one transaction and one statement. Ingest reads
-// every open period's pins on each event.
-func (s *PostgresStore) MetersPricedAt(ctx context.Context, tenantID string, pins []PlanPin) ([][]string, error) {
-	out := make([][]string, len(pins))
+// PriceMatch is one price as usage ingest reads it: its meter and the labels
+// it takes (dimension_match; {} takes every event of the meter).
+type PriceMatch struct {
+	MeterID string
+	Match   map[string]string
+}
+
+// PriceMatchesAt returns, for each pin, the meter and dimension_match of
+// every price its plan has taking part then (the prices of PlanPricesAt), in
+// one transaction and one statement. Ingest reads every open period's pins
+// once per customer per request, before it writes, and matches each event's
+// labels against them in Go (usage.takes).
+func (s *PostgresStore) PriceMatchesAt(ctx context.Context, tenantID string, pins []PlanPin) ([][]PriceMatch, error) {
+	out := make([][]PriceMatch, len(pins))
 	if len(pins) == 0 {
 		return out, nil
 	}
@@ -197,24 +206,31 @@ func (s *PostgresStore) MetersPricedAt(ctx context.Context, tenantID string, pin
 	}
 	defer postgres.Rollback(tx)
 	rows, err := tx.QueryContext(ctx, `
-		SELECT DISTINCT r.ord, p.meter_id
+		SELECT r.ord, p.meter_id, p.dimension_match
 		FROM unnest($1::text[], $2::text[]::timestamptz[], $3::text[]) WITH ORDINALITY AS r(plan_id, at, clock_id, ord)
 		JOIN plan_prices p ON p.plan_id = r.plan_id
 		CROSS JOIN LATERAL (`+versionInForceAt("r.at", "r.clock_id")+`) v
 		WHERE NOT v.removed
-		ORDER BY r.ord, p.meter_id`,
+		ORDER BY r.ord, p.meter_id, p.id`,
 		postgres.StringArray(planIDs), postgres.StringArray(ats), postgres.StringArray(clockIDs))
 	if err != nil {
-		return nil, fmt.Errorf("read the meters of plans: %w", err)
+		return nil, fmt.Errorf("read the prices of plans: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var ord int
-		var meterID string
-		if err := rows.Scan(&ord, &meterID); err != nil {
+		var pm PriceMatch
+		var match []byte
+		if err := rows.Scan(&ord, &pm.MeterID, &match); err != nil {
 			return nil, err
 		}
-		out[ord-1] = append(out[ord-1], meterID)
+		if err := json.Unmarshal(match, &pm.Match); err != nil {
+			return nil, fmt.Errorf("decode dimension_match: %w", err)
+		}
+		if pm.Match == nil {
+			pm.Match = map[string]string{}
+		}
+		out[ord-1] = append(out[ord-1], pm)
 	}
 	return out, rows.Err()
 }

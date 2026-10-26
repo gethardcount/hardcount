@@ -2846,9 +2846,8 @@ export interface paths {
                     };
                 };
                 /**
-                 * @description Event ingested. `billing_status: after_close` means its period
-                 *     was already invoiced: the event is stored but billed on no
-                 *     invoice.
+                 * @description Event ingested. A `billing_status` says no invoice will bill
+                 *     it (see `UsageBillingStatus`); the event is stored all the same.
                  */
                 201: {
                     headers: {
@@ -2968,19 +2967,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            /** @description Newly written events. */
-                            ingested?: number;
-                            /** @description Idempotency replays — already ingested, counted as success. */
-                            deduplicated?: number;
-                            /**
-                             * @description Of `ingested`, the events whose period a subscription
-                             *     already invoiced: stored, billed on no invoice. A
-                             *     replayed event never counts here.
-                             */
-                            after_close?: number;
-                            total?: number;
-                        };
+                        "application/json": components["schemas"]["UsageEventBatchResult"];
                     };
                 };
                 /** @description Request body over the 1MB cap — send smaller batches. */
@@ -3043,7 +3030,8 @@ export interface paths {
          *     only if that period's invoice has not been built yet. An event for
          *     an already-invoiced period is stored but never billed, and its 201
          *     says so with `billing_status: after_close`; bill it with a one-off
-         *     invoice.
+         *     invoice. Its 201 carries the other statuses too (see
+         *     `UsageBillingStatus`).
          *
          *     Shares idempotency keys with live ingest: a repeated
          *     `idempotency_key` returns 200 with the original event and an
@@ -7216,18 +7204,72 @@ export interface components {
              * @enum {string}
              */
             provider_cost_source?: "table" | "not_applicable" | "observed";
+            billing_status?: components["schemas"]["UsageBillingStatus"];
+        };
+        /**
+         * @description Sent only on the answer that wrote the event, when no invoice will
+         *     bill it. The event is stored all the same.
+         *
+         *     - `after_close`: a subscription whose plan prices this meter already
+         *       invoiced the event's time. Bill it with a one-off invoice if it
+         *       should be charged. A spend-threshold invoice counts only once it
+         *       is paid: until then it can be voided, and then the period's
+         *       invoice bills the event.
+         *     - `no_price`: the event's time is in a subscription's current
+         *       billing period, and the plan prices this meter, but no price of
+         *       the plan takes the event's `dimensions`. A price takes an event
+         *       whose dimensions include all of its `dimension_match`, compared
+         *       as strings: the number `1` is not the string `"1"`. A price you
+         *       add now applies from the next period.
+         *     - `not_on_plan`: a subscription covered the event's time, but its
+         *       plan has no price for this meter.
+         *     - `outside_subscription`: no active or trialing subscription of the
+         *       customer covered the event's time. The customer has none, or the
+         *       time is before one started, in a free trial, or after one ended.
+         *
+         *     `not_on_plan` and `outside_subscription` describe the customer's
+         *     subscriptions when the event arrived. A subscription created later
+         *     that day, or an item added on the first day of a billing period,
+         *     bills from the start of that day, so it can bill the event after
+         *     all. A price saved in the same instant a billing period starts can
+         *     make one `no_price` or `not_on_plan` answer wrong.
+         *
+         *     Absent when an invoice will bill the event, or still can (a
+         *     spend-threshold invoice not paid yet). Absent on a replay and on a
+         *     read.
+         * @enum {string}
+         */
+        UsageBillingStatus: "after_close" | "no_price" | "not_on_plan" | "outside_subscription";
+        UsageEventBatchResult: {
+            /** @description Newly written events. */
+            ingested: number;
+            /** @description Idempotency replays — already ingested, counted as success. */
+            deduplicated: number;
+            /** @description Events in the request. */
+            total: number;
+            /** @description Of `ingested`, the events answered `billing_status` `after_close`. */
+            after_close: number;
+            /** @description Of `ingested`, the events answered `billing_status` `no_price`. */
+            no_price: number;
+            /** @description Of `ingested`, the events answered `billing_status` `not_on_plan`. */
+            not_on_plan: number;
+            /** @description Of `ingested`, the events answered `billing_status` `outside_subscription`. */
+            outside_subscription: number;
             /**
-             * @description Sent only on the 201 that wrote the event. `after_close`: a
-             *     subscription that prices this meter already invoiced the
-             *     event's time, so the event is stored but billed on no invoice,
-             *     now or later. Bill it with a one-off invoice if it should be
-             *     charged. A spend-threshold invoice counts only once it is
-             *     paid: until then it can be voided, and then the period's
-             *     invoice bills the event. Absent otherwise, which is not a promise that the event
-             *     will be billed. Never sent on a replay or a read.
+             * @description One entry per event, in the order sent: `results[i]` is the
+             *     request's event `i`.
+             */
+            results: components["schemas"]["UsageEventBatchEventResult"][];
+        };
+        UsageEventBatchEventResult: {
+            /**
+             * @description `ingested`: the batch wrote the event. `deduplicated`: an event
+             *     with its `idempotency_key` was already stored, earlier or in
+             *     this batch, so it was not stored again.
              * @enum {string}
              */
-            billing_status?: "after_close";
+            status: "ingested" | "deduplicated";
+            billing_status?: components["schemas"]["UsageBillingStatus"];
         };
         /**
          * @description What an issued invoice or credit note prints about its buyer, copied
@@ -9482,19 +9524,25 @@ export interface components {
             more_to_release: number;
             /**
              * @description Released rows inside an active subscription's current billing
-             *     period whose meter the subscription's plan prices. That period's
-             *     invoice counts them. A row after the period end, released before
-             *     that period's invoice is built, counts here when the subscription
-             *     continues and its plan from then on prices the meter. Rows of a
-             *     sum or count meter stamped before the end of this period's
-             *     spend-threshold invoice are not counted here: see
+             *     period that a price of the subscription's plan takes. That
+             *     period's invoice counts them. A row after the period end,
+             *     released before that period's invoice is built, counts here when
+             *     the subscription continues and a price of its plan from then on
+             *     takes it. Rows of a sum or count meter stamped before the end of
+             *     this period's spend-threshold invoice are not counted here: see
              *     `pending_threshold_invoice` and `outside_open_period`.
              */
             in_open_period: number;
             /**
              * @description Released rows inside an active subscription's current billing
-             *     period whose meter no plan on that subscription prices. No
-             *     invoice charges them.
+             *     period whose meter the plan prices, but that no price of the
+             *     plan takes (their dimensions do not include any price's
+             *     `dimension_match`). No invoice charges them.
+             */
+            no_price: number;
+            /**
+             * @description Released rows in a subscription's time whose meter the
+             *     subscription's plan does not price. No invoice charges them.
              */
             not_on_plan: number;
             /**
@@ -9506,8 +9554,9 @@ export interface components {
              */
             pending_threshold_invoice: number;
             /**
-             * @description Released rows outside every current billing period: before the
-             *     subscription started, or in an earlier period. Also rows of a
+             * @description Released rows outside every subscription's time (before it
+             *     started, in a free trial, or after it ended), and rows in an
+             *     earlier period of a plan that prices their meter. Also rows of a
              *     sum or count meter stamped before the end of this period's paid
              *     spend-threshold invoice. A subscription invoice does not count
              *     them unless that period's invoice has not been built yet. Bill
@@ -9536,6 +9585,25 @@ export interface components {
              *     here.
              */
             after_close: number;
+            /**
+             * @description Of `accepted`, the events no price of the subscription's plan
+             *     takes (`billing_status: no_price`): stored, billed on no
+             *     invoice. A model no price names lands here. A replay never
+             *     counts here.
+             */
+            no_price: number;
+            /**
+             * @description Of `accepted`, the events whose meter the subscription's plan
+             *     does not price (`billing_status: not_on_plan`). A replay never
+             *     counts here.
+             */
+            not_on_plan: number;
+            /**
+             * @description Of `accepted`, the events no subscription of the customer
+             *     covered (`billing_status: outside_subscription`). A replay
+             *     never counts here.
+             */
+            outside_subscription: number;
             /** @description One entry per record that was not recorded. A record's events are recorded together or not at all. */
             errors?: {
                 /** @description The LiteLLM record id. */
@@ -13157,9 +13225,8 @@ export interface operations {
                 };
             };
             /**
-             * @description Event recorded. `billing_status: after_close` means its period
-             *     was already invoiced: the event is stored but billed on no
-             *     invoice.
+             * @description Event recorded. A `billing_status` says no invoice will bill
+             *     it (see `UsageBillingStatus`); the event is stored all the same.
              */
             201: {
                 headers: {

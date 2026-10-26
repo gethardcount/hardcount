@@ -307,24 +307,27 @@ func TestUsageAfterClose_GraceIsNotFlagged(t *testing.T) {
 }
 
 // TestUsageAfterClose_TrialUsageIsNotFlagged: usage stamped in a trial, before
-// the first paid period starts, is free, not missed: it is not flagged. The
-// control: after that period's invoice, an event stamped in it is flagged.
+// the first paid period starts, is free, not missed: it is never after_close.
+// It is answered outside_subscription, because no billing period holds it
+// (D07). The control: after that period's invoice, an event stamped in it is
+// after_close.
 //
 // Mutation check: take the floor from the subscription's start instead of
-// the trial end → the trial event is flagged.
+// the trial end → the trial event after the first paid invoice is
+// after_close.
 func TestUsageAfterClose_TrialUsageIsNotFlagged(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(uwDay)
 	out := r.postEvent("/v1/usage-events", "calls", "trial-1", uwDay.Add(-14*time.Hour), uwDay.Add(-14*time.Hour+time.Minute), 5, http.StatusCreated)
-	wantStatus(t, "trial event", out, "")
+	wantStatus(t, "trial event", out, "outside_subscription")
 
 	r.expireTrials(dayAt(0, 30))
 	r.closePeriod(uwDay)
 	out = r.postEvent("/v1/usage-events", "calls", "paid-late", dayAt(1, 0), r.sub().CurrentBillingPeriodStart.Add(2*time.Hour), 9, http.StatusCreated)
 	wantStatus(t, "paid-period event after its invoice", out, "after_close")
 	out = r.postEvent("/v1/usage-events", "calls", "trial-late", uwDay.Add(-13*time.Hour), r.sub().CurrentBillingPeriodStart.Add(2*time.Hour), 5, http.StatusCreated)
-	wantStatus(t, "trial event after the first paid invoice", out, "")
+	wantStatus(t, "trial event after the first paid invoice", out, "outside_subscription")
 }
 
 // TestUsageAfterClose_LastMeterIsFlagged: a last meter bills the latest

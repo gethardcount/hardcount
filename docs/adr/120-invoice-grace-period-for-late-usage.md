@@ -1,9 +1,9 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; a `no_price` status and one unbilled counter, not built yet)
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; every unbilled event answers with its status, and one unbilled counter, built in PR-6 #1390)
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). A new `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` flag wrong (PR-6). Its counter `velox_usage_after_close_total{origin}` becomes `velox_usage_unbilled_total{reason="after_close", origin}`, one counter for every unbilled status (PR-6). The grace and the after_close flag stay.
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Built in PR-6 (#1390), with D07 folded in: every written event no invoice will bill now answers with a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`), and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). The `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` or `not_on_plan` flag wrong. The grace and the after_close flag stay.
 
 ## Summary
 
@@ -223,7 +223,8 @@ pipeline lags longer raises it.
   Every other draw tests expiry at its own instant.
 - **Late usage after the invoice is flagged per event, but not listed.**
   Since 2026-10-22 (amendment below) the answer that writes such an event
-  says so, and `velox_usage_after_close_total` counts them. There is still
+  says so, and `velox_usage_unbilled_total{reason="after_close"}` counts
+  them (`velox_usage_after_close_total` until 2026-10-27). There is still
   no list of them per customer and period, and no dashboard notice.
   **Deferred: the per-customer list** (and a pre-filled one-off invoice).
   Trigger: an operator needs to find which events missed an invoice after
@@ -243,12 +244,13 @@ Usage that arrives after its period's invoice is still stored, answered
 - `POST /v1/usage-events/batch` and the LiteLLM callback count such rows in
   `after_close`;
 - `velox_usage_after_close_total{origin}` counts them, with a WARN log line
-  per row.
+  per row. (Since 2026-10-27: `velox_usage_unbilled_total{reason="after_close", origin}`.)
 
 **The rule** (`internal/usage/open_period.go`, `classify`). An event is
 after_close when an active or trialing subscription that prices its meter
 already invoiced its time, and no active or trialing subscription's open
-period holds it. "Already invoiced" means either:
+period holds it. (Since 2026-10-27: no other subscription's open period
+bills it or prices its meter; see below.) "Already invoiced" means either:
 
 - the event is before the subscription's current period start, and not
   before its trial end (trial usage is free) or its start; or
@@ -324,6 +326,73 @@ the meter. A row the rule calls after_close counts as
 `outside_open_period`. A row before the end of an unpaid threshold invoice
 counts as `pending_threshold_invoice`: the period's invoice bills it only
 if that threshold invoice is voided first.
+
+## Amendment 2026-10-27: every unbilled event says why (ADR-130 PR-6, D07)
+
+The after_close signal now covers every written event no invoice will
+bill. The rule is still `classify` (`internal/usage/open_period.go`), and
+the answer that writes the event carries one of four statuses:
+
+- `after_close`: as above.
+- `no_price`: the event's time is in an open period whose plan prices its
+  meter at the plan's pin, but no price of that plan takes its dimensions.
+  "Takes" is the close's `properties @> dimension_match`. Ingest checks it
+  in Go: price values are strings only (ADR-130 §1), so it is per-key
+  string equality, and a number label never equals a string.
+  `TestTakes_AgreesWithPostgresContainment` checks the two agree on a
+  generated corpus.
+- `not_on_plan`: a subscription held the event's time, but its plan does
+  not price the meter. In an open period that is every plan the
+  subscription was on at that instant; before the period start (an
+  invoiced period, past the billing start) it is the current plans.
+- `outside_subscription`: no active or trialing subscription held the
+  time: none exists, or the time is before one started, in a free trial,
+  or after one ends at its period end.
+
+Where they disagree across subscriptions, a subscription that bills the
+event wins, then one that prices its meter (`no_price`, then
+`after_close`), then one that held its time (`not_on_plan`). So a
+subscription whose open period holds the time but does not price the
+meter no longer turns an `after_close` event into a silent one. Nothing is
+sent when an invoice bills the event or still can (before an unpaid
+threshold invoice's end).
+
+**Which plan an event is checked against.** The close bills an open
+period by plan stretches: each stretch of the period during which an item
+was on a plan, from the billing intervals, at that plan's pin. A plan
+swapped away from and an item removed in the period keep their stretches.
+Ingest reads the same stretches (`billing.PeriodPlans`), so the billing
+intervals of every active subscription are read on each open-period read,
+not only when an item joined its plan in the period. Checked only against
+the current items, an event before a swap or a removal would be called
+`not_on_plan` and then billed. The prices of every plan of the period are
+read at their pins in the one statement that read their meters before
+(`pricing.PriceMatchesAt`), before the write. The read is once per
+customer per request.
+
+**Two stated exceptions.**
+
+- A price write whose transaction spans a pin and commits after the ingest
+  read can make one `no_price` or `not_on_plan` flag wrong (ADR-130 §12).
+- `not_on_plan` and `outside_subscription` describe the subscriptions when
+  the event arrived. A subscription's first period starts at the start of
+  its first day, and an item added on a period's first day bills from the
+  period start (ADR-012). So a subscription created, or such an item added,
+  later on the event's day can bill an event flagged earlier that day.
+  `TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt` pins
+  it. A trial event is `outside_subscription`: trial usage is free.
+
+**The answers.** The single and backfill 201 carry `billing_status`. The
+batch 201 counts each status (`after_close`, `no_price`, `not_on_plan`,
+`outside_subscription`) and returns `results[i]`, each event's `status`
+(`ingested` or `deduplicated`) and `billing_status`, at its index in the
+request. The LiteLLM answer counts the four statuses. The held-usage
+release counts `no_price` beside `not_on_plan`, so a released row no price
+takes is never `in_open_period`. A replay or a deduplicated row carries
+no status. `velox_usage_unbilled_total{reason, origin}` counts every
+written row by status; only an `after_close` row also logs a WARN line, as
+before, because the other three are a setup to fix and can be every event
+of a customer.
 
 ## References
 

@@ -100,11 +100,13 @@ type ReleaseHeldInput struct {
 
 // ReleasedRow is one held row the release wrote, or found already written.
 type ReleasedRow struct {
-	HeldID       string    `json:"-"`
-	EventID      string    `json:"-"`
-	EventName    string    `json:"-"`
-	EventAt      time.Time `json:"-"`
-	Deduplicated bool      `json:"-"`
+	HeldID     string         `json:"-"`
+	EventID    string         `json:"-"`
+	EventName  string         `json:"-"`
+	EventAt    time.Time      `json:"-"`
+	Dimensions map[string]any `json:"-"`
+	// Deduplicated: usage_events already had the row; it was not written.
+	Deduplicated bool `json:"-"`
 }
 
 // ReleaseHeldResult reports what one release did.
@@ -312,7 +314,7 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 
 	res := ReleaseHeldResult{Rows: make([]ReleasedRow, 0, len(claimed))}
 	for _, h := range claimed {
-		row := ReleasedRow{HeldID: h.ID, EventName: h.EventName, EventAt: h.EventAt}
+		row := ReleasedRow{HeldID: h.ID, EventName: h.EventName, EventAt: h.EventAt, Dimensions: h.Dimensions}
 		if inputKey, isWrite := CallInputKey(h.IdempotencyKey); isWrite {
 			// A LiteLLM cache-write row whose call usage_events already
 			// bills the pre-split way (a copy of the previous release

@@ -30,6 +30,25 @@ export interface LitellmSpendResult {
      * here.
      */
   after_close: number;
+  /**
+     * Of `accepted`, the events no price of the subscription's plan
+     * takes (`billing_status: no_price`): stored, billed on no
+     * invoice. A model no price names lands here. A replay never
+     * counts here.
+     */
+  no_price: number;
+  /**
+     * Of `accepted`, the events whose meter the subscription's plan
+     * does not price (`billing_status: not_on_plan`). A replay never
+     * counts here.
+     */
+  not_on_plan: number;
+  /**
+     * Of `accepted`, the events no subscription of the customer
+     * covered (`billing_status: outside_subscription`). A replay
+     * never counts here.
+     */
+  outside_subscription: number;
   /** One entry per record that was not recorded. A record's events are recorded together or not at all. */
   errors?: LitellmSpendResultErrorsItem[];
 }

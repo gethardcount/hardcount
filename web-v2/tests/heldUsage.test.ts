@@ -52,13 +52,13 @@ test('release is offered only once the customer and a meter exist', () => {
 })
 
 test('the release summary says which rows a subscription invoice will not include', () => {
-  const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 1, still_held: 0, more_to_release: 0, in_open_period: 1, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 2 })
+  const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 1, still_held: 0, more_to_release: 0, in_open_period: 1, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 2 })
   assert.equal(s.title, 'Released 4 usage rows')
   assert.match(s.description, /1 fall in the current billing period/)
   assert.match(s.description, /2 fall outside the current billing period.*one-off invoice/)
   assert.match(s.description, /1 were already recorded/)
 
-  const none = releaseSummary({ customer_id: 'c', released: 0, deduplicated: 0, still_held: 2, more_to_release: 0, in_open_period: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 0 })
+  const none = releaseSummary({ customer_id: 'c', released: 0, deduplicated: 0, still_held: 2, more_to_release: 0, in_open_period: 0, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 0 })
   assert.equal(none.title, 'Nothing released')
   assert.match(none.description, /2 usage rows still held/)
   assert.doesNotMatch(none.description, /invoiced/)
@@ -68,17 +68,26 @@ test('the release summary says which rows a subscription invoice will not includ
 // invoiced, and rows left by the 5,000-row cap are not blamed on a missing
 // meter.
 test('the release summary names unpriced rows and rows past the cap apart', () => {
-  const s = releaseSummary({ customer_id: 'c', released: 5000, deduplicated: 0, still_held: 0, more_to_release: 1000, in_open_period: 0, not_on_plan: 5000, pending_threshold_invoice: 0, outside_open_period: 0 })
-  assert.match(s.description, /5,000 fall in the current billing period, but the subscription's plan has no price for their meter, so no invoice charges them/)
+  const s = releaseSummary({ customer_id: 'c', released: 5000, deduplicated: 0, still_held: 0, more_to_release: 1000, in_open_period: 0, no_price: 0, not_on_plan: 5000, pending_threshold_invoice: 0, outside_open_period: 0 })
+  assert.match(s.description, /5,000 are for a meter the subscription's plan has no price for, so no invoice charges them/)
   assert.doesNotMatch(s.description, /will be invoiced/)
   assert.match(s.description, /1,000 usage rows more are ready.*release again/)
   assert.doesNotMatch(s.description, /a meter is missing/)
 })
 
+// Design G9 (D08 PR-6): rows no price of the plan takes are never called
+// invoiced.
+test('the release summary names rows no price matches', () => {
+  const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 0, still_held: 0, more_to_release: 0, in_open_period: 1, no_price: 2, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 0 })
+  assert.match(s.description, /1 fall in the current billing period and will be invoiced\./)
+  assert.match(s.description, /2 fall in the current billing period, but no price on the subscription's plan matches them, so no invoice charges them\./)
+  assert.doesNotMatch(s.description, /for a meter/)
+})
+
 // Review finding 3 (#1350): rows in time an unpaid spend-threshold invoice
 // covered are not called invoiced, and their outcome is said both ways.
 test('the release summary says rows under an unpaid threshold invoice may or may not be billed', () => {
-  const s = releaseSummary({ customer_id: 'c', released: 4, deduplicated: 0, still_held: 0, more_to_release: 0, in_open_period: 0, not_on_plan: 0, pending_threshold_invoice: 4, outside_open_period: 0 })
+  const s = releaseSummary({ customer_id: 'c', released: 4, deduplicated: 0, still_held: 0, more_to_release: 0, in_open_period: 0, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 4, outside_open_period: 0 })
   assert.match(s.description, /4 fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet/)
   assert.match(s.description, /If it is paid or written off, no invoice charges them\. If it is voided before/)
   assert.doesNotMatch(s.description, /will be invoiced/)

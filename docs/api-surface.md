@@ -200,6 +200,33 @@ value, is refused with `422` and `param: quantity`. The event's
 `dimensions` pick its price; `properties`, the old name, is refused when
 it has a key (`null` or `{}` is ignored).
 
+### Usage that will not be billed
+
+Velox stores every valid event. When no invoice will bill it, the answer
+that wrote it says why, in `billing_status`:
+
+| `billing_status` | Meaning | What to do |
+|---|---|---|
+| `after_close` | Its billing period was already invoiced (see Late usage below). | Bill it with a one-off invoice. |
+| `no_price` | The plan prices the meter, but no price takes the event's `dimensions`. A price takes an event whose dimensions include all of its `dimension_match`, compared as strings: the number `1` is not `"1"`. | Add a price for those dimensions. It applies from each subscriber's next period, so this event stays unbilled. |
+| `not_on_plan` | The customer's subscription covered the time, but its plan has no price for the meter. | Add a price for the meter to the plan, or move the customer to a plan that has one. |
+| `outside_subscription` | No active or trialing subscription of the customer covered the time: there is none, or the time is before it started, in a free trial, or after it ended. | Check the event's customer and timestamp. |
+
+- The single and backfill 201 carry it. `POST /v1/usage-events/batch`
+  returns `results[i]` for each event, in the order sent: `status`
+  (`ingested` or `deduplicated`) and `billing_status`, plus a count of
+  each status. The LiteLLM answer counts each status, and the held-usage
+  release counts `no_price` and `not_on_plan`.
+- No `billing_status` means an invoice will bill the event, or still can
+  (a spend-threshold invoice not paid yet). A replay and a read never
+  carry it.
+- `not_on_plan` and `outside_subscription` describe the subscriptions when
+  the event arrived. A subscription created later that day, or an item
+  added on the first day of a billing period, bills from the start of that
+  day, so it can still bill the event.
+- A price saved in the same instant a billing period starts can make one
+  `no_price` or `not_on_plan` answer wrong.
+
 ### Late usage
 
 An event counts toward the billing period its `timestamp` falls in.
@@ -236,8 +263,10 @@ An event counts toward the billing period its `timestamp` falls in.
 - Dunning's final pause or cancel waits for the grace. When retries run out
   inside it, the run waits until the grace ends, then pauses or cancels.
 
-The metric `velox_usage_after_close_total{origin}` counts the events
-flagged `after_close`. Usage on a canceled subscription is not flagged. `velox_usage_late_event_total`
+The metric `velox_usage_unbilled_total{reason, origin}` counts the events
+answered with each `billing_status` (`reason="after_close"` for late usage).
+Usage on a canceled subscription is answered `outside_subscription`, not
+`after_close`. `velox_usage_late_event_total`
 counts events, not sent through the backfill route, whose `timestamp` is
 more than 24 hours older than their arrival. It does not say whether an
 event missed an invoice.

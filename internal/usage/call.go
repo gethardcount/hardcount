@@ -71,12 +71,12 @@ type CallResult struct {
 	Legacy bool
 	// Written lists, for IngestCallResolvingHeld, the indices of the rows it
 	// newly wrote to usage_events, into the mapping it wrote (the events,
-	// or the legacy events when Legacy is true). IngestCall counts
-	// after_close from it.
+	// or the legacy events when Legacy is true). IngestCall counts the
+	// unbilled rows from it.
 	Written []int
-	// AfterClose counts, for IngestCall, the rows written whose period was
-	// already invoiced: stored, billed on no invoice (open_period.go).
-	AfterClose int
+	// Unbilled counts, for IngestCall, the rows written that no invoice
+	// will bill, by billing_status (open_period.go).
+	Unbilled UnbilledCounts
 }
 
 // CallInputKey is the key of the call's input row for a cache-write row's
@@ -98,7 +98,7 @@ func CallInputKey(key string) (string, bool) {
 // PostgresStore.IngestCallResolvingHeld). The customer's open periods are
 // read before the write, and the rows the store newly wrote, in the mapping
 // it wrote, are classified on its transaction after the inserts
-// (open_period.go); only they count as after_close.
+// (open_period.go); only they are counted by billing_status.
 func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput) (CallResult, error) {
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable
@@ -182,10 +182,9 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	// Only rows this call wrote: a row deduplicated against an earlier write
 	// was flagged, or not, when that write happened.
 	for _, i := range res.Written {
-		if writtenClass[i] == AfterClose {
-			res.AfterClose++
-			recordAfterClose(ctx, written[i])
-		}
+		status := s.statusOf(writtenClass[i])
+		res.Unbilled.Add(status)
+		recordUnbilled(ctx, written[i], status)
 	}
 	return res, nil
 }

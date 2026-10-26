@@ -6,7 +6,13 @@ Back to the [runbook index](index.md).
 
 ## Symptom
 
-`velox_usage_unpriced_quantity_total{meter_id, mode}` rises (`mode` is
+The earliest sign is at ingest: the answer that wrote the event carries
+`billing_status: "no_price"` (a `no_price` count on a batch, a LiteLLM
+delivery or a held-usage release), and
+`velox_usage_unbilled_total{reason="no_price"}` rises. Usage of a meter the
+plan has no price for at all is answered `not_on_plan` instead.
+
+At the invoice, `velox_usage_unpriced_quantity_total{meter_id, mode}` rises (`mode` is
 `live` or `test`; test-clock simulations are not counted). Or the server
 logs a WARN with `meter`, `quantity` and `subscription_id`:
 
