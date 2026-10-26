@@ -17,7 +17,8 @@ export type PlanDetail = Plan & {
      * Whether a subscription has ever used the plan (canceled ones
      * and scheduled plan changes included). On a plan no one has
      * used, a price change applies at once; on a used plan, from
-     * each subscriber's next billing period.
+     * each subscriber's next billing period, and from the join for
+     * a subscriber who first joins the plan in a period after it.
      */
   used: boolean;
   /**
@@ -31,7 +32,8 @@ export type PlanDetail = Plan & {
      * Whether a subscription has ever used the plan (canceled ones
      * and scheduled plan changes included). On a plan no one has
      * used, a price change applies at once; on a used plan, from
-     * each subscriber's next billing period.
+     * each subscriber's next billing period, and from the join for
+     * a subscriber who first joins the plan in a period after it.
      */
   used: boolean;
   /**

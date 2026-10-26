@@ -11,7 +11,7 @@ terminal.
 |---|---|
 | Dimensions | Labels on a usage event, such as `model` and `token_type`. |
 | Price | One usage rate of a plan: a meter, the labels an event must carry (`dimension_match`), and an amount per unit, tiers, or packages. |
-| Used plan | A plan a subscription has used. A price change on it applies from each subscriber's next billing period. |
+| Used plan | A plan a subscription has used. A price change on it applies from each subscriber's next billing period. A subscriber who joins the plan after the change pays it from the join, unless the same subscription was on the plan earlier in that period. |
 
 ## Ready-made recipes
 
@@ -117,10 +117,10 @@ takes the plan's currency.
 `effective` says when it applies. On a plan no subscription has used it is
 `now`. On a used plan it is `next_period`: each subscriber pays it from
 their next billing period, and the period already open keeps the prices it
-started with. A subscription that starts later that day, or moves to the
-plan mid-period, pays it from its next period
-([Change a price](#change-a-price)). Add one price for each kind of token you sell. Other plans
-that price the `tokens` meter are not changed.
+started with. A subscriber who joins the plan after the change pays it from
+the moment they join ([Change a price](#change-a-price)). Add one price for
+each kind of token you sell. Other plans that price the `tokens` meter are
+not changed.
 
 ## How Velox picks the price for an event
 
@@ -160,38 +160,44 @@ bill it with a one-off invoice
 
 A price's rate changes with `PATCH /v1/plans/{id}/prices/{price_id}`, and
 `DELETE` removes it. Its meter and labels never change: for other events,
-add another price. A billing period is priced as the plan's prices were when
-it started, so:
+add another price. Each billing period of a subscription pays the plan's
+prices as they were at the period's start. If the subscription joined the
+plan during the period, it pays them as they were when it first joined the
+plan in that period. So:
 
 - On a plan no subscription has used, a change applies at once
   (`effective: now`).
 - On a used plan, it applies from each subscriber's next billing period
-  (`effective: next_period`). The period already open keeps the price it
-  started with. A customer on a test clock follows the clock: the change
-  applies from the clock's next period.
-- A subscription that starts without a trial has a first period from
-  midnight of its first day. So one that starts later on the day of a
-  change gets the change from its second period. Its first period pays the
-  old rate, still bills a price removed that day, and does not bill a price
-  added that day. For a new customer to get the new prices at once,
-  subscribe them the next day in your billing timezone, or on a new plan.
-- A subscription that moves to the plan mid-period (an immediate plan
-  change, or an added item) pays the plan's prices as they were at the
-  start of its own period, until its next period. A rate changed earlier in
-  that period is billed at the old rate, a price removed earlier is still
-  billed, and a meter the plan first priced earlier in that period is not
-  billed that period. That usage does not appear as not billed either: the
-  plan did not price the meter at the period's start. An immediate change
-  from a plan with another billing interval is the exception: it starts a
-  new period at the change, so it pays the plan's prices as they are then.
+  (`effective: next_period`). The period already open keeps the prices it
+  started with, also after a quantity change. A customer on a test clock
+  follows the clock: the change applies from the clock's next period.
+- A subscriber who joins the plan after a change pays it at once: a new
+  subscription from its start (after a trial, from the trial's end), an
+  immediate plan change onto the plan from the change, an added item from
+  the add. So a subscription that starts later on the day of a change pays
+  the new rate, bills a price added earlier and does not bill a price
+  removed earlier, from its first period.
 - A customer's negotiated rate (a price override) keeps applying when the
   price's rate changes. Removing the price ends it, and the answer lists the
   overrides it ended.
-- An override, too, applies from the customer's next billing period. One
-  created on the day a subscription of the customer starts without a
-  trial, before or after it, applies from its second period: the first
-  period started at midnight and bills the price's rate. To bill the first period at the
-  override, create it on an earlier day in your billing timezone.
+- A subscription that leaves the plan and joins it again in the same
+  period keeps the prices of its first join for that period. That holds for
+  an item removed and added back, and for a plan change and back. A change
+  made in between applies from its next period.
+- An override follows the same rule. It applies from the subscriber's next
+  period, or from the join when the subscription first joins the plan in a
+  period after the override was created. So one created before a
+  subscription starts (after a trial, before the trial ends), even on the
+  same day, applies from its first period.
+- When an item leaves a plan and an item joins it again later in the
+  period, each part bills on its own, with its own peak and tiers. An item
+  added on the period's first day bills from the period start, so its part
+  starts where the part before it ended. On one plan those two parts bill
+  as one: a `max` meter bills one peak, and tiers run on.
+- On a test clock, a change or an override takes effect just after the
+  clock's current time. A subscription, an immediate plan change or an
+  added item at that same clock time gets the earlier prices, so advance
+  the clock first.
 
 On the dashboard, open the plan under **Pricing**. Its **Usage prices**
 card says which of the two applies before you save.

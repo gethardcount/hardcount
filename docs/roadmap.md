@@ -39,7 +39,8 @@ first. Every shipped change, with its date, is in the
 - **Done: usage prices are set per plan.** A price belongs to a plan, so
   two plans can charge different rates for one meter. A price change applies
   at once on a plan no one has subscribed to, and from each subscriber's next
-  billing period otherwise, on a test clock too. A customer's negotiated
+  billing period otherwise, on a test clock too. A subscriber who first
+  joins the plan in a period after a change pays it from then. A customer's negotiated
   rate names one plan price. Rating rules, meter pricing rules and a meter's
   default price are gone
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).

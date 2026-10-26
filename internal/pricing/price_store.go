@@ -34,11 +34,12 @@ import (
 //     plan it also stamps every test clock of the account with the clock's
 //     time plus 1 microsecond (plan_price_version_clocks), read FOR SHARE.
 //
-// A period is priced at its pin, its start. In wall time a version is in
-// force at the pin when valid_from <= pin; on test clock C, when its stamp
-// for C is, a version with no stamp for C counting as always in force. The
-// latest such version wins, ties broken by valid_from. A price whose
-// winning version is a removal takes no part.
+// A plan is priced at its pin of the period: the period start, or the first
+// instant in the period the subscription joined the plan (ADR-130 §4 step
+// 3). In wall time a version is in force at the pin when valid_from <= pin;
+// on test clock C, when its stamp for C is, a version with no stamp for C
+// counting as always in force. The latest such version wins, ties broken by
+// valid_from. A price whose winning version is a removal takes no part.
 
 // versionInForce is the price version in force for a reader: at $2 in the
 // time domain of clock $3 (” is wall time), from the version list of p.

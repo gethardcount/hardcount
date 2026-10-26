@@ -192,9 +192,9 @@ function CreateOverrideDialog({ customerId, prices, existing, onClose, onCreated
           <DialogTitle>Add price override</DialogTitle>
           <DialogDescription>
             A negotiated rate for this customer on one plan price. It applies from this customer's
-            next billing period; the period in progress keeps the rate it started with. A subscription
-            that starts today without a trial has a first period from midnight, so it gets the rate from its
-            second period.
+            next billing period; the period in progress keeps the rate it started with. If the customer
+            subscribes to the plan or moves to it after you save, it applies from then, unless the same
+            subscription was on the plan earlier in that billing period. On a test clock, advance the clock first.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} noValidate className="space-y-4">
@@ -271,7 +271,9 @@ function DeleteOverrideDialog({ override, name, onClose, onDeleted }: {
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           <strong className="text-foreground">List price applies from the next billing period.</strong>{' '}
-          The period already in progress still bills the negotiated rate it started with.
+          The period already in progress still bills the negotiated rate it started with. If the customer
+          subscribes to the plan or moves to it after you end the override, list price applies from then,
+          unless the same subscription was on the plan earlier in that billing period.
         </p>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>

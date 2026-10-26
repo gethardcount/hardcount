@@ -298,23 +298,24 @@ func TestUsageWindow_TrialEndsAtMidnight_Unchanged(t *testing.T) {
 // TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce: a
 // spend threshold fires at 21:00 on the day the trial ended at 18:00. The
 // fire bills the usage from the trial end and says so on its line; the close
-// bills what came after the fire. A price edit at 12:00, after the
-// period opened, applies from the next period on both invoices (ADR-130): the
-// fire's window opens at the trial end but its price is pinned at the period
-// start.
+// bills what came after the fire. The plan is priced at the trial end, where
+// the first paid period starts (ADR-130 §4 step 3, amended 2026-10-26). A
+// price edit at 18:30, after that, applies from the next period on both
+// invoices: neither the fire's watermark nor the trial-end floor moves the
+// plan's pin.
 func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	trialEnd := dayAt(18, 0)
 	r.newTrialEndingAt(trialEnd)
-	plan := r.must(http.MethodGet, "/v1/plans/"+r.planA, dayAt(12, 0), nil, http.StatusOK)
+	plan := r.must(http.MethodGet, "/v1/plans/"+r.planA, dayAt(18, 30), nil, http.StatusOK)
 	priceID := flowStr(flowList(plan, "prices")[0], "id")
-	r.must(http.MethodPatch, "/v1/plans/"+r.planA+"/prices/"+priceID, dayAt(12, 0), map[string]any{
+	r.must(http.MethodPatch, "/v1/plans/"+r.planA+"/prices/"+priceID, dayAt(18, 30), map[string]any{
 		"mode": "per_unit", "unit_amount_cents": "2",
 	}, http.StatusOK)
-	// The database stamps the edit with its own clock; put it at 12:00 of
-	// the simulated day, after the period opened.
-	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(12, 0), priceID)
+	// The database stamps the edit with its own clock; put it at 18:30 of
+	// the simulated day, after the paid window opened at the trial end.
+	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(18, 30), priceID)
 	r.ingest(dayAt(10, 0), 40)
 	r.ingest(dayAt(19, 0), 7)
 	r.expireTrials(dayAt(19, 45))
@@ -337,7 +338,7 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 		t.Fatalf("%d threshold invoices, want 1", len(fire))
 	}
 	if got := fire[0].sum("usage"); got != 7 {
-		t.Errorf("threshold invoice usage = %dc, want 7c (7 calls at the period-start price, after the trial end)", got)
+		t.Errorf("threshold invoice usage = %dc, want 7c (7 calls at the trial end's price, after the trial end)", got)
 	}
 	wantUsageStarts(t, "threshold invoice", fire[0], trialEnd)
 
@@ -349,6 +350,40 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 		t.Errorf("usage over all live invoices = %dc, want 10c", got)
 	}
 	wantUsageBilledOnce(t)
+}
+
+// TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit: the trial
+// ends at 18:00 on day D, and the plan's price was edited at 12:00, during
+// the trial. The plan is priced at the trial end, where the first paid
+// period starts (ADR-130 §4 step 3, amended 2026-10-26), so the preview and
+// the first paid invoice bill the edited price.
+//
+// Mutation: pin every plan at the period start, and both bill the old
+// price.
+func TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit(t *testing.T) {
+	skipShort(t)
+	r := newLagRigBare(t, "in_arrears", 0)
+	r.newTrialEndingAt(dayAt(18, 0))
+	plan := r.must(http.MethodGet, "/v1/plans/"+r.planA, dayAt(12, 0), nil, http.StatusOK)
+	priceID := flowStr(flowList(plan, "prices")[0], "id")
+	edit := r.must(http.MethodPatch, "/v1/plans/"+r.planA+"/prices/"+priceID, dayAt(12, 0), map[string]any{
+		"mode": "per_unit", "unit_amount_cents": "2",
+	}, http.StatusOK)
+	if flowStr(edit, "effective") != "next_period" {
+		t.Fatalf("edit during the trial: effective %q, want next_period (the plan is used)", flowStr(edit, "effective"))
+	}
+	// The database stamps the edit with its own clock; put it at 12:00 of
+	// the simulated day, during the trial.
+	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(12, 0), priceID)
+	r.ingest(dayAt(19, 0), 7)
+
+	if got := r.previewUsage(dayAt(19, 30)); got != 14 {
+		t.Errorf("preview usage = %dc, want 14c: 7 calls at the price edited during the trial", got)
+	}
+	r.expireTrials(dayAt(19, 45))
+	if got := r.closePeriod(uwDay).sum("usage"); got != 14 {
+		t.Errorf("first paid invoice usage = %dc, want 14c: 7 calls at the price edited during the trial", got)
+	}
 }
 
 // TestUsageWindow_ItemThresholdAfterTrial_CountsUsageFromTrialEnd: an item

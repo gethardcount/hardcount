@@ -1950,7 +1950,9 @@ export interface paths {
          * @description On a plan no subscription has used, the price applies at once
          *     (`effective: now`). On a used plan it applies from each
          *     subscriber's next billing period (`effective: next_period`); until
-         *     then the plan's other prices bill the meter's usage as before.
+         *     then the plan's other prices bill the meter's usage as before. A
+         *     subscriber who first joins the plan in a period after the add pays
+         *     it from the join (see `PriceWrite`).
          *
          *     A price that names a removed price's meter and `dimension_match`
          *     adds that price back under its id. Its old customer overrides do
@@ -1977,10 +1979,13 @@ export interface paths {
          * Remove a price from a plan
          * @description On a plan no subscription has used, the price is gone at once. On a
          *     used plan it takes no part from each subscriber's next billing
-         *     period; the current period keeps it. The removal ends every customer
-         *     override of the price, each when the removal takes effect for its
-         *     customer, and the answer names them (`ended_overrides`). Adding the
-         *     price back later keeps its id but not the overrides.
+         *     period; the current period keeps it. A subscriber who first joins the
+         *     plan in a period after the removal does not pay it (see
+         *     `PriceWrite`). The removal
+         *     ends every customer override of the price, each when the removal
+         *     takes effect for its customer, and the answer names them
+         *     (`ended_overrides`). Adding the price back later keeps its id but not
+         *     the overrides.
          */
         delete: operations["removePlanPrice"];
         options?: never;
@@ -1991,8 +1996,9 @@ export interface paths {
          *     identity and cannot change: add a price for other events instead.
          *     On a plan no subscription has used, the change applies at once; on
          *     a used plan, from each subscriber's next billing period. The current
-         *     period keeps the price it started with. Customer overrides of the
-         *     price keep applying.
+         *     period keeps the price it started with. A subscriber who first joins
+         *     the plan in a period after the change pays it from the join (see
+         *     `PriceWrite`). Customer overrides of the price keep applying.
          */
         patch: operations["updatePlanPrice"];
         trace?: never;
@@ -6305,13 +6311,14 @@ export interface paths {
          *     active override for that price, it is closed and replaced by this
          *     one. A new or replaced rate applies from the customer's next
          *     billing period, in the customer's time (its test clock's, if it has
-         *     one); the current period keeps the rate it started with. A
-         *     subscription that starts without a trial has a first period from
-         *     midnight of its first day. So an override created on the day the
-         *     customer's subscription starts, before or after it, applies from
-         *     its second period: the first period bills the price's rate. To
-         *     bill the first period at the override, create it on an earlier day.
-         *     The override takes the plan's currency. A plan swap does not carry
+         *     one); the current period keeps the rate it started with. It applies
+         *     from the join when a subscription of the customer first joins the
+         *     plan in a period after it is created: an override created before a
+         *     subscription starts (after a trial, before the trial ends), even on
+         *     the same day, applies from its first period. On a test clock, it takes effect just after the
+         *     clock's time, so a subscription created at that same clock time
+         *     bills the list price; advance the clock first. The override takes
+         *     the plan's currency. A plan swap does not carry
          *     it: the new plan's price is another price.
          */
         post: operations["createPriceOverride"];
@@ -6335,7 +6342,10 @@ export interface paths {
          * End a customer price override
          * @description Marks the override inactive. The row is kept. The customer goes back
          *     to the price's rate from its next billing period, in the customer's
-         *     time; the current period keeps the rate it started with.
+         *     time; the current period keeps the rate it started with. A
+         *     subscription of the customer that first joins the plan in a period
+         *     after the override ends (a new subscription, an immediate plan
+         *     change, an added item) pays the price's rate from the join.
          */
         delete: operations["deletePriceOverride"];
         options?: never;
@@ -6940,7 +6950,8 @@ export interface components {
              * @description Whether a subscription has ever used the plan (canceled ones
              *     and scheduled plan changes included). On a plan no one has
              *     used, a price change applies at once; on a used plan, from
-             *     each subscriber's next billing period.
+             *     each subscriber's next billing period, and from the join for
+             *     a subscriber who first joins the plan in a period after it.
              */
             used: boolean;
             /**
@@ -7019,17 +7030,17 @@ export interface components {
          *     `now`: no subscription has used the plan, so it applies at once.
          *     `next_period`: each subscriber pays the new content from their next
          *     billing period; the current period keeps the prices it started with.
-         *     A period is priced by the prices in force at its start, and a
-         *     subscription that starts without a trial has a first period from
-         *     midnight of its first day. So one that starts later on the day of
-         *     the write gets it from its second period: its first period still
-         *     bills a price removed that day and does not bill one added that day.
-         *     A subscription that moves to the plan mid-period (an immediate plan
-         *     change or an added item) gets it from its next period too: the rest
-         *     of its current period is priced by the plan's prices at that
-         *     period's start. An immediate change from a plan with another
-         *     billing interval is the exception: it starts a new period at the
-         *     change, so it gets the write at once.
+         *     A subscriber who first joins the plan in a period after the write
+         *     gets it from the join: a subscription that starts after it (after a
+         *     trial, from the trial's end), an immediate plan change onto the
+         *     plan, or an item added on it. Each is priced from that moment by the
+         *     plan's prices then, so a subscription that starts later on the day
+         *     of the write bills a price added that day and not one removed that
+         *     day. A subscription that was on the plan earlier in the period and
+         *     joins it again keeps the prices of its first join until its next
+         *     period. On a test clock, the write takes effect just after the
+         *     clock's time: a subscriber who joins at that same clock time gets
+         *     the earlier prices.
          */
         PriceWrite: components["schemas"]["PlanPrice"] & {
             /** @enum {string} */
@@ -9233,8 +9244,9 @@ export interface components {
             /**
              * Format: date-time
              * @description When the override starts, in the customer's time: wall time, or
-             *     its test clock's time. A billing period is priced at its start,
-             *     so the override applies from the customer's next period.
+             *     its test clock's time. A subscription already on the plan gets
+             *     it from its next period; one that first joins the plan in a
+             *     period after this instant gets it from the join.
              */
             created_at: string;
             /**

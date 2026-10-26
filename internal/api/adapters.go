@@ -1691,6 +1691,7 @@ type usageOpenPeriods struct {
 
 type usageLiveSubscriptions interface {
 	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error)
+	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
 }
 
 type usageMeterReader interface {
@@ -1704,20 +1705,25 @@ type usageThresholdReader interface {
 
 // OpenPeriods reads every active and trialing subscription of the customer
 // (one transaction), the threshold watermarks of each one's current period,
-// and in one more transaction the meters each one's plans price at its
-// period start and, for the plans that continue, at its period end (the next
-// period's pin), in its own time domain (ADR-130 §4). The watermarks are
-// read whether or not the subscription still has thresholds: the close keys
-// them on the period's threshold invoices, not on the setting.
+// and in one more transaction the meters each current plan prices at its
+// pin of the period and, for the plans that continue, at the period end (the
+// next period's pin), in the subscription's own time domain (ADR-130 §4). A
+// plan's pin is the one the close prices it at (billing.PlanPins): the period
+// start, or the first instant in the period the subscription had an item on
+// the plan. It reads a subscription's billing intervals only when one of its
+// items joined its plan in the period. The watermarks are read whether or
+// not the subscription still has thresholds: the close keys them on the
+// period's threshold invoices, not on the setting.
 func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
 	subs, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list live subscriptions: %w", err)
 	}
 	type subPins struct {
-		sub            domain.Subscription
-		wm             usage.ThresholdWatermark
-		atStart, atEnd map[string]int // plan id → index in pins
+		sub   domain.Subscription
+		wm    usage.ThresholdWatermark
+		atPin map[string]int // plan id → index in pins, at its pin of the period
+		atEnd map[string]int // plan id → index in pins
 	}
 	var (
 		pins []pricing.PlanPin
@@ -1728,25 +1734,31 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 			continue
 		}
 		start, end := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
-		sp := subPins{sub: sub, atStart: map[string]int{}, atEnd: map[string]int{}}
+		sp := subPins{sub: sub, atPin: map[string]int{}, atEnd: map[string]int{}}
 		sp.wm.BilledThrough, sp.wm.PaidThrough, err = a.thresholds.ThresholdWatermarks(ctx, tenantID, sub.ID, start, end)
 		if err != nil {
 			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
 		}
+		planPins, err := billing.PlanPins(sub, start, end, func() ([]domain.ItemInterval, error) {
+			return a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
+		})
+		if err != nil {
+			return nil, err
+		}
 		for _, it := range sub.Items {
-			for _, r := range []struct {
-				planID string
-				at     time.Time
-				into   map[string]int
-			}{{it.PlanID, start, sp.atStart}, {it.PlanID, end, sp.atEnd}, {it.PendingPlanID, end, sp.atEnd}} {
-				if r.planID == "" {
+			if _, done := sp.atPin[it.PlanID]; it.PlanID != "" && !done {
+				sp.atPin[it.PlanID] = len(pins)
+				pins = append(pins, pricing.PlanPin{PlanID: it.PlanID, At: planPins[it.PlanID], ClockID: sub.TestClockID})
+			}
+			for _, planID := range []string{it.PlanID, it.PendingPlanID} {
+				if planID == "" {
 					continue
 				}
-				if _, done := r.into[r.planID]; done {
+				if _, done := sp.atEnd[planID]; done {
 					continue
 				}
-				r.into[r.planID] = len(pins)
-				pins = append(pins, pricing.PlanPin{PlanID: r.planID, At: r.at, ClockID: sub.TestClockID})
+				sp.atEnd[planID] = len(pins)
+				pins = append(pins, pricing.PlanPin{PlanID: planID, At: end, ClockID: sub.TestClockID})
 			}
 		}
 		read = append(read, sp)
@@ -1760,14 +1772,14 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 		return nil, fmt.Errorf("meters of the plans: %w", err)
 	}
 	for _, sp := range read {
-		atStart, atEnd := map[string][]string{}, map[string][]string{}
-		for planID, i := range sp.atStart {
-			atStart[planID] = meters[i]
+		atPin, atEnd := map[string][]string{}, map[string][]string{}
+		for planID, i := range sp.atPin {
+			atPin[planID] = meters[i]
 		}
 		for planID, i := range sp.atEnd {
 			atEnd[planID] = meters[i]
 		}
-		if p, ok := usage.OpenPeriodOf(sp.sub, atStart, atEnd, sp.wm); ok {
+		if p, ok := usage.OpenPeriodOf(sp.sub, atPin, atEnd, sp.wm); ok {
 			out = append(out, p)
 		}
 	}

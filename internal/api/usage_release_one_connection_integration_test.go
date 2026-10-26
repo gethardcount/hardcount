@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -29,6 +30,11 @@ func (s releaseSubs) ListLiveByCustomer(context.Context, string, string) ([]doma
 		CurrentBillingPeriodStart: &s.start, CurrentBillingPeriodEnd: &s.end, StartedAt: &started,
 		Items: []domain.SubscriptionItem{{PlanID: "pln_release"}},
 	}}, nil
+}
+
+// ListItemIntervals is not read: the item joined its plan before the period.
+func (s releaseSubs) ListItemIntervals(context.Context, string, string) ([]domain.ItemInterval, error) {
+	return nil, errors.New("billing intervals read for a subscription whose items joined before the period")
 }
 
 // releasePricing reads meters from the store and answers that plan

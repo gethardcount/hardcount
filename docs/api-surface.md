@@ -77,7 +77,9 @@ Before you send usage, read [the retry rules](#sending-usage-safely).
 **A price belongs to a plan.** Two plans can price one meter differently.
 When an event fits more than one price of the plan, the price with the most
 labels takes it. On a plan no subscription has used, a price change applies
-at once; on a used plan, from each subscriber's next billing period.
+at once; on a used plan, from each subscriber's next billing period, and
+from the join for a subscriber who first joins the plan in a period after
+it.
 
 **A price has one `mode`:**
 
