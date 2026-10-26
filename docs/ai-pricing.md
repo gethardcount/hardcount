@@ -221,7 +221,8 @@ jq -n --arg meter "$METER_ID" \
     -d @- | jq -c '{dimension_match, effective}'
 ```
 
-**You see:**
+**You see,** on a plan a subscription has used (on an unused plan,
+`effective` is `now`):
 `{"dimension_match":{"model":"claude-opus-4-9","token_type":"input"},"effective":"next_period"}`
 
 If a later release learns the model and renames it, the price stops
@@ -249,7 +250,8 @@ jq -n --arg meter "$METER_ID" \
     -d @- | jq -c '{dimension_match, effective}'
 ```
 
-**You see:**
+**You see,** on a plan a subscription has used (on an unused plan,
+`effective` is `now`):
 `{"dimension_match":{"model":"claude-opus-4.6","model_raw":"vertex_ai/claude-opus-4-6@default","token_type":"input"},"effective":"next_period"}`
 
 - Keep `model` in the price. `{model_raw, token_type}` beside the recipe's
