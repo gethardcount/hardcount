@@ -1183,19 +1183,18 @@ func (e *Engine) loadUsageFloors(ctx context.Context, sub domain.Subscription, f
 // splitting it double-bills. With no watermark full is empty and only
 // clamped is used.
 //
-// A window whose meter is priced alike at an earlier pin of its plan is
-// billed under that pin (alike, from pricedAlike), so the two are one window.
-// A meter's usage at one instant is in one window (oneWindowPerInstant).
-// Callers still run mergeUsageIntervals on each key.
+// A meter's usage at one instant is in one window (oneWindowPerInstant),
+// decided by each window's own pin. Only then is a window whose meter is
+// priced alike at an earlier pin of its plan billed under that pin (alike,
+// from pricedAlike): re-keyed first, it would take the earlier pin's place
+// and absorb a window priced differently in between. Callers still run
+// mergeUsageIntervals on each key; time that touches merges into one range.
 func meterUsageIntervals(stretches []planStretch, planMeters map[planPin][]string, alike alikePins, billedThrough *time.Time, floors usageFloors) (clamped, full map[planMeter][]usageInterval) {
 	clamped = map[planMeter][]usageInterval{}
 	full = map[planMeter][]usageInterval{}
 	for _, st := range stretches {
 		for _, mid := range planMeters[planPin{planID: st.planID, pin: st.pin}] {
 			k := planMeter{planID: st.planID, meterID: mid, pin: st.pin}
-			if pin, ok := alike[k]; ok {
-				k.pin = pin
-			}
 			s := floors.start(mid, st.start, st.end)
 			if billedThrough != nil && st.end.After(s) {
 				full[k] = append(full[k], usageInterval{s, st.end})
@@ -1214,7 +1213,20 @@ func meterUsageIntervals(stretches []planStretch, planMeters map[planPin][]strin
 	}
 	oneWindowPerInstant(clamped)
 	oneWindowPerInstant(full)
-	return clamped, full
+	return underAlikePins(clamped, alike), underAlikePins(full, alike)
+}
+
+// underAlikePins is windows with each key that alike maps billed under the
+// pin it maps to.
+func underAlikePins(windows map[planMeter][]usageInterval, alike alikePins) map[planMeter][]usageInterval {
+	out := make(map[planMeter][]usageInterval, len(windows))
+	for k, ivs := range windows {
+		if pin, ok := alike[k]; ok {
+			k.pin = pin
+		}
+		out[k] = append(out[k], ivs...)
+	}
+	return out
 }
 
 // oneWindowPerInstant leaves each instant of a meter's usage in one window

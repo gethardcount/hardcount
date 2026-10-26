@@ -251,17 +251,28 @@ item of #1386. Step 3 changes; the other steps stay.
   merged, so without this rule the time before the removal was billed once
   per window (review of #1388). Across two plans that double bill was older
   than this amendment; the same rule ends it.
-- Two windows of one plan and meter that are priced alike are one window.
-  Priced alike means the meter's prices at the two pins are the same, each
-  with the customer's override in force applied: the same prices, events
-  and shapes. The later window is billed under the earlier pin. So an item
-  that leaves a plan and an item added on it later in the period, with no
-  change to that meter's prices in between, bill as one item would: a `max`
-  or `last` meter bills its peak once, and graduated tiers run on. Each
-  meter is compared on its own, so an edit to another meter of the plan
-  does not split them. When the meter's prices differ, the windows stay
-  apart, and each bills its own peak and starts its own tiers (second
-  review of #1388).
+- Two windows of one plan and meter that are priced alike are billed under
+  one pin. Priced alike means the meter's prices at the two pins are the
+  same, each with the customer's override in force applied: the same
+  prices, events and shapes. The later window is billed under the earlier
+  pin. Each meter is compared on its own, so an edit to another meter of
+  the plan does not split them (second review of #1388).
+- The re-key comes after the one-window-per-instant step, which orders
+  windows by their own pins. Re-keyed first, a later window took the
+  earlier pin's place and absorbed a window priced differently in between.
+  A meter moved from plan A to plan C and back on a period's first day
+  billed C's usage at A's prices (third review of #1388).
+- Time billed under one pin is rated as one window only where it touches.
+  An item added on the period's first day bills from the period start
+  (ADR-012), so its time starts where the item before it left. If that
+  item was on the same plan and the meter's prices did not change in
+  between, the two bill as one item would. A `max` or `last` meter bills
+  its peak once, and graduated tiers run on.
+- Time with a gap between is rated as separate windows, as before this
+  amendment. An item re-added later in the period bills its own peak and
+  starts its own tiers. So does a first-day re-add after a window priced
+  differently. When the meter's prices differ, the windows stay apart, and
+  each bills its own peak and starts its own tiers.
 - Every pin is a stored instant (`started_at`, `trial_end_at`, a billing
   interval's start, an item's `created_at`), so all readers agree on it. A
   subscription create, an immediate swap and an item add hold their plans

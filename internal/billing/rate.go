@@ -251,11 +251,13 @@ func stretchMeters(ctx context.Context, src PriceSource, sub domain.Subscription
 // alikePins maps a window key of a period to the key's pin it is billed
 // under, when the two differ: the earliest pin of the same plan and meter at
 // which the meter's prices, each with the customer's override in force
-// applied, are the same as at its own pin. Windows of one plan and meter
-// priced alike are one window, so a max meter bills its peak once and tiers
-// run on across them: an item that leaves a plan and an item added on it
-// later in the period, with no change to the meter's prices in between, bill
-// as one item would. A key with no entry is billed under its own pin.
+// applied, are the same as at its own pin. Windows billed under one pin whose
+// time touches are rated as one window, so a max meter bills its peak once
+// and tiers run on across them: an item that leaves a plan and an item added
+// on it on the period's first day, which bills from the period start
+// (ADR-012), with no change to the meter's prices in between, bill as one
+// item would. Time with a gap between is rated as separate windows. A key
+// with no entry is billed under its own pin.
 type alikePins map[planMeter]ratePin
 
 // pricedAlike is the alikePins of planMeters, for customerID. It reads each

@@ -565,6 +565,52 @@ func TestE2E_PlanPrices_ItemOffAndBackPricedAlike(t *testing.T) {
 	}
 }
 
+// TestE2E_PlanPrices_ItemOffAndBackLaterInThePeriod: on a test clock, an
+// item on a plan is removed on day 3 of a period and an item on the plan is
+// added on day 6, with no price change. The time in between is on no item,
+// so the two parts do not touch, and each bills on its own (as the pricing
+// guide says): the peak (max) meter bills each part's peak, and the calls'
+// free tier is granted to each part.
+//
+// Mutation: merge a key's ranges across a gap into one window, and the peak
+// bills once and the free tier is granted once.
+func TestE2E_PlanPrices_ItemOffAndBackLaterInThePeriod(t *testing.T) {
+	j := newJoinRig(t, "item off and back later", true)
+	peak, calls, tokens := j.meter("peak", "max"), j.meter("calls", "sum"), j.meter("tokens", "sum")
+	planA, aIDs := j.plan("plan_a", perUnit(peak, "1", nil), graduated(calls, 10, "0", "2"))
+	planB, _ := j.plan("plan_b", perUnit(tokens, "2", nil))
+	peakA, callsA := aIDs[0], aIDs[1]
+	cust := j.cust("pp-off-back-later")
+	subID, p0, p1 := j.subscribeItems(cust, planA, planB)
+	first := j.before(p0)
+	j.ingest(time.Time{}, "pp-off-back-later", "peak", 10, first, nil)
+	j.ingest(time.Time{}, "pp-off-back-later", "calls", 10, first, nil)
+
+	j.now = p0.Add(3 * 24 * time.Hour)
+	j.advance(j.clk, j.now)
+	j.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+subID+"/items/"+j.item(subID, planA), nil, http.StatusNoContent)
+	j.now = p0.Add(6 * 24 * time.Hour)
+	j.advance(j.clk, j.now)
+	j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
+	at := j.soon()
+	j.ingest(time.Time{}, "pp-off-back-later", "peak", 10, at, nil)
+	j.ingest(time.Time{}, "pp-off-back-later", "calls", 10, at, nil)
+
+	j.agreeOpen("item off and back later in the period", cust, subID, 20)
+	j.closeAt(p1.Add(time.Hour))
+	got := map[string]int64{}
+	peakLines := 0
+	for _, l := range j.cycle(subID, p0).usage() {
+		got[l.priceID] += l.amount
+		if l.priceID == peakA {
+			peakLines++
+		}
+	}
+	if got[peakA] != 20 || peakLines != 2 || got[callsA] != 0 {
+		t.Errorf("peak %dc on %d lines, calls %dc; want each part on its own: peak 20c on 2 lines (10 each), calls 0c (10 free in each part)", got[peakA], peakLines, got[callsA])
+	}
+}
+
 // lateJoiner is the shared start of the stories below: a subscriber on the
 // plan from before a price edit (early), and one that subscribes after it the
 // same day (late), each with usage at the start of their first period.

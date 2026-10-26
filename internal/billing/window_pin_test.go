@@ -104,9 +104,9 @@ func (p pinPrices) Price(_ context.Context, _, _ string, price domain.PlanPrice,
 	return price, nil
 }
 
-// Windows of one plan and meter priced alike are one window: a later pin at
-// which the meter's prices, overrides applied, are the same as at an earlier
-// one maps to the earlier one. Each meter is compared on its own, a price
+// Windows of one plan and meter priced alike are billed under one pin: a
+// later pin at which the meter's prices, overrides applied, are the same as
+// at an earlier one maps to the earlier one. Each meter is compared on its own, a price
 // with an equal shape written as other digits is alike, and a changed rate,
 // an override or a new price on the meter is not.
 //

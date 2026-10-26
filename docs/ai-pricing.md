@@ -182,10 +182,12 @@ they were on it then, so:
   joins the plan after it was created, and otherwise from the next period.
   So one created before a subscription starts (after a trial, before the
   trial ends), even on the same day, applies from its first period.
-- When an item leaves a plan and another item joins it in the same period,
-  a meter whose prices did not change in between bills the two as one: a
-  `max` meter bills one peak, and tiers run on. If the meter's prices
-  changed, each item's part bills on its own, with its own peak and tiers.
+- When an item leaves a plan and another item joins it later in the
+  period, each item's part bills on its own, with its own peak and tiers.
+  An item added on the period's first day bills from the period start, so
+  its part starts where the part before it ended. If those two parts are
+  on one plan and the meter's prices did not change in between, they bill
+  as one: a `max` meter bills one peak, and tiers run on.
 - On a test clock, a change or an override takes effect just after the
   clock's current time. A subscription, an immediate plan change or an
   added item at that same clock time gets the earlier prices, so advance
