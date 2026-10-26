@@ -229,3 +229,76 @@ func TestBillingStatus_HeldReleaseCountsTheUnbilledMetric(t *testing.T) {
 		t.Errorf("%s{reason=no_price,origin=backfill} moved by %v, want 1", unbilledMetric, got)
 	}
 }
+
+// TestBillingStatus_TrialCanceledAtPeriodEnd: the trial ends at 18:00 on day
+// D and a cancel at period end is scheduled at 10:00. A trialing
+// subscription with a cancel at period end is canceled free at its trial end
+// (ADR-069): no invoice bills its usage. Until the expiry scan runs, it is
+// still trialing, so an event after the trial end, and one inside the future
+// skew before it, are outside_subscription. The scan then cancels it at the
+// trial end, and no invoice bills any usage.
+//
+// Mutation check: end the subscription's billed time at cancel_at only, not
+// at the derived cancel instant → both events carry no status.
+func TestBillingStatus_TrialCanceledAtPeriodEnd(t *testing.T) {
+	skipShort(t)
+	r := newLagRigBare(t, "in_arrears", 0)
+	r.newTrialEndingAt(dayAt(18, 0))
+	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/schedule-cancel", dayAt(10, 0),
+		map[string]any{"at_period_end": true}, http.StatusOK)
+
+	out := r.postLabelled("calls", "skew-1802", dayAt(18, 2), dayAt(17, 58), 3, nil)
+	wantStatus(t, "event after the trial end, sent inside the skew before it", out, "outside_subscription")
+	out = r.postLabelled("calls", "after-1830", dayAt(18, 30), dayAt(18, 40), 7, nil)
+	if s := r.sub(); s.Status != domain.SubscriptionTrialing {
+		t.Fatalf("status when the event arrived = %s, want trialing (the expiry scan has not run)", s.Status)
+	}
+	wantStatus(t, "event after the trial end, before the expiry scan", out, "outside_subscription")
+
+	r.clk.Set(dayAt(19, 0))
+	if _, errs := r.srv.SubscriptionSvc.ProcessExpiredTrials(uwCtx(dayAt(19, 0)), 100); len(errs) != 0 {
+		t.Fatalf("trial expiry: %v", errs)
+	}
+	if s := r.sub(); s.Status != domain.SubscriptionCanceled {
+		t.Fatalf("status after the expiry scan = %s, want canceled", s.Status)
+	}
+	r.run(dayAt(20, 0))
+	if got := usageBilled(r.invoices()); got != 0 {
+		r.logInvoices(r.invoices())
+		t.Errorf("usage billed = %dc, want 0c: the trial canceled free at its end", got)
+	}
+}
+
+// TestBillingStatus_AfterCloseOnAPlanSwappedAwayAtTheBoundary: the
+// subscription is on plan A (prices calls) in April, with a change to plan C
+// (no meter) scheduled for May 1. April's invoice bills calls on plan A. An
+// April event sent after that invoice is after_close: its period was
+// invoiced, whatever plan the subscription is on now. It is not not_on_plan,
+// which would say that adding a price to the plan bills it.
+//
+// Mutation check: answer an invoiced period by the current plans' meters →
+// the April event is not_on_plan.
+func TestBillingStatus_AfterCloseOnAPlanSwappedAwayAtTheBoundary(t *testing.T) {
+	skipShort(t)
+	r := newLagRigWith(t, "in_arrears", false, WithInvoiceGrace(e2eGrace))
+	r.ingest(lagP0.AddDate(0, 0, 3), 5)
+	r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, lagP0.AddDate(0, 0, 9),
+		map[string]any{"new_plan_id": r.planC, "immediate": false}, http.StatusOK)
+	r.run(lagB.Add(2 * time.Hour))
+	if s := r.sub(); s.Items[0].PlanID != r.planC {
+		t.Fatalf("plan after April's close = %s, want plan C", s.Items[0].PlanID)
+	}
+
+	n0 := unbilledCount(t, "after_close", "api")
+	out := r.postLabelled("calls", "april-late", lagP0.AddDate(0, 0, 20), lagB.Add(3*time.Hour), 6, nil)
+	wantStatus(t, "April event after April's invoice, now on a plan without the meter", out, "after_close")
+	if got := unbilledCount(t, "after_close", "api") - n0; got != 1 {
+		t.Errorf("%s{reason=after_close,origin=api} moved by %v, want 1", unbilledMetric, got)
+	}
+
+	invs := r.invoices()
+	if got := r.cycleInvoice(invs, lagP0).sum("usage"); got != 5 {
+		r.logInvoices(invs)
+		t.Errorf("April usage = %dc, want 5c: plan A billed calls, not the late event", got)
+	}
+}

@@ -159,7 +159,9 @@ func TestClassify(t *testing.T) {
 		{"invoiced period, labels no price takes", opApr.AddDate(0, 0, 20), "m", map[string]any{"model": "b"}, []OpenPeriod{labelled}, sum, AfterClose},
 		{"invoiced period, one instant before the start", opMay.Add(-time.Nanosecond), "m", nil, []OpenPeriod{may}, sum, AfterClose},
 		{"the start itself is open", opMay, "m", nil, []OpenPeriod{may}, sum, InOpen},
-		{"invoiced period, meter not priced", opApr.AddDate(0, 0, 20), "x", nil, []OpenPeriod{may}, sum, NotOnPlan},
+		// Review round 2 on #1390: an invoiced period is answered as such,
+		// whatever the current plans price. Adding a price never bills it.
+		{"invoiced period, meter not priced now", opApr.AddDate(0, 0, 20), "x", nil, []OpenPeriod{may}, sum, AfterClose},
 		{"before the subscription started", opApr.AddDate(0, -2, 0), "m", nil, []OpenPeriod{may}, sum, Outside},
 		{"in the trial", opApr.AddDate(0, 0, 3), "m", nil, []OpenPeriod{withTrial}, sum, Outside},
 		{"after the trial, invoiced", opApr.AddDate(0, 0, 20), "m", nil, []OpenPeriod{withTrial}, sum, AfterClose},
@@ -299,6 +301,19 @@ func TestOpenPeriodOf(t *testing.T) {
 	cancelAt.CancelAt = opAt(opJun)
 	if p, _ := OpenPeriodOf(cancelAt, stretches, windows, plans, plans, ThresholdWatermark{}); p.Next != nil || p.Ends == nil || !p.Ends.Equal(opJun) {
 		t.Errorf("cancel_at at the end: next %v ends %v, want nil and the cancel", p.Next, p.Ends)
+	}
+
+	// Review round 2 on #1390: a trialing subscription with a cancel at
+	// period end is canceled free at its trial end (ADR-069), so its billed
+	// time ends there.
+	trialCancel := base
+	trialCancel.Status = domain.SubscriptionTrialing
+	trialCancel.TrialEndAt = opAt(opMay.Add(18 * time.Hour))
+	trialCancel.CancelAtPeriodEnd = true
+	if p, _ := OpenPeriodOf(trialCancel, stretches, windows, plans, plans, ThresholdWatermark{}); p.Ends == nil || !p.Ends.Equal(*trialCancel.TrialEndAt) || p.Next != nil {
+		t.Errorf("trialing, cancel at period end: ends %v next %v, want the trial end and nil", p.Ends, p.Next)
+	} else if c, _ := classify(opMay.Add(19*time.Hour), "m", nil, []OpenPeriod{p}, nil); c != Outside {
+		t.Errorf("trialing, cancel at period end: after the trial end = %v, want Outside", c)
 	}
 
 	trial := base

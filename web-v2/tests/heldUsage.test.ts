@@ -1,6 +1,6 @@
 // Held usage notice (#1044): one line per external ID that says what is held
 // and why, and a release summary that never claims rows will be invoiced
-// when they fall outside the current billing period.
+// when no invoice will bill them.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { canRelease, groupHeldByCustomer, heldLine, heldNextStep, heldUnlisted, releaseSummary } from '../src/lib/heldUsage.ts'
@@ -55,7 +55,10 @@ test('the release summary says which rows a subscription invoice will not includ
   const s = releaseSummary({ customer_id: 'c', released: 3, deduplicated: 1, still_held: 0, more_to_release: 0, in_open_period: 1, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 2 })
   assert.equal(s.title, 'Released 4 usage rows')
   assert.match(s.description, /1 fall in a billing period not invoiced yet and will be invoiced/)
-  assert.match(s.description, /2 fall outside the current billing period.*one-off invoice/)
+  // Review round 2 (#1390): these rows include trial time and time after a
+  // cancel inside the current period, and no invoice will bill any of them.
+  assert.match(s.description, /2 fall in time no subscription bills \(before it starts, in a free trial, or after it ends\) or in time already invoiced, so no subscription invoice includes them\. Bill them with a one-off invoice if needed\./)
+  assert.doesNotMatch(s.description, /current billing period|not built yet/)
   assert.match(s.description, /1 were already recorded/)
 
   const none = releaseSummary({ customer_id: 'c', released: 0, deduplicated: 0, still_held: 2, more_to_release: 0, in_open_period: 0, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 0, outside_open_period: 0 })

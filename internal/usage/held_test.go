@@ -17,8 +17,8 @@ import (
 // A released row is "in an open period" only inside an active or trialing
 // subscription's CURRENT period. Before the subscription started it is
 // outside; in an earlier period whose invoice is built it is outside too
-// when the plan prices its meter (after_close), and not_on_plan when it does
-// not: Velox never re-times usage onto a later invoice (ADR-120). Inside the
+// (after_close), whatever its plan prices now: Velox never re-times usage
+// onto a later invoice (ADR-120). Inside the
 // period it is invoiced only when a price of the plan takes it; it is
 // no_price when the plan prices its meter but no price takes its labels, and
 // not_on_plan when the plan does not price its meter. A row at or after the
@@ -71,7 +71,7 @@ func TestCountReleased(t *testing.T) {
 		{"active, plan prices the meter", []sub{{s: active}}, rows, ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
 		// Review finding (#1151): a plan without the meter used to count
 		// these as "will be invoiced".
-		{"active, plan does not price the meter", []sub{{s: seatsOnly}}, rows, ReleaseResult{NotOnPlan: 5}},
+		{"active, plan does not price the meter", []sub{{s: seatsOnly}}, rows, ReleaseResult{NotOnPlan: 4, OutsideOpenPeriod: 1}},
 		{"two subscriptions, one prices it", []sub{{s: seatsOnly}, {s: active}}, rows, ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
 		{"active, cancels at the period end", []sub{{s: ending}}, rows, ReleaseResult{InOpenPeriod: 3, OutsideOpenPeriod: 2}},
 		// Review finding 3 on #1350: the release ignored the watermark.
@@ -115,8 +115,8 @@ func TestCountReleased(t *testing.T) {
 	p, _ := OpenPeriodOf(active, []Stretch{{PlanID: "pln_tokens", From: start, To: end}}, nil, nil, nil, ThresholdWatermark{})
 	var got ReleaseResult
 	countReleased(&got, rows, []OpenPeriod{p}, sum)
-	if got != (ReleaseResult{NotOnPlan: 5}) {
-		t.Errorf("no plans: %+v, want not_on_plan 5", got)
+	if got != (ReleaseResult{NotOnPlan: 4, OutsideOpenPeriod: 1}) {
+		t.Errorf("no plans: %+v, want not_on_plan 4 and the invoiced row outside", got)
 	}
 }
 

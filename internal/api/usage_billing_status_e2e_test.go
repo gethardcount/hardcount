@@ -144,8 +144,9 @@ func TestBillingStatus_OutsideSubscription_SameDaySubscriptionBillsIt(t *testing
 }
 
 // TestBillingStatus_NotOnPlan: an event of a meter the subscription's plan
-// does not price is answered not_on_plan, in the open period and in an
-// invoiced one; the invoices leave it out.
+// does not price is answered not_on_plan in the open period. In an invoiced
+// period it is after_close, as a priced meter's is: adding a price would not
+// bill it. The invoices leave both out.
 //
 // Mutation check: answer no status for NotOnPlan → absent.
 func TestBillingStatus_NotOnPlan(t *testing.T) {
@@ -161,12 +162,12 @@ func TestBillingStatus_NotOnPlan(t *testing.T) {
 
 	r.run(lagB.Add(2 * time.Hour))
 	out = r.postLabelled("seats", "seats-late", lagP0.AddDate(0, 0, 20), lagB.Add(3*time.Hour), 6, nil)
-	wantStatus(t, "unpriced meter in the invoiced period", out, "not_on_plan")
+	wantStatus(t, "unpriced meter in the invoiced period", out, "after_close")
 	out = r.postLabelled("calls", "calls-late", lagP0.AddDate(0, 0, 20), lagB.Add(3*time.Hour), 6, nil)
 	wantStatus(t, "priced meter in the invoiced period", out, "after_close")
 
-	if got := unbilledCount(t, "not_on_plan", "api") - n0; got != 2 {
-		t.Errorf("%s{reason=not_on_plan,origin=api} moved by %v, want 2", unbilledMetric, got)
+	if got := unbilledCount(t, "not_on_plan", "api") - n0; got != 1 {
+		t.Errorf("%s{reason=not_on_plan,origin=api} moved by %v, want 1", unbilledMetric, got)
 	}
 	r.run(lagP2.Add(2 * time.Hour))
 	if got := usageBilled(r.invoices()); got != 4 {
