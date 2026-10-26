@@ -2,6 +2,9 @@ package billing
 
 import (
 	"context"
+	"fmt"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,4 +185,61 @@ func TestMeterUsageIntervals_AlikePinsAreOneWindow(t *testing.T) {
 			t.Errorf("%s = %v, want one window [%v, %v)", name, ivs, start, pe)
 		}
 	}
+}
+
+// A window priced alike to an earlier pin does not take that pin's place in
+// the one-window-per-instant order. On a period's first day an item x on plan
+// p leaves the meter, an item y priced differently joins it (on plan q, or on
+// p after an edit), y leaves, and an item z on p priced as x was joins. Each
+// added item's window reaches back to the period start (ADR-012). y keeps the
+// time between x leaving and z joining; z's time is billed under x's pin.
+//
+// Mutation: re-key z to x's pin before the overlap step, and x's pin takes
+// the whole period: y's window is gone.
+func TestMeterUsageIntervals_AlikeKeepsItsOwnPlaceInTime(t *testing.T) {
+	d := time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)
+	pe := d.AddDate(0, 1, 0)
+	created := d.AddDate(0, 0, -20)
+	xLeft, yAdded, yLeft, zAdded, wm := d.Add(2*time.Hour), d.Add(3*time.Hour), d.Add(5*time.Hour), d.Add(6*time.Hour), d.Add(time.Hour)
+	for _, yPlan := range []string{"p", "q"} {
+		t.Run("y on "+yPlan, func(t *testing.T) {
+			sub := domain.Subscription{CreatedAt: created, StartedAt: &created, Items: []domain.SubscriptionItem{{ID: "z", PlanID: "p", CreatedAt: zAdded}}}
+			segs := map[string][]baseSegment{
+				"x": {{start: d, end: xLeft, planID: "p", runStart: created, itemCreatedAt: created}},
+				"y": {{start: d, end: yLeft, planID: yPlan, runStart: d, itemCreatedAt: yAdded}},
+				"z": {{start: d, end: pe, planID: "p", runStart: d, itemCreatedAt: zAdded}},
+			}
+			pinX, pinY, pinZ := windowPin(sub, d, created), windowPin(sub, d, yAdded), windowPin(sub, d, zAdded)
+			plans := map[planPin][]string{{planID: "p", pin: pinX}: {"m"}, {planID: yPlan, pin: pinY}: {"m"}, {planID: "p", pin: pinZ}: {"m"}}
+			alike := alikePins{{planID: "p", meterID: "m", pin: pinZ}: pinX}
+			x := planMeter{planID: "p", meterID: "m", pin: pinX}
+			y := planMeter{planID: yPlan, meterID: "m", pin: pinY}
+			clamped, full := meterUsageIntervals(planStretches(sub, segs, d, pe, d), plans, alike, &wm, usageFloors{})
+			for name, m := range map[string]map[planMeter][]usageInterval{"clamped": clamped, "full": full} {
+				start := d
+				if name == "clamped" {
+					start = wm
+				}
+				want := windowsText(map[planMeter][]usageInterval{x: {{start, xLeft}, {yLeft, pe}}, y: {{xLeft, yLeft}}})
+				if got := windowsText(m); got != want {
+					t.Errorf("%s = %s, want %s", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+// windowsText is windows merged, one key per line in key order, each instant
+// as an RFC 3339 time.
+func windowsText(windows map[planMeter][]usageInterval) string {
+	var lines []string
+	for k, ivs := range windows {
+		line := fmt.Sprintf("%s/%s@%s:", k.planID, k.meterID, k.pin.at.Format(time.RFC3339))
+		for _, iv := range mergeUsageIntervals(ivs) {
+			line += fmt.Sprintf(" [%s, %s)", iv.start.Format(time.RFC3339), iv.end.Format(time.RFC3339))
+		}
+		lines = append(lines, line)
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "; ")
 }

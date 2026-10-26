@@ -401,6 +401,100 @@ func TestE2E_PlanPrices_MeterMovesPlansOnTheFirstDay(t *testing.T) {
 	})
 }
 
+// between is an instant after every write so far and before the next one,
+// inside the open period: a test clock moves on an hour, and in wall time it
+// is now.
+func (j *joinRig) between() time.Time {
+	if j.clk != "" {
+		return j.soon()
+	}
+	return time.Now().UTC()
+}
+
+// TestE2E_PlanPrices_MeterMovesPlansAndBackOnTheFirstDay: on the first day
+// of a period a meter moves from plan A (1c) to plan C (3c) and back: A's
+// item is removed, C's added, C's removed and A's added again. The added
+// items bill from the period start (ADR-012). A's second window is priced as
+// its first, but each event is billed by the plan that priced the meter
+// when it came: before the move and after the move back by plan A, in
+// between by plan C.
+//
+// Mutation: bill A's second window under its first window's pin before
+// taking earlier windows' time out of later ones, and plan A's first window
+// takes the whole period: C's events bill at 1c.
+func TestE2E_PlanPrices_MeterMovesPlansAndBackOnTheFirstDay(t *testing.T) {
+	joinModes(t, func(t *testing.T, onClock bool) {
+		j := newJoinRig(t, "meter moves plans and back", onClock)
+		calls, tokens := j.meter("calls", "sum"), j.meter("tokens", "sum")
+		planA, aIDs := j.plan("plan_a", perUnit(calls, "1", nil))
+		planB, _ := j.plan("plan_b", perUnit(tokens, "2", nil))
+		planC, cIDs := j.plan("plan_c", perUnit(calls, "3", nil))
+		callsA, callsC := aIDs[0], cIDs[0]
+		cust := j.cust("pp-moves-back")
+		subID, p0, p1 := j.subscribeItems(cust, planA, planB)
+		j.ingest(time.Time{}, "pp-moves-back", "calls", 10, j.before(p0), nil)
+
+		j.later()
+		j.later()
+		j.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+subID+"/items/"+j.item(subID, planA), nil, http.StatusNoContent)
+		j.later()
+		j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planC, "quantity": 1}, http.StatusCreated)
+		j.ingest(time.Time{}, "pp-moves-back", "calls", 10, j.between(), nil)
+		j.later()
+		j.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+subID+"/items/"+j.item(subID, planC), nil, http.StatusNoContent)
+		j.later()
+		j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
+		j.ingest(time.Time{}, "pp-moves-back", "calls", 10, j.soon(), nil)
+
+		j.agreeOpen("meter moved plans and back", cust, subID, 50)
+		j.closeAt(p1.Add(time.Hour))
+		wantUsage(t, "each event by the plan pricing the meter then: 20 at A's 1c, 10 at C's 3c", j.cycle(subID, p0), map[string]int64{callsA: 20, callsC: 30})
+	})
+}
+
+// TestE2E_PlanPrices_PriceChangesAndBackOnTheFirstDay: on the first day of a
+// period a plan's calls price is edited from 1c to 5c, the subscription's
+// item on the plan is removed and another added (at 5c), that one is removed,
+// the price is edited back to 1c and a third item is added. The added items
+// bill from the period start (ADR-012). The third item is priced as the
+// first, but the events in between are billed at the 5c they came at.
+//
+// Mutation: bill the third item's window under the first item's pin before
+// taking earlier windows' time out of later ones, and the first item's
+// window takes the whole period: the 5c events bill at 1c.
+func TestE2E_PlanPrices_PriceChangesAndBackOnTheFirstDay(t *testing.T) {
+	joinModes(t, func(t *testing.T, onClock bool) {
+		j := newJoinRig(t, "price changes and back", onClock)
+		calls, tokens := j.meter("calls", "sum"), j.meter("tokens", "sum")
+		planA, aIDs := j.plan("plan_a", perUnit(calls, "1", nil))
+		planB, _ := j.plan("plan_b", perUnit(tokens, "2", nil))
+		callsA := aIDs[0]
+		cust := j.cust("pp-price-back")
+		subID, p0, p1 := j.subscribeItems(cust, planA, planB)
+		j.ingest(time.Time{}, "pp-price-back", "calls", 10, j.before(p0), nil)
+
+		j.later()
+		j.later()
+		j.editTo(planA, callsA, "5", "next_period")
+		j.later()
+		j.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+subID+"/items/"+j.item(subID, planA), nil, http.StatusNoContent)
+		j.later()
+		j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
+		j.ingest(time.Time{}, "pp-price-back", "calls", 10, j.between(), nil)
+		j.later()
+		j.must(time.Time{}, http.MethodDelete, "/v1/subscriptions/"+subID+"/items/"+j.item(subID, planA), nil, http.StatusNoContent)
+		j.later()
+		j.editTo(planA, callsA, "1", "next_period")
+		j.later()
+		j.must(time.Time{}, http.MethodPost, "/v1/subscriptions/"+subID+"/items", map[string]any{"plan_id": planA, "quantity": 1}, http.StatusCreated)
+		j.ingest(time.Time{}, "pp-price-back", "calls", 10, j.soon(), nil)
+
+		j.agreeOpen("price changed and back", cust, subID, 70)
+		j.closeAt(p1.Add(time.Hour))
+		wantUsage(t, "each event at the price it came at: 10 at 1c, 10 at 5c, 10 at 1c", j.cycle(subID, p0), map[string]int64{callsA: 70})
+	})
+}
+
 // graduated is a graduated price body: the first free units at freeCents
 // each, every unit above at aboveCents.
 func graduated(meterID string, free int64, freeCents, aboveCents string) map[string]any {
