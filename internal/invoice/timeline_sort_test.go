@@ -21,7 +21,7 @@ func TestSortInvoiceTimeline_CausalTies(t *testing.T) {
 	t.Run("same-instant cascade orders causally regardless of insertion", func(t *testing.T) {
 		// Deliberately inserted in the OLD source-major order that
 		// rendered anti-causally: lifecycle first, dunning last.
-		events := []timelineEvent{
+		events := []TimelineEvent{
 			{EventType: "invoice.uncollectible", sortAt: instant, tieRank: rankLifecycleTerminal},
 			{EventType: "invoice.finalized", sortAt: instant, tieRank: rankInvoiceFinalized},
 			{EventType: "invoice.created", sortAt: instant, tieRank: rankInvoiceCreated},
@@ -42,7 +42,7 @@ func TestSortInvoiceTimeline_CausalTies(t *testing.T) {
 	})
 
 	t.Run("failed retry precedes same-instant settle", func(t *testing.T) {
-		events := []timelineEvent{
+		events := []TimelineEvent{
 			{EventType: "invoice.paid", sortAt: instant, tieRank: rankLifecycleTerminal},
 			{EventType: "dunning.retry_attempted", sortAt: instant, tieRank: rankRetryAttempted},
 		}
@@ -56,7 +56,7 @@ func TestSortInvoiceTimeline_CausalTies(t *testing.T) {
 		// Two CNs 36ms apart — the serialized string collides at second
 		// granularity; full-precision sortAt must order them, with the
 		// later-written CN below the earlier one whatever the rank says.
-		events := []timelineEvent{
+		events := []TimelineEvent{
 			{EventType: "cn.second", sortAt: instant.Add(36 * time.Millisecond), tieRank: rankCreditNote},
 			{EventType: "cn.first", sortAt: instant.Add(4 * time.Millisecond), tieRank: rankCreditNote},
 			{EventType: "late.lifecycle", sortAt: instant.Add(900 * time.Millisecond), tieRank: rankInvoiceCreated},
@@ -78,7 +78,7 @@ func TestSortInvoiceTimeline_CausalTies(t *testing.T) {
 	})
 }
 
-func typesOf(events []timelineEvent) []string {
+func typesOf(events []TimelineEvent) []string {
 	out := make([]string, len(events))
 	for i, e := range events {
 		out[i] = e.EventType
@@ -95,7 +95,7 @@ func typesOf(events []timelineEvent) []string {
 func TestSortInvoiceTimeline_FullLifeAtOneInstant(t *testing.T) {
 	instant := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	// Inserted deliberately shuffled.
-	events := []timelineEvent{
+	events := []TimelineEvent{
 		{EventType: "email.payment_receipt", sortAt: instant, tieRank: rankEmail},
 		{EventType: "credit_note.issued", sortAt: instant, tieRank: rankCreditNote},
 		{EventType: "invoice.paid", sortAt: instant, tieRank: rankLifecycleTerminal},
@@ -196,7 +196,7 @@ func TestSortInvoiceTimeline_RealityPass(t *testing.T) {
 	t.Run("all-stamped group orders by real sequence, across ranks", func(t *testing.T) {
 		// Real sequence deliberately CONTRADICTS the ladder: the email
 		// went out in the morning, the CN and the void came later.
-		events := []timelineEvent{
+		events := []TimelineEvent{
 			{EventType: "invoice.voided", sortAt: instant, tieRank: rankLifecycleTerminal, recordedSort: wall(15, 0)},
 			{EventType: "credit_note.issued", sortAt: instant, tieRank: rankCreditNote, recordedSort: wall(14, 0)},
 			{EventType: "email.invoice", sortAt: instant, tieRank: rankEmail, recordedSort: wall(10, 0)},
@@ -216,7 +216,7 @@ func TestSortInvoiceTimeline_RealityPass(t *testing.T) {
 		// Same shape, but the CN is a pre-0164 row with no stamp: the
 		// group must render in ladder order — today's behavior, never a
 		// fabricated sequence.
-		events := []timelineEvent{
+		events := []TimelineEvent{
 			{EventType: "email.invoice", sortAt: instant, tieRank: rankEmail, recordedSort: wall(10, 0)},
 			{EventType: "credit_note.issued", sortAt: instant, tieRank: rankCreditNote}, // bare
 			{EventType: "invoice.finalized", sortAt: instant, tieRank: rankInvoiceFinalized, recordedSort: wall(9, 0)},
@@ -232,7 +232,7 @@ func TestSortInvoiceTimeline_RealityPass(t *testing.T) {
 
 	t.Run("equal recorded stamps (same tx) fall back to the ladder", func(t *testing.T) {
 		txStamp := wall(9, 0)
-		events := []timelineEvent{
+		events := []TimelineEvent{
 			{EventType: "email.payment_setup_request", sortAt: instant, tieRank: rankEmail, recordedSort: txStamp},
 			{EventType: "dunning.started", sortAt: instant, tieRank: rankDunningStarted, recordedSort: txStamp},
 			{EventType: "invoice.finalized", sortAt: instant, tieRank: rankInvoiceFinalized, recordedSort: txStamp},
@@ -250,7 +250,7 @@ func TestSortInvoiceTimeline_RealityPass(t *testing.T) {
 		// A late-recorded row at an EARLIER story instant must stay above
 		// an early-recorded row at a LATER story instant (the anchored
 		// webhook-settle case that kills wall-primary designs).
-		events := []timelineEvent{
+		events := []TimelineEvent{
 			{EventType: "later.story", sortAt: instant.Add(time.Hour), tieRank: rankInvoiceCreated, recordedSort: wall(9, 0)},
 			{EventType: "earlier.story", sortAt: instant, tieRank: rankLifecycleTerminal, recordedSort: wall(18, 0)},
 		}

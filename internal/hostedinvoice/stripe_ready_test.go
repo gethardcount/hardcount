@@ -40,14 +40,14 @@ func readyHandler(t *testing.T, token string, ready bool, mutate func(*domain.In
 	return h, stripe, fi
 }
 
-func viewPayload(t *testing.T, h *Handler, token string) hostedInvoicePayload {
+func viewPayload(t *testing.T, h *Handler, token string) HostedInvoicePayload {
 	t.Helper()
 	w := httptest.NewRecorder()
 	mountRouter(h).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/"+token, nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("view: got %d, body=%s", w.Code, w.Body.String())
 	}
-	var resp hostedInvoicePayload
+	var resp HostedInvoicePayload
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}

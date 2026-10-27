@@ -421,15 +421,15 @@ func (h *SettingsHandler) get(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
-	respond.JSON(w, r, http.StatusOK, settingsResponse{TenantSettings: ts, NextInvoiceSequence: seq})
+	respond.JSON(w, r, http.StatusOK, SettingsResponse{TenantSettings: ts, NextInvoiceSequence: seq})
 }
 
-// settingsResponse is the settings body both routes return: the stored
+// SettingsResponse is the settings body both routes return: the stored
 // settings plus next_invoice_sequence, which is per mode and not a setting.
 // It stays out of domain.TenantSettings so the PUT body cannot carry it and
 // the audit diff never reports an invoice issued between the read and the
 // save as a settings change.
-type settingsResponse struct {
+type SettingsResponse struct {
 	domain.TenantSettings
 	NextInvoiceSequence int `json:"next_invoice_sequence"`
 }
@@ -515,7 +515,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	respond.JSON(w, r, http.StatusOK, settingsResponse{TenantSettings: result, NextInvoiceSequence: seq})
+	respond.JSON(w, r, http.StatusOK, SettingsResponse{TenantSettings: result, NextInvoiceSequence: seq})
 }
 
 // diffSettings returns {json_field: {"from": old, "to": new}} for every field

@@ -162,7 +162,8 @@ type LoginReq struct {
 	Password string `json:"password"`
 }
 
-type loginResp struct {
+// LoginResponse is POST /v1/auth/login's 200.
+type LoginResponse struct {
 	UserID    string `json:"user_id"`
 	TenantID  string `json:"tenant_id"`
 	Email     string `json:"email"`
@@ -280,7 +281,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	// written here could never be deleted.
 	h.auditAuthEvent(r.Context(), r, u.ID, tenant.TenantID, "login", u.ID, "",
 		map[string]any{"livemode": sess.Livemode})
-	respond.JSON(w, r, http.StatusOK, loginResp{
+	respond.JSON(w, r, http.StatusOK, LoginResponse{
 		UserID:    u.ID,
 		TenantID:  tenant.TenantID,
 		Email:     u.Email,

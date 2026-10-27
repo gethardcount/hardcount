@@ -1434,14 +1434,15 @@ func lifecycleAuditRows(entries []domain.AuditEntry) map[string]domain.AuditEntr
 // group whose every row has a recorded stamp (ADR-104 ordering amendment,
 // 2026-07-29), then the causal rank, then insertion order (callers append
 // sources oldest-first).
-func sortInvoiceTimeline(events []timelineEvent) {
+func sortInvoiceTimeline(events []TimelineEvent) {
 	timeline.Order(events,
-		func(e timelineEvent) time.Time { return e.sortAt },
-		func(e timelineEvent) time.Time { return e.recordedSort },
-		func(a, b timelineEvent) bool { return a.tieRank < b.tieRank })
+		func(e TimelineEvent) time.Time { return e.sortAt },
+		func(e TimelineEvent) time.Time { return e.recordedSort },
+		func(a, b TimelineEvent) bool { return a.tieRank < b.tieRank })
 }
 
-type timelineEvent struct {
+// TimelineEvent is one event of GET /v1/invoices/{id}/payment-timeline.
+type TimelineEvent struct {
 	Timestamp string `json:"timestamp"`
 	// sortAt/tieRank are ordering-only, never serialized. sortAt is the
 	// FULL-PRECISION source instant (the serialized Timestamp truncates
@@ -1512,7 +1513,7 @@ type timelineEvent struct {
 // older fields: the title is the description, the meta line (detail parts
 // and actor) is the detail, the problem is the error, the tone is the
 // status, and the line's amount is the row's amount.
-func (e *timelineEvent) fillFromLine() {
+func (e *TimelineEvent) fillFromLine() {
 	e.Line.ID = e.ID
 	e.Line = activity.Stamp(e.Line, e.sortAt, e.recordedSort, e.IsSimulated)
 	e.Description = e.Line.Title
@@ -1554,7 +1555,7 @@ func piFromEventMetadata(meta map[string]any) string {
 // `pending` attempts never render (in flight; the attention banner owns
 // that), and a succeeded attempt on a NOT-paid invoice does render —
 // that shape is an anomaly worth seeing.
-func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceChargeAttempt, inv domain.Invoice) []timelineEvent {
+func renderChargeAttempts(events []TimelineEvent, attempts []domain.InvoiceChargeAttempt, inv domain.Invoice) []TimelineEvent {
 	dunningIdxByPI := recoveryRowsByPI(events)
 	retryRefusedRows := 0
 	for _, e := range events {
@@ -1620,7 +1621,7 @@ func renderChargeAttempts(events []timelineEvent, attempts []domain.InvoiceCharg
 // PRIMARY position is its billing-axis instant, with the wall instant
 // kept as RecordedAt (Invariant A); an unanchored attempt keeps its
 // wall stamp — same fallback as legacy emails (ADR-104).
-func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) timelineEvent {
+func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) TimelineEvent {
 	ts := a.OccurredAt
 	sim := false
 	var recorded time.Time
@@ -1629,7 +1630,7 @@ func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) timelin
 		recorded = a.OccurredAt
 		sim = true
 	}
-	return timelineEvent{
+	return TimelineEvent{
 		ID:              "attempt:" + a.ID,
 		Timestamp:       ts.Format(time.RFC3339),
 		sortAt:          ts,
@@ -1778,7 +1779,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 
 	// Draft invoices have no payment activity
 	if inv.Status == domain.InvoiceDraft {
-		respond.JSON(w, r, http.StatusOK, map[string]any{"events": []timelineEvent{}, "degraded": []string{}, "truncated": false})
+		respond.JSON(w, r, http.StatusOK, map[string]any{"events": []TimelineEvent{}, "degraded": []string{}, "truncated": false})
 		return
 	}
 
@@ -1931,7 +1932,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 
 	// ── Rows ──
 
-	var events []timelineEvent
+	var events []TimelineEvent
 
 	// Lifecycle rows synthesised from invoice columns. Without these,
 	// freshly-finalized invoices that haven't seen a charge yet render an
@@ -1948,7 +1949,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		if e, ok := lifecycle[eventType]; ok && isSimulated {
 			recorded = e.CreatedAt
 		}
-		events = append(events, timelineEvent{
+		events = append(events, TimelineEvent{
 			ID:           "lifecycle:" + idKind + ":" + inv.ID,
 			Timestamp:    at.Format(time.RFC3339),
 			sortAt:       at,
@@ -2073,7 +2074,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		if cn.IsSimulated && cn.RecordedAt != nil {
 			cnRecorded = *cn.RecordedAt
 		}
-		events = append(events, timelineEvent{
+		events = append(events, TimelineEvent{
 			ID:           "cn:" + cn.ID,
 			Timestamp:    cn.IssuedAt.Format(time.RFC3339),
 			sortAt:       *cn.IssuedAt,
@@ -2103,7 +2104,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		ts, recorded, sim := emailRowInstant(evt)
-		events = append(events, timelineEvent{
+		events = append(events, TimelineEvent{
 			ID:           "email:" + evt.ID,
 			Timestamp:    ts.Format(time.RFC3339),
 			sortAt:       ts,
@@ -2177,11 +2178,11 @@ func (h *Handler) subscriptionLink(ctx context.Context, tenantID string, inv dom
 // disputeTimelineEvents renders each dispute as the rows it has earned so
 // far: "Payment disputed" when Stripe opened it, and "Dispute closed" with
 // its outcome once Stripe closed it.
-func disputeTimelineEvents(disputes []domain.InvoiceDispute) []timelineEvent {
-	var out []timelineEvent
+func disputeTimelineEvents(disputes []domain.InvoiceDispute) []TimelineEvent {
+	var out []TimelineEvent
 	for _, d := range disputes {
 		opened, closed := disputeLines(d)
-		out = append(out, timelineEvent{
+		out = append(out, TimelineEvent{
 			ID:              "dispute:opened:" + d.ID,
 			Timestamp:       d.OpenedAt.Format(time.RFC3339),
 			sortAt:          d.OpenedAt,
@@ -2194,7 +2195,7 @@ func disputeTimelineEvents(disputes []domain.InvoiceDispute) []timelineEvent {
 		if closed == nil {
 			continue
 		}
-		out = append(out, timelineEvent{
+		out = append(out, TimelineEvent{
 			ID:              "dispute:closed:" + d.ID,
 			Timestamp:       d.ClosedAt.Format(time.RFC3339),
 			sortAt:          *d.ClosedAt,

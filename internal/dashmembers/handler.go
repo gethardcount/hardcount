@@ -89,9 +89,9 @@ type memberView struct {
 	JoinedAt string `json:"joined_at"`
 }
 
-// invitationView mirrors members.ts InvitationView. status is derived
+// InvitationView mirrors members.ts InvitationView. status is derived
 // server-side; clients treat it as authoritative.
-type invitationView struct {
+type InvitationView struct {
 	ID             string  `json:"id"`
 	Email          string  `json:"email"`
 	Role           string  `json:"role"`
@@ -113,8 +113,8 @@ func fmtTimePtr(t *time.Time) *string {
 	return &s
 }
 
-func (h *Handler) invitationView(inv Invitation, now time.Time) invitationView {
-	return invitationView{
+func (h *Handler) invitationView(inv Invitation, now time.Time) InvitationView {
+	return InvitationView{
 		ID:             inv.ID,
 		Email:          inv.Email,
 		Role:           inv.Role,
@@ -143,7 +143,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 			JoinedAt: m.JoinedAt.Format(rfc3339),
 		})
 	}
-	iv := make([]invitationView, 0, len(invs))
+	iv := make([]InvitationView, 0, len(invs))
 	for _, inv := range invs {
 		iv = append(iv, h.invitationView(inv, now))
 	}

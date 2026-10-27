@@ -89,7 +89,7 @@ func TestHostedView_IssuedInvoiceKeepsIssueTimeParties(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET hosted view: %d %s", w.Code, w.Body.String())
 	}
-	var got hostedInvoicePayload
+	var got HostedInvoicePayload
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}

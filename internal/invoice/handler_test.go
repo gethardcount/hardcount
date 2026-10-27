@@ -27,11 +27,11 @@ func TestRenderChargeAttempts(t *testing.T) {
 		}
 		return a
 	}
-	dunningRow := func(pi string) timelineEvent {
-		return timelineEvent{Source: "dunning", EventType: "retry_attempted", PaymentIntentID: pi,
+	dunningRow := func(pi string) TimelineEvent {
+		return TimelineEvent{Source: "dunning", EventType: "retry_attempted", PaymentIntentID: pi,
 			Line: dunningLine(domain.InvoiceDunningEvent{EventType: domain.DunningEventRetryAttempted, AttemptCount: 1, Reason: "payment failed: Your card was declined."}, dunningContext{})}
 	}
-	count := func(evts []timelineEvent, src string) int {
+	count := func(evts []TimelineEvent, src string) int {
 		n := 0
 		for _, e := range evts {
 			if e.Source == src {
@@ -44,7 +44,7 @@ func TestRenderChargeAttempts(t *testing.T) {
 	// Dunning owns the PI → attempt absorbed, and its provider facts
 	// land on the dunning row: the decline code in words about the
 	// cardholder, else the provider's own text, and the amount.
-	out := renderChargeAttempts([]timelineEvent{dunningRow("pi_1")},
+	out := renderChargeAttempts([]TimelineEvent{dunningRow("pi_1")},
 		[]domain.InvoiceChargeAttempt{failed("pi_1", true)}, domain.Invoice{Currency: "USD"})
 	if len(out) != 1 || count(out, "payment") != 0 {
 		t.Fatalf("dunning-owned PI: got %d rows (%d payment), want 1 dunning row only", len(out), count(out, "payment"))
@@ -54,7 +54,7 @@ func TestRenderChargeAttempts(t *testing.T) {
 	}
 	coded := failed("pi_1", true)
 	coded.DeclineCode = "insufficient_funds"
-	out = renderChargeAttempts([]timelineEvent{dunningRow("pi_1")}, []domain.InvoiceChargeAttempt{coded}, domain.Invoice{Currency: "USD"})
+	out = renderChargeAttempts([]TimelineEvent{dunningRow("pi_1")}, []domain.InvoiceChargeAttempt{coded}, domain.Invoice{Currency: "USD"})
 	if out[0].Line.Problem != "Card declined: insufficient funds" {
 		t.Fatalf("a decline code wins over the provider's text: %q", out[0].Line.Problem)
 	}
@@ -75,7 +75,7 @@ func TestRenderChargeAttempts(t *testing.T) {
 	}
 	// Empty-PI attempts (the PI create itself failed) still render —
 	// they can never have a dunning twin to absorb them.
-	out = renderChargeAttempts([]timelineEvent{dunningRow("pi_9")},
+	out = renderChargeAttempts([]TimelineEvent{dunningRow("pi_9")},
 		[]domain.InvoiceChargeAttempt{failed("", true)}, domain.Invoice{})
 	if count(out, "payment") != 1 {
 		t.Fatalf("empty-PI attempt must render: %+v", out)
@@ -99,12 +99,12 @@ func TestRenderChargeAttempts(t *testing.T) {
 	// the other refusal once.
 	refused := domain.InvoiceChargeAttempt{Outcome: domain.ChargeAttemptBelowMinimum, Trigger: domain.ChargeTriggerDunningRetry,
 		ProviderReason: "Amount must be at least $0.50 usd", AmountCents: 30, OccurredAt: wallT}
-	refusedRow := timelineEvent{Source: "dunning", EventType: "retry_attempted", Line: activity.Line{Kind: kindRetryRefused}}
-	out = renderChargeAttempts([]timelineEvent{refusedRow}, []domain.InvoiceChargeAttempt{refused}, domain.Invoice{})
+	refusedRow := TimelineEvent{Source: "dunning", EventType: "retry_attempted", Line: activity.Line{Kind: kindRetryRefused}}
+	out = renderChargeAttempts([]TimelineEvent{refusedRow}, []domain.InvoiceChargeAttempt{refused}, domain.Invoice{})
 	if count(out, "payment") != 0 {
 		t.Fatalf("a retry's refusal with its own row must not render again: %+v", out)
 	}
-	out = renderChargeAttempts([]timelineEvent{refusedRow}, []domain.InvoiceChargeAttempt{refused, refused}, domain.Invoice{})
+	out = renderChargeAttempts([]TimelineEvent{refusedRow}, []domain.InvoiceChargeAttempt{refused, refused}, domain.Invoice{})
 	if count(out, "payment") != 1 {
 		t.Fatalf("two retry refusals and one row: got %d payment rows, want 1", count(out, "payment"))
 	}

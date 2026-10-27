@@ -148,17 +148,11 @@ func (h *Handler) listPolicies(w http.ResponseWriter, r *http.Request) {
 	if policies == nil {
 		policies = []domain.DunningPolicy{}
 	}
-	// Attach customer-assignment counts so the admin page can render
-	// the "N customers assigned" badge without a round-trip per row.
-	type policyWithCount struct {
-		domain.DunningPolicy
-		AssignedCustomers int `json:"assigned_customers"`
-	}
 	window := respond.Window(policies, page)
-	out := make([]policyWithCount, 0, len(window))
+	out := make([]PolicyListItem, 0, len(window))
 	for _, p := range window {
 		count, _ := h.svc.CountCustomersOnPolicy(r.Context(), tenantID, p.ID)
-		out = append(out, policyWithCount{DunningPolicy: p, AssignedCustomers: count})
+		out = append(out, PolicyListItem{DunningPolicy: p, AssignedCustomers: count})
 	}
 	respond.List(w, r, out, len(policies))
 }
@@ -394,9 +388,9 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 		lines = l
 		degraded = append(degraded, d...)
 	}
-	out := make([]runEvent, 0, len(events))
+	out := make([]RunEvent, 0, len(events))
 	for _, evt := range events {
-		e := runEvent{InvoiceDunningEvent: evt}
+		e := RunEvent{InvoiceDunningEvent: evt}
 		if l, ok := lines[evt.ID]; ok {
 			e.Line = &l
 		}
@@ -410,9 +404,17 @@ func (h *Handler) getRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// runEvent is one event of a run on the wire: the event, and its activity
+// PolicyListItem is one policy as GET /v1/dunning/policies lists it. It
+// carries the number of customers assigned to the policy, so the admin page
+// can show "N customers assigned" without a request per row.
+type PolicyListItem struct {
+	domain.DunningPolicy
+	AssignedCustomers int `json:"assigned_customers"`
+}
+
+// RunEvent is one event of a run on the wire: the event, and its activity
 // line (ADR-128), in the words the invoice's Activity card uses for it.
-type runEvent struct {
+type RunEvent struct {
 	domain.InvoiceDunningEvent
 	Line *activity.Line `json:"line,omitempty"`
 }

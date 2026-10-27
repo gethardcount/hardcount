@@ -154,12 +154,12 @@ func (h *Handler) Routes() chi.Router {
 
 // ---- Response shapes ----
 
-// hostedInvoicePayload is the safe, presentation-shaped projection the SPA
+// HostedInvoicePayload is the safe, presentation-shaped projection the SPA
 // consumes. Deliberately excludes internal IDs (subscription_id, stripe
 // payment-intent id), Stripe metadata, and anything partner-operational.
 // Customers see what they need to understand what they owe and what was
 // delivered — nothing more.
-type hostedInvoicePayload struct {
+type HostedInvoicePayload struct {
 	Invoice   viewInvoice    `json:"invoice"`
 	LineItems []viewLineItem `json:"line_items"`
 	BillTo    viewBillTo     `json:"bill_to"`
@@ -364,7 +364,7 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	belowMinimum := inv.BelowStripeMinimum()
-	respond.JSON(w, r, http.StatusOK, hostedInvoicePayload{
+	respond.JSON(w, r, http.StatusOK, HostedInvoicePayload{
 		Invoice:              toViewInvoice(inv),
 		LineItems:            toViewLineItems(items),
 		BillTo:               billTo,
@@ -460,10 +460,13 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	type response struct {
-		URL string `json:"url"`
-	}
-	respond.JSON(w, r, http.StatusOK, response{URL: sessionURL})
+	respond.JSON(w, r, http.StatusOK, CheckoutResponse{URL: sessionURL})
+}
+
+// CheckoutResponse is POST /v1/public/invoices/{token}/checkout: the Stripe
+// Checkout page to send the customer to.
+type CheckoutResponse struct {
+	URL string `json:"url"`
 }
 
 func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {

@@ -260,7 +260,7 @@ func TestViewInvoice_Finalized_OK(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200, body=%s", w.Code, w.Body.String())
 	}
-	var resp hostedInvoicePayload
+	var resp HostedInvoicePayload
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestViewInvoice_Paid_PayDisabled(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("paid invoice should still be viewable, got %d", w.Code)
 	}
-	var resp hostedInvoicePayload
+	var resp HostedInvoicePayload
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.PayEnabled {
 		t.Error("pay_enabled must be false for paid invoices")
@@ -352,7 +352,7 @@ func TestViewInvoice_Voided_PayDisabled(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("voided invoice should still be viewable, got %d", w.Code)
 	}
-	var resp hostedInvoicePayload
+	var resp HostedInvoicePayload
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.PayEnabled {
 		t.Error("pay_enabled must be false for voided invoices")
@@ -595,7 +595,7 @@ func TestViewInvoice_CarriesTaxExemptReason(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200, body=%s", w.Code, w.Body.String())
 	}
-	var resp hostedInvoicePayload
+	var resp HostedInvoicePayload
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}

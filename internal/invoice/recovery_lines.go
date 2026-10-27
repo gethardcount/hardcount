@@ -73,9 +73,9 @@ type recoveryRowsInput struct {
 }
 
 // recoveryRows builds one row per payment-recovery event, in run order.
-func recoveryRows(in recoveryRowsInput) []timelineEvent {
+func recoveryRows(in recoveryRowsInput) []TimelineEvent {
 	inv := in.inv
-	var out []timelineEvent
+	var out []TimelineEvent
 	for _, re := range in.runs {
 		for _, evt := range re.events {
 			if in.fold {
@@ -112,7 +112,7 @@ func recoveryRows(in recoveryRowsInput) []timelineEvent {
 			if inv.IsSimulated && evt.RecordedAt != nil {
 				recorded = *evt.RecordedAt
 			}
-			out = append(out, timelineEvent{
+			out = append(out, TimelineEvent{
 				ID:           "dunning:" + evt.ID,
 				Timestamp:    evt.CreatedAt.Format(time.RFC3339),
 				sortAt:       evt.CreatedAt,
@@ -136,7 +136,7 @@ func recoveryRows(in recoveryRowsInput) []timelineEvent {
 
 // recoveryRowsByPI indexes the payment-recovery rows by the PaymentIntent
 // their charge made, the exact key a charge attempt is matched by.
-func recoveryRowsByPI(events []timelineEvent) map[string]int {
+func recoveryRowsByPI(events []TimelineEvent) map[string]int {
 	idx := map[string]int{}
 	for i, e := range events {
 		if e.Source == "dunning" && e.PaymentIntentID != "" {
@@ -153,7 +153,7 @@ func recoveryRowsByPI(events []timelineEvent) map[string]int {
 // words about the cardholder, or else its verbatim provider reason,
 // replaces the dunning event's internally-wrapped copy ("payment failed:
 // Your card was declined."), and its amount is the row's.
-func liftAttempt(d *timelineEvent, a domain.InvoiceChargeAttempt, inv domain.Invoice) {
+func liftAttempt(d *TimelineEvent, a domain.InvoiceChargeAttempt, inv domain.Invoice) {
 	if d.Line.Tone == activity.ToneFailure {
 		if p := activity.DeclineReason(a.DeclineCode, a.ProviderReason); p != "" {
 			d.Line.Problem = p

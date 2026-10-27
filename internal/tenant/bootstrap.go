@@ -49,7 +49,8 @@ type BootstrapRequest struct {
 	OwnerPassword string `json:"owner_password"`
 }
 
-type bootstrapResponse struct {
+// BootstrapResponse is POST /v1/bootstrap's 201.
+type BootstrapResponse struct {
 	Tenant             domain.Tenant `json:"tenant"`
 	OwnerEmail         string        `json:"owner_email"`
 	OwnerPassword      string        `json:"owner_password"`
@@ -136,7 +137,7 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 	// Credentials + raw keys transit exactly once; keep every cache
 	// (browser, proxy) out of the loop.
 	w.Header().Set("Cache-Control", "no-store")
-	respond.JSON(w, r, http.StatusCreated, bootstrapResponse{
+	respond.JSON(w, r, http.StatusCreated, BootstrapResponse{
 		Tenant:             result.Tenant,
 		OwnerEmail:         result.OwnerUser.Email,
 		OwnerPassword:      result.OwnerPassword,
