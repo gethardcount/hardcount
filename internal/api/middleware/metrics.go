@@ -12,6 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/sagarsuperuser/velox/internal/domain"
 )
 
 var (
@@ -119,10 +121,12 @@ var (
 		[]string{"status"},
 	)
 
+	// Every known event type starts at 0 (init below), so increase() sees
+	// the first failure.
 	webhookOutboxEnqueueFailures = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "velox_webhook_outbox_enqueue_failures_total",
-			Help: "Total webhook outbox enqueue failures by event type.",
+			Help: "Webhook events that could not be added to the webhook outbox, by event type. The event is lost: no endpoint gets it. The ERROR log \"failed to enqueue webhook event\" names the tenant.",
 		},
 		[]string{"event_type"},
 	)
@@ -231,6 +235,9 @@ const (
 )
 
 func init() {
+	for eventType := range domain.KnownWebhookEventTypes {
+		webhookOutboxEnqueueFailures.WithLabelValues(eventType)
+	}
 	for _, mode := range []string{"live", "test"} {
 		emailOutboxDeadLettered.WithLabelValues(DeadLetterPermanent, mode)
 		emailOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
