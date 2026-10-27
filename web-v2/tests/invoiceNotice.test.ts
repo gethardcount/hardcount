@@ -105,7 +105,7 @@ test('messageLines keeps all three lines of a no-card commit invoice', () => {
 
 // #1109: Finalize asks first, and says what it will do for this customer.
 test('the finalize confirmation says what finalizing does', () => {
-  const card = finalizeConfirmLines({ hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
+  const card = finalizeConfirmLines({ stripeConnected: true, hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(card[0], /can't edit it afterwards/)
   assert.match(card[0], /void/)
   assert.equal(card.length, 2)
@@ -113,20 +113,20 @@ test('the finalize confirmation says what finalizing does', () => {
   assert.match(card[1], /charges their card on file/)
   assert.doesNotMatch(card[1], /emails/)
 
-  const noCard = finalizeConfirmLines({ hasCard: false, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
+  const noCard = finalizeConfirmLines({ stripeConnected: true, hasCard: false, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(noCard[1], /no card on file/)
   assert.match(noCard[1], /emails them a link/)
   assert.doesNotMatch(noCard[1], /charges/)
 
-  const nowhere = finalizeConfirmLines({ hasCard: false, hasEmail: false, canEmailSetupLinks: true, taxAtFinalize: false })
+  const nowhere = finalizeConfirmLines({ stripeConnected: true, hasCard: false, hasEmail: false, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(nowhere[1], /nothing is charged/)
   assert.doesNotMatch(nowhere[1], /emails/)
 
-  const unknown = finalizeConfirmLines({ hasCard: undefined, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
+  const unknown = finalizeConfirmLines({ stripeConnected: true, hasCard: undefined, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
   assert.match(unknown[1], /charges their card on file, or emails them a link/)
 
   // A manual invoice gets its tax at finalize.
-  const manual = finalizeConfirmLines({ hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: true })
+  const manual = finalizeConfirmLines({ stripeConnected: true, hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: true })
   assert.equal(manual.length, 3)
   assert.match(manual[1], /Tax is worked out now/)
 })
@@ -135,13 +135,42 @@ test('the finalize confirmation says what finalizing does', () => {
 // the confirmation must not promise one (whoami.can_email_setup_links).
 test('the finalize confirmation does not promise an email the server cannot send', () => {
   for (const canEmailSetupLinks of [false, undefined]) {
-    const noCard = finalizeConfirmLines({ hasCard: false, hasEmail: true, canEmailSetupLinks, taxAtFinalize: false })
+    const noCard = finalizeConfirmLines({ stripeConnected: true, hasCard: false, hasEmail: true, canEmailSetupLinks, taxAtFinalize: false })
     assert.doesNotMatch(noCard[1], /emails/)
     assert.match(noCard[1], /can't email setup links/)
     assert.match(noCard[1], /customer page/)
 
-    const unknown = finalizeConfirmLines({ hasCard: undefined, hasEmail: true, canEmailSetupLinks, taxAtFinalize: false })
+    const unknown = finalizeConfirmLines({ stripeConnected: true, hasCard: undefined, hasEmail: true, canEmailSetupLinks, taxAtFinalize: false })
     assert.doesNotMatch(unknown[1], /emails/)
     assert.match(unknown[1], /charges their card on file if they have one/)
+  }
+})
+
+// With Stripe not connected in this mode, no card can be charged and the
+// customer can't add one online (the setup-link request answers 409
+// stripe_not_connected, and the update-payment page says adding a card isn't
+// available). The confirmation promises neither, whatever else is true.
+test('the finalize confirmation promises no charge and no link while Stripe is not connected', () => {
+  for (const hasCard of [true, false, undefined]) {
+    for (const canEmailSetupLinks of [true, false, undefined]) {
+      for (const hasEmail of [true, false]) {
+        const lines = finalizeConfirmLines({ stripeConnected: false, hasCard, hasEmail, canEmailSetupLinks, taxAtFinalize: false })
+        assert.equal(lines.length, 2)
+        assert.match(lines[1], /credit balance first/)
+        assert.match(lines[1], /Stripe isn't connected in this mode, so no card can be charged or added online/)
+        assert.match(lines[1], /Connect Stripe under Settings/)
+        assert.doesNotMatch(lines[1], /charges their card|emails|copy a setup link/)
+      }
+    }
+  }
+})
+
+// While the Stripe connection is not known (not loaded, or the read failed),
+// the confirmation says what happens only if Stripe is connected.
+test('the finalize confirmation hedges a charge while the Stripe connection is unknown', () => {
+  for (const hasCard of [true, false, undefined]) {
+    const lines = finalizeConfirmLines({ stripeConnected: undefined, hasCard, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
+    assert.match(lines[1], /if Stripe is connected/)
+    assert.doesNotMatch(lines[1], /emails|copy a setup link/)
   }
 })

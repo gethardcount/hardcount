@@ -170,17 +170,24 @@ test('a one-off invoice: save a draft from the customer page, add a line, finali
   await expect(figure(page, 'Subtotal')).toContainText(usd(twoLines.invoice.subtotal_cents))
 
   // Finalize asks first (#1109) and says what will happen: the invoice is
-  // issued for good, its tax is worked out now (a manual invoice), and this
-  // customer, who has no card, is emailed a link to add one, but only when
-  // this server can email setup links (SMTP and PAYMENT_UPDATE_URL set; CI
-  // sets no PAYMENT_UPDATE_URL). Cancel changes nothing.
+  // issued for good, its tax is worked out now (a manual invoice), and what
+  // happens to anything left to pay. With Stripe not connected in this mode
+  // (CI connects none), no card can be charged or added online, so it
+  // promises neither. With Stripe connected, this customer, who has no card,
+  // is emailed a link to add one, but only when this server can email setup
+  // links (SMTP and PAYMENT_UPDATE_URL set). Cancel changes nothing.
   const { can_email_setup_links: canEmail } = await api<{ can_email_setup_links: boolean }>('GET', '/settings/email')
+  const stripeConnected = (await api<{ data: { livemode: boolean }[] }>('GET', '/settings/stripe')).data.some(c => !c.livemode)
   await page.getByRole('button', { name: 'Finalize', exact: true }).click()
   const confirm = page.getByRole('alertdialog', { name: `Finalize invoice ${number}?` })
   await expect(confirm).toContainText(`${usd(twoLines.invoice.total_amount_cents)} to ${customer.display_name}.`)
   await expect(confirm).toContainText("You can't edit it afterwards, and the only way to cancel it is to void it.")
   await expect(confirm).toContainText('Tax is worked out now, so the total may change.')
-  if (canEmail) {
+  if (!stripeConnected) {
+    await expect(confirm).toContainText("Stripe isn't connected in this mode, so no card can be charged or added online. Connect Stripe under Settings to collect by card.")
+    await expect(confirm).not.toContainText('emails them')
+    await expect(confirm).not.toContainText('copy a setup link')
+  } else if (canEmail) {
     await expect(confirm).toContainText('The customer has no card on file, so if anything is left to pay, Velox emails them a link to add one.')
   } else {
     await expect(confirm).toContainText("The customer has no card on file and this server can't email setup links, so if anything is left to pay, copy a setup link from the customer page and send it to them.")
