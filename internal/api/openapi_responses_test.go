@@ -166,6 +166,7 @@ var inlineNotChecked = map[string]string{
 	"GET /v1/members 200":                                     mapLiteral,
 	"GET /v1/whoami 200":                                      mapLiteral,
 	"POST /v1/billing/run 200":                                mapLiteral,
+	"POST /v1/billing/run 206":                                mapLiteral,
 	"GET /v1/credits/balance/{customer_id} 200":               mapLiteral,
 	"DELETE /v1/test-clocks/{id} 200":                         mapLiteral,
 	"GET /v1/analytics/revenue-chart 200":                     mapLiteral,
@@ -275,6 +276,11 @@ func specResponses(t *testing.T) (map[string]any, map[string]bool, map[string]ma
 //   - a key the type can send must be a property, and a property must be a key
 //     the type can send.
 //
+// When operations that share a schema encode different types (a list and a
+// get), the schema is checked against all of them at once: a key is required
+// only if every type always sends it, and a property needs some type to
+// send it.
+//
 // It encodes each type twice, once zero and once with every field set, so a
 // custom MarshalJSON is checked as it really encodes. It follows each
 // property into the schema it describes, inline or by $ref, at every depth.
@@ -312,7 +318,7 @@ func TestOpenAPISpec_ResponseRequired(t *testing.T) {
 			stale = append(stale, op+": inlineResponseTypes names it, but the spec has no such inline response schema")
 			continue
 		}
-		c.compare(op, reflect.TypeOf(v), schema)
+		c.compare(op, []reflect.Type{reflect.TypeOf(v)}, schema)
 	}
 	for op, reason := range inlineNotChecked {
 		if strings.TrimSpace(reason) == "" {
@@ -389,9 +395,11 @@ type respComparer struct {
 // compareComponent compares the component schema name with the Go types
 // the server encodes for it.
 func (c *respComparer) compareComponent(name string, types []any) {
+	ts := make([]reflect.Type, 0, len(types))
 	for _, v := range types {
-		c.compare(name, reflect.TypeOf(v), map[string]any{"$ref": "#/components/schemas/" + name})
+		ts = append(ts, reflect.TypeOf(v))
 	}
+	c.compare(name, ts, map[string]any{"$ref": "#/components/schemas/" + name})
 }
 
 // resolve follows $ref and merges allOf. It returns the schema's properties,
@@ -547,80 +555,129 @@ func itemSchema(s map[string]any) map[string]any {
 	return s
 }
 
-func (c *respComparer) compare(at string, t reflect.Type, schema map[string]any) {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
+// compare checks schema against the Go types the server encodes for it. When
+// several operations share the schema and encode different types, a key is
+// required only if every type always sends it, and a property needs only
+// some type to send it.
+func (c *respComparer) compare(at string, ts []reflect.Type, schema map[string]any) {
 	props, required, name, ok := c.resolve(schema)
 	if !ok {
 		return // not an object schema: an enum, a scalar, a free-form map.
 	}
+	types := make([]reflect.Type, 0, len(ts))
+	names := make([]string, 0, len(ts))
+	paths := make([]string, 0, len(ts))
+	for _, t := range ts {
+		for t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+		types = append(types, t)
+		names = append(names, t.String())
+		paths = append(paths, t.PkgPath()+"."+t.Name())
+	}
 	label := at
 	if name != "" {
 		label = name
-		key := name + "|" + t.PkgPath() + "." + t.Name()
+		key := name + "|" + strings.Join(paths, "+")
 		if c.done[key] {
 			return
 		}
 		c.done[key] = true
 		c.checked[name] = true
 	}
-	if t.Kind() != reflect.Struct {
-		c.diffs = append(c.diffs, fmt.Sprintf("%s: the spec describes an object, %s encodes as %s", label, t, t.Kind()))
-		return
-	}
-	who := t.String()
 
-	always, err := encodedKeys(reflect.New(t).Elem())
-	if err != nil {
-		c.diffs = append(c.diffs, fmt.Sprintf("%s: encode zero %s: %v", label, who, err))
-		return
+	// always[i] and sometimes[i] are the keys types[i] writes when every
+	// field is zero, and when every field is set.
+	always := make([]map[string]bool, len(types))
+	sometimes := make([]map[string]bool, len(types))
+	for i, t := range types {
+		if t.Kind() != reflect.Struct {
+			c.diffs = append(c.diffs, fmt.Sprintf("%s: the spec describes an object, %s encodes as %s", label, t, t.Kind()))
+			return
+		}
+		zero, err := encodedKeys(reflect.New(t).Elem())
+		if err != nil {
+			c.diffs = append(c.diffs, fmt.Sprintf("%s: encode zero %s: %v", label, t, err))
+			return
+		}
+		full := reflect.New(t).Elem()
+		fill(full, 0)
+		set, err := encodedKeys(full)
+		if err != nil {
+			c.diffs = append(c.diffs, fmt.Sprintf("%s: encode filled %s: %v", label, t, err))
+			return
+		}
+		for k := range zero {
+			set[k] = true
+		}
+		always[i], sometimes[i] = zero, set
 	}
-	full := reflect.New(t).Elem()
-	fill(full, 0)
-	sometimes, err := encodedKeys(full)
-	if err != nil {
-		c.diffs = append(c.diffs, fmt.Sprintf("%s: encode filled %s: %v", label, who, err))
-		return
+	// who names the types whose set has k.
+	who := func(sets []map[string]bool, k string) string {
+		var out []string
+		for i, set := range sets {
+			if set[k] {
+				out = append(out, names[i])
+			}
+		}
+		return strings.Join(out, " and ")
 	}
-	for k := range always {
-		sometimes[k] = true
+	every := func(sets []map[string]bool, k string) bool {
+		for _, set := range sets {
+			if !set[k] {
+				return false
+			}
+		}
+		return true
 	}
 
-	for k := range sometimes {
+	keys := map[string]bool{}
+	for _, set := range sometimes {
+		for k := range set {
+			keys[k] = true
+		}
+	}
+	for k := range keys {
 		_, inSpec := props[k]
 		switch {
-		case !inSpec && always[k]:
-			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: always sent by %s, not in spec", label, k, who))
+		case !inSpec && who(always, k) != "":
+			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: always sent by %s, not in spec", label, k, who(always, k)))
 		case !inSpec:
-			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: sent by %s when set, not in spec", label, k, who))
-		case always[k] && !required[k]:
-			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: always sent by %s, not required", label, k, who))
+			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: sent by %s when set, not in spec", label, k, who(sometimes, k)))
+		case every(always, k) && !required[k]:
+			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: always sent by %s, not required", label, k, who(always, k)))
 		}
 	}
 	for k := range required {
-		if !always[k] {
-			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: required, but omitted by %s when empty", label, k, who))
+		for i, t := range types {
+			switch {
+			case !sometimes[i][k]:
+				c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: required, but never sent by %s", label, k, t))
+			case !always[i][k]:
+				c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: required, but omitted by %s when empty", label, k, t))
+			}
 		}
 	}
 	for k := range props {
-		if !sometimes[k] {
-			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: in spec, never sent by %s", label, k, who))
+		if !keys[k] {
+			c.diffs = append(c.diffs, fmt.Sprintf("%s.%s: in spec, never sent by %s", label, k, strings.Join(names, " and ")))
 		}
 	}
 
-	fields := jsonFields(t)
-	for k, ps := range props {
-		ft, ok := fields[k]
-		if !ok {
-			continue
+	for _, t := range types {
+		fields := jsonFields(t)
+		for k, ps := range props {
+			ft, ok := fields[k]
+			if !ok {
+				continue
+			}
+			et, isStruct := elemStruct(ft)
+			if !isStruct {
+				continue
+			}
+			sm, _ := ps.(map[string]any)
+			c.compare(label+"."+k, []reflect.Type{et}, itemSchema(sm))
 		}
-		et, isStruct := elemStruct(ft)
-		if !isStruct {
-			continue
-		}
-		sm, _ := ps.(map[string]any)
-		c.compare(label+"."+k, et, itemSchema(sm))
 	}
 }
 

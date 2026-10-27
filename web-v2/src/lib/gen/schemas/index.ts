@@ -331,6 +331,7 @@ export * from './postV1AuthPasswordResetRequest200';
 export * from './postV1AuthPasswordResetRequest200EmailDelivery';
 export * from './postV1AuthPasswordResetRequestBody';
 export * from './postV1BillingRun200';
+export * from './postV1BillingRun206';
 export * from './postV1CreditNotesBody';
 export * from './postV1CreditNotesBodyCommitRelief';
 export * from './postV1CreditNotesBodyLinesItem';

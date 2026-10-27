@@ -596,12 +596,13 @@ export interface paths {
          * @description Unauthenticated. The `vlx_pcd_…` token in the URL is the sole
          *     credential — partners embed via iframe / fetch from their own
          *     app without an API key. Sanitized projection: customer_id,
-         *     tenant_id, billing_period, subscriptions, usage[], totals,
-         *     projected_total_cents. PII (email, display_name, external_id,
+         *     tenant_id, livemode, billing_period, subscriptions, usage[],
+         *     totals, projected_total_cents, credits. PII (email, display_name, external_id,
          *     metadata, billing_profile) is NEVER on this response. Wrong
          *     prefix or unknown token → 401 (anti-enumeration). No active
-         *     sub → 200 with `billing_period.source = "no_subscription"`
-         *     and empty arrays.
+         *     sub → 200 with `billing_period.source = "no_subscription"`:
+         *     `subscriptions`, `usage` and `totals` are empty, and `credits`
+         *     still lists the customer's credit balance.
          */
         get: {
             parameters: {
@@ -630,7 +631,7 @@ export interface paths {
                                 /** Format: date-time */
                                 end: string;
                                 /**
-                                 * @description Branch on this before rendering the period. When it is `no_subscription` the customer has no active subscription, every array is empty, and `start`/`end` carry the zero time (`0001-01-01T00:00:00Z`) rather than a real range — display them and the page reads "January 1, year 1".
+                                 * @description Branch on this before rendering the period. When it is `no_subscription` the customer has no active subscription, `subscriptions`, `usage` and `totals` are empty (`credits` is not), and `start`/`end` carry the zero time (`0001-01-01T00:00:00Z`) rather than a real range — display them and the page reads "January 1, year 1".
                                  * @enum {string}
                                  */
                                 source: "subscription" | "no_subscription";
@@ -4973,8 +4974,24 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Billing cycle result */
+                /** @description Every due subscription was billed. `errors` is empty. */
                 200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            invoices_generated: number;
+                            errors: string[];
+                        };
+                    };
+                };
+                /**
+                 * @description The run finished, but `errors` is not empty: a subscription could
+                 *     not be billed (`subscription <id>: billing failed`), or the run's
+                 *     audit record could not be written. The invoices it made are kept.
+                 */
+                206: {
                     headers: {
                         [name: string]: unknown;
                     };

@@ -187,6 +187,7 @@ import type {
   PostV1AuthPasswordResetRequest200,
   PostV1AuthPasswordResetRequestBody,
   PostV1BillingRun200,
+  PostV1BillingRun206,
   PostV1CreditNotesBody,
   PostV1CreditNotesIdSend200,
   PostV1CreditNotesIdSendBody,
@@ -2043,12 +2044,13 @@ export const getGetV1PublicCostDashboardTokenUrl = (token: string,) => {
  * Unauthenticated. The `vlx_pcd_…` token in the URL is the sole
  * credential — partners embed via iframe / fetch from their own
  * app without an API key. Sanitized projection: customer_id,
- * tenant_id, billing_period, subscriptions, usage[], totals,
- * projected_total_cents. PII (email, display_name, external_id,
+ * tenant_id, livemode, billing_period, subscriptions, usage[],
+ * totals, projected_total_cents, credits. PII (email, display_name, external_id,
  * metadata, billing_profile) is NEVER on this response. Wrong
  * prefix or unknown token → 401 (anti-enumeration). No active
- * sub → 200 with `billing_period.source = "no_subscription"`
- * and empty arrays.
+ * sub → 200 with `billing_period.source = "no_subscription"`:
+ * `subscriptions`, `usage` and `totals` are empty, and `credits`
+ * still lists the customer's credit balance.
  * @summary Public cost-dashboard projection (ADR-032)
  */
 export const getV1PublicCostDashboardToken = async (token: string, options?: RequestInit): Promise<GetV1PublicCostDashboardToken200> => {
@@ -11474,9 +11476,9 @@ export const getPostV1BillingRunUrl = () => {
 /**
  * @summary Trigger billing cycle
  */
-export const postV1BillingRun = async ( options?: RequestInit): Promise<PostV1BillingRun200> => {
+export const postV1BillingRun = async ( options?: RequestInit): Promise<PostV1BillingRun200 | PostV1BillingRun206> => {
 
-  return orvalClient<PostV1BillingRun200>(getPostV1BillingRunUrl(),
+  return orvalClient<PostV1BillingRun200 | PostV1BillingRun206>(getPostV1BillingRunUrl(),
   {
     ...options,
     method: 'POST'
