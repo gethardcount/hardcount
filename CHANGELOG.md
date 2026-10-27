@@ -233,6 +233,7 @@ original text.
 ### Fixed
 
 - **A card-setup link asked for with Stripe not connected answers 409 `stripe_not_connected` for every customer (2026-10-27, [#1399](https://github.com/getvelox/velox/pull/1399)).** A customer not yet sent to Stripe got a 500. The dashboard shows the message. The customer's update-payment page answers 409, not 502, and says adding a card online isn't available, also for a customer Velox already sent to Stripe.
+- **The [first-invoice tutorial](docs/first-invoice.md) is checked in CI: every pull request runs its commands on its own build and compares each output with the page (2026-10-27, [#1400](https://github.com/getvelox/velox/pull/1400)).** Its wording now matches Velox: the meter is named Tokens and counts `tokens` events, and the invoice's **⋯** menu is next to **Audit log**. The quick start runs v0.8.2, so the page links its v0.8.2 version.
 - **An installed recipe's card says its settings were set at install (2026-10-27).** It said "you can adjust", while they are fixed once installed.
 - **The Recipes page now says to edit an installed recipe's plan and prices on the plan's page (2026-10-27).** It sent you to the Pricing page, which no longer lists prices.
 - **The customer's Daily usage chart shows each axis label whole, and large numbers in short form, such as 180K (2026-10-27).** Long labels were cut off: 180,000 read "80000" and 0.00008 read "00008".

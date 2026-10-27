@@ -270,7 +270,8 @@ jobs:
           path: ${{ runner.temp }}/migrations-out
           retention-days: 7
 
-  # Golden path: the README quickstart + scripts/demo.sh, executed for real.
+  # Golden path: the first-invoice tutorial's own commands, then the README
+  # quickstart + scripts/demo.sh, executed for real.
   # This is the whole wedge chain in one run — recipe → test-clock customer →
   # LiteLLM-shaped token ingest → provider cost rates → simulated month →
   # finalized invoice with per-(model, token_type) lines + PDF → margin
@@ -338,6 +339,33 @@ jobs:
           # demo would pass without tenant isolation being on.
           grep -q 'using app database connection (RLS enforced)' server.log \
             || { echo "server is not on the app connection: row-level security is off"; tail -50 server.log; exit 1; }
+
+      # docs/first-invoice.md, run from its own code blocks by
+      # cmd/velox-docs-run, before the demo, as on a fresh install. The page
+      # reads the test key from the file the quick start writes, so this
+      # writes that file. The first pass sends the usage both ways (5a, then
+      # 5b, which deduplicates). The second takes only 5b, for a new
+      # customer, as the page's "already exists" row says to. Step 1 says
+      # applying the recipe again returns the same setup, so the plans and
+      # meters must be the same after the second pass as after the first.
+      - name: Run the first-invoice tutorial (docs/first-invoice.md)
+        run: |
+          set -o pipefail
+          shopt -s inherit_errexit
+          jq -n --arg k "$(cat secret.key)" '{secret_key_test: $k}' > deploy/compose/quickstart-credentials.json
+          go build -o "$RUNNER_TEMP/velox-docs-run" ./cmd/velox-docs-run
+          setup() {
+            for kind in plans meters; do
+              curl -sf "http://localhost:8080/v1/$kind" -H "Authorization: Bearer $(cat secret.key)" \
+                | jq -ec --arg kind "$kind" '{($kind): [.data[].id] | sort}'
+            done
+          }
+          "$RUNNER_TEMP/velox-docs-run" docs/first-invoice.md
+          after_first=$(setup)
+          "$RUNNER_TEMP/velox-docs-run" -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
+          after_second=$(setup)
+          echo "$after_first"
+          [ "$after_first" = "$after_second" ] || { echo "Applying the recipe again changed the plans or meters:"; echo "$after_second"; exit 1; }
 
       - name: Run the golden path (scripts/demo.sh)
         run: ./scripts/demo.sh "$(cat secret.key)"

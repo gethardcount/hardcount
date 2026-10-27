@@ -117,4 +117,4 @@ Skip it for v0.9.0: its previous release, v0.8.2, has no upgrade path. On a v0.8
 
 ## First invoice tutorial
 
-- [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches its "You see:" line. When a step differs, fix the page on `main` before you publish the release notes.
+- [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches the one under its "You see:". CI runs the same commands on every pull request, against a build from source, not the release images. When a step differs, fix the page on `main` before you publish the release notes. The page links its own version for the release that `quickstart.sh` starts. When you change `VELOX_VERSION` there, change the page's link and version too: `TestFirstInvoicePageNamesTheQuickStartRelease` fails until you do.
