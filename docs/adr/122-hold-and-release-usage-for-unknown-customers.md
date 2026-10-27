@@ -83,7 +83,10 @@ release it once with an honest statement of what it will bill.
    livemode from the session, `UNIQUE (tenant_id, livemode,
    idempotency_key)`). The LiteLLM handler calls `usage.Service.HoldCall`
    (through a consumer-defined `Holder`) when the customer or meter lookup
-   returns not-found. It holds every row of the call in one transaction.
+   returns not-found. It holds the call's rows in one transaction. When a
+   row already stored or held under the call's input key has the quantity
+   the mapper wrote before the 2026-10-22 cache-write split, it holds the
+   rows in that older form, with no cache-write rows (item 6).
    Each insert is `ON CONFLICT DO NOTHING`; a resend of a held row is
    counted as `deduplicated`. A hold that cannot be written is a 503, so
    LiteLLM resends. A payload with no `id` (no key) or no `user` stays an
@@ -137,6 +140,11 @@ release it once with an honest statement of what it will bill.
    A `discarded` row means nothing is written and the resend counts as
    deduplicated, so discard stays final. A `held` row is written and marked
    released, so a later discard cannot mark usage that is already billed.
+   Two cases mark a `held` row released and write nothing, so its
+   `released_event_id` stays empty: `usage_events` already has its key (the
+   usage is billed), or it is a cache-write row of a call whose input row
+   has the quantity from before the 2026-10-22 cache-write split, which
+   counted the writes inside the input.
 
 ## Why this design
 
