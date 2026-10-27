@@ -3,7 +3,7 @@
 **Date:** 2026-10-14
 **Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Velox found when it arrived, and one unbilled counter, built in PR-6 #1390)
 
-**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: the answer that writes an event carries a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`) when Velox finds a reason it is not billed, as a snapshot of what Velox found then, not a promise; and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). The `no_price` status brings one stated exception to "a flag is never false": a price write that spans a period start can make one `no_price` or `not_on_plan` flag wrong. The grace and the after_close flag stay.
+**Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: the answer that writes an event carries a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`) when Velox finds a reason it is not billed, as a snapshot of what Velox found then, not a promise; and `velox_usage_after_close_total{origin}` became `velox_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). Two stated exceptions to "a flag is never false" stay (see "Where a present status can be wrong" in that amendment): a price write whose transaction spans a period start and commits after the ingest read, and a subscription change that commits between the read and the write. The grace and the after_close flag stay.
 
 ## Summary
 
@@ -281,9 +281,9 @@ if that invoice is voided before the close, the close bills the period's
 sum and count usage from the period start, the event included. A paid
 invoice cannot be voided (the status write refuses it), so its end is a
 watermark the close never goes below. A written-off one still can be, so
-its end does not flag. If the unpaid invoice is paid or written off
-instead, the event is billed nowhere and was not flagged: a missed flag,
-not a wrong one.
+its end does not flag. If the unpaid invoice is paid instead, or written
+off and never voided, the event is billed nowhere and was not flagged: a
+missed flag, not a wrong one.
 
 **Why the flag is never false.** Ingest reads the periods before it writes
 the event. Every writer of a period start, and the threshold watermark

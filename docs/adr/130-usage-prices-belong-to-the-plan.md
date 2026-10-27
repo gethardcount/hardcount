@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. PR-6 (#1390) shipped section 12, with D07 folded in: every unbilled event answers with its `billing_status`, and one unbilled counter. Not built yet: the base fee next-period rule (PR-7) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. PR-6 (#1390) shipped section 12, with D07 folded in: the answer that writes an event carries a `billing_status` when Velox finds a reason the event is not billed, what Velox found then and not a promise (ADR-120 amendment 2026-10-27), and one unbilled counter. Not built yet: the base fee next-period rule (PR-7) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -591,9 +591,10 @@ Built in #1390 (notes of 2026-10-27, from the code):
   period is checked against each current plan at its pin of the period.)
 - Matching runs in Go. With string values, per-key equality is the same as
   Postgres `@>`; a real-Postgres test checks the two agree.
-- **One stated exception to "a flag is never false"** (ADR-120): a price
+- **A stated exception to "a flag is never false"** (ADR-120): a price
   write whose transaction spans a period start, and commits after an
-  ingest read, can make one `no_price` flag wrong. Closing it needs a lock
+  ingest read, can make one `no_price` flag wrong. ADR-120 states one more:
+  a subscription change that commits between the read and the write. Closing it needs a lock
   on the plan per ingested event, at the 1,000 to 12,000 events per second
   measured in [scale](../scale.md). Rejected.
 
@@ -881,7 +882,7 @@ it.
 | [085](085-recipe-idempotent-apply.md) | Rule adoption, the rule conformance check, the currency taken from adopted rules and the 2026-10-23 amendment go (PR-4); recipes no longer create a dunning policy or webhook endpoint (PR-5). |
 | [096](096-unpriced-meter-plan-attach-guard.md) | The plan-attach guard and the meter-in-use guard that replaced the last-price guard go: a plan's meters are its prices' meters (PR-4). The WARN and counter stay; ingest adds `no_price` (PR-6). |
 | [100](100-currency-coherence-guard-ring.md) | G1, G2, G2b, the override currency clause and G4's recipe probe go; prices take the plan's currency (PR-4). |
-| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4). `no_price` adds one stated exception to "a flag is never false" (PR-6). The after_close counter becomes `velox_usage_unbilled_total{reason="after_close"}` (PR-6). |
+| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4). `no_price` adds a stated exception to "a flag is never false" (PR-6). The after_close counter becomes `velox_usage_unbilled_total{reason="after_close"}` (PR-6). |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default (PR-5). |
 
 ## References

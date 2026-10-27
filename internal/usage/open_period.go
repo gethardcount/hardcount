@@ -141,9 +141,8 @@ const (
 	// at its pin, but no price of the plan takes the row's labels.
 	NoPrice
 	// Unsettled: a threshold invoice that is not paid billed the row's time.
-	// If that invoice is paid or written off, no other invoice counts the
-	// row. If it is voided before the period closes, the period's invoice
-	// counts it.
+	// The period's invoice counts the row only if that invoice is voided
+	// before the period closes. A written-off invoice can still be voided.
 	Unsettled
 	// Later: not checked. The row's time is at or after the current
 	// period's end, and the subscription goes on: a period not invoiced yet

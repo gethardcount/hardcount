@@ -229,9 +229,9 @@ type ReleaseResult struct {
 	InOpenPeriod int `json:"in_open_period"`
 	// PendingThresholdInvoice counts released rows of a sum or count meter
 	// stamped before the time a threshold invoice of the current period
-	// billed through, while that invoice is not paid. If it is paid or
-	// written off, no invoice counts them. If it is voided before the period
-	// closes, the period's invoice counts them.
+	// billed through, while that invoice is not paid. The period's invoice
+	// counts them only if that invoice is voided before the period closes.
+	// A written-off invoice can still be voided.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 	// NoPrice counts released rows whose time falls in a billing period not
 	// invoiced yet, whose meter the plan that bills that time prices, but no

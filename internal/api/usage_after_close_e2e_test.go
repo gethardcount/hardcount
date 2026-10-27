@@ -572,8 +572,8 @@ func TestUsageAfterClose_HeldReleaseInTheGrace_PendingPlan(t *testing.T) {
 // watermark included. A threshold (no reset) fires on April 20 and bills
 // April 1 to 20. Rows stamped April 15 released while that invoice is
 // unpaid count as pending_threshold_invoice: April's invoice bills them only
-// if the threshold invoice is voided or written off. Once it is paid, rows
-// stamped April 16 count as outside_open_period: no invoice bills them.
+// if the threshold invoice is voided before April closes. Once it is paid,
+// rows stamped April 16 count as outside_open_period: no invoice bills them.
 // Rows stamped April 25 are in_open_period.
 //
 // Mutation checks: classify the release with no watermark → the April 15

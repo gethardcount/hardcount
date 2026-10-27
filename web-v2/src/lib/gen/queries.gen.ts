@@ -7403,10 +7403,13 @@ export const getBackfillUsageEventUrl = () => {
  *
  * The event counts toward the billing period its timestamp falls in
  * only if that period's invoice has not been built yet. An event for
- * an already-invoiced period is stored but never billed, and its 201
- * says so with `billing_status: after_close`; bill it with a one-off
- * invoice. Its 201 carries the other statuses too (see
- * `UsageBillingStatus`).
+ * an already-invoiced period is stored, but that invoice does not
+ * bill it; bill it with a one-off invoice if needed. Its 201 carries
+ * the `billing_status` Velox found (see `UsageBillingStatus`):
+ * `after_close` while the subscription that invoiced the period is
+ * active or trialing, `outside_subscription` once it has ended. A
+ * billing period of another subscription that is not invoiced yet and
+ * holds the event's time decides the status instead.
  *
  * Shares idempotency keys with live ingest: a repeated
  * `idempotency_key` returns 200 with the original event and an

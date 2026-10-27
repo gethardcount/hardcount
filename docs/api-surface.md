@@ -226,10 +226,11 @@ that the event will be billed.
   undone, or a price added.
 - The invoice is the final answer.
 
-A present status can be wrong in two cases: a price saved in the same
-instant a billing period starts, and a subscription change saved while the
-request is in flight. A LiteLLM delivery reads the subscriptions once, so
-the second case covers the whole delivery.
+A present status can be wrong in two cases: a price change whose save
+began before a billing period started and finished after the request read
+the prices, and a subscription change saved while the request is in
+flight. A LiteLLM delivery reads the subscriptions once, so the second
+case covers the whole delivery.
 
 Where it is sent:
 

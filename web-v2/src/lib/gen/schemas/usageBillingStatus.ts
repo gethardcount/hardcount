@@ -40,9 +40,10 @@
  * trial extended, a scheduled cancel undone, or a price added. The
  * invoice is the final answer.
  *
- * A price saved in the same instant a billing period starts, or a
- * subscription change saved while the request is in flight, can make
- * a present status wrong. Absent on a replay and on a read.
+ * Two cases can make a present status wrong: a price change whose
+ * save began before a billing period started and finished after the
+ * request read the prices, and a subscription change saved while the
+ * request is in flight. Absent on a replay and on a read.
  */
 export type UsageBillingStatus = typeof UsageBillingStatus[keyof typeof UsageBillingStatus];
 

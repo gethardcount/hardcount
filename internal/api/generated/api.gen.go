@@ -4619,9 +4619,9 @@ type HeldUsageReleaseResult struct {
 
 	// PendingThresholdInvoice Released rows of a sum or count meter stamped before the end of
 	// this period's spend-threshold invoice, while that invoice is not
-	// paid. If it is paid or written off, no invoice counts them. If
-	// it is voided before the period closes, the period's invoice
-	// counts them.
+	// paid. The period's invoice counts them only if that invoice is
+	// voided before the period closes. A written-off invoice can still
+	// be voided.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 
 	// Released Rows newly written as usage events.
@@ -6687,9 +6687,10 @@ type UsageAggregate struct {
 // trial extended, a scheduled cancel undone, or a price added. The
 // invoice is the final answer.
 //
-// A price saved in the same instant a billing period starts, or a
-// subscription change saved while the request is in flight, can make
-// a present status wrong. Absent on a replay and on a read.
+// Two cases can make a present status wrong: a price change whose
+// save began before a billing period started and finished after the
+// request read the prices, and a subscription change saved while the
+// request is in flight. Absent on a replay and on a read.
 type UsageBillingStatus string
 
 // UsageEvent defines model for UsageEvent.
@@ -6725,9 +6726,10 @@ type UsageEvent struct {
 	// trial extended, a scheduled cancel undone, or a price added. The
 	// invoice is the final answer.
 	//
-	// A price saved in the same instant a billing period starts, or a
-	// subscription change saved while the request is in flight, can make
-	// a present status wrong. Absent on a replay and on a read.
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
 	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
 	CustomerId    string             `json:"customer_id"`
 
@@ -6801,9 +6803,10 @@ type UsageEventBatchEventResult struct {
 	// trial extended, a scheduled cancel undone, or a price added. The
 	// invoice is the final answer.
 	//
-	// A price saved in the same instant a billing period starts, or a
-	// subscription change saved while the request is in flight, can make
-	// a present status wrong. Absent on a replay and on a read.
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
 	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
 
 	// Status `ingested`: the batch wrote the event. `deduplicated`: an event

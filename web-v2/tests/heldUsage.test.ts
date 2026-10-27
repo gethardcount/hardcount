@@ -100,11 +100,14 @@ test('the release summary names rows no price matches', () => {
 })
 
 // Review finding 3 (#1350): rows in time an unpaid spend-threshold invoice
-// covered are not called invoiced, and their outcome is said both ways.
+// covered are not called invoiced. The line says when the period's invoice
+// can charge them, and does not say a write-off settles it (#1390 review
+// round 5: a written-off invoice can still be voided).
 test('the release summary says rows under an unpaid threshold invoice may or may not be billed', () => {
   const s = releaseSummary({ customer_id: 'c', released: 4, deduplicated: 0, still_held: 0, more_to_release: 0, in_open_period: 0, no_price: 0, not_on_plan: 0, pending_threshold_invoice: 4, outside_open_period: 0 })
   assert.match(s.description, /4 fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet/)
-  assert.match(s.description, /If it is paid or written off, no invoice charges them\. If it is voided before/)
+  assert.match(s.description, /The period's invoice charges them only if the spend-threshold invoice is voided before the period's invoice is built\. A written-off invoice can still be voided\./)
+  assert.doesNotMatch(s.description, /no invoice charges/)
   assert.doesNotMatch(s.description, /will be invoiced/)
 })
 

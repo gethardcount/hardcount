@@ -104,7 +104,7 @@ export function releaseSummary(r: HeldUsageReleaseResult): { title: string; desc
     parts.push(`${r.not_on_plan.toLocaleString('en-US')} are for a meter the subscription's plan has no price for.`)
   }
   if (r.pending_threshold_invoice > 0) {
-    parts.push(`${r.pending_threshold_invoice.toLocaleString('en-US')} fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet. If it is paid or written off, no invoice charges them. If it is voided before the period's invoice is built, the period's invoice does.`)
+    parts.push(`${r.pending_threshold_invoice.toLocaleString('en-US')} fall in time this period's spend-threshold invoice covered, and that invoice is not paid yet. The period's invoice charges them only if the spend-threshold invoice is voided before the period's invoice is built. A written-off invoice can still be voided.`)
   }
   if (r.outside_open_period > 0) {
     parts.push(`${r.outside_open_period.toLocaleString('en-US')} fall in time no subscription bills (before it starts, in a free trial, or after it ends) or in time already invoiced. Bill them with a one-off invoice if needed.`)

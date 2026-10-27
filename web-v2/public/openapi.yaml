@@ -718,9 +718,10 @@ components:
         trial extended, a scheduled cancel undone, or a price added. The
         invoice is the final answer.
 
-        A price saved in the same instant a billing period starts, or a
-        subscription change saved while the request is in flight, can make
-        a present status wrong. Absent on a replay and on a read.
+        Two cases can make a present status wrong: a price change whose
+        save began before a billing period started and finished after the
+        request read the prices, and a subscription change saved while the
+        request is in flight. Absent on a replay and on a read.
 
     UsageEventBatchResult:
       type: object
@@ -4047,9 +4048,9 @@ components:
           description: |
             Released rows of a sum or count meter stamped before the end of
             this period's spend-threshold invoice, while that invoice is not
-            paid. If it is paid or written off, no invoice counts them. If
-            it is voided before the period closes, the period's invoice
-            counts them.
+            paid. The period's invoice counts them only if that invoice is
+            voided before the period closes. A written-off invoice can still
+            be voided.
         outside_open_period:
           type: integer
           description: |
@@ -9242,10 +9243,13 @@ paths:
 
         The event counts toward the billing period its timestamp falls in
         only if that period's invoice has not been built yet. An event for
-        an already-invoiced period is stored but never billed, and its 201
-        says so with `billing_status: after_close`; bill it with a one-off
-        invoice. Its 201 carries the other statuses too (see
-        `UsageBillingStatus`).
+        an already-invoiced period is stored, but that invoice does not
+        bill it; bill it with a one-off invoice if needed. Its 201 carries
+        the `billing_status` Velox found (see `UsageBillingStatus`):
+        `after_close` while the subscription that invoiced the period is
+        active or trialing, `outside_subscription` once it has ended. A
+        billing period of another subscription that is not invoiced yet and
+        holds the event's time decides the status instead.
 
         Shares idempotency keys with live ingest: a repeated
         `idempotency_key` returns 200 with the original event and an
