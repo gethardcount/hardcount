@@ -104,7 +104,11 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 		return CallResult{}, ErrHoldUnavailable
 	}
 	// One clock lookup for the call: build reads the bound instant.
-	ctx = clock.WithSim(ctx, s.simNow(ctx, tenantID, in.CustomerID))
+	sim, err := s.simNow(ctx, tenantID, in.CustomerID)
+	if err != nil {
+		return CallResult{}, err
+	}
+	ctx = clock.WithSim(ctx, sim)
 	// Both mappings are built, the store writes one, and only that one is
 	// recorded as late: a replay would otherwise count rows never written.
 	prep := func(evs []CallEvent) ([]domain.UsageEvent, []domain.UsageEvent, error) {

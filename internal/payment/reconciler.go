@@ -177,6 +177,10 @@ func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 // stale-hold check of an 'unknown' invoice that names its PaymentIntent is
 // never stamped, so it comes back first.
 func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	// The parked-invoice count (ADR-107's alerting surface) is exported by
 	// every replica from the database at scrape time (metrics.go,
 	// velox_parked_invoices) — not stamped here, where only the billing
@@ -194,7 +198,7 @@ func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 		// The panic drops errs, which only the caller logs. Log them here, so
 		// another row's failure is not hidden while one row keeps panicking.
 		mode := "live"
-		if !postgres.Livemode(ctx) {
+		if !live {
 			mode = "test"
 		}
 		for _, err := range errs {

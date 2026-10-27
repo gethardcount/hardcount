@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -330,7 +331,7 @@ func TestRetryPendingCreditNoteTaxReversal_ReDrivesAndClears(t *testing.T) {
 	// Stripe recovers; the sweep must re-drive and clear the marker.
 	rev.failWith = nil
 	rev.returnID = "tx_reversal_recovered"
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
@@ -382,7 +383,7 @@ func TestRetryPendingCreditNoteTaxReversal_RecoversMarkerlessOrphan(t *testing.T
 		t.Fatalf("seed orphan: %v", err)
 	}
 
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
@@ -488,7 +489,7 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxOrphanDoesNotRewriteItself(t *
 	}
 
 	before := store.setPendingCalls
-	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10); len(sweepErrs) != 0 {
+	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
 
@@ -539,7 +540,7 @@ func TestRetryPendingCreditNoteTaxReversal_ClearsMarkerWhenActuallySet(t *testin
 	}
 
 	before := store.setPendingCalls
-	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10); len(sweepErrs) != 0 {
+	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 0 {
 		t.Fatalf("sweep errors: %v", sweepErrs)
 	}
 	if got := store.setPendingCalls - before; got != 1 {
@@ -593,7 +594,7 @@ func TestRetryPendingCreditNoteTaxReversal_PromotesMarkerlessOrphanOnFailure(t *
 	svc.SetTaxReverser(rev)
 	cn := seedTaxOrphan(t, store, false)
 
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if n != 0 || len(sweepErrs) != 1 {
 		t.Fatalf("reversed=%d errs=%v, want 0 reversed and exactly the re-drive error", n, sweepErrs)
 	}
@@ -616,7 +617,7 @@ func TestRetryPendingCreditNoteTaxReversal_RepeatedFailureDoesNotRewriteMarker(t
 	svc.SetTaxReverser(rev)
 	seedTaxOrphan(t, store, true)
 
-	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10); len(sweepErrs) != 1 {
+	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 1 {
 		t.Fatalf("errs=%v, want exactly the re-drive error", sweepErrs)
 	}
 	if store.setPendingCalls != 0 {
@@ -635,7 +636,7 @@ func TestRetryPendingCreditNoteTaxReversal_PromoteWriteFailureIsReported(t *test
 	svc.SetTaxReverser(rev)
 	cn := seedTaxOrphan(t, store, false)
 
-	_, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	_, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if len(sweepErrs) != 2 {
 		t.Fatalf("errs=%v, want the re-drive error AND the promote error", sweepErrs)
 	}
@@ -657,7 +658,7 @@ func TestRetryPendingCreditNoteTaxReversal_EmptyResultOnTaxBearingInvoiceIsFailu
 	cnPending := seedTaxOrphan(t, store, true)
 	cnOrphan := seedTaxOrphan(t, store, false)
 
-	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(context.Background(), 10)
+	n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10)
 	if n != 0 {
 		t.Fatalf("reversed=%d, want 0 — an empty result reversed nothing", n)
 	}

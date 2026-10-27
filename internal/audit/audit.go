@@ -571,6 +571,10 @@ func buildListWhere(tenantID string, livemode bool, filter QueryFilter) (whereCl
 
 // Query reads audit entries for a tenant.
 func (l *Logger) Query(ctx context.Context, tenantID string, filter QueryFilter) ([]domain.AuditEntry, int, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	tx, err := l.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, 0, err
@@ -586,7 +590,7 @@ func (l *Logger) Query(ctx context.Context, tenantID string, filter QueryFilter)
 		limit = 100
 	}
 
-	whereClause, args, idx, useCursor := buildListWhere(tenantID, postgres.Livemode(ctx), filter)
+	whereClause, args, idx, useCursor := buildListWhere(tenantID, live, filter)
 
 	// Cursor path skips COUNT — the handler derives hasMore from a limit+1
 	// over-fetch. The offset path (page 1, and every filter change) keeps a count
@@ -790,6 +794,10 @@ func scanAuditEntry(rows *sql.Rows) (domain.AuditEntry, error) {
 // memory. An error from fn aborts the walk and surfaces to the caller, which is
 // how a mid-stream failure reaches exportAbort's EXPORT_INCOMPLETE marker.
 func (l *Logger) Stream(ctx context.Context, tenantID string, filter QueryFilter, fn func(domain.AuditEntry) error) error {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
 	tx, err := l.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
@@ -800,7 +808,7 @@ func (l *Logger) Stream(ctx context.Context, tenantID string, filter QueryFilter
 	filter.Limit, filter.Offset = 0, 0
 	filter.AfterCreatedAt, filter.AfterID = time.Time{}, ""
 
-	whereClause, args, _, _ := buildListWhere(tenantID, postgres.Livemode(ctx), filter)
+	whereClause, args, _, _ := buildListWhere(tenantID, live, filter)
 
 	rows, err := tx.QueryContext(ctx, auditListSelect+whereClause+auditListOrder, args...)
 	if err != nil {
@@ -825,6 +833,10 @@ func (l *Logger) Stream(ctx context.Context, tenantID string, filter QueryFilter
 // a tenant. The audit page uses this to build filter dropdowns dynamically,
 // so new event types appear automatically without a UI release.
 func (l *Logger) FilterOptions(ctx context.Context, tenantID string) (actions, resourceTypes []string, err error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	tx, err := l.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, nil, err
@@ -839,12 +851,12 @@ func (l *Logger) FilterOptions(ctx context.Context, tenantID string) (actions, r
 	// Cap at 500 to bound the payload: a tenant should not organically produce more
 	// distinct actions than that, and if they do the cap drops the values sorting
 	// LAST alphabetically, not the oldest ones.
-	actions, err = distinctByLooseIndexScan(ctx, tx, "action", tenantID, postgres.Livemode(ctx), 500)
+	actions, err = distinctByLooseIndexScan(ctx, tx, "action", tenantID, live, 500)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	resourceTypes, err = distinctByLooseIndexScan(ctx, tx, "resource_type", tenantID, postgres.Livemode(ctx), 500)
+	resourceTypes, err = distinctByLooseIndexScan(ctx, tx, "resource_type", tenantID, live, 500)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -869,6 +881,10 @@ type SimClock struct {
 // the operator gave it), which survive teardown by design; unnamed or
 // pre-0148 clocks fall back to the id in the UI.
 func (l *Logger) SimClocks(ctx context.Context, tenantID string) ([]SimClock, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := l.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -897,7 +913,7 @@ func (l *Logger) SimClocks(ctx context.Context, tenantID string) ([]SimClock, er
 			ORDER BY created_at DESC
 			LIMIT 1
 		) n ON true
-		ORDER BY c.last_at DESC`, tenantID, postgres.Livemode(ctx))
+		ORDER BY c.last_at DESC`, tenantID, live)
 	if err != nil {
 		return nil, err
 	}

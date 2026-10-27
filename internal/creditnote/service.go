@@ -674,7 +674,10 @@ func (s *Service) LockInvoicesForDraftsTx(ctx context.Context, tx *sql.Tx, tenan
 // self-heals via RetryPendingCreditNoteTaxReversal — not something this sweep
 // chases. Per-row errors are collected, not aborted-on.
 func (s *Service) RetryPendingClawbackIssue(ctx context.Context, batch int) (int, []error) {
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	drafts, err := s.store.ListPendingClawbackDrafts(ctx, batch, livemode)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list pending clawback drafts: %w", err)}
@@ -740,7 +743,10 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 	if s.taxRev == nil {
 		return 0, nil
 	}
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	pending, err := s.store.ListPendingCreditNoteTaxReversal(ctx, batch, livemode)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list pending credit-note tax reversals: %w", err)}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // #976: a Stripe 409 is never a definite failure, whatever its error type.
@@ -76,7 +77,7 @@ func TestCreatePaymentIntent_A409IsNeverADefiniteFailure(t *testing.T) {
 			stub := withCannedStripe(t, http.StatusConflict, tc.body)
 			c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
-			_, err := c.CreatePaymentIntent(auth.WithTenantID(context.Background(), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+			_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
 			var pe *PaymentError
 			if !errors.As(err, &pe) || !pe.Unknown {
 				t.Fatalf("err = %#v, want an unclear outcome (Unknown): a 409 can follow an earlier request under the same key that Stripe is still running", err)
@@ -101,7 +102,7 @@ func TestCreatePaymentIntent_A400RejectionStaysDefinite(t *testing.T) {
 	withCannedStripe(t, http.StatusBadRequest, stripe400MissingParam)
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
-	_, err := c.CreatePaymentIntent(auth.WithTenantID(context.Background(), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+	_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
 	var pe *PaymentError
 	if !errors.As(err, &pe) || pe.Unknown {
 		t.Fatalf("err = %#v, want a definite failure", err)
@@ -203,7 +204,7 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			dunning := &recordingDunningStarter{}
 			s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, dunning)
 
-			ctx := auth.WithTenantID(context.Background(), "t1")
+			ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 			var err error
 			if tc.purpose == piPurposeDunningRetry {
 				_, err = s.ChargeInvoiceForDunningRetry(ctx, "t1", snapshot, testHold, "cus_stripe", "pm_on_file")

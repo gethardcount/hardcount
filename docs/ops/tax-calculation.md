@@ -72,6 +72,7 @@ Velox counts every invoice that waits for tax on the metric `velox_tax_outcome_t
 |---|---|
 | `no_country` | The customer has no country on file |
 | `no_client_for_mode` | Stripe is not connected for the invoice's mode, test or live |
+| `credentials_unreadable` | Velox could not read the stored Stripe keys for that mode, for example a database error or a key it cannot decrypt |
 | `api_error` | Stripe Tax returned an error |
 
 Each one also logs a WARN line, `stripe tax failed, deferring invoice for retry`, with the reason. Alert on the metric, not the log.

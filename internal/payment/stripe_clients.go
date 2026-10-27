@@ -3,7 +3,6 @@ package payment
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -34,9 +33,9 @@ type StripeCredentials interface {
 // tenant brings their own Stripe keys (stored encrypted via tenantstripe);
 // this resolver looks them up and constructs a client with the right secret.
 //
-// The type name is retained from the env-var-backed ancestor so call sites
-// don't churn — callers still treat a nil return from ForCtx/For as "Stripe
-// not configured for this tenant+mode" and surface ErrStripeNotConfigured.
+// Resolve and ResolveCtx return (nil, nil) only when the tenant has not
+// connected Stripe for the mode; callers surface that as
+// ErrStripeNotConfigured. Any other miss is an error.
 type StripeClients struct {
 	fetcher StripeCredentials
 	http    *http.Client // nil: stripeHTTPClient
@@ -64,40 +63,18 @@ func NewStripeClientsWithHTTPClient(fetcher StripeCredentials, hc *http.Client) 
 	return c
 }
 
-// ForCtx derives tenantID from auth ctx and livemode from postgres ctx,
-// then returns the stripe client for those credentials. Used by
-// authenticated request handlers where both values already flow through ctx.
-func (c *StripeClients) ForCtx(ctx context.Context) *stripe.Client {
-	if c == nil {
-		return nil
-	}
-	tenantID := auth.TenantID(ctx)
-	if tenantID == "" {
-		return nil
-	}
-	return c.For(ctx, tenantID, postgres.Livemode(ctx))
-}
+// errNoTenant is a lookup asked for with no tenant ID: a bug at the caller.
+var errNoTenant = errors.New("stripe credentials: no tenant ID")
 
-// For returns the stripe client for an explicit (tenant, mode). Used by
-// token-authenticated paths (public payment links) and background workers
-// (reconciler) that derive tenantID + livemode from a database row instead
-// of request ctx.
-func (c *StripeClients) For(ctx context.Context, tenantID string, livemode bool) *stripe.Client {
-	sc, err := c.Resolve(ctx, tenantID, livemode)
-	if err != nil {
-		slog.ErrorContext(ctx, "stripe credential lookup failed",
-			"tenant_id", tenantID, "livemode", livemode, "error", err)
-		return nil
-	}
-	return sc
-}
-
-// Resolve is For that tells "not configured" (nil, nil) apart from "the
-// credentials could not be read" (nil, err). Money paths use it so a lookup
-// blip is a retryable failure, not a definite "Stripe not configured".
+// Resolve returns the Stripe client for an explicit (tenant, mode). It
+// returns (nil, nil) when Stripe is not wired or the tenant has not connected
+// it for the mode, and an error when the credentials could not be read.
 func (c *StripeClients) Resolve(ctx context.Context, tenantID string, livemode bool) (*stripe.Client, error) {
-	if c == nil || tenantID == "" {
+	if c == nil {
 		return nil, nil
+	}
+	if tenantID == "" {
+		return nil, errNoTenant
 	}
 	creds, err := c.fetcher.GetPlaintext(ctx, tenantID, livemode)
 	if err != nil {
@@ -121,7 +98,11 @@ func (c *StripeClients) ResolveCtx(ctx context.Context) (*stripe.Client, error) 
 	if c == nil {
 		return nil, nil
 	}
-	return c.Resolve(ctx, auth.TenantID(ctx), postgres.Livemode(ctx))
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.Resolve(ctx, auth.TenantID(ctx), live)
 }
 
 // Has returns true iff a credential fetcher is wired. Used at server
@@ -132,29 +113,14 @@ func (c *StripeClients) Has() bool {
 	return c != nil && c.fetcher != nil
 }
 
-// HasFor reports whether THIS tenant has Stripe credentials stored for
-// the given mode. Used by callers that gate features on the
-// per-tenant connection state — e.g. tenant settings refusing to
-// accept tax_provider=stripe_tax until Stripe is actually connected.
-//
-// Distinct from Has(): Has() reflects "the system can look up keys";
-// HasFor reflects "this specific tenant has connected." A nil
-// receiver, missing fetcher, or ErrNotFound from the fetcher all
-// resolve to false. Other fetcher errors log and return false too —
-// gating features safely is more important than surfacing transient
-// fetch errors here, since the validation will simply re-run on the
-// operator's next save.
-func (c *StripeClients) HasFor(ctx context.Context, tenantID string, livemode bool) bool {
-	if c == nil || c.fetcher == nil || tenantID == "" {
-		return false
-	}
-	creds, err := c.fetcher.GetPlaintext(ctx, tenantID, livemode)
+// HasFor reports whether this tenant has Stripe credentials stored for the
+// mode. Distinct from Has(): Has() reflects "the system can look up keys";
+// HasFor reflects "this specific tenant has connected." It returns an error
+// when the credentials could not be read.
+func (c *StripeClients) HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error) {
+	sc, err := c.Resolve(ctx, tenantID, livemode)
 	if err != nil {
-		if !errors.Is(err, errs.ErrNotFound) {
-			slog.ErrorContext(ctx, "stripe credential lookup failed",
-				"tenant_id", tenantID, "livemode", livemode, "error", err)
-		}
-		return false
+		return false, err
 	}
-	return creds.SecretKey != ""
+	return sc != nil, nil
 }

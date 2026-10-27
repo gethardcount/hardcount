@@ -11,6 +11,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // thresholdMockSubs extends mockSubs with a candidate filter so the
@@ -245,7 +246,7 @@ func TestScanThresholds_PeriodCASFailure_IsLoud(t *testing.T) {
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	subs.closePeriodErr = fmt.Errorf("injected advance failure")
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if fired != 0 {
 		t.Errorf("fired = %d, want 0 (a failed fire must not count)", fired)
 	}
@@ -266,7 +267,7 @@ func TestScanThresholds_CommitFailure_IsLoud(t *testing.T) {
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
 	subs.txErr = fmt.Errorf("injected commit failure")
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if fired != 0 || len(errs) == 0 {
 		t.Fatalf("fired=%d errs=%v; want 0 fired + a loud commit error", fired, errs)
 	}
@@ -292,7 +293,7 @@ func TestScanThresholds_PeriodMoved_SkipsQuietly(t *testing.T) {
 		s.NextBillingAt = &moved
 		m.subs["sub_1"] = s
 	}
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if fired != 0 || len(errs) != 0 {
 		t.Fatalf("fired=%d errs=%v; want 0 fired and no error on a lost race", fired, errs)
 	}
@@ -427,7 +428,7 @@ func TestScanThresholds_SkipsTerminalSubs(t *testing.T) {
 	subs.subs["sub_1"] = s
 	subs.candidates[0] = s
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -454,7 +455,7 @@ func TestScanThresholds_SkipsPauseCollection(t *testing.T) {
 	subs.subs["sub_1"] = s
 	subs.candidates[0] = s
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -472,7 +473,7 @@ func TestScanThresholds_NoCandidates(t *testing.T) {
 	engine, subs, _ := setupThresholdEngine(&domain.BillingThresholds{AmountGTE: 100}, 100)
 	subs.candidates = nil
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) > 0 {
 		t.Errorf("unexpected errors: %v", errs)
 	}
@@ -499,7 +500,7 @@ func TestThresholdFire_ClockPinned_StampsIsSimulated(t *testing.T) {
 	frozen := pinned.CurrentBillingPeriodStart.AddDate(0, 0, 5)
 	engine.SetTestClockReader(&stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: frozen}})
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) > 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}
@@ -552,7 +553,7 @@ func TestScanThresholds_FireOnceProbe_NoReEvaluate(t *testing.T) {
 	// would fire and mask the probe. A fake clock inside the window isolates the
 	// probe as the sole thing under test.
 	engine.clock = clock.NewFake(time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC))
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 
 	fired1, errs1 := engine.ScanThresholds(ctx, 50)
 	if len(errs1) != 0 {
@@ -613,7 +614,7 @@ func TestScanThresholds_DrainsPastBatchSize(t *testing.T) {
 		subs.subs[s.ID] = s // the fire's verify-only CAS (ADR-115) reads the row
 	}
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}
@@ -639,7 +640,7 @@ func TestScanOneThreshold_BoundarySkip(t *testing.T) {
 	// now == periodEnd: the window is closed.
 	engine.clock = clock.NewFake(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC))
 
-	didFire, err := engine.scanOneThreshold(context.Background(), subs.candidates[0])
+	didFire, err := engine.scanOneThreshold(postgres.WithLivemode(context.Background(), true), subs.candidates[0])
 	if err != nil {
 		t.Fatalf("scanOneThreshold: %v", err)
 	}
@@ -679,7 +680,7 @@ func TestFireThreshold_ZeroTotal_AutoPaid(t *testing.T) {
 	// with the base gone.
 	mp.prices["pln_1"][0].UnitAmountCents = decimal.Zero
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}
@@ -726,7 +727,7 @@ func TestScanThresholds_ProbeHealsStrandedZeroDue(t *testing.T) {
 		BillingPeriodEnd:   fireAt,
 	})
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}

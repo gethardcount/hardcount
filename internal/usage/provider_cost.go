@@ -352,11 +352,11 @@ func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *M
 // effectiveNow is the customer's current time for the default margin
 // window: the usage Service's effectiveNow (test-clock frozen_time when
 // the customer is pinned, wall-clock otherwise).
-func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID string) time.Time {
+func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
 	if a != nil && a.usageSvc != nil && a.usageSvc.usage != nil {
 		return a.usageSvc.usage.effectiveNow(ctx, tenantID, customerID)
 	}
-	return time.Now().UTC()
+	return time.Now().UTC(), nil
 }
 
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
@@ -675,7 +675,7 @@ func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 // marginWindow is the Margin handler's [from, to): the request's bounds,
 // with missing ones defaulted around the customer's effective now.
 func (h *ProviderCostHandler) marginWindow(r *http.Request, tenantID, customerID string) (time.Time, time.Time, error) {
-	return parseWindow(r, func() time.Time {
+	return parseWindow(r, func() (time.Time, error) {
 		return h.margin.effectiveNow(r.Context(), tenantID, customerID)
 	})
 }
@@ -687,11 +687,14 @@ func (h *ProviderCostHandler) marginWindow(r *http.Request, tenantID, customerID
 // same timeline customer usage follows. It is
 // called only when a bound is missing, so an explicit window costs no
 // clock lookup.
-func parseWindow(r *http.Request, now func() time.Time) (time.Time, time.Time, error) {
+func parseWindow(r *http.Request, now func() (time.Time, error)) (time.Time, time.Time, error) {
 	q := r.URL.Query()
 	var from, to time.Time
 	if q.Get("from") == "" || q.Get("to") == "" {
-		n := now()
+		n, err := now()
+		if err != nil {
+			return time.Time{}, time.Time{}, err
+		}
 		from, to = n.AddDate(0, 0, -30), n
 	}
 	if v := r.URL.Query().Get("from"); v != "" {

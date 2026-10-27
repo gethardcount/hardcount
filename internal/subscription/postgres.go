@@ -292,7 +292,7 @@ func (s *PostgresStore) PauseCollections(ctx context.Context, tenantID string, i
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx,
-		`SELECT `+subCols+` FROM subscriptions WHERE id = ANY($1::text[])`, postgres.StringArray(ids))
+		`SELECT `+subCols+` FROM subscriptions WHERE id = ANY($1::text[])`, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -1631,6 +1631,10 @@ func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id strin
 // instant billSubscription's own checks use: an arm that admitted a row the
 // engine then declined would be saved as errStillDue on a healthy sub.
 func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Leader-only funnel (ADR-114): the claim proves the caller's lease token
 	// in its own snapshot. Outside a led tick this fails loud — never an
 	// unfenced fallback.
@@ -1667,8 +1671,8 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 	// with an explicit WHERE clause since TxBypass doesn't set app.livemode.
 	//
 	// exclude: subs the billing drain already attempted this run (P27). The
-	// COALESCE is load-bearing: a nil slice reaches Postgres as NULL (see
-	// postgres.StringArray), and NOT (id = ANY(NULL)) is NULL, which would
+	// COALESCE is load-bearing: pgx sends a nil slice as NULL, and
+	// NOT (id = ANY(NULL)) is NULL, which would
 	// drop every row. The drain's first page always passes nil.
 	//
 	// Billing-failure gate (ADR-119): a sub whose saved failure is parked, or
@@ -1688,7 +1692,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 		  AND NOT (s.id = ANY(COALESCE($6::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
-	`, postgres.Livemode(ctx), now, limit, string(leader.RoleBilling), token, postgres.StringArray(exclude), dueBy)
+	`, live, now, limit, string(leader.RoleBilling), token, exclude, dueBy)
 	if err != nil {
 		return nil, err
 	}
@@ -1758,7 +1762,7 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
 		FOR UPDATE OF s SKIP LOCKED
-	`, now, limit, postgres.StringArray(exclude), dueBy)
+	`, now, limit, exclude, dueBy)
 	if err != nil {
 		return nil, err
 	}
@@ -1817,7 +1821,7 @@ func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clo
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
 		FOR UPDATE OF s SKIP LOCKED
-	`, clockID, limit, postgres.StringArray(exclude))
+	`, clockID, limit, exclude)
 	if err != nil {
 		return nil, err
 	}
@@ -1878,6 +1882,10 @@ func resumeNotWaitingOnCloseSQL(a string) string {
 // but whose next_billing_at was still in the future would stay
 // paused indefinitely. The new scan closes that gap.
 func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before time.Time, limit int) ([]domain.Subscription, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -1896,7 +1904,7 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 		  AND `+resumeNotWaitingOnCloseSQL("s")+`
 		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
-	`, postgres.Livemode(ctx), before, limit)
+	`, live, before, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2230,7 +2238,7 @@ func lockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []string) error {
 	}
 	if _, err := tx.ExecContext(ctx,
 		`SELECT id FROM plans WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`,
-		postgres.StringArray(ids),
+		ids,
 	); err != nil {
 		return fmt.Errorf("lock plans: %w", err)
 	}
@@ -2278,7 +2286,7 @@ func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, items []itemPlan) err
 		JOIN subscription_items b ON b.subscription_id = s2.id AND b.deleted_at IS NULL AND b.id <> n.item_id
 		JOIN plan_prices pb ON pb.meter_id = pp.meter_id AND (pb.plan_id = b.plan_id OR pb.plan_id = b.pending_plan_id)
 		ORDER BY pp.meter_id, s2.code
-		LIMIT 1`, postgres.StringArray(itemIDs), postgres.StringArray(planIDs)).Scan(&meterID, &code, &sameSub)
+		LIMIT 1`, itemIDs, planIDs).Scan(&meterID, &code, &sameSub)
 	if err == sql.ErrNoRows {
 		return nil
 	}

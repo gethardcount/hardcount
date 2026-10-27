@@ -12,6 +12,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // capturingAudit records audit Log calls so a test can assert what a handler
@@ -72,7 +73,7 @@ func (c *capturingAudit) actions() []string {
 // subscription audit path that omitted it — so these rows carried no test-clock
 // context.
 func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), true)
 	tenantID := "t1"
 
 	store := newMemStore()

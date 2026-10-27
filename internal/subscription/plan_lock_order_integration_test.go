@@ -394,7 +394,7 @@ func (r *lockOrderRig) twoMeterPlans(t *testing.T, key string) (m1, m2 string, p
 		byID[pl.ID] = pl
 		ids = append(ids, pl.ID)
 	}
-	rows, err := r.admin.QueryContext(r.ctx, `SELECT id FROM plans WHERE id = ANY($1) ORDER BY id`, postgres.StringArray(ids))
+	rows, err := r.admin.QueryContext(r.ctx, `SELECT id FROM plans WHERE id = ANY($1) ORDER BY id`, ids)
 	if err != nil {
 		t.Fatalf("order plans: %v", err)
 	}

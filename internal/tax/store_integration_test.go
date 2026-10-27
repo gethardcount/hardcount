@@ -119,6 +119,9 @@ func TestPostgresStore_LinkInvoice(t *testing.T) {
 		if err != nil {
 			t.Fatalf("begin setup tx: %v", err)
 		}
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+			t.Fatalf("set livemode: %v", err)
+		}
 		defer func() { _ = tx.Rollback() }()
 		var custID string
 		if err := tx.QueryRowContext(ctx, `
@@ -238,6 +241,9 @@ func TestPostgresStore_LookupCalculationCreatedAt_OldestRecord(t *testing.T) {
 		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 		if err != nil {
 			t.Fatalf("begin setup tx: %v", err)
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+			t.Fatalf("set livemode: %v", err)
 		}
 		defer func() { _ = tx.Rollback() }()
 		var custID string

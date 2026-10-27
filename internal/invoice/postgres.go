@@ -748,7 +748,7 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 		WHERE id = $5 AND status = ANY($6)
 		RETURNING `+invCols,
 		status, postgres.NullableTime(voidedAt), postgres.NullableTime(uncollectibleAt), now, id,
-		postgres.StringArray(allowedSources),
+		allowedSources,
 	).Scan(s.scanInvDest(&inv)...)
 
 	if err == sql.ErrNoRows {
@@ -2776,6 +2776,10 @@ const staleHoldRecheckAfter = 30 * time.Minute
 // run: it reads page after page and checks each hold once, even one it could
 // not stamp.
 func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, skip []string) ([]domain.StaleChargeHold, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -2785,8 +2789,8 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 	if limit <= 0 {
 		limit = 50
 	}
-	// COALESCE: a nil skip list can reach Postgres as NULL, and
-	// NOT (id = ANY(NULL)) would filter out every row (see postgres.StringArray).
+	// COALESCE: pgx sends a nil skip list as NULL, and
+	// NOT (id = ANY(NULL)) would filter out every row.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until, COALESCE(c.stripe_customer_id, ''),
 		       i.auto_charge_claimed_until < now() - make_interval(secs => $6)
@@ -2799,7 +2803,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 		ORDER BY (i.status = 'finalized' AND i.payment_status IN ('pending', 'failed')) DESC,
 		         i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC, i.id ASC
 		LIMIT $4
-	`, domain.StaleChargeHoldWait.Seconds(), postgres.Livemode(ctx), staleHoldRecheckAfter.Seconds(), limit, postgres.StringArray(skip),
+	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, skip,
 		domain.ParkedNothingWait.Seconds())
 	if err != nil {
 		return nil, err
@@ -3060,6 +3064,10 @@ func notPausedForCollection(alias, at string) string {
 // must never charge a clock-pinned invoice. The catchup worker uses
 // ListAutoChargePendingForClock as the disjoint per-clock entry point.
 func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3092,7 +3100,7 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 		  AND (i.created_at, i.id) > ($3, $4)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $2
-	`, postgres.Livemode(ctx), limit, after.CreatedAt, after.ID)
+	`, live, limit, after.CreatedAt, after.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -3128,6 +3136,10 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 // from ctx. olderThan is the cool-off so the inline SettleFailed path wins the
 // common case and this stays a pure backstop.
 func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderThan time.Time, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3151,7 +3163,7 @@ func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderTh
 		  AND i.is_simulated = false
 		ORDER BY i.updated_at ASC
 		LIMIT $3
-	`, postgres.Livemode(ctx), olderThan, limit)
+	`, live, olderThan, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3298,6 +3310,10 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // BindEffectiveNow + the velox_anchor_at PI anchor, so recovered outcomes
 // still stamp the simulated instant. See the ADR-030 wall-plane note.
 func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.InvoicePaymentStatus, olderThan time.Time, limit int) ([]domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3337,7 +3353,7 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 		-- hiding a row from the very code that would end its wait.
 		ORDER BY provider_synced_at ASC NULLS FIRST, updated_at ASC
 		LIMIT $4
-	`, string(status), olderThan, postgres.Livemode(ctx), limit)
+	`, string(status), olderThan, live, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3399,7 +3415,7 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 		  AND i.is_simulated = false
 		ORDER BY i.tax_next_retry_at ASC NULLS FIRST
 		LIMIT $4
-	`, livemode, postgres.StringArray(retryableCodes), maxAttempts, batch)
+	`, livemode, retryableCodes, maxAttempts, batch)
 	if err != nil {
 		return nil, err
 	}
@@ -3657,7 +3673,7 @@ func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantI
 		  AND i.tax_retry_count < $4
 		ORDER BY i.created_at ASC
 		LIMIT $5
-	`, tenantID, clockID, postgres.StringArray(retryableCodes), maxAttempts, limit)
+	`, tenantID, clockID, retryableCodes, maxAttempts, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -4708,7 +4724,7 @@ func (s *PostgresStore) PaymentPagesLive(ctx context.Context, tenantID string, i
 	}
 	defer postgres.Rollback(tx)
 	rows, err := tx.QueryContext(ctx, `SELECT q.id FROM unnest($1::text[]) AS q(id) WHERE `+
-		domain.HostedCheckoutLiveSQL("q.id"), postgres.StringArray(invoiceIDs))
+		domain.HostedCheckoutLiveSQL("q.id"), invoiceIDs)
 	if err != nil {
 		return nil, fmt.Errorf("payment pages live: %w", err)
 	}
@@ -4757,7 +4773,7 @@ func (s *PostgresStore) RetryBlockingDecline(ctx context.Context, tenantID, invo
 		  AND decline_code <> ''
 		ORDER BY decline_code = ANY($3::text[]) DESC, created_at DESC, id DESC
 		LIMIT 1`,
-		invoiceID, stripePaymentMethodID, postgres.StringArray(domain.HardDeclineCodes()),
+		invoiceID, stripePaymentMethodID, domain.HardDeclineCodes(),
 	).Scan(&code)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("read retry-blocking decline on card: %w", err)
@@ -4799,7 +4815,7 @@ func (s *PostgresStore) RetryBlockingDeclinesOnDefaultCards(ctx context.Context,
 		  AND a.stripe_payment_method_id <> ''
 		  AND a.decline_code <> ''
 		ORDER BY a.invoice_id, a.decline_code = ANY($2::text[]) DESC, a.created_at DESC, a.id DESC`,
-		postgres.StringArray(invoiceIDs), postgres.StringArray(domain.HardDeclineCodes()))
+		invoiceIDs, domain.HardDeclineCodes())
 	if err != nil {
 		return nil, fmt.Errorf("read retry-blocking declines on default cards: %w", err)
 	}

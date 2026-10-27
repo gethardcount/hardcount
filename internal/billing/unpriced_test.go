@@ -1,14 +1,12 @@
 package billing
 
 import (
-	"context"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 func unpricedSeries(t *testing.T, meterID, mode string) float64 {
@@ -40,7 +38,7 @@ func unpricedSeries(t *testing.T, meterID, mode string) float64 {
 func TestUnpricedRecord_ModeLabelAndTestClockSkip(t *testing.T) {
 	u := unpricedUsage{}
 	u.add("mtr_unpriced_rec_live", decimal.NewFromInt(7))
-	u.record(postgres.WithLivemode(context.Background(), true), domain.Subscription{ID: "sub_live"})
+	u.record(true, domain.Subscription{ID: "sub_live"})
 	if got := unpricedSeries(t, "mtr_unpriced_rec_live", "live"); got != 7 {
 		t.Fatalf("live: counter = %v, want 7", got)
 	}
@@ -50,15 +48,14 @@ func TestUnpricedRecord_ModeLabelAndTestClockSkip(t *testing.T) {
 
 	u = unpricedUsage{}
 	u.add("mtr_unpriced_rec_test", decimal.NewFromInt(3))
-	ctxTest := postgres.WithLivemode(context.Background(), false)
-	u.record(ctxTest, domain.Subscription{ID: "sub_test"})
+	u.record(false, domain.Subscription{ID: "sub_test"})
 	if got := unpricedSeries(t, "mtr_unpriced_rec_test", "test"); got != 3 {
 		t.Fatalf("test mode: counter = %v, want 3", got)
 	}
 
 	u = unpricedUsage{}
 	u.add("mtr_unpriced_rec_clock", decimal.NewFromInt(5))
-	u.record(ctxTest, domain.Subscription{ID: "sub_clock", TestClockID: "clk_1"})
+	u.record(false, domain.Subscription{ID: "sub_clock", TestClockID: "clk_1"})
 	if got := unpricedSeries(t, "mtr_unpriced_rec_clock", "test"); got != 0 {
 		t.Fatalf("test-clock subscription counted: %v, want 0", got)
 	}

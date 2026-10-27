@@ -81,6 +81,10 @@ func nonAdditive(aggregation string) bool {
 // errors do not abort the whole scan — they're collected and returned so
 // the operator dashboard can flag stuck rows without losing throughput.
 func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	if batchSize <= 0 {
 		batchSize = 50
 	}
@@ -103,7 +107,7 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 			errsOut = append(errsOut, fmt.Errorf("threshold scan ctx done: %w", err))
 			break
 		}
-		candidates, err := e.subs.ListWithThresholds(ctx, postgres.Livemode(ctx), afterID, batchSize)
+		candidates, err := e.subs.ListWithThresholds(ctx, live, afterID, batchSize)
 		if err != nil {
 			errsOut = append(errsOut, fmt.Errorf("list candidates: %w", err))
 			break
@@ -204,6 +208,10 @@ func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID s
 // over the partial cycle [period_start, now), checks each configured cap,
 // and — when crossed — fires the early finalize via fireThreshold.
 func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) (bool, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
 	if sub.BillingThresholds == nil {
 		return false, nil
 	}
@@ -334,7 +342,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 			"subscription_id", sub.ID)
 		unpriced.add(u.MeterID, u.Quantity)
 	}
-	unpriced.record(ctx, sub)
+	unpriced.record(live, sub)
 	// Usage below zero: its audit row committed with the fire (#1193).
 	for _, b := range eval.BelowZero {
 		slog.Warn("threshold: usage below zero after corrections — billed as 0",

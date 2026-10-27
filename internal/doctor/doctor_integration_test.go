@@ -67,6 +67,9 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed begin: %v", err)
 		}
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+			t.Fatalf("set livemode: %v", err)
+		}
 		defer postgres.Rollback(tx)
 		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -323,6 +326,9 @@ func TestDoctor_CreditCurrencyChecks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed begin: %v", err)
 		}
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+			t.Fatalf("set livemode: %v", err)
+		}
 		defer postgres.Rollback(tx)
 		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -423,6 +429,9 @@ func TestDoctor_ImportedInvoicesAreNotFlagged(t *testing.T) {
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		t.Fatalf("set livemode: %v", err)
 	}
 	defer postgres.Rollback(tx)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO customers (id, tenant_id, external_id, display_name, email)

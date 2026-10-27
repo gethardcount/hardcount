@@ -9,6 +9,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // recordingAudit captures engine audit rows so the once-per-cycle loudness
@@ -64,7 +65,7 @@ func TestFireThreshold_ResetFalse_DropsMaxBucket_SubtotalSplit(t *testing.T) {
 	thresholds := &domain.BillingThresholds{AmountGTE: 102000}
 	engine, _, invoices := setupMaxLastEngine(thresholds)
 
-	fired, errs := engine.ScanThresholds(context.Background(), 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) != 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}
@@ -107,7 +108,7 @@ func TestScanThresholds_PureMaxCrossing_SkipsWithOneArtifact(t *testing.T) {
 	engine.SetAuditLogger(audit)
 
 	for tick := 0; tick < 3; tick++ {
-		fired, errs := engine.ScanThresholds(context.Background(), 50)
+		fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 		if len(errs) != 0 {
 			t.Fatalf("tick %d errors: %v (crossed-but-deferred must not error)", tick, errs)
 		}
@@ -183,7 +184,7 @@ func TestBillOnePeriod_DeferredMaxBucket_BilledExactlyOnceAtClose(t *testing.T) 
 		MeterID: "mtr_api", PriceID: "prc_api", AmountCents: 40000,
 	})
 
-	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("cycle failures: %v", failures)
 	}

@@ -19,7 +19,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/activity"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // InvoiceVoider routes dunning resolution outcomes through the invoice
@@ -483,9 +482,9 @@ func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
 		// hard-deleted by ADR-086 teardown, so this row is the only surviving
 		// record of WHY collection was closed out ("marked recovered when no
 		// payment came in") — precisely the question the comment above says
-		// finance asks. Nothing to resolve in live mode (no clock possible).
+		// finance asks. A live invoice has no clock, so the bind leaves ctx as is.
 		auditCtx := r.Context()
-		if h.resolver != nil && run.InvoiceID != "" && !postgres.Livemode(auditCtx) {
+		if h.resolver != nil && run.InvoiceID != "" {
 			auditCtx, _ = clock.BindEffectiveNow(auditCtx, h.resolver, clock.Pin{TenantID: tenantID, InvoiceID: run.InvoiceID})
 		}
 		_ = h.auditLogger.Log(auditCtx, tenantID, domain.AuditActionUpdate, "dunning_run", run.ID, "", map[string]any{

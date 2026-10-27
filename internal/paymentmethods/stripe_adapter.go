@@ -44,7 +44,10 @@ func NewStripeAdapter(clients *payment.StripeClients, customerLink CustomerStrip
 var _ StripeAPI = (*StripeAdapter)(nil)
 
 func (a *StripeAdapter) client(ctx context.Context) (*stripe.Client, error) {
-	c := a.clients.ForCtx(ctx)
+	c, err := a.clients.ResolveCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read Stripe credentials: %w", err)
+	}
 	if c == nil {
 		// Typed, so the API answers 409 with a sentence the operator can act
 		// on. As a bare error it reached the caller as a 500 "internal error".
@@ -77,8 +80,14 @@ func (a *StripeAdapter) EnsureStripeCustomer(ctx context.Context, tenantID, cust
 		return cust.StripeCustomerID, nil
 	}
 
-	livemode := postgres.Livemode(ctx)
-	sc := a.clients.For(ctx, tenantID, livemode)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
+	sc, err := a.clients.Resolve(ctx, tenantID, livemode)
+	if err != nil {
+		return "", fmt.Errorf("read Stripe credentials for tenant=%s livemode=%v: %w", tenantID, livemode, err)
+	}
 	if sc == nil {
 		return "", fmt.Errorf("stripe not configured for tenant=%s livemode=%v", tenantID, livemode)
 	}

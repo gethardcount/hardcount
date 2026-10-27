@@ -61,6 +61,9 @@ A paid invoice cannot be voided or written off; issue a credit note instead.
   - incoming webhooks;
   - two signed-in areas: Stripe credential settings (`internal/tenantstripe`) and team members and invites (`internal/dashmembers`);
   - `velox-bench-seed`, which sets up a database for a benchmark.
+- **Every tenant-scoped operation states its mode.** Test mode and live mode are separate data in one tenant. Each entry point puts the mode on the request context with `postgres.WithLivemode`: the auth middleware from the key or session, public links from their row, background jobs per row or per mode. Nothing guesses a missing mode:
+  - `postgres.Livemode` returns `ErrLivemodeUnset`, and `BeginTx` refuses a `TxTenant` without a mode or a tenant ID;
+  - the database refuses an insert into a table with a `livemode` column when `app.livemode` is not `on` or `off`, and its RLS policies show no row (migrations 00213 and 00214).
 - **PaymentIntent-only Stripe.** No Stripe Billing or Stripe Invoices. Velox owns invoices end to end; Stripe executes the card charge.
 - **Billing engine as coordinator.** `billing` is the one package that works across domains. It calls usage, pricing, invoice, payment and the others only through small interfaces it defines itself (`UsageAggregator`, `PricingReader`, `InvoiceWriter`, `InvoiceCharger` and so on). The other domains do not know about each other, and the engine can be tested with fakes.
 - **Ledger and audit records for money.** Credit grants, usage, expiry and adjustments are entries in one credit ledger. The ledger is not strictly append-only: each grant entry keeps a running count of what has been used of it (`consumed_cents`, `cn_retired_cents`), updated in place. The audit log is append-only: the database refuses any change or delete in it.
@@ -153,12 +156,13 @@ Tax is calculated by one of three providers in `internal/tax`: `none`, `manual` 
 
 ### Failure: defer, never guess
 
-When `stripe_tax` fails, the error propagates, the engine defers the invoice to `tax_status=pending`, and a scheduled retry runs `Calculate` again. It never guesses a rate. The three failure reasons:
+When `stripe_tax` fails, the error propagates, the engine defers the invoice to `tax_status=pending`, and a scheduled retry runs `Calculate` again. It never guesses a rate. The four failure reasons:
 
 | Reason | Meaning |
 |---|---|
 | `no_country` | The customer has no country |
 | `no_client_for_mode` | No Stripe client for the request's mode |
+| `credentials_unreadable` | The tenant's Stripe credentials for the mode could not be read |
 | `api_error` | Stripe Tax returned an error |
 
 Each failure increments `velox_tax_outcome_total{outcome="deferred", reason}` and logs a `warn`. Successful calculations are not counted.

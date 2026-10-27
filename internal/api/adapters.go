@@ -1224,8 +1224,14 @@ func (a *hostedInvoiceStripeAdapter) CreateInvoicePaymentSession(
 	// on `invoices` which has RLS — without app.tenant_id /
 	// app.bypass_rls set on the session, the policy returned zero
 	// rows ("resolve livemode: sql: no rows in result set").
-	livemode := postgres.Livemode(ctx)
-	sc := a.clients.For(ctx, tenantID, livemode)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return "", err
+	}
+	sc, err := a.clients.Resolve(ctx, tenantID, livemode)
+	if err != nil {
+		return "", fmt.Errorf("read Stripe credentials for livemode=%v: %w", livemode, err)
+	}
 	if sc == nil {
 		return "", fmt.Errorf("stripe not configured for mode livemode=%v", livemode)
 	}

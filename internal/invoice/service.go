@@ -113,7 +113,7 @@ type PaymentMethodReader interface {
 //
 // Implemented by *payment.StripeClients via HasFor.
 type StripeChecker interface {
-	HasFor(ctx context.Context, tenantID string, livemode bool) bool
+	HasFor(ctx context.Context, tenantID string, livemode bool) (bool, error)
 }
 
 // CustomerReader reads the full customer record. Two consumers:
@@ -1123,7 +1123,14 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		// request that's reading the invoice is already mode-scoped,
 		// so the ctx value matches the row's stored mode under RLS.
 		// Tenant- and mode-wide, so one read covers the page.
-		f.stripeConnected = s.stripeChecker.HasFor(ctx, tenantID, postgres.Livemode(ctx))
+		live, err := postgres.Livemode(ctx)
+		if err == nil {
+			f.stripeConnected, err = s.stripeChecker.HasFor(ctx, tenantID, live)
+		}
+		if err != nil {
+			slog.Warn("invoice: attention could not read the Stripe connection", "error", err,
+				"tenant_id", tenantID)
+		}
 	}
 
 	if s.paymentMethods != nil {
@@ -2718,7 +2725,10 @@ func (s *Service) RetryPendingTax(ctx context.Context, batch int) (int, []error)
 	// the cross-mode RLS-bypassed scan returns rows for both modes
 	// and per-row RetryTax fails with "not found" on the half whose
 	// livemode doesn't match ctx.
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	stuck, err := s.store.ListPendingTaxRetry(ctx, batch, codes, maxAttempts, livemode)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list pending tax retries: %w", err)}
@@ -2743,7 +2753,10 @@ func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []
 	if s.taxCommitter == nil {
 		return 0, nil
 	}
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	orphans, err := s.store.ListPendingTaxCommit(ctx, batch, livemode)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list pending tax commits: %w", err)}
@@ -2778,7 +2791,10 @@ func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, 
 	if s.taxReverser == nil {
 		return 0, nil
 	}
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	pending, err := s.store.ListPendingTaxReversal(ctx, batch, livemode)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list pending tax reversals: %w", err)}

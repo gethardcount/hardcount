@@ -74,7 +74,7 @@ func (f heldFixture) countEvents(t *testing.T, keys ...string) int {
 	var n int
 	if err := tx.QueryRowContext(f.ctx,
 		`SELECT COUNT(*) FROM usage_events WHERE idempotency_key = ANY($1::text[])`,
-		postgres.StringArray(keys)).Scan(&n); err != nil {
+		keys).Scan(&n); err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	return n

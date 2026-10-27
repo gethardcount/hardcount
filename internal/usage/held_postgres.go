@@ -246,7 +246,7 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 		)
 		AND status = 'held'
 		RETURNING id, event_name, quantity, properties, idempotency_key, event_at, observed_cost_micros
-	`, tenantID, in.ExternalCustomerID, postgres.StringArray(keys), in.NotAfter, in.CustomerID, limit)
+	`, tenantID, in.ExternalCustomerID, keys, in.NotAfter, in.CustomerID, limit)
 	if err != nil {
 		return ReleaseHeldResult{}, err
 	}
@@ -318,7 +318,7 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 			COUNT(*) FILTER (WHERE NOT (event_name = ANY($3::text[]) AND event_at <= $4))
 		FROM usage_held_events
 		WHERE tenant_id = $1 AND status = 'held' AND external_customer_id = $2
-	`, tenantID, in.ExternalCustomerID, postgres.StringArray(keys), in.NotAfter).Scan(&res.MoreToRelease, &res.StillHeld); err != nil {
+	`, tenantID, in.ExternalCustomerID, keys, in.NotAfter).Scan(&res.MoreToRelease, &res.StillHeld); err != nil {
 		return ReleaseHeldResult{}, err
 	}
 
@@ -400,7 +400,7 @@ func lockHeldKeys(ctx context.Context, tx *sql.Tx, tenantID string, keys []strin
 		WHERE tenant_id = $1 AND idempotency_key = ANY($2::text[])
 		ORDER BY idempotency_key
 		FOR UPDATE
-	`, tenantID, postgres.StringArray(keys))
+	`, tenantID, keys)
 	if err != nil {
 		return nil, err
 	}

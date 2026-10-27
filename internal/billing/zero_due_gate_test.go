@@ -10,6 +10,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // setupZeroCycleEngine: a due sub on a free-rated plan ($0 base + $0/call
@@ -37,7 +38,7 @@ func setupZeroCycleEngine(t *testing.T) (*Engine, *thresholdMockSubs, *mockInvoi
 func TestBillOnePeriod_ZeroTotal_AutoPaid(t *testing.T) {
 	engine, subs, invoices := setupZeroCycleEngine(t)
 
-	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("cycle failures: %v", failures)
 	}
@@ -87,7 +88,7 @@ func TestBillOnePeriod_AlreadyExistsHealsStrandedZeroDue(t *testing.T) {
 	// The unique index rejects the re-created invoice on this tick.
 	invoices.createErr = errs.ErrAlreadyExists
 
-	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("cycle failures: %v", failures)
 	}

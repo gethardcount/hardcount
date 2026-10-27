@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/stripe/stripe-go/v82"
 )
 
@@ -52,7 +53,7 @@ func TestCalculate_PagesTheRemainingLineItems(t *testing.T) {
 	for i := 0; i < n; i++ {
 		req.LineItems = append(req.LineItems, RequestLine{Ref: fmt.Sprintf("line_%d", i), AmountCents: 1000, Quantity: 1})
 	}
-	res, err := p.Calculate(context.Background(), req)
+	res, err := p.Calculate(postgres.WithLivemode(context.Background(), false), req)
 	if err != nil {
 		t.Fatalf("Calculate: %v", err)
 	}

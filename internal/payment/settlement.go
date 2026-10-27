@@ -599,7 +599,12 @@ func (s *Stripe) expireCheckoutSessionsBestEffort(ctx context.Context, tenantID 
 		return
 	}
 	for _, c := range claims {
-		sc := s.sessionClients.For(ctx, tenantID, c.Livemode)
+		sc, err := s.sessionClients.Resolve(ctx, tenantID, c.Livemode)
+		if err != nil {
+			slog.WarnContext(ctx, "settle: best-effort session expire skipped, Stripe credentials unreadable (ExpiresAt backstop applies)",
+				"invoice_id", inv.ID, "claim_id", c.ID, "session_id", c.StripeSessionID, "error", err)
+			continue
+		}
 		if sc == nil {
 			continue
 		}

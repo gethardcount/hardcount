@@ -31,7 +31,10 @@ func NewStripeBillingSync(clients *StripeClients) *StripeBillingSync {
 // migration 0100, so the email is now plumbed through as a separate
 // argument by the caller rather than read off bp.
 func (s *StripeBillingSync) SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error {
-	sc := s.clients.ForCtx(ctx)
+	sc, err := s.clients.ResolveCtx(ctx)
+	if err != nil {
+		return fmt.Errorf("stripe billing sync: read Stripe credentials: %w", err)
+	}
 	if sc == nil {
 		return ErrStripeNotConfigured
 	}
@@ -72,7 +75,7 @@ func (s *StripeBillingSync) SyncBillingProfile(ctx context.Context, stripeCustom
 		params.TaxExempt = stripe.String(string(stripe.CustomerTaxExemptNone))
 	}
 
-	_, err := sc.V1Customers.Update(ctx, stripeCustomerID, params)
+	_, err = sc.V1Customers.Update(ctx, stripeCustomerID, params)
 	if err != nil {
 		return fmt.Errorf("stripe customer update: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 func dueSubFixture(id string) domain.Subscription {
@@ -50,7 +51,7 @@ func TestRunCycleForTenant_BillsDueSubs(t *testing.T) {
 	}
 	engine := tenantRunEngine(subs)
 
-	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("unexpected failures: %v", failures)
 	}

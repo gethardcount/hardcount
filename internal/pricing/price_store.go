@@ -218,7 +218,7 @@ func (s *PostgresStore) PriceMatchesAt(ctx context.Context, tenantID string, pin
 		ats[i] = p.At.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
 		clockIDs[i] = p.ClockID
 	}
-	args := []any{postgres.StringArray(planIDs), postgres.StringArray(ats), postgres.StringArray(clockIDs)}
+	args := []any{planIDs, ats, clockIDs}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -291,7 +291,7 @@ func (s *PostgresStore) ListPrices(ctx context.Context, tenantID string, planIDs
 		FROM plan_prices p
 		CROSS JOIN LATERAL (`+latestVersion+`) v
 		WHERE p.plan_id = ANY($1::text[]) AND NOT v.removed
-		ORDER BY p.plan_id, p.created_at, p.id`, postgres.StringArray(planIDs))
+		ORDER BY p.plan_id, p.created_at, p.id`, planIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list plan prices: %w", err)
 	}
@@ -684,7 +684,7 @@ func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID s
 		INSERT INTO plan_price_version_clocks (tenant_id, version_id, test_clock_id, valid_from)
 		SELECT $1, $2, c.id, c.frozen_time + interval '1 microsecond'
 		FROM test_clocks c WHERE c.id = ANY($3::text[])`,
-		tenantID, v.id, postgres.StringArray(ids)); err != nil {
+		tenantID, v.id, ids); err != nil {
 		return writtenVersion{}, fmt.Errorf("stamp version %s for the test clocks: %w", v.id, err)
 	}
 	return v, nil

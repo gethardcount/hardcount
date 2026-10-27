@@ -7,6 +7,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // tzNetSettings is mockSettings with a tenant timezone and Net terms.
@@ -58,7 +59,7 @@ func TestRunCycle_NetTermsDueDate_UsesTenantCalendarAcrossDST(t *testing.T) {
 		&tzNetSettings{tz: "America/New_York", netDays: 30}, nil, nil,
 		clock.NewFake(periodEnd.Add(time.Second))))
 
-	count, errs := engine.RunCycle(context.Background(), 50, nil)
+	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}

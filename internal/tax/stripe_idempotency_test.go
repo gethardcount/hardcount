@@ -44,7 +44,7 @@ func (b *capturingBackend) SetMaxNetworkRetries(int64) {}
 // these unit tests, which only exercise param building, not per-tenant routing.
 type staticClientResolver struct{ c *stripe.Client }
 
-func (r staticClientResolver) ForCtx(context.Context) *stripe.Client { return r.c }
+func (r staticClientResolver) ResolveCtx(context.Context) (*stripe.Client, error) { return r.c, nil }
 
 // newCapturingProvider wires a StripeTaxProvider whose Stripe client routes
 // every API call into the returned capturingBackend.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // fakeCreditApplier drives the credit-before-charge contract in the retry
@@ -100,7 +101,7 @@ func TestRetrySweep_ReappliesCreditsBeforeCharge(t *testing.T) {
 	applier := &fakeCreditApplier{applyCents: 400}
 	_, charger, engine := retryHarness(t, applier)
 
-	charged, errs := engine.RetryPendingCharges(context.Background(), 50, nil)
+	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) != 0 {
 		t.Fatalf("errors: %v", errs)
 	}
@@ -127,7 +128,7 @@ func TestRetrySweep_FullyCreditCovered_MarksPaidWithoutCharge(t *testing.T) {
 	resolver := &fakeDunResolver{}
 	engine.SetDunningResolver(resolver)
 
-	charged, errs := engine.RetryPendingCharges(context.Background(), 50, nil)
+	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) != 0 {
 		t.Fatalf("errors: %v", errs)
 	}
@@ -159,7 +160,7 @@ func TestRetrySweep_CreditApplyFailure_SkipsCharge(t *testing.T) {
 	applier := &fakeCreditApplier{err: errors.New("db blip")}
 	inv, charger, engine := retryHarness(t, applier)
 
-	charged, errs := engine.RetryPendingCharges(context.Background(), 50, nil)
+	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) != 0 {
 		t.Fatalf("a credit-apply failure is a skip, not an escalated error: %v", errs)
 	}
@@ -179,7 +180,7 @@ func TestRetrySweep_CreditApplyFailure_SkipsCharge(t *testing.T) {
 func TestRetrySweep_NoCreditsWired_ChargesAsBefore(t *testing.T) {
 	_, charger, engine := retryHarness(t, nil)
 
-	charged, errs := engine.RetryPendingCharges(context.Background(), 50, nil)
+	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) != 0 || charged != 1 {
 		t.Fatalf("charged/errs: got %d/%v, want 1/none", charged, errs)
 	}

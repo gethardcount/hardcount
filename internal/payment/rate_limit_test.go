@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tenantstripe"
 )
 
@@ -55,7 +56,7 @@ func withCannedStripe(t *testing.T, status int, body string) *cannedStripe {
 // through to "outcome unknown" and parked the invoice for a person.
 func TestCreatePaymentIntent_RateLimitIsTransient(t *testing.T) {
 	stub := withCannedStripe(t, http.StatusTooManyRequests, stripe429)
-	ctx := auth.WithTenantID(context.Background(), "t1")
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
 	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
@@ -73,7 +74,7 @@ func TestCreatePaymentIntent_RateLimitIsTransient(t *testing.T) {
 // Control: a real decline is still a definite failure, not a skip.
 func TestCreatePaymentIntent_DeclineStaysDefinite(t *testing.T) {
 	withCannedStripe(t, http.StatusPaymentRequired, stripeDecline)
-	ctx := auth.WithTenantID(context.Background(), "t1")
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
 	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})

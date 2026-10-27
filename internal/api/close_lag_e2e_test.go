@@ -328,6 +328,11 @@ func (r *lagRig) exec(query string, args ...any) {
 		r.t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
+	// Live, like the rig's API key: the livemode trigger stamps inserted rows
+	// from this setting and refuses an insert without it.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		r.t.Fatalf("set livemode: %v", err)
+	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		r.t.Fatalf("fixture %q: %v", query, err)
 	}

@@ -169,7 +169,7 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 				return err
 			}
 			defer func() { _ = tx.Rollback() }()
-			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM plans WHERE id = ANY($1) ORDER BY id FOR UPDATE /* plan writer */`, postgres.StringArray([]string{lo.ID, hi.ID})); err != nil {
+			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM plans WHERE id = ANY($1) ORDER BY id FOR UPDATE /* plan writer */`, []string{lo.ID, hi.ID}); err != nil {
 				return err
 			}
 			return tx.Commit()

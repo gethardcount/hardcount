@@ -18,9 +18,20 @@ this only when the dashboard **Resolve** action is unavailable.
    | annulled or billed in error | `invoice_voided` |
    | written off as bad debt | `invoice_not_collectible` |
 
-2. **Resolve the run:**
+2. **Find the run's mode.** `true` is a live run, `false` a test run:
 
    ```sql
+   SELECT livemode FROM invoice_dunning_runs WHERE id = '<run_id>';
+   ```
+
+3. **Resolve the run.** Set `app.livemode` to `'on'` for a live run or
+   `'off'` for a test run. The event row takes its mode from this setting,
+   and the insert is refused without it.
+
+   ```sql
+   BEGIN;
+   SET LOCAL app.livemode = 'on';  -- 'off' for a test run
+
    UPDATE invoice_dunning_runs
    SET state = 'resolved', resolution = 'invoice_voided',  -- see table above
        resolved_at = now(), next_action_at = NULL
@@ -28,12 +39,13 @@ this only when the dashboard **Resolve** action is unavailable.
 
    INSERT INTO invoice_dunning_events (tenant_id, run_id, invoice_id, event_type, state, reason)
    VALUES ('<tenant_id>', '<run_id>', '<invoice_id>', 'resolved', 'resolved', 'invoice_voided');
+   COMMIT;
    ```
 
    Do not write `manually_resolved`; it is kept only so old rows stay
    readable.
 
-3. **Change the invoice too.** This SQL resolves the run only; it does not
+4. **Change the invoice too.** This SQL resolves the run only; it does not
    touch the invoice. The endpoint makes the matching invoice change (void,
    mark uncollectible, or record a payment), and this SQL does not. If you
    skip this step, the run and the invoice disagree.

@@ -89,6 +89,9 @@ func seedSettingsAndIdempotency(t *testing.T, db *postgres.DB, ctx context.Conte
 	if err != nil {
 		t.Fatalf("seed begin: %v", err)
 	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		t.Fatalf("set livemode: %v", err)
+	}
 	defer postgres.Rollback(tx)
 
 	if _, err := tx.ExecContext(ctx,

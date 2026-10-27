@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // TestBillFinalOnImmediateCancel_MultiDimMeterBilled locks the ADR-044 fix for
@@ -70,7 +71,7 @@ func TestBillFinalOnImmediateCancel_MultiDimMeterBilled(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}
@@ -153,7 +154,7 @@ func TestBillFinalOnImmediateCancel_SingleRuleMeterStillBilled(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestBillFinalOnImmediateCancel_HonorsDueOnReceipt(t *testing.T) {
 
 	engine := wireBaseTax(NewEngine(&mockSubs{subs: map[string]domain.Subscription{sub.ID: sub}}, usage, pricing, invoices, nil, &zeroTermsSettings{}, nil, nil, billingTestClock()))
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("BillFinalOnImmediateCancel: %v", err)
 	}

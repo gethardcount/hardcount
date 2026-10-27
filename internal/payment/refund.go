@@ -170,7 +170,11 @@ func NewStripeRefunder(clients *StripeClients) *StripeRefunder {
 // Every error is a *RefundError, which says whether Stripe may have made the
 // refund anyway.
 func (r *StripeRefunder) CreateRefund(ctx context.Context, paymentIntentID string, amountCents int64, idempotencyKey, creditNoteID string) (string, domain.RefundStatus, error) {
-	sc := r.clients.ForCtx(ctx)
+	sc, err := r.clients.ResolveCtx(ctx)
+	if err != nil {
+		// Nothing was sent, so nothing was refunded.
+		return "", "", &RefundError{Message: "stripe refund: read Stripe credentials: " + err.Error(), NotRun: true}
+	}
 	if sc == nil {
 		// Nothing was sent, so nothing was refunded.
 		return "", "", &RefundError{Message: "stripe refund: " + ErrStripeNotConfigured.Message, NotRun: true}
@@ -198,7 +202,10 @@ func (r *StripeRefunder) CreateRefund(ctx context.Context, paymentIntentID strin
 // stale saved response, which is what makes it safe to consult before a
 // retry. The second return is Stripe's failure_reason (empty unless failed).
 func (r *StripeRefunder) GetRefund(ctx context.Context, refundID string) (domain.RefundStatus, string, error) {
-	sc := r.clients.ForCtx(ctx)
+	sc, err := r.clients.ResolveCtx(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("stripe get refund: read Stripe credentials: %w", err)
+	}
 	if sc == nil {
 		return "", "", ErrStripeNotConfigured
 	}
@@ -224,7 +231,10 @@ func (r *StripeRefunder) GetRefund(ctx context.Context, refundID string) (domain
 // exactly that with an exclude-one-id variant. Dead attempts stay visible in
 // the audit trail, which records every id and failure reason as it happened.
 func (r *StripeRefunder) FindRefundForCreditNote(ctx context.Context, paymentIntentID, creditNoteID string) (string, domain.RefundStatus, error) {
-	sc := r.clients.ForCtx(ctx)
+	sc, err := r.clients.ResolveCtx(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("stripe list refunds: read Stripe credentials: %w", err)
+	}
 	if sc == nil {
 		return "", "", ErrStripeNotConfigured
 	}

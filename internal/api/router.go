@@ -1707,9 +1707,14 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// notice to decide it server-side.
 		r.Get("/whoami", func(w http.ResponseWriter, req *http.Request) {
 			ctx := req.Context()
+			live, err := postgres.Livemode(ctx)
+			if err != nil {
+				respond.FromError(w, req, err, "whoami")
+				return
+			}
 			out := map[string]any{
 				"tenant_id":             auth.TenantID(ctx),
-				"livemode":              auth.Livemode(ctx),
+				"livemode":              live,
 				"can_email_setup_links": setupLinksEmailable,
 				"can_send_invites":      membersSvc.CanInvite(),
 				// smtp_configured lets any page show one global "email is

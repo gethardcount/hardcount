@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // mockCancelExecutor records FireDueScheduledCancel calls and applies the
@@ -132,7 +133,7 @@ func TestRunCycle_CancelAtEqualsBoundary_TieGoesToBoundaryPath(t *testing.T) {
 	exec := &mockCancelExecutor{subs: subs}
 	engine.SetScheduledCancelExecutor(exec)
 
-	if _, errs := engine.RunCycle(context.Background(), 50, nil); len(errs) > 0 {
+	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	if len(exec.calls) != 0 {

@@ -3005,6 +3005,10 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 // skip paths (trial-active) advance the cycle without generating
 // an invoice. The wrapper distinguishes via fresh sub-state reads.
 func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bool, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillSubscription",
 		trace.WithAttributes(
 			attribute.String("subscription_id", sub.ID),
@@ -3078,7 +3082,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 
 	// Apply any scheduled plan changes due at this cycle boundary before
 	// reading plans (see applyDueScheduledPlanChanges).
-	sub, err := e.applyDueScheduledPlanChanges(ctx, sub, now)
+	sub, err = e.applyDueScheduledPlanChanges(ctx, sub, now)
 	if err != nil {
 		return false, err
 	}
@@ -3163,7 +3167,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		}
 		// The period closed with no invoice; any unpriced usage in it is
 		// now billed nowhere, so it counts here, after the commit.
-		unpriced.record(ctx, sub)
+		unpriced.record(live, sub)
 		if out.canceled != nil {
 			e.afterScheduledCancel(ctx, sub, *out.canceled, now)
 		}
@@ -3339,7 +3343,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	inv := out.inv
 	// Counted after the commit: a close that lost its CAS or rolled back
 	// counted nothing, and the retry that wins counts once.
-	unpriced.record(ctx, sub)
+	unpriced.record(live, sub)
 	// The period is closed (or the sub terminated) — every leg from here is
 	// post-commit and at-least-once.
 	if out.canceled != nil {
@@ -3553,6 +3557,10 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 // nil; the caller runs it once tx commits (it counts the usage left unpriced,
 // which a rolled-back, retried swap must not count twice).
 func (e *Engine) BillOnPlanSwapTx(ctx context.Context, tx *sql.Tx, before, after domain.Subscription, at time.Time) (domain.Invoice, bool, func(), error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return domain.Invoice{}, false, nil, err
+	}
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillOnPlanSwapTx",
 		trace.WithAttributes(
 			attribute.String("subscription_id", before.ID),
@@ -3562,7 +3570,7 @@ func (e *Engine) BillOnPlanSwapTx(ctx context.Context, tx *sql.Tx, before, after
 	defer span.End()
 
 	unpriced := unpricedUsage{}
-	afterCommit := func() { unpriced.record(ctx, before) }
+	afterCommit := func() { unpriced.record(live, before) }
 	if before.CurrentBillingPeriodStart == nil || before.CurrentBillingPeriodEnd == nil {
 		return domain.Invoice{}, false, afterCommit, fmt.Errorf("subscription has no billing period set")
 	}
@@ -3927,9 +3935,13 @@ func (e *Engine) BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subs
 // rolled back after this returned: a refused relief is saved as a billing
 // failure and retried on backoff (ADR-119).
 func (e *Engine) BillFinalOnImmediateCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, afterCommit func(), err error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return domain.Invoice{}, nil, err
+	}
 	unpriced := unpricedUsage{}
 	inv, err = e.billFinalOnImmediateCancelImpl(ctx, tx, sub, unpriced)
-	return inv, func() { unpriced.record(ctx, sub) }, err
+	return inv, func() { unpriced.record(live, sub) }, err
 }
 
 // The usage-line suffixes of a partial window: an immediate cancel ended it,
@@ -4078,6 +4090,10 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 }
 
 func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx, sub domain.Subscription, unpriced unpricedUsage) (domain.Invoice, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
 	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillFinalOnImmediateCancel",
 		trace.WithAttributes(
 			attribute.String("subscription_id", sub.ID),
@@ -4237,7 +4253,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 				return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel): %w", err)
 			}
 		}
-		unpriced.record(ctx, sub)
+		unpriced.record(live, sub)
 		return domain.Invoice{}, nil
 	}
 
@@ -4320,7 +4336,7 @@ func (e *Engine) billFinalOnImmediateCancelImpl(ctx context.Context, tx *sql.Tx,
 		}
 		return domain.Invoice{}, fmt.Errorf("create final-on-cancel invoice: %w", err)
 	}
-	unpriced.record(ctx, sub)
+	unpriced.record(live, sub)
 
 	// The finalize AUDIT row already committed inside the create tx above; here
 	// only the post-commit WEBHOOK fires.
@@ -4786,6 +4802,10 @@ func drainInvoiceQueue(ctx context.Context, pageSize int, fetch invoicePage, vis
 // onPage. ADR-029 Phase 1: clock-pinned invoices are excluded from this query
 // and are processed instead by RetryPendingChargesForClock during catchup.
 func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage func()) (int, []error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	if e.charger == nil || e.paymentSetups == nil {
 		return 0, nil
 	}
@@ -4802,7 +4822,7 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 	}
 	listed, charged, errs := drainInvoiceQueue(ctx, pageSize, fetch, visit, onPage)
 	if listed > 0 {
-		slog.Info("auto-charge sweep", "livemode", postgres.Livemode(ctx), "listed", listed,
+		slog.Info("auto-charge sweep", "livemode", live, "listed", listed,
 			"charged", charged, "errors", len(errs), "duration_ms", time.Since(start).Milliseconds())
 	}
 	return charged, errs

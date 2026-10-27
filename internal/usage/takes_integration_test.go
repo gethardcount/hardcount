@@ -6,7 +6,6 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
@@ -86,7 +85,7 @@ func TestTakes_AgreesWithPostgresContainment(t *testing.T) {
 	rows, err := db.Pool.QueryContext(ctx, `
 		SELECT l::jsonb @> m::jsonb
 		FROM unnest($1::text[], $2::text[]) WITH ORDINALITY AS c(l, m, i)
-		ORDER BY i`, postgres.StringArray(labelDocs), postgres.StringArray(matchDocs))
+		ORDER BY i`, labelDocs, matchDocs)
 	if err != nil {
 		t.Fatalf("containment: %v", err)
 	}

@@ -533,7 +533,7 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 		FROM invoice_dunning_runs r
 		LEFT JOIN dunning_policies p ON p.id = r.policy_id
 		WHERE r.invoice_id = ANY($1::text[])
-	`, postgres.StringArray(invoiceIDs))
+	`, invoiceIDs)
 	if err != nil {
 		return nil, err
 	}

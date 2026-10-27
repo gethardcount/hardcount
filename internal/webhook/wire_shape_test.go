@@ -13,6 +13,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // TestWireShape_EndpointDeliveries pins the endpoint drill-down response:
@@ -25,7 +26,7 @@ func TestWireShape_EndpointDeliveries(t *testing.T) {
 	h := NewHandler(svc)
 
 	tenantID := "vlx_tenant_epdrill"
-	ctx := auth.WithTenantID(context.Background(), tenantID)
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	ep, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL: "http://localhost:9001/sink", Events: []string{"*"},
 	})
@@ -103,7 +104,7 @@ func TestWireShape_WebhookEventsStream_SnakeCase(t *testing.T) {
 	// exercised (the contract is identical for test mode but the live
 	// path is the one Track A's PR description anchors on).
 	tenantID := "vlx_tenant_wireshape"
-	ctx := auth.WithTenantID(context.Background(), tenantID)
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	if _, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL:    "http://localhost:9001/sink",
 		Events: []string{"*"},
@@ -238,7 +239,7 @@ func TestWireShape_WebhookEventReplay(t *testing.T) {
 	h := NewHandler(svc)
 
 	tenantID := "vlx_tenant_replay"
-	ctx := auth.WithTenantID(context.Background(), tenantID)
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	if _, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL:    "http://localhost:9002/sink",
 		Events: []string{"*"},
@@ -319,7 +320,7 @@ func TestWireShape_WebhookEventDeliveries(t *testing.T) {
 	h := NewHandler(svc)
 
 	tenantID := "vlx_tenant_deliveries"
-	ctx := auth.WithTenantID(context.Background(), tenantID)
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), tenantID)
 	if _, err := svc.CreateEndpoint(ctx, tenantID, CreateEndpointInput{
 		URL:    "http://localhost:9003/sink",
 		Events: []string{"*"},

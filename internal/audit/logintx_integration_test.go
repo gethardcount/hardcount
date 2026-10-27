@@ -220,6 +220,11 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		defer postgres.Rollback(tx)
+		// Set the mode so the insert reaches the tenant guard: the livemode
+		// trigger refuses an unset mode before NOT NULL is checked.
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+			t.Fatalf("set livemode: %v", err)
+		}
 		err = logger.LogInTx(ctx, tx, audit.Entry{
 			Action: "update", ResourceType: "gucless_probe", ResourceID: "vlx_probe_6",
 		})

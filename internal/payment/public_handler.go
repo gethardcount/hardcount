@@ -248,7 +248,14 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		return
 	}
 
-	sc := h.clients.For(scopedCtx, token.TenantID, token.Livemode)
+	sc, err := h.clients.Resolve(scopedCtx, token.TenantID, token.Livemode)
+	if err != nil {
+		slog.ErrorContext(scopedCtx, "public payment: read stripe credentials",
+			"customer_id", token.CustomerID, "error", err)
+		respond.Error(w, r, http.StatusBadGateway, "api_error", "stripe_error",
+			"We couldn't start the payment update right now. Please contact your billing administrator if the problem persists.")
+		return
+	}
 	if sc == nil {
 		// EnsureStripeCustomer just succeeded for this (tenant, mode), so a nil
 		// client here would be a config change between the two calls.

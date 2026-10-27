@@ -213,20 +213,6 @@ func WithCustomerActor(ctx context.Context, customerID string) context.Context {
 	return context.WithValue(ctx, customerActorKey, customerID)
 }
 
-// Livemode returns whether the request is operating in live mode. Delegates
-// to the shared postgres-package accessor so BeginTx and auth see the same
-// value off the same ctx key.
-func Livemode(ctx context.Context) bool {
-	return postgres.Livemode(ctx)
-}
-
-// WithLivemode returns a derived context carrying the livemode flag. Used by
-// auth middleware to propagate the key's mode downstream, and by tests to
-// simulate test-mode requests.
-func WithLivemode(ctx context.Context, live bool) context.Context {
-	return postgres.WithLivemode(ctx, live)
-}
-
 func extractBearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if strings.HasPrefix(auth, "Bearer ") {

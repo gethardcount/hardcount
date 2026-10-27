@@ -9,6 +9,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 type mockReconcileStore struct {
@@ -145,7 +146,7 @@ func TestReconciler_SucceededResolvesUnknown(t *testing.T) {
 	}
 	r := NewReconciler(client, store, time.Second)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -173,7 +174,7 @@ func TestReconciler_CanceledMarksFailed(t *testing.T) {
 	}
 	r := NewReconciler(client, store, time.Second)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -197,7 +198,7 @@ func TestReconciler_StillInFlightSkipped(t *testing.T) {
 	}
 	r := NewReconciler(client, store, time.Second)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -226,7 +227,7 @@ func TestReconciler_NoPaymentIntentIDStaysUnknown(t *testing.T) {
 	})
 	r := NewReconciler(&mockStripeClient{}, store, time.Second)
 
-	resolved, errs := r.Run(context.Background(), 10)
+	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}

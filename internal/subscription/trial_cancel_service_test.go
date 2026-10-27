@@ -10,6 +10,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // seedExpiredTrialMem puts a trialing sub with an elapsed trial into the mem
@@ -45,7 +46,7 @@ func TestProcessExpiredTrials_RoutesDueCancel(t *testing.T) {
 	svc.SetBiller(fb)
 	_, trialEnd := seedExpiredTrialMem(mem, true, nil)
 
-	processed, errsOut := svc.ProcessExpiredTrials(context.Background(), 50)
+	processed, errsOut := svc.ProcessExpiredTrials(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errsOut) != 0 {
 		t.Fatalf("errors: %v", errsOut)
 	}
@@ -73,7 +74,7 @@ func TestProcessExpiredTrials_NoSchedule_ActivatesAsBefore(t *testing.T) {
 	svc.SetBiller(fb)
 	seedExpiredTrialMem(mem, false, nil)
 
-	processed, errsOut := svc.ProcessExpiredTrials(context.Background(), 50)
+	processed, errsOut := svc.ProcessExpiredTrials(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errsOut) != 0 || processed != 1 {
 		t.Fatalf("processed=%d errs=%v", processed, errsOut)
 	}

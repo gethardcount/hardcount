@@ -15,9 +15,9 @@ type fakeReady struct {
 	calls int
 }
 
-func (f *fakeReady) HasFor(_ context.Context, _ string, _ bool) bool {
+func (f *fakeReady) HasFor(_ context.Context, _ string, _ bool) (bool, error) {
 	f.calls++
-	return f.ready
+	return f.ready, nil
 }
 
 func readyHandler(t *testing.T, token string, ready bool, mutate func(*domain.Invoice)) (*Handler, *fakeCheckout, *fakeInvoices) {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/api/respond"
 	"github.com/sagarsuperuser/velox/internal/auth"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // Stripe error bodies, shaped like Stripe's error object
@@ -176,7 +177,7 @@ func TestCreateRefund_SaysWhetherTheRefundMayExist(t *testing.T) {
 			tc.stripe(t)
 			sent := countRequests(t)
 			r := NewStripeRefunder(NewStripeClients(fixedCreds{}))
-			ctx := auth.WithTenantID(context.Background(), "t1")
+			ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 
 			_, _, err := r.CreateRefund(ctx, "pi_x", 500, "velox_cn_x", "cn_x")
 			if err == nil {

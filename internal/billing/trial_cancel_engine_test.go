@@ -7,6 +7,7 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // trialEngineFixture: a due, trial-elapsed sub on the standard mock plan.
@@ -32,7 +33,7 @@ func trialEngineFixture(cancelAtPeriodEnd bool) (*Engine, *thresholdMockSubs, *m
 func TestEngineTrialBranch_DueCancel_NoInvoiceNoAdvance(t *testing.T) {
 	engine, subs, invoices, trialEnd := trialEngineFixture(true)
 
-	generated, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	generated, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("failures: %v", failures)
 	}
@@ -60,7 +61,7 @@ func TestEngineTrialBranch_DueCancel_NoInvoiceNoAdvance(t *testing.T) {
 func TestEngineTrialBranch_NoSchedule_ActivatesAndBills(t *testing.T) {
 	engine, subs, _, _ := trialEngineFixture(false)
 
-	_, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	_, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("failures: %v", failures)
 	}
@@ -90,7 +91,7 @@ func TestBillFinalOnImmediateCancel_TrialWriteOff(t *testing.T) {
 	sub.ActivatedAt = nil
 	subs.subs["sub_1"] = sub
 
-	inv, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("bill final: %v", err)
 	}
@@ -102,7 +103,7 @@ func TestBillFinalOnImmediateCancel_TrialWriteOff(t *testing.T) {
 	activatedAt := trialEnd
 	sub.ActivatedAt = &activatedAt
 	subs.subs["sub_1"] = sub
-	inv2, err := engine.BillFinalOnImmediateCancel(context.Background(), sub)
+	inv2, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("bill final (activated): %v", err)
 	}
@@ -128,7 +129,7 @@ func TestEngineTrialBranch_Day1InvoiceFinalized(t *testing.T) {
 	audit := &recordingAudit{}
 	engine.SetAuditLogger(audit)
 
-	_, failures := engine.RunCycleForTenant(context.Background(), "t1", 50)
+	_, failures := engine.RunCycleForTenant(postgres.WithLivemode(context.Background(), true), "t1", 50)
 	if len(failures) != 0 {
 		t.Fatalf("failures: %v", failures)
 	}

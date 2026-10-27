@@ -3143,7 +3143,10 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 	if batch <= 0 {
 		batch = 100
 	}
-	livemode := postgres.Livemode(ctx)
+	livemode, err := postgres.Livemode(ctx)
+	if err != nil {
+		return 0, []error{err}
+	}
 	now := s.clock.Now(ctx)
 	expired, err := s.store.ListExpiredTrials(ctx, now, livemode, batch)
 	if err != nil {

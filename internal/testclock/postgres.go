@@ -292,12 +292,12 @@ func (s *PostgresStore) transitionWithReason(
 		query = `UPDATE test_clocks SET status = $1, last_failure_reason = NULL,
 			updated_at = now()
 			WHERE id = $2 AND status = ANY($3)			RETURNING ` + clockCols
-		args = []any{to, id, postgres.StringArray(allowedFrom)}
+		args = []any{to, id, allowedFrom}
 	} else {
 		query = `UPDATE test_clocks SET status = $1, last_failure_reason = $2,
 			updated_at = now()
 			WHERE id = $3 AND status = ANY($4)			RETURNING ` + clockCols
-		args = []any{to, truncateReason(reason), id, postgres.StringArray(allowedFrom)}
+		args = []any{to, truncateReason(reason), id, allowedFrom}
 	}
 	err = tx.QueryRowContext(ctx, query, args...).Scan(scanDest(&clk)...)
 	if err == sql.ErrNoRows {
@@ -347,11 +347,11 @@ func (s *PostgresStore) transition(ctx context.Context, tenantID, id, to string,
 	if frozenTime != nil {
 		query = `UPDATE test_clocks SET status = $1, frozen_time = $2, updated_at = now()
 			WHERE id = $3 AND status = ANY($4) RETURNING ` + clockCols
-		args = []any{to, *frozenTime, id, postgres.StringArray(allowedFrom)}
+		args = []any{to, *frozenTime, id, allowedFrom}
 	} else {
 		query = `UPDATE test_clocks SET status = $1, updated_at = now()
 			WHERE id = $2 AND status = ANY($3) RETURNING ` + clockCols
-		args = []any{to, id, postgres.StringArray(allowedFrom)}
+		args = []any{to, id, allowedFrom}
 	}
 	err = tx.QueryRowContext(ctx, query, args...).Scan(scanDest(&clk)...)
 	if err == sql.ErrNoRows {

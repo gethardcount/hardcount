@@ -249,7 +249,7 @@ func (s *PostgresStore) LostDisputesByInvoices(ctx context.Context, tenantID str
 		FROM invoice_disputes
 		WHERE invoice_id = ANY($1::text[]) AND status = $2
 		ORDER BY invoice_id, closed_at DESC, id DESC`,
-		postgres.StringArray(invoiceIDs), string(domain.DisputeLost))
+		invoiceIDs, string(domain.DisputeLost))
 	if err != nil {
 		return nil, fmt.Errorf("read lost disputes: %w", err)
 	}

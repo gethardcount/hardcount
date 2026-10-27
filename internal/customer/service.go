@@ -13,7 +13,6 @@ import (
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
-	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/tax"
 )
 
@@ -172,11 +171,12 @@ func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID stri
 // clock.Resolver into the handler: one resolver per domain, one pin resolution,
 // no chance of the two disagreeing.
 //
-// No-op in live mode (a live customer can never be clock-pinned — DB CHECK on
-// test_clocks.livemode), so production pays nothing; no-op when ctx is already
-// bound. created_at stays wall-clock (ADR-030); this is the second axis.
+// A live customer can never be clock-pinned (DB CHECK on
+// test_clocks.livemode), so the bind finds no clock and leaves ctx as is;
+// no-op when ctx is already bound. created_at stays wall-clock (ADR-030);
+// this is the second axis.
 func (s *Service) AuditCtx(ctx context.Context, tenantID, customerID string) context.Context {
-	if s.resolver == nil || customerID == "" || postgres.Livemode(ctx) {
+	if s.resolver == nil || customerID == "" {
 		return ctx
 	}
 	if _, ok := clock.SimOf(ctx); ok {

@@ -11,6 +11,7 @@ import (
 	"github.com/sagarsuperuser/velox/internal/auth"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/payment/breaker"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 )
 
 // Stripe refuses a charge below its minimum (USD 0.50) with this reply, seen
@@ -23,7 +24,7 @@ const stripeAmountTooSmall = `{"error":{"code":"amount_too_small","doc_url":"htt
 const stripeBadParam = `{"error":{"code":"parameter_invalid_integer","message":"Invalid integer: abc","param":"amount","type":"invalid_request_error"}}`
 
 func TestCreatePaymentIntent_BelowMinimumIsItsOwnOutcome(t *testing.T) {
-	ctx := auth.WithTenantID(context.Background(), "t1")
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	withCannedStripe(t, http.StatusBadRequest, stripeAmountTooSmall)
 	_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreatePaymentIntent(ctx, createParams())
 
@@ -96,7 +97,7 @@ func TestChargeInvoice_BelowMinimum_NotADecline(t *testing.T) {
 			s.SetDunningResolver(resolver)
 			s.SetEmailPaymentFailed(emails, staticCustomerEmail{})
 
-			_, err := tc.charge(s, auth.WithTenantID(context.Background(), "t1"), inv)
+			_, err := tc.charge(s, auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), inv)
 			if !errors.Is(err, domain.ErrBelowMinimumCharge) {
 				t.Fatalf("err = %v, want ErrBelowMinimumCharge", err)
 			}
@@ -176,7 +177,7 @@ func TestChargeInvoice_BelowMinimum_LeavesTheBreakerClosed(t *testing.T) {
 		inv.ID = "inv_" + string(rune('a'+i))
 		inv.AmountDueCents = 30
 		invoices.invoices[inv.ID] = inv
-		if _, err := s.ChargeInvoice(auth.WithTenantID(context.Background(), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test"); !errors.Is(err, domain.ErrBelowMinimumCharge) {
+		if _, err := s.ChargeInvoice(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), "t1", inv, testHold, "cus_stripe", "pm_test"); !errors.Is(err, domain.ErrBelowMinimumCharge) {
 			t.Fatalf("charge %d: err = %v, want ErrBelowMinimumCharge", i+1, err)
 		}
 	}
@@ -189,7 +190,7 @@ func TestChargeInvoice_BelowMinimum_LeavesTheBreakerClosed(t *testing.T) {
 // same way, and IsDefiniteRefusal separates a refusal that made nothing
 // from an answer that may hide a session.
 func TestBelowMinimumOf_AndIsDefiniteRefusal(t *testing.T) {
-	ctx := auth.WithTenantID(context.Background(), "t1")
+	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	// The raw stripe-go error, as api/adapters.go gets it from the create.
 	refusal := func(status int, body string) error {
 		t.Helper()

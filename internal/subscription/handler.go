@@ -278,15 +278,15 @@ func (h *Handler) bindForSub(ctx context.Context, tenantID, subID string) contex
 // One resolution of the pin yields both halves, consistent by construction
 // (clock.Sim).
 //
-// Cost is zero on the path that matters: live mode can hold no clock (DB
-// CHECK on test_clocks.livemode), so production never resolves. It is also a
-// no-op when ctx is already bound — the service-layer entry points
-// (bindForSub) bind before we get here on most routes.
+// A live subscription can hold no clock (DB CHECK on test_clocks.livemode),
+// so the bind finds none and leaves ctx as is. It is also a no-op when ctx is
+// already bound — the service-layer entry points (bindForSub) bind before we
+// get here on most routes.
 //
 // ADR-030 still holds: created_at stays WALL-clock ("when the operator
 // clicked"). This is the second axis, not a replacement for the first.
 func (h *Handler) auditCtx(ctx context.Context, tenantID, subID string) context.Context {
-	if h.resolver == nil || subID == "" || postgres.Livemode(ctx) {
+	if h.resolver == nil || subID == "" {
 		return ctx
 	}
 	if _, ok := clock.SimOf(ctx); ok {
