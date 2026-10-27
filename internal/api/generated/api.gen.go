@@ -8012,7 +8012,7 @@ type RecordInvoicePaymentParams struct {
 
 // RefundInvoiceJSONBody defines parameters for RefundInvoice.
 type RefundInvoiceJSONBody struct {
-	// AmountCents Amount to refund. 0 or absent refunds the full remaining amount.
+	// AmountCents Amount to refund. 0 or absent refunds what was paid by card less the refunds on the invoice's credit notes that are not voided, up to what is left of the invoice total.
 	AmountCents int64 `json:"amount_cents,omitempty"`
 
 	// Description Text for the credit note line. Defaults to "Refund: <reason>".

@@ -500,6 +500,31 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	return notes, rows.Err()
 }
 
+// InvoiceSums adds up every credit note on the invoice in one RLS-scoped
+// query (tenant and mode). No LIMIT: a sum over a page of notes is short.
+// A sum past int64 fails the cast instead of wrapping.
+func (s *PostgresStore) InvoiceSums(ctx context.Context, tenantID, invoiceID string) (InvoiceSums, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return InvoiceSums{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	var sums InvoiceSums
+	if err := tx.QueryRowContext(ctx, `
+		SELECT
+		    COALESCE(SUM(total_cents) FILTER (WHERE status <> 'voided'), 0)::bigint,
+		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'issued'), 0)::bigint,
+		    COALESCE(SUM(total_cents) FILTER (WHERE status = 'voided' AND issued_at IS NULL), 0)::bigint,
+		    COALESCE(SUM(refund_amount_cents) FILTER (WHERE status <> 'voided' AND refund_amount_cents > 0), 0)::bigint
+		FROM credit_notes
+		WHERE invoice_id = $1
+	`, invoiceID).Scan(&sums.CreditedCents, &sums.IssuedCents, &sums.UnrelievedCents, &sums.RefundCents); err != nil {
+		return InvoiceSums{}, fmt.Errorf("sum the credit notes on invoice %s: %w", invoiceID, err)
+	}
+	return sums, nil
+}
+
 // creditNoteWhere is the WHERE clause of the list and its count, from the
 // filter, with its arguments ($1 onward).
 func creditNoteWhere(filter ListFilter) (string, []any) {
