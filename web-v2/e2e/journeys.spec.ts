@@ -8,7 +8,7 @@ import {
   type Customer, type Invoice, type Plan, type Seed, type Subscription,
 } from './fixtures/seed'
 
-const USAGE_ESTIMATE = "Estimate at each subscription's current prices. Past invoices may differ."
+const USAGE_ESTIMATE = "Estimate at each subscription's current prices. Canceled subscriptions are not counted. Past invoices may differ."
 
 // The few things an operator does most. Each test seeds what it needs through
 // the API, does one job through the screen, and checks that the screen shows
@@ -795,6 +795,31 @@ test("the customer's Activity card says a chosen window is an estimate, not a pr
   const usage = await api<{ period: { source: string }; warnings: string[] }>(
     'GET', `/customers/${customer.id}/usage?from=${iso(from)}&to=${iso(to)}`)
   expect([usage.period.source, usage.warnings]).toEqual(['explicit', []])
+})
+
+// The Daily usage chart's quantity axis is as wide as its longest label. A
+// fixed 40px axis cut a tick of 0.00008 to "00008", which reads as 8.
+test('the Daily usage chart shows each axis label whole: 0.00008 GB-hours reads 0.00008', async ({ page }) => {
+  const id = uniq()
+  const meter = await api<{ id: string; event_name: string }>('POST', '/meters', {
+    event_name: `e2e_gb_hours_${id}`, name: `E2E GB-hours ${id}`, unit: 'GB-hour', aggregation: 'sum',
+  })
+  const plan = await api<Plan>('POST', '/plans', {
+    code: `e2e-gb-hours-${id}`, name: `E2E GB-hours ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0,
+    prices: [{ meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '1' }],
+  })
+  const customer = await createCustomer()
+  await createSubscription(customer.id, plan.id)
+  await api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: meter.event_name, quantity: '0.00008', idempotency_key: `e2e_${uniq()}` })
+
+  await page.goto(`/customers/${customer.id}`)
+  const chart = page.getByRole('main').locator('[data-slot="card"]').filter({ has: page.getByText('Daily usage', { exact: true }) })
+  const ticks = chart.locator('.recharts-yAxis .recharts-cartesian-axis-tick-value')
+  await expect(ticks.filter({ hasText: /^0\.00008$/ })).toHaveCount(1)
+  const surface = chart.locator('svg.recharts-surface').first()
+  for (const tick of await ticks.all()) {
+    expect(await boxInside(tick, surface), `axis label "${await tick.textContent()}" fits the chart`).toBe(true)
+  }
 })
 
 test('grant credits from the customer page', async ({ page }) => {

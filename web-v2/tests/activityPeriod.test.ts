@@ -23,9 +23,11 @@ test('explicit windows are not rewritten', () => {
 
 // A chosen window (7d, 30d, 90d, or the margin card's windows) is priced at
 // each subscription's current prices (ADR-130 §10), so the page says it is an
-// estimate. The current billing cycle is exact and says nothing.
+// estimate. Only active and trialing subscriptions are rated, so it says a
+// canceled one is not counted. The current billing cycle is exact and says
+// nothing.
 test('a chosen window says it is an estimate; the cycle does not', () => {
   assert.equal(usageEstimateNote({ source: 'explicit' }), USAGE_ESTIMATE_NOTE)
   assert.equal(usageEstimateNote({ source: 'current_billing_cycle' }), null)
-  assert.equal(USAGE_ESTIMATE_NOTE, "Estimate at each subscription's current prices. Past invoices may differ.")
+  assert.equal(USAGE_ESTIMATE_NOTE, "Estimate at each subscription's current prices. Canceled subscriptions are not counted. Past invoices may differ.")
 })
