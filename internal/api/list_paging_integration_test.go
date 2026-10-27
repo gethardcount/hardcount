@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -91,10 +92,43 @@ var notListRoutes = map[string]string{
 // listRoutesNotSeeded are list routes the fixture below cannot fill with two
 // rows, so only their shape and their limit and offset checks run.
 var listRoutesNotSeeded = map[string]string{
-	"/v1/customers/{customer_id}/payment-methods":     "a payment method comes from Stripe",
-	"/v1/invoices/{id}/disputes":                      "a dispute comes from Stripe",
-	"/v1/webhook-endpoints/endpoints/{id}/deliveries": "a delivery is made by the dispatcher, which this server does not run",
-	"/v1/customers/{id}/sent-emails":                  "an email row is written by the email worker's flow, not by these requests",
+	"/v1/customers/{customer_id}/payment-methods": "a payment method comes from Stripe",
+	"/v1/invoices/{id}/disputes":                  "a dispute comes from Stripe",
+	"/v1/customers/{id}/sent-emails":              "an email row is written by the email worker's flow, not by these requests",
+}
+
+// unpagedSets are the notListRoutes that answer a set of rows in one
+// response, with no total and no paging. docs/api-surface.md names each in
+// its Lists section, so a caller does not page one expecting a 422 or a
+// next page.
+var unpagedSets = []string{
+	"/v1/usage-events/held",
+	"/v1/subscriptions/{id}/timeline",
+	"/v1/invoices/{id}/payment-timeline",
+	"/v1/webhook_events/{id}/deliveries",
+	"/v1/members",
+	"/v1/credits/balance/{customer_id}",
+	"/v1/credits/grants/{customer_id}",
+}
+
+// TestListsDoc_NamesTheSetsThatDoNotPage: the Lists section says every list
+// pages one way, so it must name the routes that answer a set without
+// paging.
+func TestListsDoc_NamesTheSetsThatDoNotPage(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/api-surface.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, lists, ok := strings.Cut(string(doc), "\n## Lists\n")
+	if !ok {
+		t.Fatal("docs/api-surface.md has no Lists section")
+	}
+	lists, _, _ = strings.Cut(lists, "\n## ")
+	for _, route := range unpagedSets {
+		if !strings.Contains(lists, "`GET "+route+"`") {
+			t.Errorf("the Lists section of docs/api-surface.md does not name `GET %s`, which does not page", route)
+		}
+	}
 }
 
 func TestListRoutes_OnePagingStyle(t *testing.T) {
@@ -151,14 +185,14 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		}
 		return id(call("POST", "/v1/customers", body).want(t, 201, "customer "+ext))
 	}
-	subscribe := func(code, customerID string) {
-		call("POST", "/v1/subscriptions", map[string]any{
+	subscribe := func(code, customerID string) string {
+		return id(call("POST", "/v1/subscriptions", map[string]any{
 			"code": code, "display_name": code, "customer_id": customerID,
 			"items": []map[string]any{{"plan_id": flowStr(planA, "id")}}, "billing_time": "anniversary",
-		}).want(t, 201, "subscription "+code)
+		}).want(t, 201, "subscription "+code))
 	}
 	cusA, cusB := customer("paging-a", ""), customer("paging-b", "")
-	subscribe("paging-sub-a", cusA)
+	subA := subscribe("paging-sub-a", cusA)
 	subscribe("paging-sub-b", cusB)
 	subscribe("paging-sub-c1", customer("paging-c1", clk))
 	subscribe("paging-sub-c2", customer("paging-c2", clk))
@@ -197,16 +231,21 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		}).want(t, 201, "credit grant")
 	}
 	endpoint := ""
-	for _, u := range []string{"https://example.com/paging-1", "https://example.com/paging-2"} {
+	for i, u := range []string{"https://example.com/paging-1", "https://example.com/paging-2"} {
 		ep := call("POST", "/v1/webhook-endpoints/endpoints", map[string]any{"url": u}).want(t, 201, "webhook endpoint").body
 		endpoint = flowStr(flowObj(ep, "endpoint"), "id")
-		// One delivery per endpoint gives the stats list a row for each. The
+		// Deliveries give the stats list a row for each endpoint, and the
+		// last endpoint two rows in its own delivery list, so its paging and
+		// its total are checked against the other endpoint's row. The
 		// dispatcher writes deliveries, and this server does not run it.
-		seedBypass(t, db, `WITH e AS (
-				INSERT INTO webhook_events (tenant_id, event_type, payload) VALUES ($1, 'invoice.created', '{}') RETURNING id)
-			INSERT INTO webhook_deliveries (tenant_id, webhook_endpoint_id, webhook_event_id, status)
-			SELECT $1, $2, e.id, 'succeeded' FROM e`, tenantID, endpoint)
+		for range i + 1 {
+			seedBypass(t, db, `WITH e AS (
+					INSERT INTO webhook_events (tenant_id, event_type, payload) VALUES ($1, 'invoice.created', '{}') RETURNING id)
+				INSERT INTO webhook_deliveries (tenant_id, webhook_endpoint_id, webhook_event_id, status)
+				SELECT $1, $2, e.id, 'succeeded' FROM e`, tenantID, endpoint)
+		}
 	}
+	webhookEvent := flowStr(flowList(call("GET", "/v1/webhook-endpoints/events?limit=1", nil).want(t, 200, "webhook events").body, "data")[0], "id")
 	for _, model := range []string{"paging-1", "paging-2"} {
 		call("PUT", "/v1/provider-costs", map[string]any{
 			"provider": "openai", "model": model, "token_type": "input", "unit_cost_cents": "0.0001",
@@ -337,6 +376,12 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 			if total < len(data) {
 				t.Errorf("total %d is below the %d rows on the page", total, len(data))
 			}
+			// The fixture's lists fit on the default page, so total must
+			// count exactly its rows: a total that counts rows outside the
+			// list (another endpoint's, another customer's) is caught here.
+			if total <= 50 && len(data) != total {
+				t.Errorf("the default page holds %d rows but total is %d", len(data), total)
+			}
 
 			for _, bad := range []struct{ query, param string }{
 				{"limit=0", "limit"}, {"limit=101", "limit"}, {"limit=-1", "limit"}, {"limit=ten", "limit"},
@@ -378,6 +423,33 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 			past, t3 := page(t, with(path, fmt.Sprintf("offset=%d", total)))
 			if len(past) != 0 || t3 != total {
 				t.Errorf("offset=total answers %d rows and total %d, want 0 rows and total %d", len(past), t3, total)
+			}
+		})
+	}
+
+	// A set that does not page answers the same with or without the paging
+	// parameters, as docs/api-surface.md says.
+	unpagedPaths := map[string]string{
+		"/v1/usage-events/held":              "/v1/usage-events/held",
+		"/v1/subscriptions/{id}/timeline":    "/v1/subscriptions/" + subA + "/timeline",
+		"/v1/invoices/{id}/payment-timeline": "/v1/invoices/" + finalInvoice + "/payment-timeline",
+		"/v1/webhook_events/{id}/deliveries": "/v1/webhook_events/" + webhookEvent + "/deliveries",
+		"/v1/credits/balance/{customer_id}":  "/v1/credits/balance/" + cusA,
+		"/v1/credits/grants/{customer_id}":   "/v1/credits/grants/" + cusA,
+	}
+	for _, route := range unpagedSets {
+		if _, ok := notListRoutes[route]; !ok {
+			t.Errorf("unpagedSets names %s, which is not in notListRoutes", route)
+		}
+		path, ok := unpagedPaths[route]
+		if !ok {
+			continue // /v1/members answers only a dashboard session
+		}
+		t.Run("unpaged "+route, func(t *testing.T) {
+			plain := call("GET", path, nil).want(t, 200, "plain")
+			paged := call("GET", with(path, "limit=1&offset=1&after=x"), nil).want(t, 200, "with paging parameters")
+			if string(plain.raw) != string(paged.raw) {
+				t.Errorf("limit, offset and after changed the answer:\n%s\n%s", clip(plain.raw), clip(paged.raw))
 			}
 		})
 	}
