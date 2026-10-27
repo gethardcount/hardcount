@@ -336,10 +336,10 @@ func TestVoid_ReversesTaxNoIssuedNoteCovered(t *testing.T) {
 	}
 }
 
-// A refund with no amount refunds what was paid and not yet refunded, but no
-// more than the invoice can still be credited. Paid invoice of 100.00 by
-// card, with one issued note of 10.00 settled outside Stripe: 90.00 is left to
-// credit, and all of it can go back to the card.
+// A refund with no amount refunds what was paid by card less the refunds on
+// its notes, but no more than the invoice can still be credited. Paid
+// invoice of 100.00 by card, with one issued note of 10.00 settled outside
+// Stripe: 90.00 is left to credit, and all of it can go back to the card.
 func TestCreateRefund_NoAmount_StopsAtWhatIsLeftToCredit(t *testing.T) {
 	r := newSumsRig(t, "CN Sums Refund After Credit")
 	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sumsoob", domain.InvoicePaid, domain.PaymentSucceeded, "pi_sums_oob")
@@ -396,5 +396,60 @@ func TestCreateRefund_NoAmount_StopsAtWhatWasPaidByCard(t *testing.T) {
 	}
 	if refund.RefundAmountCents != 6000 || refund.TotalCents != 6000 {
 		t.Errorf("refund note total %d refund %d, want 6000 each: the part paid by card", refund.TotalCents, refund.RefundAmountCents)
+	}
+}
+
+// refusedErr is a refund Stripe answered with a clear no.
+type refusedErr struct{}
+
+func (refusedErr) Error() string        { return "card_declined" }
+func (refusedErr) OutcomeUnknown() bool { return false }
+
+// refuseFirstRefunder refuses the first refund and lets the rest through.
+type refuseFirstRefunder struct {
+	okRefunder
+	refused atomic.Bool
+}
+
+func (r *refuseFirstRefunder) CreateRefund(ctx context.Context, pi string, amount int64, key, cnID string) (string, domain.RefundStatus, error) {
+	if r.refused.CompareAndSwap(false, true) {
+		return "", "", refusedErr{}
+	}
+	return r.okRefunder.CreateRefund(ctx, pi, amount, key, cnID)
+}
+
+// A refund note whose Stripe refund failed still holds its amount: the
+// customer gets it with retry-refund on that note, so a refund with no amount
+// refunds what was paid by card less it. The API docs say so; a default that
+// skipped failed refunds would ask for that money twice. The invoice is paid
+// 60.00 by card and 40.00 by credit balance, so the card part, not the invoice
+// total, sets the amount.
+func TestCreateRefund_NoAmount_CountsAFailedRefund(t *testing.T) {
+	r := newSumsRig(t, "CN Sums Refund After Failed")
+	r.svc = creditnote.NewService(creditnote.NewPostgresStore(r.db), r.invoices, &refuseFirstRefunder{})
+	r.svc.SetNumberGenerator(tenant.NewSettingsStore(r.db))
+	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sumsfail", domain.InvoicePaid, domain.PaymentSucceeded, "pi_sums_fail")
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(r.ctx, `UPDATE invoices SET amount_paid_cents = 6000, credits_applied_cents = 4000 WHERE id = $1`, inv.ID); err != nil {
+		t.Fatalf("split the payment: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	failed := r.note(t, inv.ID, 1000, true, true)
+	if failed.RefundStatus != domain.RefundFailed {
+		t.Fatalf("first refund status %q, want failed", failed.RefundStatus)
+	}
+
+	refund, err := r.svc.CreateRefund(r.ctx, r.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+	if err != nil {
+		t.Fatalf("CreateRefund with no amount: %v", err)
+	}
+	if refund.RefundAmountCents != 5000 {
+		t.Errorf("refund %d, want 5000: 60.00 paid by card less the 10.00 failed refund still on a note", refund.RefundAmountCents)
 	}
 }

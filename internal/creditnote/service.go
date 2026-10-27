@@ -1435,10 +1435,11 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 	}
 
 	// No amount: refund the most Create's two caps allow, what was paid by
-	// card and not yet refunded, but no more than the invoice can still be
-	// credited (a note to the customer's balance or settled outside Stripe
-	// uses up part of the invoice too). Create checks both again under the
-	// invoice lock.
+	// card less the refunds on notes not voided (a failed refund counts: its
+	// note keeps the amount for retry-refund), but no more than the invoice
+	// can still be credited (a note to the customer's balance or settled
+	// outside Stripe uses up part of the invoice too). Create checks both
+	// again under the invoice lock.
 	amount := input.AmountCents
 	if amount == 0 {
 		sums, err := s.store.InvoiceSums(ctx, tenantID, input.InvoiceID)

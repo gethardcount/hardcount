@@ -9241,9 +9241,11 @@ export const getRefundInvoiceUrl = (id: string,) => {
  * owes) for the refund, and sends the refund to Stripe.
  *
  * Leave out `amount_cents`, or send 0, to refund what was paid by card
- * and not yet refunded. If other credit notes already cover part of the
- * invoice, the refund stops at what is left of the invoice total. The
- * response is the credit note. Check its
+ * less the refunds on the invoice's credit notes that are not voided. A
+ * refund that failed or is not finished counts too: retry it with
+ * `POST /v1/credit-notes/{id}/retry-refund`. If other credit notes
+ * already cover part of the invoice, the refund stops at what is left of
+ * the invoice total. The response is the credit note. Check its
  * `refund_status`: if Stripe refused the refund, it is `failed`. If
  * Stripe gave no clear answer, it is `unknown`: the customer may
  * already be refunded, so don't refund again in the Stripe Dashboard.
