@@ -2,17 +2,16 @@ package respond
 
 import (
 	"bytes"
-	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
+
+	kjson "sigs.k8s.io/json"
 )
 
 // The one rule for a request body Velox defines (every route but the
@@ -174,113 +173,32 @@ func decodeValue(raw json.RawMessage, v any, rule decodeRule) error {
 		return &BodyError{Err: err}
 	}
 	// encoding/json matches a key to a field without regard to case, so
-	// {"Email": ...} set email. The reference lists one spelling.
-	if key := inexactKey(raw, reflect.TypeOf(v)); key != "" {
+	// {"Email": ...} set email; the reference lists one spelling.
+	// sigs.k8s.io/json (Kubernetes' strict decoder) matches exactly. It only
+	// checks here: it reads whole numbers in an `any` as int64, so v keeps
+	// the encoding/json decode above.
+	if key := inexactKey(raw, v); key != "" {
 		return &BodyError{Field: key}
 	}
 	return nil
 }
 
-var (
-	jsonUnmarshaler = reflect.TypeFor[json.Unmarshaler]()
-	textUnmarshaler = reflect.TypeFor[encoding.TextUnmarshaler]()
-)
-
-// inexactKey returns the first key in raw, at any depth, that names a field
-// of t in another case. raw has already decoded into t, so every key matches
-// a field in some case. A value t decodes its own way (an Unmarshaler, raw
-// JSON, any) holds no field names, and neither do a map's keys.
-func inexactKey(raw json.RawMessage, t reflect.Type) string {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if reflect.PointerTo(t).Implements(jsonUnmarshaler) || reflect.PointerTo(t).Implements(textUnmarshaler) {
+// inexactKey returns a key in raw, at any depth, that names a field of v's
+// type only in another case. raw has already decoded into v, so every key
+// matches a field in some case.
+func inexactKey(raw json.RawMessage, v any) string {
+	fresh := reflect.New(reflect.TypeOf(v).Elem()).Interface()
+	strictErrs, err := kjson.UnmarshalStrict(raw, fresh, kjson.DisallowUnknownFields)
+	if err != nil || len(strictErrs) == 0 {
 		return ""
 	}
-	switch t.Kind() {
-	case reflect.Struct:
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(raw, &obj) != nil {
-			return "" // null
-		}
-		fields := map[string]reflect.Type{}
-		jsonFields(t, fields)
-		for _, k := range slices.Sorted(maps.Keys(obj)) {
-			ft, ok := fields[k]
-			if !ok {
-				return k
-			}
-			if key := inexactKey(obj[k], ft); key != "" {
-				return key
-			}
-		}
-	case reflect.Slice, reflect.Array:
-		if t.Elem().Kind() == reflect.Uint8 {
-			return "" // []byte is a base64 string
-		}
-		var items []json.RawMessage
-		if json.Unmarshal(raw, &items) != nil {
-			return ""
-		}
-		for _, it := range items {
-			if key := inexactKey(it, t.Elem()); key != "" {
-				return key
-			}
-		}
-	case reflect.Map:
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(raw, &obj) != nil {
-			return ""
-		}
-		for _, k := range slices.Sorted(maps.Keys(obj)) {
-			if key := inexactKey(obj[k], t.Elem()); key != "" {
-				return key
-			}
-		}
+	var fe kjson.FieldError
+	if !errors.As(strictErrs[0], &fe) {
+		return ""
 	}
-	return ""
-}
-
-// jsonFields adds the JSON names of t's fields, as encoding/json names
-// them, to out: the tag's name, else the Go name; "-" is skipped; an
-// untagged embedded struct's fields are promoted, and a shallower field of
-// the same name wins.
-func jsonFields(t reflect.Type, out map[string]reflect.Type) {
-	var embedded []reflect.Type
-	for i := range t.NumField() {
-		f := t.Field(i)
-		tag := f.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		name, _, _ := strings.Cut(tag, ",")
-		if f.Anonymous && name == "" {
-			et := f.Type
-			if et.Kind() == reflect.Pointer {
-				et = et.Elem()
-			}
-			if et.Kind() == reflect.Struct {
-				embedded = append(embedded, et)
-				continue
-			}
-		}
-		if !f.IsExported() {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		out[name] = f.Type
-	}
-	for _, et := range embedded {
-		promoted := map[string]reflect.Type{}
-		jsonFields(et, promoted)
-		for name, ft := range promoted {
-			if _, ok := out[name]; !ok {
-				out[name] = ft
-			}
-		}
-	}
+	// FieldPath is items[0].Name; param is the key, as for an unknown one.
+	path := fe.FieldPath()
+	return path[strings.LastIndexAny(path, ".]")+1:]
 }
 
 // unknownField pulls the key out of encoding/json's `json: unknown field "x"`,

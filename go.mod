@@ -30,6 +30,7 @@ require (
 	golang.org/x/time v0.14.0
 	golang.org/x/tools v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
+	sigs.k8s.io/json v0.0.0-20260909141634-11ed52e25bc5
 )
 
 require (
