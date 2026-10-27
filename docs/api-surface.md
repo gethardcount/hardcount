@@ -49,7 +49,7 @@ client, or generate a client from the OpenAPI file.
 
 ## Lists
 
-Every route that lists things pages the same way:
+Every list route pages the same way:
 
 - Send `limit` (how many rows, 1 to 100, default 50) and `offset` (how
   many rows to skip, default 0).
@@ -73,6 +73,19 @@ Two lists stop counting:
   "more than 10,000".
 - The customer list with `search`, or sorted by name or email, looks at
   5,000 customers at most. Its rows and its `total` stop there.
+
+A few routes answer a set of rows in one response and do not page. They
+have no `total`, and `limit`, `offset` and `after` change nothing:
+
+- `GET /v1/usage-events/held` lists the 200 external customers whose held
+  usage arrived last. `total_customers` and `total_rows` count all of it.
+  Release or discard held usage to see the rest.
+- `GET /v1/subscriptions/{id}/timeline` and
+  `GET /v1/invoices/{id}/payment-timeline` can leave rows out, and then
+  answer `truncated: true`.
+- `GET /v1/webhook_events/{id}/deliveries`, `GET /v1/members`,
+  `GET /v1/credits/balance/{customer_id}` and
+  `GET /v1/credits/grants/{customer_id}` answer every row.
 
 ## Core routes
 
