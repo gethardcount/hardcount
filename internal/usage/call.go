@@ -189,8 +189,8 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	return res, nil
 }
 
-// HoldCall holds one call's events in one transaction, each with Hold's
-// checks. A key already held is counted as deduplicated.
+// HoldCall holds one call's events in one transaction, each with
+// heldEvent's checks. A key already held is counted as deduplicated.
 func (s *Service) HoldCall(ctx context.Context, tenantID string, in HoldCallInput) (CallResult, error) {
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable

@@ -73,10 +73,10 @@ func newHeldAggFixture(t *testing.T, name, eventName string) heldAggFixture {
 	f.psvc = pricing.NewService(pricing.NewPostgresStore(f.db))
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 	for _, key := range []string{"agg-" + eventName + ":input", "agg-" + eventName + ":output"} {
-		if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
+		if _, err := f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
 			Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: "ext_" + eventName, EventName: eventName,
-			Quantity: decimal.NewFromInt(5), IdempotencyKey: key, EventAt: &at,
 			Reason: domain.HeldReasonCustomerNotFound,
+			Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}},
 		}); err != nil {
 			t.Fatalf("hold %s: %v", key, err)
 		}

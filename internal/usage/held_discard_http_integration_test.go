@@ -31,14 +31,12 @@ func TestHeldDiscard_HTTP_UnknownFieldDiscardsNothing(t *testing.T) {
 		{"tokens", "strict-tokens"},
 		{"images", "strict-images"},
 	} {
-		if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
+		if _, err := f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
 			Source:             domain.HeldUsageSourceLiteLLM,
 			ExternalCustomerID: "cus_x",
 			EventName:          row.eventName,
-			Quantity:           decimal.NewFromInt(10),
-			IdempotencyKey:     row.key,
-			EventAt:            &at,
 			Reason:             domain.HeldReasonCustomerNotFound,
+			Events:             []usage.CallEvent{{Quantity: decimal.NewFromInt(10), IdempotencyKey: row.key, Timestamp: &at}},
 		}); err != nil {
 			t.Fatalf("hold %s: %v", row.key, err)
 		}

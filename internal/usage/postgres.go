@@ -35,7 +35,7 @@ func (s *PostgresStore) Ingest(ctx context.Context, tenantID string, event domai
 //
 // The single and backfill doors read the meter's aggregation there
 // (open_period.go). Batch reads it in IngestBatch's hook, and the LiteLLM
-// doors in IngestResolvingHeld's and IngestCallResolvingHeld's. Only
+// door in IngestCallResolvingHeld's. Only
 // BACKFILL also writes an audit row there (ADR-090):
 // live ingest (POST /v1/usage-events, /batch, the LiteLLM spend callback) is
 // machine metering at up to ~1000/s, usage_events IS the record, and a row

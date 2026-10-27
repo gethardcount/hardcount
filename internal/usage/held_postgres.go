@@ -18,9 +18,6 @@ import (
 // customer or meter did not exist (#1044, ADR-122). PostgresStore
 // implements it; NewService picks it up from the Store it is given.
 type HeldStore interface {
-	// Hold inserts a held row. Returns errs.ErrDuplicateKey (nothing
-	// written) when a held row with the same idempotency key exists.
-	Hold(ctx context.Context, tenantID string, ev domain.HeldUsageEvent) (domain.HeldUsageEvent, error)
 	// ListHeldSummary groups the rows still held, for the most recent
 	// HeldListCustomers external customer ids, with totals over all of them.
 	ListHeldSummary(ctx context.Context, tenantID string) (HeldSummary, error)
@@ -31,15 +28,10 @@ type HeldStore interface {
 	ReleaseHeld(ctx context.Context, tenantID string, in ReleaseHeldInput, emit func(tx *sql.Tx, res ReleaseHeldResult) error) (ReleaseHeldResult, error)
 	// DiscardHeld marks held rows discarded (kept, never ingested).
 	DiscardHeld(ctx context.Context, tenantID, externalCustomerID, eventName string, emit func(tx *sql.Tx, n int) error) (int, error)
-	// IngestResolvingHeld is the live LiteLLM ingest: it writes the event
-	// unless a held row with the same key was discarded, and resolves a
-	// held row with the same key as released. after, when not nil, runs on
-	// the transaction after the insert, only when the row was written; an
-	// error from it rolls the write back.
-	IngestResolvingHeld(ctx context.Context, tenantID string, event domain.UsageEvent, after func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error)
-	// IngestCallResolvingHeld writes every event of one LiteLLM call in one
-	// transaction, with IngestResolvingHeld's per-key rules and the
-	// pre-split replay guard. after, when not nil, runs on the transaction
+	// IngestCallResolvingHeld is the live LiteLLM ingest. It writes every
+	// event of one LiteLLM call in one transaction: a key held and then
+	// discarded is not written, a key still held is written and its held
+	// row marked released, and the pre-split replay guard applies. after, when not nil, runs on the transaction
 	// after the inserts, with what the call wrote; an error from it rolls
 	// the call back.
 	IngestCallResolvingHeld(ctx context.Context, tenantID string, call StoreCall, after func(tx *sql.Tx, res CallResult) error) (CallResult, error)
@@ -120,43 +112,6 @@ type ReleaseHeldResult struct {
 	// taken but did not, because it stopped at Limit. Another release takes
 	// them.
 	MoreToRelease int
-}
-
-// Hold inserts one held row. ON CONFLICT DO NOTHING on the idempotency key,
-// so a LiteLLM resend of a row already held writes nothing and reports
-// errs.ErrDuplicateKey, the same contract ingestOneTx has.
-func (s *PostgresStore) Hold(ctx context.Context, tenantID string, ev domain.HeldUsageEvent) (domain.HeldUsageEvent, error) {
-	props, err := propertiesJSON(ev.Dimensions)
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id,
-			event_name, quantity, properties, idempotency_key, event_at,
-			observed_cost_micros, reason)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
-		RETURNING id, received_at, status
-	`, postgres.NewID("vlx_hue"), tenantID, ev.Source, ev.ExternalCustomerID,
-		ev.EventName, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
-		ev.ObservedCostMicros, string(ev.Reason),
-	).Scan(&ev.ID, &ev.ReceivedAt, &ev.Status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.HeldUsageEvent{}, fmt.Errorf("%w: held idempotency_key %q", errs.ErrDuplicateKey, ev.IdempotencyKey)
-	}
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	return ev, nil
 }
 
 // ListHeldSummary returns one group per (external customer id, event name,
@@ -412,77 +367,6 @@ func (s *PostgresStore) DiscardHeld(ctx context.Context, tenantID, externalCusto
 	return n, nil
 }
 
-// IngestResolvingHeld writes one live LiteLLM event, in one transaction
-// with the held row that has the same idempotency key, if any:
-//
-//   - discarded: nothing is written and errs.ErrDuplicateKey is returned.
-//     The operator decided these rows are never billed, and a LiteLLM
-//     resend after the customer exists must not undo that.
-//   - held: the event is written (or found already written) and the held
-//     row is marked released, so a later discard cannot mark a row
-//     discarded whose usage is already in usage_events.
-//   - released, or no held row: a plain ingest.
-//
-// SELECT ... FOR UPDATE takes the held row's lock, the same lock
-// ReleaseHeld's and DiscardHeld's UPDATEs take, so whichever runs second
-// sees the first one's status. after runs on the transaction once the event
-// is written (the service reads the meter's aggregation there), never for a
-// duplicate.
-func (s *PostgresStore) IngestResolvingHeld(ctx context.Context, tenantID string, event domain.UsageEvent, after func(tx *sql.Tx, out domain.UsageEvent) error) (domain.UsageEvent, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.UsageEvent{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var heldID, status string
-	if event.IdempotencyKey != "" {
-		err = tx.QueryRowContext(ctx, `
-			SELECT id, status FROM usage_held_events
-			WHERE tenant_id = $1 AND idempotency_key = $2
-			FOR UPDATE
-		`, tenantID, event.IdempotencyKey).Scan(&heldID, &status)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return domain.UsageEvent{}, err
-		}
-	}
-	if status == string(domain.HeldStatusDiscarded) {
-		return domain.UsageEvent{}, fmt.Errorf("%w: idempotency_key %q was held and discarded", errs.ErrDuplicateKey, event.IdempotencyKey)
-	}
-
-	out, ingestErr := ingestOneTx(ctx, tx, tenantID, event)
-	if ingestErr != nil && !errors.Is(ingestErr, errs.ErrDuplicateKey) {
-		return domain.UsageEvent{}, ingestErr
-	}
-	if status == string(domain.HeldStatusHeld) {
-		// The event id is recorded only when this call wrote it; a
-		// duplicate means usage_events already had the key.
-		var eventID *string
-		if ingestErr == nil {
-			eventID = &out.ID
-		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE usage_held_events SET status = 'released', resolved_at = now(),
-				released_customer_id = $2, released_event_id = $3
-			WHERE id = $1 AND status = 'held'
-		`, heldID, event.CustomerID, eventID); err != nil {
-			return domain.UsageEvent{}, err
-		}
-	}
-	if ingestErr == nil && after != nil {
-		if err := after(tx, out); err != nil {
-			return domain.UsageEvent{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.UsageEvent{}, err
-	}
-	if ingestErr != nil {
-		return domain.UsageEvent{}, ingestErr
-	}
-	return out, nil
-}
-
 // StoreCall is one LiteLLM call for IngestCallResolvingHeld: Events is how
 // the current mapper records it, Legacy (with LegacyKey) how the mapper
 // before the cache-write split did. See CallInput.
@@ -562,10 +446,17 @@ func callKeys(groups ...[]string) []string {
 // made from it — in ONE transaction, so a crash or a store failure leaves
 // all of the call or none of it, and a LiteLLM resend finds the call whole.
 //
-// Each key follows IngestResolvingHeld's rules: a key held and then
-// discarded is not written (counted as deduplicated), a key still held is
-// written and its held row marked released, a key usage_events already has
-// is deduplicated. The held rows are read under FOR UPDATE first.
+// Each key follows the held rules (#1044, ADR-122), read under the held
+// row's lock (lockHeldKeys), the lock ReleaseHeld's and DiscardHeld's
+// UPDATEs take, so whichever runs second sees the first one's status:
+//
+//   - held and then discarded: not written (counted as deduplicated). The
+//     operator decided these rows are never billed, and a LiteLLM resend
+//     after the customer exists must not undo that.
+//   - still held: written (or found already written) and the held row
+//     marked released, so a later discard cannot mark a row discarded whose
+//     usage is already in usage_events.
+//   - already in usage_events: deduplicated.
 //
 // The replay guard (when call.Legacy is set): the call's input key may
 // already be stored by the mapper before the cache-write split, whose input
@@ -576,7 +467,7 @@ func callKeys(groups ...[]string) []string {
 //   - a usage_events row decides whenever there is one: it is what bills.
 //     With a held row for the key, that row's lock (taken above) is the one
 //     every LiteLLM writer of the key takes first — this release, the
-//     previous one's IngestResolvingHeld, ReleaseHeld's claim — so a plain
+//     previous one's per-event ingest, ReleaseHeld's claim — so a plain
 //     read now sees any such write that committed.
 //   - with a held row and no usage_events row, the held row's quantity
 //     decides (any status: a discarded row is never written).

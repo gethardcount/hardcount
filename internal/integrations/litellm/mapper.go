@@ -159,6 +159,9 @@ type Mapping struct {
 	// call first stored that way must be stored that way again, or the
 	// writes bill twice; the store decides which applies from the row
 	// already under LegacyKey (usage.PostgresStore.IngestCallResolvingHeld).
+	// An install upgraded from a main build from #1198 up to #1349 has
+	// such calls (CHANGELOG "Before upgrading"), so this stays while that
+	// upgrade is supported.
 	Legacy []ExternalIngest
 	// LegacyKey is the call's input key, which Events and Legacy both
 	// carry with different quantities. Set with Legacy.

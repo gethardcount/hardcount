@@ -12,7 +12,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
-	mw "github.com/sagarsuperuser/velox/internal/api/middleware"
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/errs"
@@ -41,7 +40,7 @@ type HoldInput struct {
 	Reason             domain.HeldUsageReason
 }
 
-// ErrHoldUnavailable is returned by Hold when the service has no held
+// ErrHoldUnavailable is returned by HoldCall when the service has no held
 // store wired. Callers treat it like any store failure.
 var ErrHoldUnavailable = errors.New("usage: held store not wired")
 
@@ -61,25 +60,6 @@ func init() {
 	} else {
 		heldUsageEvents = c
 	}
-}
-
-// Hold keeps one row that could not be ingested. It runs the same row
-// checks as ingest (dimensions, quantity, future time), so a held row can
-// later be released without failing them. Returns errs.ErrDuplicateKey when
-// the key is already held.
-func (s *Service) Hold(ctx context.Context, tenantID string, in HoldInput) (domain.HeldUsageEvent, error) {
-	if s.held == nil {
-		return domain.HeldUsageEvent{}, ErrHoldUnavailable
-	}
-	ev, err := heldEvent(in)
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	out, err := s.held.Hold(ctx, tenantID, ev)
-	if err == nil {
-		heldUsageEvents.WithLabelValues(string(in.Reason)).Inc()
-	}
-	return out, err
 }
 
 // heldEvent checks one row to hold and builds it. A row the checks refuse
@@ -145,39 +125,6 @@ func (s *Service) ListHeld(ctx context.Context, tenantID string) (HeldSummary, e
 		return HeldSummary{Groups: []HeldUsageGroup{}}, nil
 	}
 	return s.held.ListHeldSummary(ctx, tenantID)
-}
-
-// IngestResolvingHeld is Ingest for the LiteLLM callback. A row whose key
-// was held and then discarded is not written (errs.ErrDuplicateKey, so the
-// callback counts it as deduplicated), and a row whose key is still held is
-// written and its held row marked released. See
-// PostgresStore.IngestResolvingHeld. Without a held store no row can be
-// held, so it is a plain Ingest.
-func (s *Service) IngestResolvingHeld(ctx context.Context, tenantID string, input IngestInput) (domain.UsageEvent, error) {
-	if s.held == nil {
-		return s.Ingest(ctx, tenantID, input)
-	}
-	prepared, err := s.prepare(ctx, tenantID, input, domain.UsageOriginAPI)
-	if err != nil {
-		return domain.UsageEvent{}, err
-	}
-	// The open periods are read BEFORE the write, the meter's aggregation on
-	// the write's transaction after the insert: see open_period.go.
-	periods, err := s.openPeriodsFor(ctx, tenantID, prepared.CustomerID, periodCacheFrom(ctx))
-	if err != nil {
-		return domain.UsageEvent{}, err
-	}
-	var class Class
-	event, err := s.held.IngestResolvingHeld(ctx, tenantID, prepared, func(tx *sql.Tx, _ domain.UsageEvent) error {
-		c, err := s.classifyWritten(ctx, tx, prepared, periods, map[string]MeterBuckets{})
-		class = c
-		return err
-	})
-	if err == nil {
-		mw.RecordUsageIngested(1)
-		s.markWritten(ctx, &event, class)
-	}
-	return event, err
 }
 
 // HeldFor returns the event names and row count still held for one external

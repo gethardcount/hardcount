@@ -121,7 +121,7 @@ func TestCountReleased(t *testing.T) {
 	}
 }
 
-// heldMemStore is a memStore that also holds rows, for the checks Hold
+// heldMemStore is a memStore that also holds rows, for the checks HoldCall
 // makes before it reaches a store.
 type heldMemStore struct {
 	*memStore
@@ -134,10 +134,6 @@ type heldMemStore struct {
 	callWritten []int
 }
 
-func (h *heldMemStore) Hold(_ context.Context, _ string, ev domain.HeldUsageEvent) (domain.HeldUsageEvent, error) {
-	h.held = append(h.held, ev)
-	return ev, nil
-}
 func (h *heldMemStore) ListHeldSummary(context.Context, string) (HeldSummary, error) {
 	return HeldSummary{}, nil
 }
@@ -149,9 +145,6 @@ func (h *heldMemStore) ReleaseHeld(context.Context, string, ReleaseHeldInput, fu
 }
 func (h *heldMemStore) DiscardHeld(context.Context, string, string, string, func(*sql.Tx, int) error) (int, error) {
 	return 0, nil
-}
-func (h *heldMemStore) IngestResolvingHeld(ctx context.Context, tenantID string, ev domain.UsageEvent, after func(*sql.Tx, domain.UsageEvent) error) (domain.UsageEvent, error) {
-	return h.IngestAudited(ctx, tenantID, ev, after)
 }
 func (h *heldMemStore) IngestCallResolvingHeld(_ context.Context, _ string, call StoreCall, after func(*sql.Tx, CallResult) error) (CallResult, error) {
 	evs := call.Events
@@ -177,35 +170,40 @@ func (h *heldMemStore) HoldCall(_ context.Context, _ string, call HeldCall) (Cal
 	return CallResult{Inserted: len(call.Events)}, nil
 }
 
-// Hold refuses what a release could not ingest: no key, bad dimensions, a
-// quantity the column cannot hold, a time in the future. Without a held
-// store wired it reports unavailable (a 503 at the LiteLLM door), never a
-// silent success.
-func TestHold_Validation(t *testing.T) {
+// HoldCall refuses what a release could not ingest: no key, bad
+// dimensions, a quantity the column cannot hold, a time in the future. One
+// bad event refuses the whole call. Without a held store wired it reports
+// unavailable (a 503 at the LiteLLM door), never a silent success.
+func TestHoldCall_Validation(t *testing.T) {
 	ctx := context.Background()
 	at := time.Now().UTC()
 	future := at.Add(time.Hour)
-	base := HoldInput{
-		ExternalCustomerID: "cus_x", EventName: "tokens", Quantity: decimal.NewFromInt(1),
-		IdempotencyKey: "k", EventAt: &at, Reason: domain.HeldReasonCustomerNotFound,
+	base := func() HoldCallInput {
+		return HoldCallInput{
+			ExternalCustomerID: "cus_x", EventName: "tokens", Reason: domain.HeldReasonCustomerNotFound,
+			Events: []CallEvent{
+				{Quantity: decimal.NewFromInt(1), IdempotencyKey: "k:input", Timestamp: &at},
+				{Quantity: decimal.NewFromInt(1), IdempotencyKey: "k:output", Timestamp: &at},
+			},
+		}
 	}
-	if _, err := NewService(newMemStore()).Hold(ctx, "t", base); !errors.Is(err, ErrHoldUnavailable) {
+	if _, err := NewService(newMemStore()).HoldCall(ctx, "t", base()); !errors.Is(err, ErrHoldUnavailable) {
 		t.Fatalf("no held store: err %v, want ErrHoldUnavailable", err)
 	}
 
 	store := &heldMemStore{memStore: newMemStore()}
 	svc := NewService(store)
-	bad := map[string]func(in *HoldInput){
-		"no key":         func(in *HoldInput) { in.IdempotencyKey = " " },
-		"nested dim":     func(in *HoldInput) { in.Dimensions = map[string]any{"a": map[string]any{}} },
-		"huge quantity":  func(in *HoldInput) { in.Quantity = decimal.New(1, 27) },
-		"future":         func(in *HoldInput) { in.EventAt = &future },
-		"unknown reason": func(in *HoldInput) { in.Reason = "other" },
+	bad := map[string]func(in *HoldCallInput){
+		"no key":         func(in *HoldCallInput) { in.Events[1].IdempotencyKey = " " },
+		"nested dim":     func(in *HoldCallInput) { in.Events[1].Dimensions = map[string]any{"a": map[string]any{}} },
+		"huge quantity":  func(in *HoldCallInput) { in.Events[1].Quantity = decimal.New(1, 27) },
+		"future":         func(in *HoldCallInput) { in.Events[1].Timestamp = &future },
+		"unknown reason": func(in *HoldCallInput) { in.Reason = "other" },
 	}
 	for name, mut := range bad {
-		in := base
+		in := base()
 		mut(&in)
-		if _, err := svc.Hold(ctx, "t", in); !errors.Is(err, errs.ErrValidation) {
+		if _, err := svc.HoldCall(ctx, "t", in); !errors.Is(err, errs.ErrValidation) {
 			t.Errorf("%s: err %v, want a validation error", name, err)
 		}
 	}
@@ -214,9 +212,10 @@ func TestHold_Validation(t *testing.T) {
 	}
 
 	// No time on the payload: the row is stamped with when Velox got it.
-	in := base
-	in.EventAt = nil
-	if _, err := svc.Hold(ctx, "t", in); err != nil {
+	in := base()
+	in.Events = in.Events[:1]
+	in.Events[0].Timestamp = nil
+	if _, err := svc.HoldCall(ctx, "t", in); err != nil {
 		t.Fatalf("hold: %v", err)
 	}
 	if got := store.held[0].EventAt; got.Before(at) || got.After(time.Now().UTC()) {
