@@ -164,10 +164,25 @@ func TestInvoiceSums_CountEveryNote(t *testing.T) {
 	}
 }
 
-// Two direct refunds with no amount, sent together, on an invoice that
-// already has 51 refund notes. Both size their refund from the notes before
-// either commits; the credit-note lock lets one through and refuses the
-// other, so the invoice is refunded exactly what was paid.
+// sumsMeetStore holds each refund's sum read until both refunds have read
+// it, so both size their refund from the same notes before either writes:
+// the race the credit-note lock has to settle.
+type sumsMeetStore struct {
+	creditnote.Store
+	read sync.WaitGroup
+}
+
+func (s *sumsMeetStore) InvoiceSums(ctx context.Context, tenantID, invoiceID string) (creditnote.InvoiceSums, error) {
+	sums, err := s.Store.InvoiceSums(ctx, tenantID, invoiceID)
+	s.read.Done()
+	s.read.Wait()
+	return sums, err
+}
+
+// Two direct refunds with no amount on an invoice that already has 51 refund
+// notes. Both read what is left (99.49) before either writes. The credit-note
+// lock lets one through and refuses the other, so the invoice is refunded
+// exactly what was paid.
 func TestCreateRefund_RacingFullRefunds_RefundOnce(t *testing.T) {
 	r := newSumsRig(t, "CN Sums Refund Race")
 	_, inv := seedInvoiceForCN(t, r.db, r.tenantID, "sumsrace", domain.InvoicePaid, domain.PaymentSucceeded, "pi_sums_race")
@@ -175,20 +190,20 @@ func TestCreateRefund_RacingFullRefunds_RefundOnce(t *testing.T) {
 		r.note(t, inv.ID, 1, true, true)
 	}
 
-	var (
-		wg      sync.WaitGroup
-		start   = make(chan struct{})
-		results = make([]error, 2)
-	)
+	meet := &sumsMeetStore{Store: creditnote.NewPostgresStore(r.db)}
+	meet.read.Add(2)
+	svc := creditnote.NewService(meet, r.invoices, &okRefunder{})
+	svc.SetNumberGenerator(tenant.NewSettingsStore(r.db))
+
+	var wg sync.WaitGroup
+	results := make([]error, 2)
 	for i := range results {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			<-start
-			_, results[i] = r.svc.CreateRefund(r.ctx, r.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+			_, results[i] = svc.CreateRefund(r.ctx, r.tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
 		}()
 	}
-	close(start)
 	wg.Wait()
 
 	ok := 0

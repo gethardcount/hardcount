@@ -195,6 +195,31 @@ func (m *memStore) List(_ context.Context, filter ListFilter) ([]domain.CreditNo
 	return result, nil
 }
 
+// InvoiceSums mirrors the store's filters over the double's notes. The
+// filters themselves are checked against Postgres in
+// invoice_sums_differential_integration_test.go.
+func (m *memStore) InvoiceSums(_ context.Context, tenantID, invoiceID string) (InvoiceSums, error) {
+	var sums InvoiceSums
+	for _, cn := range m.notes {
+		if cn.TenantID != tenantID || cn.InvoiceID != invoiceID {
+			continue
+		}
+		if cn.Status != domain.CreditNoteVoided {
+			sums.CreditedCents += cn.TotalCents
+			if cn.RefundAmountCents > 0 {
+				sums.RefundCents += cn.RefundAmountCents
+			}
+		}
+		if cn.Status == domain.CreditNoteIssued {
+			sums.IssuedCents += cn.TotalCents
+		}
+		if cn.Status == domain.CreditNoteVoided && cn.IssuedAt == nil {
+			sums.UnrelievedCents += cn.TotalCents
+		}
+	}
+	return sums, nil
+}
+
 // NOTE: no UpdateStatus on the double — the unguarded status writer was deleted
 // with the ADR-090 void emission; every status write is a CAS.
 

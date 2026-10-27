@@ -54,6 +54,9 @@ type Store interface {
 	BeginTx(ctx context.Context, tenantID string) (*sql.Tx, error)
 	Get(ctx context.Context, tenantID, id string) (domain.CreditNote, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.CreditNote, error)
+	// InvoiceSums adds up every credit note on one invoice, in one query
+	// with no page limit.
+	InvoiceSums(ctx context.Context, tenantID, invoiceID string) (InvoiceSums, error)
 	// Count counts the credit notes the filter matches, ignoring its limit
 	// and offset (the list's total).
 	Count(ctx context.Context, filter ListFilter) (int, error)
@@ -136,6 +139,22 @@ type CurrencyStats struct {
 	RefundFailedCents  int64 `json:"refund_failed_cents"`
 	CreditedCents      int64 `json:"credited_cents"`
 	OutOfBandCents     int64 `json:"out_of_band_cents"`
+}
+
+// InvoiceSums is what the credit notes on one invoice add up to, in minor
+// units of the invoice's currency.
+type InvoiceSums struct {
+	// CreditedCents is the total of every note not voided, drafts included:
+	// the part of the invoice already credited, which caps the next note.
+	CreditedCents int64
+	// IssuedCents is the total of the issued notes, each of which reversed
+	// its own share of the invoice's tax.
+	IssuedCents int64
+	// UnrelievedCents is the total of the notes voided before they were
+	// issued: relief the invoice was owed and never got.
+	UnrelievedCents int64
+	// RefundCents is the card refund of every note not voided.
+	RefundCents int64
 }
 
 type ListFilter struct {

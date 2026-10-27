@@ -1440,19 +1440,11 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 	// common "refund everything" case.
 	amount := input.AmountCents
 	if amount == 0 {
-		existing, err := s.store.List(ctx, ListFilter{TenantID: tenantID, InvoiceID: input.InvoiceID})
+		sums, err := s.store.InvoiceSums(ctx, tenantID, input.InvoiceID)
 		if err != nil {
-			return domain.CreditNote{}, fmt.Errorf("list existing credit notes: %w", err)
+			return domain.CreditNote{}, err
 		}
-		var existingRefunds int64
-		for _, cn := range existing {
-			if cn.Status != domain.CreditNoteVoided && cn.RefundAmountCents > 0 {
-				if existingRefunds, err = domain.SumCents(existingRefunds, cn.RefundAmountCents); err != nil {
-					return domain.CreditNote{}, fmt.Errorf("refunds on invoice %s: %w", input.InvoiceID, err)
-				}
-			}
-		}
-		amount = inv.AmountPaidCents - existingRefunds
+		amount = inv.AmountPaidCents - sums.RefundCents
 		if amount <= 0 {
 			return domain.CreditNote{}, errs.InvalidState("invoice has already been fully refunded")
 		}
@@ -1527,68 +1519,40 @@ func (s *Service) Stats(ctx context.Context, tenantID string) (Stats, error) {
 	return s.store.Stats(ctx, tenantID)
 }
 
-// UnreliefedClawbackCents sums relief this invoice was OWED but never received:
-// auto-issue clawback drafts (issue_pending) that ended up voided, so their
-// Issue() never ran and never reduced amount_due.
+// UnreliefedClawbackCents sums the credit notes on the invoice that were
+// voided before they were issued: relief the invoice was owed and never got.
+// Issue() is what applies relief, so such a note never reduced amount_due, and
+// the invoice asks for more than is owed by exactly this sum.
 //
-// Since 2026-10-23 a write-off no longer voids such a draft (it issues on the
-// written-off invoice, ADR-050 amendment), so on a written-off invoice this is
-// a draft an operator voided before it issued.
+// Since 2026-10-23 a write-off no longer voids a relief draft (it issues on
+// the written-off invoice, ADR-050 amendment), so on a written-off invoice
+// this is a draft an operator voided before it issued. The invoice read and an
+// offline payment on a written-off invoice warn with it
+// (domain.RecoveryWarnsOnOfflinePayment).
 //
-// Consumed by the bad-debt recovery gate. A written-off invoice carrying one of
-// these has an amount_due that is stale-HIGH — charging it would over-collect
-// by exactly this sum. Relief that was properly issued has already moved
-// amount_due and must not be counted, which is why status discriminates:
-// IssuePending is set only at create and NEVER cleared (see domain.CreditNote),
-// so an issued clawback drops out by its status, not by the flag.
+// The test is the status and issued_at, not issue_pending: the status
+// transition clears issue_pending in the same statement
+// (creditnote/postgres.go), so no voided row still holds it.
 func (s *Service) UnreliefedClawbackCents(ctx context.Context, tenantID, invoiceID string) (int64, error) {
-	cns, err := s.store.List(ctx, ListFilter{TenantID: tenantID, InvoiceID: invoiceID})
+	sums, err := s.store.InvoiceSums(ctx, tenantID, invoiceID)
 	if err != nil {
 		return 0, err
 	}
-	var total int64
-	for _, cn := range cns {
-		// Voided WITHOUT ever having been issued. Issue() is what applies the
-		// relief, so a credit note that reached 'voided' with issued_at still
-		// NULL never reduced amount_due — the invoice is owed that money and
-		// its amount is stale-HIGH by exactly this sum.
-		//
-		// This used to test `IssuePending && voided`, which is UNSATISFIABLE:
-		// TransitionStatusAudited sets `issue_pending=false` in the same
-		// statement that sets status (creditnote/postgres.go), so no row can
-		// ever hold both. The gate built on it could never fire. It was
-		// written from domain.CreditNote's own comment claiming the flag is
-		// "NEVER cleared" — a comment the clearing writer contradicts, and
-		// which is corrected in the same commit as this.
-		if cn.Status == domain.CreditNoteVoided && cn.IssuedAt == nil {
-			if total, err = domain.SumCents(total, cn.TotalCents); err != nil {
-				return 0, fmt.Errorf("credit notes on invoice %s: %w", invoiceID, err)
-			}
-		}
-	}
-	return total, nil
+	return sums.UnrelievedCents, nil
 }
 
-// CreditedCents returns the sum of non-voided credit-note totals already issued
-// against an invoice — i.e. how much of the invoice has been credited. The
+// CreditedCents returns the total of every credit note on the invoice that is
+// not voided, drafts included — i.e. how much of the invoice has been credited. The
 // remaining creditable headroom is inv.TotalAmountCents - CreditedCents. The
 // billing engine's headroom-aware multi-invoice credit fan-out uses it so a
 // share never overruns an invoice whose creditable amount a prior credit note
 // (e.g. an earlier downgrade clawback) already consumed.
 func (s *Service) CreditedCents(ctx context.Context, tenantID, invoiceID string) (int64, error) {
-	cns, err := s.store.List(ctx, ListFilter{TenantID: tenantID, InvoiceID: invoiceID})
+	sums, err := s.store.InvoiceSums(ctx, tenantID, invoiceID)
 	if err != nil {
 		return 0, err
 	}
-	var total int64
-	for _, cn := range cns {
-		if cn.Status != domain.CreditNoteVoided {
-			if total, err = domain.SumCents(total, cn.TotalCents); err != nil {
-				return 0, fmt.Errorf("credit notes on invoice %s: %w", invoiceID, err)
-			}
-		}
-	}
-	return total, nil
+	return sums.CreditedCents, nil
 }
 
 // IssuedCreditedCents sums the ISSUED credit notes against an invoice — the
@@ -1597,19 +1561,11 @@ func (s *Service) CreditedCents(ctx context.Context, tenantID, invoiceID string)
 // it reverses nothing and is voided with the invoice (the orphan guard in
 // Issue). Counting it under-reversed the tenant's output tax by its share.
 func (s *Service) IssuedCreditedCents(ctx context.Context, tenantID, invoiceID string) (int64, error) {
-	cns, err := s.store.List(ctx, ListFilter{TenantID: tenantID, InvoiceID: invoiceID})
+	sums, err := s.store.InvoiceSums(ctx, tenantID, invoiceID)
 	if err != nil {
 		return 0, err
 	}
-	var total int64
-	for _, cn := range cns {
-		if cn.Status == domain.CreditNoteIssued {
-			if total, err = domain.SumCents(total, cn.TotalCents); err != nil {
-				return 0, fmt.Errorf("credit notes on invoice %s: %w", invoiceID, err)
-			}
-		}
-	}
-	return total, nil
+	return sums.IssuedCents, nil
 }
 
 func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {
