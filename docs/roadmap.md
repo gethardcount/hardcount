@@ -52,9 +52,10 @@ first. Every shipped change, with its date, is in the
   it, the plan does not price its meter, no subscription covers its time,
   or its period was already invoiced. A batch answer gives each event's status
   ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) §12).
-- **Planned:** a base fee change that waits for each subscriber's next
-  period may follow
-  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md)).
+- **Not in v0.9.0:** a base fee change that waits for each subscriber's
+  next period. The base fee stays locked while a live subscription uses
+  the plan; to change it, create a new plan and move subscribers to it
+  ([ADR-130](adr/130-usage-prices-belong-to-the-plan.md) section 5).
 
 Everything else v0.9.0 changes: [Unreleased](../CHANGELOG.md#unreleased).
 
@@ -96,6 +97,8 @@ Each item waits until someone using Velox needs it:
 - Data deletion, compliance documents (SOC 2, audit-log retention), and
   roles that limit what a team member can do. Every team member has full
   access today.
+- A base fee edit on a used plan that applies from each subscriber's next
+  period.
 - Bulk actions, moving many subscriptions to a new plan at once, and a tool
   to move from Stripe Billing.
 - A Helm chart and a Terraform module. Docker Compose is the supported
