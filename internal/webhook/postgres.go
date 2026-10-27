@@ -205,7 +205,7 @@ func (s *PostgresStore) ListEndpoints(ctx context.Context, tenantID string) ([]d
 		SELECT id, tenant_id, livemode, url, COALESCE(description,''), secret_encrypted, secret_last4,
 			secondary_secret_encrypted, secondary_secret_last4, secondary_secret_expires_at,
 			events, active, created_at, updated_at
-		FROM webhook_endpoints WHERE deleted_at IS NULL ORDER BY created_at DESC
+		FROM webhook_endpoints WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC
 	`)
 	if err != nil {
 		return nil, err
@@ -854,6 +854,7 @@ func (s *PostgresStore) GetEndpointStats(ctx context.Context, tenantID string) (
 			COUNT(*) FILTER (WHERE status = 'failed') AS failed
 		FROM webhook_deliveries
 		GROUP BY webhook_endpoint_id
+		ORDER BY webhook_endpoint_id
 	`)
 	if err != nil {
 		return nil, err

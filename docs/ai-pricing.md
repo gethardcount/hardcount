@@ -92,12 +92,15 @@ takes the plan's currency.
 1. **Find the `tokens` meter and your plan.**
 
    ```bash
-   METER_ID=$(curl -s "$VELOX/v1/meters" -H "Authorization: Bearer $VELOX_KEY" \
+   METER_ID=$(curl -s "$VELOX/v1/meters?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
      | jq -r '.data[] | select(.event_name == "tokens") | .id')
-   PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+   PLAN_ID=$(curl -s "$VELOX/v1/plans?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
      | jq -r '.data[] | select(.name == "GPT API") | .id')
    echo "$METER_ID $PLAN_ID"
    ```
+
+   This reads your 100 newest meters and plans. If you have more, add
+   `&offset=100` to look further ([Lists](api-surface.md#lists)).
 
    **You see:** the two IDs, such as `vlx_mtr_… vlx_pln_…`.
 
@@ -238,7 +241,8 @@ cover](#price-a-model-a-recipe-does-not-cover), with one price for each kind
 of token. This example adds it to the `anthropic_style` plan "AI API":
 
 ```bash
-CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+# Your 100 newest plans. With more, add &offset=100 to look further.
+CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
   | jq -r '.data[] | select(.name == "AI API") | .id')
 jq -n --arg meter "$METER_ID" \
     '{meter_id: $meter, dimension_match: {model: "claude-opus-4-9", token_type: "input"},
@@ -266,7 +270,8 @@ example charges Claude Opus 4.6 input tokens sent under that name $5.50
 per million, on the `anthropic_style` plan "AI API":
 
 ```bash
-CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans" -H "Authorization: Bearer $VELOX_KEY" \
+# Your 100 newest plans. With more, add &offset=100 to look further.
+CLAUDE_PLAN_ID=$(curl -s "$VELOX/v1/plans?limit=100" -H "Authorization: Bearer $VELOX_KEY" \
   | jq -r '.data[] | select(.name == "AI API") | .id')
 jq -n --arg meter "$METER_ID" \
     '{meter_id: $meter,

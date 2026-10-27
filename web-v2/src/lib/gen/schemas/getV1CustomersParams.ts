@@ -25,11 +25,14 @@ ids?: string;
  * Case-insensitive substring match on display name, email,
  * external ID, or ID. Matching runs post-decryption (PII
  * columns are encrypted at rest), bounded to the first 5000
- * rows of the tenant's filtered set.
+ * rows of the tenant's filtered set; the rows and `total` stop
+ * there.
  */
 search?: string;
 /**
- * One of display_name, email, external_id, status, created_at (default).
+ * One of display_name, email, external_id, status, created_at
+ * (default). A sort by display_name or email looks at 5,000
+ * customers at most; the rows and `total` stop there.
  */
 sort?: string;
 dir?: GetV1CustomersDir;

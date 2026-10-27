@@ -85,7 +85,7 @@ func (s *PostgresStore) List(ctx context.Context, tenantID, customerID string) (
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+pmSelectCols+` FROM payment_methods
 		WHERE tenant_id = $1 AND customer_id = $2 AND detached_at IS NULL
-		ORDER BY is_default DESC, created_at DESC LIMIT 100`, tenantID, customerID)
+		ORDER BY is_default DESC, created_at DESC, id DESC`, tenantID, customerID)
 	if err != nil {
 		return nil, err
 	}

@@ -72,9 +72,12 @@ export default function WebhookEndpointDetailPage() {
   const replayInFlight = useRef(false)
 
   // The endpoint and one page of its deliveries. An unknown id 404s on
-  // both instead of rendering an empty-but-healthy-looking history.
+  // both instead of rendering an empty-but-healthy-looking history. The
+  // endpoint's key sits under the endpoints list's key, so every change that
+  // refreshes the list (Resume here; edit, pause or delete on the list page)
+  // refreshes this read too.
   const endpointQuery = useQuery({
-    queryKey: ['webhook-endpoint', id],
+    queryKey: ['webhook-endpoints', id],
     queryFn: () => api.getWebhookEndpoint(id!),
     enabled: !!id,
   })

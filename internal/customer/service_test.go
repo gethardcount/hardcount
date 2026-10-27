@@ -91,7 +91,7 @@ func (m *memoryStore) List(_ context.Context, filter ListFilter) ([]domain.Custo
 	return result, len(result), nil
 }
 
-func (m *memoryStore) ListByTestClockID(_ context.Context, tenantID, clockID string) ([]domain.Customer, error) {
+func (m *memoryStore) ListByTestClockID(_ context.Context, tenantID, clockID string, _, _ int) ([]domain.Customer, int, error) {
 	var result []domain.Customer
 	for _, c := range m.customers {
 		if c.TenantID != tenantID || c.TestClockID != clockID {
@@ -99,7 +99,7 @@ func (m *memoryStore) ListByTestClockID(_ context.Context, tenantID, clockID str
 		}
 		result = append(result, c)
 	}
-	return result, nil
+	return result, len(result), nil
 }
 
 func (m *memoryStore) Update(_ context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {

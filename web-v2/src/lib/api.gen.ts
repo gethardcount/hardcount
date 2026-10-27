@@ -111,10 +111,15 @@ export interface paths {
                      * @description Case-insensitive substring match on display name, email,
                      *     external ID, or ID. Matching runs post-decryption (PII
                      *     columns are encrypted at rest), bounded to the first 5000
-                     *     rows of the tenant's filtered set.
+                     *     rows of the tenant's filtered set; the rows and `total` stop
+                     *     there.
                      */
                     search?: string;
-                    /** @description One of display_name, email, external_id, status, created_at (default). */
+                    /**
+                     * @description One of display_name, email, external_id, status, created_at
+                     *     (default). A sort by display_name or email looks at 5,000
+                     *     customers at most; the rows and `total` stop there.
+                     */
                     sort?: string;
                     dir?: "asc" | "desc";
                     /**
@@ -6904,7 +6909,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @description How many rows match the request's filters, on every page, not only this one. */
+        /**
+         * @description How many rows match the request's filters, on every page, not only
+         *     this one. The audit log and the customer list's search and name or
+         *     email sort say where they stop counting.
+         */
         ListTotal: number;
         Error: {
             error?: {
@@ -10499,7 +10508,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description `limit` or `offset` is out of range or not a whole number (`param` names it) */
+        /** @description `limit` or `offset` is out of range or not a whole number, or the request sends the removed `after` cursor (`param` names it) */
         InvalidPage: {
             headers: {
                 [name: string]: unknown;

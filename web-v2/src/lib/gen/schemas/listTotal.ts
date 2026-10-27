@@ -9,6 +9,8 @@
  */
 
 /**
- * How many rows match the request's filters, on every page, not only this one.
+ * How many rows match the request's filters, on every page, not only
+ * this one. The audit log and the customer list's search and name or
+ * email sort say where they stop counting.
  */
 export type ListTotal = number;

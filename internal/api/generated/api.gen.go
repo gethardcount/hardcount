@@ -5056,7 +5056,9 @@ type InvoiceDisputeStatus string
 type InvoiceDisputeList struct {
 	Data []InvoiceDispute `json:"data"`
 
-	// Total How many rows match the request's filters, on every page, not only this one.
+	// Total How many rows match the request's filters, on every page, not only
+	// this one. The audit log and the customer list's search and name or
+	// email sort say where they stop counting.
 	Total ListTotal `json:"total"`
 }
 
@@ -5308,7 +5310,9 @@ type InvoiceWithLineItems struct {
 // share the same `(subscription, item, timestamp)`.
 type ItemChangeType string
 
-// ListTotal How many rows match the request's filters, on every page, not only this one.
+// ListTotal How many rows match the request's filters, on every page, not only
+// this one. The audit log and the customer list's search and name or
+// email sort say where they stop counting.
 type ListTotal = int
 
 // LitellmSpendLog The fields of a LiteLLM `StandardLoggingPayload` that Velox reads.
@@ -7506,10 +7510,13 @@ type GetV1CustomersParams struct {
 	// Search Case-insensitive substring match on display name, email,
 	// external ID, or ID. Matching runs post-decryption (PII
 	// columns are encrypted at rest), bounded to the first 5000
-	// rows of the tenant's filtered set.
+	// rows of the tenant's filtered set; the rows and `total` stop
+	// there.
 	Search string `form:"search,omitempty" json:"search,omitempty"`
 
-	// Sort One of display_name, email, external_id, status, created_at (default).
+	// Sort One of display_name, email, external_id, status, created_at
+	// (default). A sort by display_name or email looks at 5,000
+	// customers at most; the rows and `total` stop there.
 	Sort string                  `form:"sort,omitempty" json:"sort,omitempty"`
 	Dir  GetV1CustomersParamsDir `form:"dir,omitempty" json:"dir,omitempty"`
 

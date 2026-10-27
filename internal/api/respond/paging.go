@@ -24,10 +24,16 @@ type Page struct {
 // ParsePage reads `limit` and `offset` from the query. A missing limit is
 // DefaultLimit and a missing offset is 0. A limit outside 1 to MaxLimit, a
 // negative offset, or a value that is not a whole number is refused with a
-// 422 naming the parameter; it is never clamped. On false the 422 is written
-// and the handler returns.
+// 422 naming the parameter; it is never clamped. The removed `after` cursor
+// is refused too: ignored, it would answer page 1 to a client asking for the
+// page after one it holds. On false the 422 is written and the handler
+// returns.
 func ParsePage(w http.ResponseWriter, r *http.Request) (Page, bool) {
 	q := r.URL.Query()
+	if _, ok := q["after"]; ok {
+		ValidationField(w, r, "after", "after is not supported; page with offset")
+		return Page{}, false
+	}
 	p := Page{Limit: DefaultLimit}
 	if raw, ok := q["limit"]; ok {
 		n, err := strconv.Atoi(raw[0])

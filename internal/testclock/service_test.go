@@ -25,10 +25,10 @@ type fakeCustomerReader struct {
 	returns []domain.Customer
 }
 
-func (f *fakeCustomerReader) ListByTestClockID(_ context.Context, _, clockID string) ([]domain.Customer, error) {
+func (f *fakeCustomerReader) ListByTestClockID(_ context.Context, _, clockID string, _, _ int) ([]domain.Customer, int, error) {
 	f.calls++
 	f.gotID = clockID
-	return f.returns, nil
+	return f.returns, len(f.returns), nil
 }
 
 // TestListAttachedCustomers_RoutesThroughCustomerReader pins the
@@ -46,7 +46,7 @@ func TestListAttachedCustomers_RoutesThroughCustomerReader(t *testing.T) {
 	svc := NewService(store)
 	svc.SetCustomerReader(reader)
 
-	got, err := svc.ListAttachedCustomers(context.Background(), "t1", "c1")
+	got, _, err := svc.ListAttachedCustomers(context.Background(), "t1", "c1", 50, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestListAttachedCustomers_FailsLoudWithoutReader(t *testing.T) {
 	store.clocks["c1"] = domain.TestClock{ID: "c1", TenantID: "t1", Status: domain.TestClockStatusReady}
 
 	svc := NewService(store) // no SetCustomerReader
-	_, err := svc.ListAttachedCustomers(context.Background(), "t1", "c1")
+	_, _, err := svc.ListAttachedCustomers(context.Background(), "t1", "c1", 50, 0)
 	if err == nil {
 		t.Fatal("expected error when CustomerReader is unwired; got nil")
 	}

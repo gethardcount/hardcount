@@ -419,13 +419,13 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Custome
 	return s.store.List(ctx, filter)
 }
 
-// ListByTestClockID returns customers pinned to the given test clock.
-// Exposed as a service method (not just a store passthrough) so the
-// testclock domain can depend on the customer service's narrow
-// CustomerReader interface — keeps the per-domain rule intact and
-// the decrypt step on the customer read path.
-func (s *Service) ListByTestClockID(ctx context.Context, tenantID, clockID string) ([]domain.Customer, error) {
-	return s.store.ListByTestClockID(ctx, tenantID, clockID)
+// ListByTestClockID returns one page of the customers pinned to the given
+// test clock, and their total. Exposed as a service method (not just a
+// store passthrough) so the testclock domain can depend on the customer
+// service's narrow CustomerReader interface — keeps the per-domain rule
+// intact and the decrypt step on the customer read path.
+func (s *Service) ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error) {
+	return s.store.ListByTestClockID(ctx, tenantID, clockID, limit, offset)
 }
 
 type UpdateInput struct {

@@ -58,6 +58,8 @@ Every route that lists things pages the same way:
 - A `limit` outside 1 to 100, a negative `offset`, or a value that is not a
   whole number is a 422 with `param` naming it. It is never rounded to a
   valid value.
+- There is no cursor. A request that sends `after` gets a 422 with
+  `param: after`.
 
 To read everything, add 100 to `offset` until `offset` reaches `total`:
 
@@ -65,8 +67,12 @@ To read everything, add 100 to `offset` until `offset` reaches `total`:
 curl -s "$VELOX/v1/plans?limit=100&offset=100" -H "Authorization: Bearer $VELOX_KEY"
 ```
 
-One list counts differently: the audit log's `total` stops at 10,001, so a
-value above 10,000 means "more than 10,000".
+Two lists stop counting:
+
+- The audit log's `total` stops at 10,001, so a value above 10,000 means
+  "more than 10,000".
+- The customer list with `search`, or sorted by name or email, looks at
+  5,000 customers at most. Its rows and its `total` stop there.
 
 ## Core routes
 
@@ -383,7 +389,9 @@ specific status for a body that is too large.
   - `conflict_idempotency_unresolved` (409): an earlier request with this key started more than 5 minutes ago and never recorded an outcome. Check whether the resource exists before you retry with a new key.
   - `invalid_request` (400): the body could not be read. This includes any body over 1 MB.
 - **A replayed key** (POST, PUT or PATCH under `/v1` with the same key, method, path and body) returns the first response's status and body, plus `Idempotent-Replayed: true`. The body's `request_id` is the first request's; the `Velox-Request-Id` header is the new request's. The response's other headers are not sent again. A first response of 409 or 422 is not stored: the key is freed, and a retry with the same key runs the request again. The usage routes (`/v1/usage-events…`, `/v1/integrations/litellm/spend`) ignore the header. If a database error stops the server from freeing the key or storing the first response, the key stays reserved: a retry gets `conflict_idempotency`, then `conflict_idempotency_unresolved` once 5 minutes have passed. The request does not run twice.
-- **A plain-text error** comes only from the HTTP server itself, before Velox sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Velox-Request-Id` header.
+- **A plain-text error** comes from two places:
+  - The HTTP server itself, before Velox sees the request. A request too malformed to parse, such as bad syntax or headers that are too large, gets 400 or 431 with no `Velox-Request-Id` header.
+  - `/metrics`, the Prometheus scrape route. If it cannot read the metrics, it answers a plain-text 500.
 - **Other JSON shapes:**
   - `GET /health/ready` returns 503 with `{"status", "checks"}`.
   - A rejected usage batch returns 422 with code `batch_rejected`. Next to `error`, the body also has `errors` (one entry per failing event), `ingested: 0` and `total`.

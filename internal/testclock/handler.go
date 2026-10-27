@@ -135,7 +135,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, clk)
 }
 
-// listSubscriptions returns every subscription pinned to the clock,
+// listSubscriptions returns a page of the subscriptions pinned to the clock,
 // including their customer for one-shot rendering on the clock detail
 // page. The dashboard uses the embedded customer_id to compose the
 // "customers in this simulation" view without a second round-trip.
@@ -147,14 +147,12 @@ func (h *Handler) listSubscriptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One clock's subscriptions are read whole (catchup reads the same
-	// list) and paged here.
-	subs, err := h.svc.ListSubscriptions(r.Context(), tenantID, id)
+	subs, total, err := h.svc.ListSubscriptions(r.Context(), tenantID, id, page.Limit, page.Offset)
 	if err != nil {
 		respond.FromError(w, r, err, "test_clock")
 		return
 	}
-	respond.List(w, r, respond.Window(subs, page), len(subs))
+	respond.List(w, r, subs, total)
 }
 
 // listAttachedCustomers returns customers attached to this clock —
@@ -169,13 +167,12 @@ func (h *Handler) listAttachedCustomers(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// One clock's customers are read whole and paged here.
-	customers, err := h.svc.ListAttachedCustomers(r.Context(), tenantID, id)
+	customers, total, err := h.svc.ListAttachedCustomers(r.Context(), tenantID, id, page.Limit, page.Offset)
 	if err != nil {
 		respond.FromError(w, r, err, "test_clock")
 		return
 	}
-	respond.List(w, r, respond.Window(customers, page), len(customers))
+	respond.List(w, r, customers, total)
 }
 
 func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {
