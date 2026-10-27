@@ -196,7 +196,6 @@ original text.
 
 ### Removed
 
-- **`usage.Service.IngestResolvingHeld`, a per-event LiteLLM ingest (2026-10-27).** Internal only: nothing called it. The LiteLLM door writes each call through `IngestCall`.
 - **Breaking for API callers: duplicate fields and a second dedup key (2026-10-23, [#1374](https://github.com/getvelox/velox/pull/1374)).** Old → new:
   - an invoice line's `quantity` (the integer, truncated) and `quantity_decimal` → `quantity`, the exact decimal string; `unit_amount_cents` → `unit_amount_decimal`. The same on the hosted invoice data. Amounts, PDFs and the dashboard do not change. The hosted page now writes a whole quantity of 1,000 or more on a line that is not usage as `1,500`, not `1500`, as the dashboard does;
   - a usage event's `properties` → `dimensions`; an event whose `properties` has a key is a 422, and `null` or `{}` is ignored;

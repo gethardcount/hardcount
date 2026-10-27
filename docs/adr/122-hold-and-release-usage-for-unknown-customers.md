@@ -81,14 +81,15 @@ release it once with an honest statement of what it will bill.
 
 1. **Hold.** Migration 0179 adds `usage_held_events` (row-level security,
    livemode from the session, `UNIQUE (tenant_id, livemode,
-   idempotency_key)`). The LiteLLM handler calls `usage.Service.Hold` (through
-   a consumer-defined `Holder`) when the customer or meter lookup returns
-   not-found. The insert is `ON CONFLICT DO NOTHING`; a resend of a held row
-   is counted as `deduplicated`. A hold that cannot be written is a 503, so
+   idempotency_key)`). The LiteLLM handler calls `usage.Service.HoldCall`
+   (through a consumer-defined `Holder`) when the customer or meter lookup
+   returns not-found. It holds every row of the call in one transaction.
+   Each insert is `ON CONFLICT DO NOTHING`; a resend of a held row is
+   counted as `deduplicated`. A hold that cannot be written is a 503, so
    LiteLLM resends. A payload with no `id` (no key) or no `user` stays an
    error and is not held.
 2. **Show.** `GET /v1/usage-events/held` groups the held rows by external id,
-   meter key and reason, with whether a matching customer and meter exist
+   event name and reason, with whether a matching customer and meter exist
    now. It lists the 200 external ids held most recently, each with all its
    groups, and returns `total_customers` and `total_rows` over every held
    row so the notice can say when the list is cut. The Usage page shows
@@ -132,8 +133,7 @@ release it once with an honest statement of what it will bill.
 6. **A resend after the customer exists.** The LiteLLM door writes each
    call through `IngestCall`, in one transaction per call. It first locks
    the held rows with the call's keys (`SELECT … FOR UPDATE`, the lock
-   release and discard take). The per-event `IngestResolvingHeld` that did
-   this before was removed in v0.9.0: nothing called it.
+   release and discard take).
    A `discarded` row means nothing is written and the resend counts as
    deduplicated, so discard stays final. A `held` row is written and marked
    released, so a later discard cannot mark usage that is already billed.

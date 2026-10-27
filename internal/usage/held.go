@@ -40,7 +40,7 @@ type HoldInput struct {
 	Reason             domain.HeldUsageReason
 }
 
-// ErrHoldUnavailable is returned by Hold when the service has no held
+// ErrHoldUnavailable is returned by HoldCall when the service has no held
 // store wired. Callers treat it like any store failure.
 var ErrHoldUnavailable = errors.New("usage: held store not wired")
 
@@ -60,25 +60,6 @@ func init() {
 	} else {
 		heldUsageEvents = c
 	}
-}
-
-// Hold keeps one row that could not be ingested. It runs the same row
-// checks as ingest (dimensions, quantity, future time), so a held row can
-// later be released without failing them. Returns errs.ErrDuplicateKey when
-// the key is already held.
-func (s *Service) Hold(ctx context.Context, tenantID string, in HoldInput) (domain.HeldUsageEvent, error) {
-	if s.held == nil {
-		return domain.HeldUsageEvent{}, ErrHoldUnavailable
-	}
-	ev, err := heldEvent(in)
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	out, err := s.held.Hold(ctx, tenantID, ev)
-	if err == nil {
-		heldUsageEvents.WithLabelValues(string(in.Reason)).Inc()
-	}
-	return out, err
 }
 
 // heldEvent checks one row to hold and builds it. A row the checks refuse

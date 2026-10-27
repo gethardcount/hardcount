@@ -134,15 +134,17 @@ func TestIngest_ProviderCostTooLargeIsStoredWithNoCost(t *testing.T) {
 	wantNoCost("call-1:input", "1000000000000000000000")
 
 	// A held row is released, not refused.
-	if _, err := svc.Hold(ctx, tenantID, usage.HoldInput{
+	if _, err := svc.HoldCall(ctx, tenantID, usage.HoldCallInput{
 		Source:             domain.HeldUsageSourceLiteLLM,
 		ExternalCustomerID: "cus_late",
 		EventName:          "tokens",
-		Quantity:           decimal.RequireFromString("1000000000000000000000"),
-		Dimensions:         dims,
-		IdempotencyKey:     "held-1:input",
-		EventAt:            &ts,
 		Reason:             domain.HeldReasonCustomerNotFound,
+		Events: []usage.CallEvent{{
+			Quantity:       decimal.RequireFromString("1000000000000000000000"),
+			Dimensions:     dims,
+			IdempotencyKey: "held-1:input",
+			Timestamp:      &ts,
+		}},
 	}); err != nil {
 		t.Fatalf("hold: %v", err)
 	}

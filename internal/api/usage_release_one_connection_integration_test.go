@@ -89,10 +89,10 @@ func TestRelease_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 	now := time.Now().UTC()
 	at := now.Add(-time.Hour).Truncate(time.Second)
 	for _, key := range []string{"one-conn:input", "one-conn:output"} {
-		if _, err := usageSvc.Hold(ctx, tenantID, usage.HoldInput{
+		if _, err := usageSvc.HoldCall(ctx, tenantID, usage.HoldCallInput{
 			Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: ext, EventName: eventName,
-			Quantity: decimal.NewFromInt(5), IdempotencyKey: key, EventAt: &at,
 			Reason: domain.HeldReasonCustomerNotFound,
+			Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}},
 		}); err != nil {
 			t.Fatalf("hold %s: %v", key, err)
 		}

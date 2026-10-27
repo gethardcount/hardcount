@@ -103,10 +103,10 @@ func (f ingestAggFixture) patch(agg string) error {
 
 func (f ingestAggFixture) hold(t *testing.T, key string, at time.Time) {
 	t.Helper()
-	if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
+	if _, err := f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
 		Source: domain.HeldUsageSourceLiteLLM, ExternalCustomerID: f.ext, EventName: f.eventName,
-		Quantity: decimal.NewFromInt(5), IdempotencyKey: key, EventAt: &at,
 		Reason: domain.HeldReasonCustomerNotFound,
+		Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(5), IdempotencyKey: key, Timestamp: &at}},
 	}); err != nil {
 		t.Fatalf("hold %s: %v", key, err)
 	}

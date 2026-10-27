@@ -175,13 +175,18 @@ func (f *writeFixture) ingestLegacy(id, customerID, meterID string) {
 	}
 }
 
+// holdLegacy holds a call the way the mapper before the split did, one
+// event at a time.
 func (f *writeFixture) holdLegacy(id, user string) {
 	f.t.Helper()
 	for tt, q := range legacyRows {
-		if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
-			ExternalCustomerID: user, EventName: EventNameTokens, Quantity: decimal.NewFromInt(q),
-			Dimensions:     map[string]any{"model": "claude-sonnet-4.5", "provider": "anthropic", "token_type": tt},
-			IdempotencyKey: id + ":" + tt, Reason: domain.HeldReasonCustomerNotFound,
+		if _, err := f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
+			ExternalCustomerID: user, EventName: EventNameTokens, Reason: domain.HeldReasonCustomerNotFound,
+			Events: []usage.CallEvent{{
+				Quantity:       decimal.NewFromInt(q),
+				Dimensions:     map[string]any{"model": "claude-sonnet-4.5", "provider": "anthropic", "token_type": tt},
+				IdempotencyKey: id + ":" + tt,
+			}},
 		}); err != nil {
 			f.t.Fatalf("legacy hold %s: %v", tt, err)
 		}

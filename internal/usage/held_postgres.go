@@ -18,9 +18,6 @@ import (
 // customer or meter did not exist (#1044, ADR-122). PostgresStore
 // implements it; NewService picks it up from the Store it is given.
 type HeldStore interface {
-	// Hold inserts a held row. Returns errs.ErrDuplicateKey (nothing
-	// written) when a held row with the same idempotency key exists.
-	Hold(ctx context.Context, tenantID string, ev domain.HeldUsageEvent) (domain.HeldUsageEvent, error)
 	// ListHeldSummary groups the rows still held, for the most recent
 	// HeldListCustomers external customer ids, with totals over all of them.
 	ListHeldSummary(ctx context.Context, tenantID string) (HeldSummary, error)
@@ -115,43 +112,6 @@ type ReleaseHeldResult struct {
 	// taken but did not, because it stopped at Limit. Another release takes
 	// them.
 	MoreToRelease int
-}
-
-// Hold inserts one held row. ON CONFLICT DO NOTHING on the idempotency key,
-// so a LiteLLM resend of a row already held writes nothing and reports
-// errs.ErrDuplicateKey, the same contract ingestOneTx has.
-func (s *PostgresStore) Hold(ctx context.Context, tenantID string, ev domain.HeldUsageEvent) (domain.HeldUsageEvent, error) {
-	props, err := propertiesJSON(ev.Dimensions)
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO usage_held_events (id, tenant_id, source, external_customer_id,
-			event_name, quantity, properties, idempotency_key, event_at,
-			observed_cost_micros, reason)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (tenant_id, livemode, idempotency_key) DO NOTHING
-		RETURNING id, received_at, status
-	`, postgres.NewID("vlx_hue"), tenantID, ev.Source, ev.ExternalCustomerID,
-		ev.EventName, ev.Quantity, props, ev.IdempotencyKey, ev.EventAt,
-		ev.ObservedCostMicros, string(ev.Reason),
-	).Scan(&ev.ID, &ev.ReceivedAt, &ev.Status)
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.HeldUsageEvent{}, fmt.Errorf("%w: held idempotency_key %q", errs.ErrDuplicateKey, ev.IdempotencyKey)
-	}
-	if err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.HeldUsageEvent{}, err
-	}
-	return ev, nil
 }
 
 // ListHeldSummary returns one group per (external customer id, event name,

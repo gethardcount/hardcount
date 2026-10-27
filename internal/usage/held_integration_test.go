@@ -2,7 +2,6 @@ package usage_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/sagarsuperuser/velox/internal/audit"
 	"github.com/sagarsuperuser/velox/internal/domain"
-	"github.com/sagarsuperuser/velox/internal/errs"
 	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 	"github.com/sagarsuperuser/velox/internal/usage"
@@ -41,19 +39,27 @@ func newHeldFixture(t *testing.T, name string) heldFixture {
 	return heldFixture{db: db, tenantID: tenantID, ctx: ctx, svc: usage.NewService(store), store: store}
 }
 
+// hold holds one row the way the LiteLLM door does, as a call of one event.
 func (f heldFixture) hold(t *testing.T, ext, key string, at time.Time) error {
 	t.Helper()
-	_, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
+	_, err := f.holdCall(t, ext, key, at)
+	return err
+}
+
+func (f heldFixture) holdCall(t *testing.T, ext, key string, at time.Time) (usage.CallResult, error) {
+	t.Helper()
+	return f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
 		Source:             domain.HeldUsageSourceLiteLLM,
 		ExternalCustomerID: ext,
 		EventName:          "tokens",
-		Quantity:           decimal.NewFromInt(100),
-		Dimensions:         map[string]any{"model": "gpt-4o", "token_type": "input"},
-		IdempotencyKey:     key,
-		EventAt:            &at,
 		Reason:             domain.HeldReasonCustomerNotFound,
+		Events: []usage.CallEvent{{
+			Quantity:       decimal.NewFromInt(100),
+			Dimensions:     map[string]any{"model": "gpt-4o", "token_type": "input"},
+			IdempotencyKey: key,
+			Timestamp:      &at,
+		}},
 	})
-	return err
 }
 
 // countEvents counts usage_events rows with the given keys, in the
@@ -113,8 +119,8 @@ func TestHeld_HoldThenReleaseWritesExactlyOnce(t *testing.T) {
 		t.Fatalf("hold: %v", err)
 	}
 	// A LiteLLM resend of a held row writes nothing.
-	if err := f.hold(t, "cus_late", "call-1:input", at); !errors.Is(err, errs.ErrDuplicateKey) {
-		t.Fatalf("re-hold: err %v, want ErrDuplicateKey", err)
+	if res, err := f.holdCall(t, "cus_late", "call-1:input", at); err != nil || res.Inserted != 0 || res.Deduplicated != 1 {
+		t.Fatalf("re-hold = %+v (%v), want 0 inserted and 1 deduplicated", res, err)
 	}
 
 	summary, err := f.svc.ListHeld(f.ctx, f.tenantID)
@@ -268,11 +274,11 @@ func TestHeld_TenantAndModeIsolation(t *testing.T) {
 		t.Fatalf("another tenant sees held rows: %+v (%v)", summary, err)
 	}
 	// The same key may be held in another tenant: keys are per tenant.
-	if _, err := f.svc.Hold(f.ctx, other, usage.HoldInput{
-		ExternalCustomerID: "cus_iso", EventName: "tokens", Quantity: decimal.NewFromInt(1),
-		IdempotencyKey: "iso-1:input", EventAt: &at, Reason: domain.HeldReasonCustomerNotFound,
-	}); err != nil {
-		t.Fatalf("hold same key in another tenant: %v", err)
+	if res, err := f.svc.HoldCall(f.ctx, other, usage.HoldCallInput{
+		ExternalCustomerID: "cus_iso", EventName: "tokens", Reason: domain.HeldReasonCustomerNotFound,
+		Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(1), IdempotencyKey: "iso-1:input", Timestamp: &at}},
+	}); err != nil || res.Inserted != 1 {
+		t.Fatalf("hold same key in another tenant = %+v (%v), want 1 inserted", res, err)
 	}
 }
 
@@ -503,9 +509,9 @@ func TestHeld_ReleaseLimitIsReportedApart(t *testing.T) {
 		}
 	}
 	// One row whose meter does not exist: still held, for a real reason.
-	if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
-		ExternalCustomerID: "cus_many", EventName: "no_such_meter", Quantity: decimal.NewFromInt(1),
-		IdempotencyKey: "many-x:input", EventAt: &at, Reason: domain.HeldReasonMeterNotFound,
+	if _, err := f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
+		ExternalCustomerID: "cus_many", EventName: "no_such_meter", Reason: domain.HeldReasonMeterNotFound,
+		Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(1), IdempotencyKey: "many-x:input", Timestamp: &at}},
 	}); err != nil {
 		t.Fatalf("hold missing meter: %v", err)
 	}
@@ -546,9 +552,9 @@ func TestHeld_ListTotalsCountPastTheCap(t *testing.T) {
 		}
 	}
 	// The newest id has two meters: both groups are listed.
-	if _, err := f.svc.Hold(f.ctx, f.tenantID, usage.HoldInput{
-		ExternalCustomerID: fmt.Sprintf("cus_cap_%03d", n-1), EventName: "other", Quantity: decimal.NewFromInt(1),
-		IdempotencyKey: "cap-extra:input", EventAt: &at, Reason: domain.HeldReasonCustomerNotFound,
+	if _, err := f.svc.HoldCall(f.ctx, f.tenantID, usage.HoldCallInput{
+		ExternalCustomerID: fmt.Sprintf("cus_cap_%03d", n-1), EventName: "other", Reason: domain.HeldReasonCustomerNotFound,
+		Events: []usage.CallEvent{{Quantity: decimal.NewFromInt(1), IdempotencyKey: "cap-extra:input", Timestamp: &at}},
 	}); err != nil {
 		t.Fatalf("hold extra: %v", err)
 	}
