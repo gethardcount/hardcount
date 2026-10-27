@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. PR-6 (#1390) shipped section 12, with D07 folded in: the answer that writes an event carries a `billing_status` when Velox finds a reason the event is not billed, what Velox found then and not a promise (ADR-120 amendment 2026-10-27), and one unbilled counter. Not built yet: the base fee next-period rule (PR-7) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. PR-6 (#1390) shipped section 12, with D07 folded in: the answer that writes an event carries a `billing_status` when Velox finds a reason the event is not billed, what Velox found then and not a promise (ADR-120 amendment 2026-10-27), and one unbilled counter. PR-7, the base fee next-period rule, was cut from v0.9.0 on 2026-10-27 (section 5): the base fee stays locked while a live subscription uses the plan. Not built yet: the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -26,9 +26,9 @@ from its next simulated period. To keep old customers on an old price, put
 new customers on a new plan. A customer's negotiated price replaces one
 plan price for that customer. Prices take the plan's currency.
 
-Usage on a yearly plan is billed once a year, at the year-end invoice. A
-base-fee edit follows the same next-period rule if PR-7 ships; otherwise
-the base fee stays locked while a live subscription uses the plan. Recipes
+Usage on a yearly plan is billed once a year, at the year-end invoice. The
+base fee stays locked while a live subscription uses the plan (PR-7, which
+would have moved it to the next-period rule, was cut on 2026-10-27). Recipes
 create meters and plans only; they no longer change dunning or webhook
 settings.
 
@@ -295,7 +295,7 @@ is removed at every pin there too.
 The check is D05's compatibility clause without the priority term
 (`internal/pricing/postgres.go:1064-1088`).
 
-### 5. The edit rule (PR-4; the base fee in PR-7)
+### 5. The edit rule (PR-4)
 
 A plan is **used** once any subscription item ever named it, as its plan
 or its pending plan, deleted items included, or any `billing_intervals` row
@@ -304,8 +304,7 @@ names it.
 | What | Never-used plan | Used plan |
 |---|---|---|
 | Usage price add, edit, remove | Applies at once. The price keeps one version, from the beginning of time; the write replaces every earlier version and its clock stamps. Every other price of the plan keeps only its latest version, also from the beginning of time, with no clock stamps. | Applies from each subscriber's next period. The write appends a version that takes effect when it commits (section 7); a removal appends a tombstone and ends the price's overrides (section 6). No period already open changes, except one that starts while the write is saving (section 7). A subscription that starts later the same day gets it from its second period, and one that moves to the plan mid-period gets it from its next period (Risks). *Amended 2026-10-26 (section 4): a subscription that first joins the plan in a period after the write, by starting on it, a swap onto it or an added item, gets it in that period.* |
-| Base fee, if PR-7 ships | Applies at once. | Applies from each subscriber's next period. |
-| Base fee, if PR-7 is cut | Editable. | Refused while a live subscription uses the plan, as today (ADR-034). |
+| Base fee | Editable. | Refused while a live subscription uses the plan (ADR-034). To change it, create a new plan and move subscribers to it. |
 | `base_bill_timing` | Editable, but not to `in_advance` at a base of 0 (section 14). | Locked. |
 | `code`, `currency`, `billing_interval` | Fixed. | Fixed. |
 | `name`, `description`, `tax_code`, `status` | At once. | At once. |
@@ -333,11 +332,20 @@ names it.
   same transaction as the write
   ([ADR-090](090-audit-in-tx-emission.md)).
 
-The base fee next-period rule in PR-7 uses the same pin. An in_arrears
-base and proration pin at the period start. An in_advance base built at a
-close pins at the next period start. PR-7 ships in v0.9.0 unless it
-cannot be made correct in time. If it is cut, the fallback row above
-applies and the docs say so.
+**PR-7 cut (main session, 2026-10-27).** PR-7 would have moved the base
+fee to the next-period rule, at the same pin. It was cut from v0.9.0
+before any code, so the base-fee row above is ADR-034's lock, as before.
+
+- The site-set was larger than this ADR listed. Besides about 30 billing,
+  proration and preview readers, the MRR analytics read the plan's base
+  fee directly (`internal/analytics/overview.go`, `mrr_movement.go`).
+  A base edit that waits for each subscriber's own next period writes no
+  subscription change, so MRR would either move before billing does, or
+  rewrite past MRR, or need a new movement source. That is a new MRR
+  rule, not a detail of this one.
+- The lock is the common model: a Stripe price's amount cannot be edited;
+  a new price is created and subscriptions move to it.
+- It can return in a later release, with the MRR rule decided first.
 
 ### 6. Overrides (PR-4)
 
@@ -681,8 +689,9 @@ meter PATCH.
 - **Money.** One pin per period means no edit reprices usage already
   recorded. The close, the threshold invoice, the preview and the live
   balance share one rater (PR-1), so a preview equals the invoice.
-- **One edit rule.** Usage prices, the base fee (with PR-7) and overrides
-  all apply from the next period on a used plan.
+- **One edit rule for usage.** Usage prices and overrides apply from the
+  next period on a used plan. The base fee stays locked (PR-7 was cut,
+  section 5).
 - **Fewer concepts.** One noun, price. No priority, no meter default, no
   rule currency, no rule versions in the API, no per-rule aggregation.
 - **Stable ids.** A price keeps its id across edits, so an integration
@@ -743,7 +752,7 @@ part breaks:
   with its own 409, derived `replaced_by` fields and a new subscription
   column.
 - **Two edit rules.** The base fee stayed locked while usage prices moved
-  next period.
+  next period. Velox has this today too, since PR-7 was cut (section 5).
 
 **Parts of plan-rows that were dropped:**
 
@@ -859,8 +868,8 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   subscription's current pin. Display only.
 - **The meter-has-events check can scan** an account's time index (section
   18).
-- **PR-7 may be cut.** Then the base fee stays locked while a live
-  subscription uses the plan, as in ADR-034.
+- **PR-7 was cut (2026-10-27).** The base fee stays locked while a live
+  subscription uses the plan, as in ADR-034 (section 5).
 - **Monthly usage on a yearly plan needs two subscriptions** until a usage
   interval per plan ships (section 13).
 - **No upgrade path from 0.8.x.** No 0.8.x install is known.
@@ -874,7 +883,7 @@ it.
 | ADR | What ADR-130 changes |
 |---|---|
 | [031](031-per-plan-base-bill-timing.md) | `base_bill_timing` no longer defaults to `in_arrears` when the base fee is above 0; in_advance with a base of 0 is refused (PR-4). |
-| [034](034-plan-billing-field-immutability.md) | The meter-set lock goes with `meter_ids` (PR-4). The base-fee lock becomes next-period edits (PR-7), or stays if PR-7 is cut. The `base_bill_timing` lock holds once a plan is used (PR-4). |
+| [034](034-plan-billing-field-immutability.md) | The meter-set lock goes with `meter_ids` (PR-4). The base-fee lock stays: PR-7, which would have made it next-period edits, was cut on 2026-10-27. The `base_bill_timing` lock holds once a plan is used (PR-4). |
 | [044](044-canonical-ai-token-metering-model.md) | Decision 4: token prices are plan prices on the `tokens` meter, most specific wins, no priority (PR-4). |
 | [045](045-decimal-per-unit-pricing-rates.md) | `package_amount_cents` becomes a decimal too, `flat` becomes `per_unit` and overage goes (PR-3). Rates take at most 12 decimal places: built in #1378, ahead of PR-3. |
 | [066](066-threshold-money-semantics.md) | Decision 4's rule-bucket granularity becomes the meter (PR-2). The ladder seed keys on price id, so the ambiguous-config failure goes (PR-4). The package clamp goes (PR-3). The fire prices per plan window (PR-4). |
