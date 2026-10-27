@@ -453,7 +453,7 @@ test('install a recipe: the preview lists what it will create, the install creat
   await expect(installed.getByText('Installed', { exact: true })).toBeVisible()
   await installed.getByRole('button', { name: 'View' }).click()
   await expect(dialog.getByText('Installed with these settings', { exact: true })).toBeVisible()
-  await expect(dialog.getByText("Set at install and fixed here. To change them, edit the plan and its prices on the plan's page.", { exact: true })).toBeVisible()
+  await expect(dialog.getByText("Set at install and fixed here. On the plan's page you can rename the plan and edit its prices. Its currency and plan ID cannot change.", { exact: true })).toBeVisible()
   await expect(dialog.getByLabel('Plan name', { exact: true })).toHaveValue(planName)
   await expect(dialog.getByLabel('Plan name', { exact: true })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: 'Already installed' })).toBeDisabled()

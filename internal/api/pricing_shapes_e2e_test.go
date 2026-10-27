@@ -272,14 +272,19 @@ usage "calls (units)" qty=1500 amount=1000 price=overage`)
 
 // TestPricingShapes_5_YearlyBasePlusUsage: usage on a yearly plan is billed
 // once a year, at the year-end invoice (ADR-130 §13). A spend threshold
-// (amount_gte) bills it early when it runs high. For monthly usage beside a
-// yearly fee, a customer has two subscriptions: a yearly plan with no prices
-// and a monthly plan with the usage prices.
+// (amount_gte) fires at most once a billing period, so once a year on a
+// yearly plan: it bills a sum or count meter's usage so far, and later usage
+// waits for the year end. A max or last meter's usage is never billed early.
+// For monthly usage beside a yearly fee, a customer has two subscriptions: a
+// yearly plan with no prices and a monthly plan with the usage prices.
 //
 // The yearly subscription: 300 calls in month 2 stay under a 500c
 // threshold; 400 more in month 7 cross it, and the scan bills the 700 calls
-// at once. 100 calls in month 10 go on the year-end invoice with the base.
-// No invoice is made in between.
+// at once. 5,000 calls in month 10 are over the threshold again, but the
+// scan makes no second invoice: they go on the year-end invoice with the
+// base. A second yearly subscription prices a max meter: 10 seats at 100c
+// are over its 500c threshold in month 2, and the scan makes no invoice; the
+// year-end invoice bills them. No invoice is made in between.
 func TestPricingShapes_5_YearlyBasePlusUsage(t *testing.T) {
 	r := newPPRig(t, "shape 5")
 	calls := r.meter("calls", "sum")
@@ -292,17 +297,32 @@ func TestPricingShapes_5_YearlyBasePlusUsage(t *testing.T) {
 		t.Fatalf("yearly period = [%v, %v), want a year", p0, p1)
 	}
 	r.must(time.Time{}, http.MethodPut, "/v1/subscriptions/"+sub+"/billing-thresholds", map[string]any{"amount_gte": 500}, http.StatusOK)
+
+	// The max meter's yearly subscription: 100c a seat, the same threshold.
+	seats := r.meter("seats", "max")
+	seatPlan, sIDs := r.shapePlan("yearly-seats", "yearly", 0, "", perUnit(seats, "100", nil))
+	custSeats := r.customer("shape-5s", "")
+	seatSub, s0, s1 := r.subscribe(time.Time{}, custSeats, seatPlan)
+	if !s0.Equal(p0) || !s1.Equal(p1) {
+		t.Fatalf("seat period = [%v, %v), want [%v, %v)", s0, s1, p0, p1)
+	}
+	r.must(time.Time{}, http.MethodPut, "/v1/subscriptions/"+seatSub+"/billing-thresholds", map[string]any{"amount_gte": 500}, http.StatusOK)
+
 	m2, m7, m10 := p0.AddDate(0, 2, 0), p0.AddDate(0, 7, 0), p0.AddDate(0, 10, 0)
 	r.ingest(time.Time{}, "shape-5", "calls", 300, m2, nil)
+	r.ingest(time.Time{}, "shape-5s", "seats", 10, m2, nil)
 	r.run(p0.AddDate(0, 3, 0)) // a month end: nothing to invoice
 	if n := r.scanThresholds(m2.Add(time.Hour)); n != 0 {
-		t.Errorf("threshold at 300c fired %d invoices, want 0", n)
+		t.Errorf("threshold at 300c calls and 1,000c seats fired %d invoices, want 0", n)
 	}
 	r.ingest(time.Time{}, "shape-5", "calls", 400, m7, nil)
 	if n := r.scanThresholds(m7.Add(time.Hour)); n != 1 {
 		t.Errorf("threshold at 700c fired %d invoices, want 1", n)
 	}
-	r.ingest(time.Time{}, "shape-5", "calls", 100, m10, nil)
+	r.ingest(time.Time{}, "shape-5", "calls", 5000, m10, nil)
+	if n := r.scanThresholds(m10.Add(time.Hour)); n != 0 {
+		t.Errorf("a second crossing in the year fired %d invoices, want 0", n)
+	}
 	r.run(p1.Add(time.Hour))
 
 	nm := names(yIDs[0], "calls")
@@ -317,7 +337,12 @@ func TestPricingShapes_5_YearlyBasePlusUsage(t *testing.T) {
 usage "calls (units)" qty=700 amount=700 price=calls`)
 	wantLines(t, "the year-end invoice: the base and the usage after the threshold", r.cycle(sub, p0), nm, `
 base_fee "yearly - base fee (qty 1)" amount=120000
-usage "calls (units)" qty=100 amount=100 price=calls`)
+usage "calls (units)" qty=5000 amount=5000 price=calls`)
+	if invs := r.invoices(seatSub); len(invs) != 1 {
+		t.Fatalf("seat subscription: %d invoices, want only the year-end invoice: %+v", len(invs), invs)
+	}
+	wantLines(t, "the seats' year-end invoice", r.cycle(seatSub, p0), names(sIDs[0], "seats"), `
+usage "seats (units)" qty=10 amount=1000 price=seats`)
 
 	// Two subscriptions: a yearly fee and monthly usage.
 	fee, _ := r.shapePlan("yearly-fee", "yearly", 120000, "in_advance")
