@@ -14,6 +14,11 @@ before anything is sent. An endpoint that keeps failing does not grow it: see
   after 15 tries over about 72 hours. Their events were never written, so
   no endpoint gets them.
 - `velox_webhook_outbox_pending` is above 1000.
+- `velox_webhook_outbox_enqueue_failures_total` rises. An event could not
+  be queued at all, so it has no row in `webhook_outbox` and no endpoint
+  gets it. The ERROR log "failed to enqueue webhook event" names its
+  `event_type` and `tenant_id`. The cause is the same as a failed write
+  below: usually the database.
 
 ## Why
 
