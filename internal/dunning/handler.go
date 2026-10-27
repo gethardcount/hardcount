@@ -275,6 +275,9 @@ func (h *Handler) updatePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 	err := h.svc.DeletePolicy(r.Context(), tenantID, id)
@@ -293,6 +296,9 @@ func (h *Handler) deletePolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) setDefaultPolicy(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 	if err := h.svc.SetDefaultPolicy(r.Context(), tenantID, id); err != nil {

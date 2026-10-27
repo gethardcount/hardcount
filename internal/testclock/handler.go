@@ -223,6 +223,9 @@ func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {
 // clock isn't in internal_failure (refuses to retry from ready
 // or advancing). ADR-018.
 func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -241,6 +244,9 @@ func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 

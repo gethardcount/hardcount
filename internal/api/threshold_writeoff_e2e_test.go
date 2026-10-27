@@ -32,7 +32,13 @@ import (
 // succeed.
 func (r *lagRig) invoiceAction(id, action string, at time.Time) {
 	r.t.Helper()
-	if code, body, _ := r.doH(http.MethodPost, "/v1/invoices/"+id+"/"+action, at, map[string]any{"note": "wire"}); code >= 300 {
+	// Only record-payment takes a body; void and mark-uncollectible take
+	// none and refuse one with a field.
+	var req any
+	if action == "record-payment" {
+		req = map[string]any{"note": "wire"}
+	}
+	if code, body, _ := r.doH(http.MethodPost, "/v1/invoices/"+id+"/"+action, at, req); code >= 300 {
 		r.t.Fatalf("%s invoice %s: %d %v", action, id, code, body)
 	}
 }

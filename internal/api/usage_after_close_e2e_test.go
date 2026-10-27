@@ -454,9 +454,7 @@ func TestUsageAfterClose_ThresholdWatermark_Unpaid(t *testing.T) {
 			out := r.postEvent("/v1/usage-events", "calls", "calls-apr15", lagP0.AddDate(0, 0, 14), fireAt.Add(time.Hour), 30, http.StatusCreated)
 			wantStatus(t, "sum event before an unpaid threshold invoice's watermark", out, "")
 
-			if code, body, _ := r.doH(http.MethodPost, "/v1/invoices/"+thr+"/"+tc.action, fireAt.Add(2*time.Hour), map[string]any{"note": "wire"}); code >= 300 {
-				t.Fatalf("%s the threshold invoice: %d %v", tc.action, code, body)
-			}
+			r.invoiceAction(thr, tc.action, fireAt.Add(2*time.Hour))
 			r.run(lagB.Add(2 * time.Hour))
 			invs := r.invoices()
 			if got := r.cycleInvoice(invs, lagP0).sum("usage"); got != tc.wantUsage {

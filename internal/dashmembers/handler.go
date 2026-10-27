@@ -178,6 +178,9 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	ctx := r.Context()
 	tenantID := auth.TenantID(ctx)
 	id := chi.URLParam(r, "id")
@@ -190,6 +193,9 @@ func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	ctx := r.Context()
 	tenantID := auth.TenantID(ctx)
 	targetUserID := chi.URLParam(r, "userID")

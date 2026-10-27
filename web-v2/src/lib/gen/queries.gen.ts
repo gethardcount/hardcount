@@ -1680,12 +1680,12 @@ export const getSendCustomerPaymentSetupEmailUrl = (customerId: string,) => {
  * is saved when Stripe reports the setup succeeded.
  *
  * At most one call per customer per minute when the server has Redis
- * configured. The minute starts at any call, including one that then
- * fails, so a second call within it returns 429 `cooldown_active`
- * with a `Retry-After` header. Without Redis there is no cooldown.
+ * configured. The minute starts at any call whose body is accepted,
+ * including one that then fails, so a second call within it returns
+ * 429 `cooldown_active` with a `Retry-After` header. Without Redis
+ * there is no cooldown.
  *
- * A body that is not valid JSON is ignored and the email is sent
- * without a note. The send is written to the audit log.
+ * The send is written to the audit log.
  * @summary Email the customer a link to add a payment method
  */
 export const sendCustomerPaymentSetupEmail = async (customerId: string,
@@ -5072,7 +5072,8 @@ export const getUpdatePlanUrl = (id: string,) => {
 /**
  * A field left out keeps its current value. To clear `description`
  * or `tax_code`, send an empty string. `code`, `currency` and
- * `billing_interval` cannot be changed and are ignored. The plan's
+ * `billing_interval` cannot be changed: sending one is a 422 naming
+ * it. The plan's
  * usage prices change through `/v1/plans/{id}/prices`.
  *
  * `base_amount_cents` cannot change while a subscription that is not

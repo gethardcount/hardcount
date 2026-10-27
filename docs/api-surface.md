@@ -340,7 +340,9 @@ A request body may hold only the fields its operation lists in the API
 reference. Any other field is refused with 422, and `param` names it: a
 misspelled field, a field the operation does not take, or a field the
 server sets, such as `id`, `tenant_id` or `created_at`. Nothing is
-changed. A body that is not one JSON value is refused with 400. The Stripe
+changed. An operation with no request body, such as
+`POST /v1/subscriptions/{id}/cancel`, lists no fields: send no body, `{}`
+or `null`. A body that is not one JSON value is refused with 400. The Stripe
 and Postmark webhooks and the LiteLLM callback are the exceptions: they
 take their sender's body as it comes.
 

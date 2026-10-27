@@ -613,6 +613,9 @@ func (h *ProviderCostHandler) upsertEmission(ctx context.Context) func(tx *sql.T
 }
 
 func (h *ProviderCostHandler) delete(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	if err := h.store.DeleteProviderCostRateAudited(r.Context(), tenantID, chi.URLParam(r, "id"), h.deleteEmission(r.Context())); err != nil {
 		respond.FromError(w, r, err, "provider_cost_rate")

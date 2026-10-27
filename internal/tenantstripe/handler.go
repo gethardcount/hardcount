@@ -141,6 +141,9 @@ func (h *Handler) setWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
 		respond.Unauthorized(w, r, "missing tenant context")

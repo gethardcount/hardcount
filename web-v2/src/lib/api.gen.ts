@@ -483,12 +483,12 @@ export interface paths {
          *     is saved when Stripe reports the setup succeeded.
          *
          *     At most one call per customer per minute when the server has Redis
-         *     configured. The minute starts at any call, including one that then
-         *     fails, so a second call within it returns 429 `cooldown_active`
-         *     with a `Retry-After` header. Without Redis there is no cooldown.
+         *     configured. The minute starts at any call whose body is accepted,
+         *     including one that then fails, so a second call within it returns
+         *     429 `cooldown_active` with a `Retry-After` header. Without Redis
+         *     there is no cooldown.
          *
-         *     A body that is not valid JSON is ignored and the email is sent
-         *     without a note. The send is written to the audit log.
+         *     The send is written to the audit log.
          */
         post: operations["sendCustomerPaymentSetupEmail"];
         delete?: never;
@@ -1915,7 +1915,8 @@ export interface paths {
          * Update plan
          * @description A field left out keeps its current value. To clear `description`
          *     or `tax_code`, send an empty string. `code`, `currency` and
-         *     `billing_interval` cannot be changed and are ignored. The plan's
+         *     `billing_interval` cannot be changed: sending one is a 422 naming
+         *     it. The plan's
          *     usage prices change through `/v1/plans/{id}/prices`.
          *
          *     `base_amount_cents` cannot change while a subscription that is not
@@ -6809,8 +6810,9 @@ export interface components {
                  *     names one. A request body may hold only the fields its
                  *     operation lists: a field it does not list, or one the server
                  *     sets (such as `id`), is refused with 422 and `param` naming
-                 *     it. The Stripe and Postmark webhooks and the LiteLLM callback
-                 *     take their sender's body as it comes.
+                 *     it. An operation with no request body lists no fields: send
+                 *     no body, `{}` or `null`. The Stripe and Postmark webhooks and
+                 *     the LiteLLM callback take their sender's body as it comes.
                  */
                 param?: string;
             };
@@ -9322,7 +9324,8 @@ export interface components {
              * @description True for the "Default retries" policy the account was created
              *     with, until you edit it or make it the default. While it is
              *     true, the next enabled policy you create becomes the default
-             *     instead. Ignored in request bodies.
+             *     instead. Set by the server: a request body that sends it is
+             *     refused with 422.
              */
             seeded: boolean;
             /**
@@ -10662,8 +10665,9 @@ export interface operations {
             };
             /**
              * @description A field failed validation, or the body has a key the profile does
-             *     not have, such as `tax_exempt` (set `tax_status` instead). `param`
-             *     names the field. A body read back from GET is accepted.
+             *     not have, such as `tax_exempt` (set `tax_status` instead), or one
+             *     the server sets, such as `customer_id` or `created_at`. `param`
+             *     names the field.
              */
             422: {
                 headers: {
@@ -10860,6 +10864,15 @@ export interface operations {
                         to: string;
                         subject: string;
                     };
+                };
+            };
+            /** @description The body is not valid JSON. Nothing was sent. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Customer not found. */
@@ -11340,7 +11353,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Stripe could not create the session. Code `stripe_error`. */
+            /** @description Starting the session failed, at Stripe or on the server. Code `stripe_error`. */
             502: {
                 headers: {
                     [name: string]: unknown;

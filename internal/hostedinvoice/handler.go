@@ -382,6 +382,9 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 // Stripe), so the session uses a pre-totaled price_data line item and
 // does not enable Stripe's automatic_tax.
 func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	inv, ok := h.resolveInvoice(w, r)
 	if !ok {
 		return

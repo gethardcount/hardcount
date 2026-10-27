@@ -101,6 +101,9 @@ func (h *emailSettingsHandler) status(w http.ResponseWriter, r *http.Request) {
 // returns the SMTP server's real answer. 409 email_not_configured without
 // SMTP_HOST; 502 smtp_error when the server refuses or can't be reached.
 func (h *emailSettingsHandler) sendTest(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	ctx := r.Context()
 	tenantID := auth.TenantID(ctx)
 	userID := auth.UserID(ctx)

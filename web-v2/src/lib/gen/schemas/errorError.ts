@@ -26,8 +26,9 @@ export type ErrorError = {
      * names one. A request body may hold only the fields its
      * operation lists: a field it does not list, or one the server
      * sets (such as `id`), is refused with 422 and `param` naming
-     * it. The Stripe and Postmark webhooks and the LiteLLM callback
-     * take their sender's body as it comes.
+     * it. An operation with no request body lists no fields: send
+     * no body, `{}` or `null`. The Stripe and Postmark webhooks and
+     * the LiteLLM callback take their sender's body as it comes.
      */
   param?: string;
 };

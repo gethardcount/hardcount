@@ -115,3 +115,41 @@ func TestDecodeBody_KeepsTheCause(t *testing.T) {
 		t.Errorf("err = %v, want invalid JSON body", err)
 	}
 }
+
+func TestNoBody(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		wantOK     bool
+		wantStatus int
+		wantParam  string
+	}{
+		{name: "no body", body: ``, wantOK: true},
+		{name: "empty object", body: `{}`, wantOK: true},
+		{name: "null", body: `null`, wantOK: true},
+		{name: "a field", body: `{"at_period_end":true}`, wantStatus: http.StatusUnprocessableEntity, wantParam: "at_period_end"},
+		{name: "an array", body: `[]`, wantStatus: http.StatusBadRequest},
+		{name: "malformed", body: `{`, wantStatus: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			ok := NoBody(rec, httptest.NewRequest("POST", "/", strings.NewReader(tc.body)))
+			if ok != tc.wantOK {
+				t.Fatalf("ok: got %v, want %v (body %s)", ok, tc.wantOK, rec.Body.String())
+			}
+			if tc.wantOK {
+				if rec.Body.Len() != 0 {
+					t.Fatalf("success wrote a response: %s", rec.Body.String())
+				}
+				return
+			}
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status: got %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if p := decodeError(t, rec).Param; p != tc.wantParam {
+				t.Errorf("param: got %q, want %q", p, tc.wantParam)
+			}
+		})
+	}
+}

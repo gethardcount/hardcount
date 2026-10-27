@@ -27,6 +27,9 @@ func (h *Handler) Routes() chi.Router {
 }
 
 func (h *Handler) triggerCycle(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
 		// Platform keys carry no tenant scope. Fail closed — NEVER fall through

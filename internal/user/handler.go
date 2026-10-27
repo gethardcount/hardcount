@@ -354,6 +354,9 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 // revoke actually succeeded. A revoke that fails is a 500 — the caller must not be
 // told they are logged out when they are not.
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	c, err := r.Cookie(session.CookieName)
 	if err != nil || c.Value == "" {
 		// No cookie: this logout revoked no session, so there is no server-side

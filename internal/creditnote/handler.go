@@ -242,6 +242,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -273,6 +276,9 @@ func (h *Handler) issue(w http.ResponseWriter, r *http.Request) {
 // connected. Svc.RetryRefund looks for the refund at Stripe before any
 // create, so retries converge (see its contract).
 func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -297,6 +303,9 @@ func (h *Handler) retryRefund(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 

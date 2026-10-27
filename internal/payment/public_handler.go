@@ -203,11 +203,23 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// writeOnlinePaymentUnavailable answers a checkout when the seller has no
+// Stripe keys for the mode: a state, not an outage, so a 409 the page
+// explains (the hosted invoice page's code for the same state), not a 502.
+// Stripe was never called.
+func writeOnlinePaymentUnavailable(w http.ResponseWriter, r *http.Request) {
+	respond.Error(w, r, http.StatusConflict, "invalid_request_error", errs.CodeOnlinePaymentUnavailable,
+		"Adding a card online isn't available for this account right now. Please contact your billing administrator.")
+}
+
 type checkoutResponse struct {
 	URL string `json:"url"`
 }
 
 func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	rawToken := chi.URLParam(r, "token")
 	if rawToken == "" {
 		respond.BadRequest(w, r, "token is required")
@@ -240,11 +252,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 	// so a replay/retry doesn't mint duplicate Stripe Customers.
 	stripeCustomerID, err := h.ensurer.EnsureStripeCustomer(scopedCtx, token.TenantID, token.CustomerID)
 	if errs.Code(err) == errs.CodeStripeNotConnected {
-		// The seller has no Stripe keys for this mode: a state, not an
-		// outage, so a 409 the page explains (the hosted invoice page's
-		// code for the same state), not a 502. Stripe was never called.
-		respond.Error(w, r, http.StatusConflict, "invalid_request_error", errs.CodeOnlinePaymentUnavailable,
-			"Adding a card online isn't available for this account right now. Please contact your billing administrator.")
+		writeOnlinePaymentUnavailable(w, r)
 		return
 	}
 	if err != nil {
@@ -266,10 +274,10 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		return
 	}
 	if sc == nil {
-		// EnsureStripeCustomer just succeeded for this (tenant, mode), so a nil
-		// client here would be a config change between the two calls.
-		respond.Error(w, r, http.StatusBadGateway, "api_error", "stripe_error",
-			"We couldn't start the payment update right now. Please contact your billing administrator if the problem persists.")
+		// Not connected for this mode. EnsureStripeCustomer reads no keys
+		// when the customer already has a Stripe customer, so this is where
+		// a disconnected mode shows for that customer.
+		writeOnlinePaymentUnavailable(w, r)
 		return
 	}
 

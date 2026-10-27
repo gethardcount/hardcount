@@ -34,9 +34,8 @@ var requestBodyReaders = map[string]string{
 }
 
 // requestBodyReads returns every non-test function under internal/ and
-// cmd/ that reads the Body of one of its *http.Request parameters: passes
-// it to a call other than http.MaxBytesReader, or calls a method on it other
-// than Close.
+// cmd/ that reads the Body of one of its *http.Request parameters (see
+// readsRequestBody).
 func requestBodyReads(t *testing.T, root string) map[string]bool {
 	t.Helper()
 	found := map[string]bool{}
@@ -103,28 +102,49 @@ func readsRequestBody(fd *ast.FuncDecl) bool {
 		id, ok := sel.X.(*ast.Ident)
 		return ok && reqs[id.Name]
 	}
+	// Uses of the body that do not read it: closing it, comparing it to
+	// nil, and capping it in place (r.Body = http.MaxBytesReader(w, r.Body,
+	// n)), which leaves the read to whatever reads r.Body next. Any other
+	// use reads it, or hands it on to be read (an alias, a wrapper).
+	notRead := map[ast.Expr]bool{}
+	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.CallExpr:
+			if fun, ok := n.Fun.(*ast.SelectorExpr); ok && isBody(fun.X) && fun.Sel.Name == "Close" {
+				notRead[fun.X] = true
+			}
+		case *ast.BinaryExpr:
+			if id, ok := n.Y.(*ast.Ident); ok && id.Name == "nil" && isBody(n.X) {
+				notRead[n.X] = true
+			}
+		case *ast.AssignStmt:
+			if len(n.Lhs) != 1 || len(n.Rhs) != 1 || !isBody(n.Lhs[0]) {
+				return true
+			}
+			notRead[n.Lhs[0]] = true
+			if call, ok := n.Rhs[0].(*ast.CallExpr); ok && isMaxBytesReader(call) && len(call.Args) == 3 && isBody(call.Args[1]) {
+				notRead[call.Args[1]] = true
+			}
+		}
+		return true
+	})
 	hit := false
 	ast.Inspect(fd.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return !hit
-		}
-		if fun, ok := call.Fun.(*ast.SelectorExpr); ok {
-			if isBody(fun.X) && fun.Sel.Name != "Close" {
-				hit = true
-			}
-			if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "http" && fun.Sel.Name == "MaxBytesReader" {
-				return !hit
-			}
-		}
-		for _, arg := range call.Args {
-			if isBody(arg) {
-				hit = true
-			}
+		if e, ok := n.(ast.Expr); ok && isBody(e) && !notRead[e] {
+			hit = true
 		}
 		return !hit
 	})
 	return hit
+}
+
+func isMaxBytesReader(call *ast.CallExpr) bool {
+	fun, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || fun.Sel.Name != "MaxBytesReader" {
+		return false
+	}
+	pkg, ok := fun.X.(*ast.Ident)
+	return ok && pkg.Name == "http"
 }
 
 func isHTTPRequestPtr(e ast.Expr) bool {

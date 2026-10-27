@@ -172,6 +172,9 @@ func (h *Handler) operatorList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) operatorSetDefault(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID, customerID, ok := operatorIdentity(r)
 	if !ok {
 		respond.BadRequest(w, r, "missing tenant or customer id")
@@ -195,6 +198,9 @@ func (h *Handler) operatorSetDefault(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) operatorDetach(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID, customerID, ok := operatorIdentity(r)
 	if !ok {
 		respond.BadRequest(w, r, "missing tenant or customer id")

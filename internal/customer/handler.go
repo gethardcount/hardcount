@@ -348,6 +348,9 @@ func (h *Handler) getBillingProfile(w http.ResponseWriter, r *http.Request) {
 // Response body: { "token": "vlx_pcd_<64 hex>", "public_url": "<url>" }.
 // Audit log records the rotation with no plaintext token.
 func (h *Handler) rotateCostDashboardToken(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	if id == "" {

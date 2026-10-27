@@ -139,6 +139,9 @@ func (h *Handler) listEndpoints(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deleteEndpoint(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -190,6 +193,9 @@ func (h *Handler) updateEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rotateSecret(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -233,6 +239,9 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 // the dashboard can highlight the new clone in its live tail and toast
 // the audit pivot.
 func (h *Handler) replayEventV2(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	eventID := chi.URLParam(r, "id")
 
@@ -327,6 +336,9 @@ func (h *Handler) listEndpointDeliveries(w http.ResponseWriter, r *http.Request)
 // touches other endpoints, so fixing one broken receiver doesn't spray
 // duplicates at the healthy ones.
 func (h *Handler) replayDelivery(w http.ResponseWriter, r *http.Request) {
+	if !respond.NoBody(w, r) {
+		return
+	}
 	tenantID := auth.TenantID(r.Context())
 	endpointID := chi.URLParam(r, "id")
 	deliveryID := chi.URLParam(r, "deliveryID")

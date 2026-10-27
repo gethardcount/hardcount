@@ -18,7 +18,8 @@ import (
 //   - the body is one JSON value; anything else is a 400 "invalid JSON body";
 //   - a key the request type does not declare, at any depth, is a 422 with
 //     param set to the key;
-//   - a key the server sets (ReadOnly) is a 422 with param set to the key.
+//   - a key the server sets (ReadOnly) is a 422 with param set to the key;
+//   - a route that takes no body refuses one with any key (NoBody).
 //
 // encoding/json drops unknown keys silently: `trial_period_days` instead of
 // `trial_days` created an active, charged subscription with a 201, and a
@@ -76,6 +77,14 @@ func DecodeStrict(w http.ResponseWriter, r *http.Request, v any, opts ...DecodeO
 		return false
 	}
 	return true
+}
+
+// NoBody is the rule for a route that takes no body: it lists no field, so
+// a body with any field is a 422 naming it. No body, `{}` and `null` are
+// fine. Call it before the handler does anything else; it writes the
+// refusal and returns false, and the handler returns on false.
+func NoBody(w http.ResponseWriter, r *http.Request) bool {
+	return DecodeStrict(w, r, &struct{}{}, EmptyBodyOK)
 }
 
 // DecodeBody is DecodeStrict for a handler that answers some refusals its
