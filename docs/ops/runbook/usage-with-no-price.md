@@ -6,7 +6,16 @@ Back to the [runbook index](index.md).
 
 ## Symptom
 
-`velox_usage_unpriced_quantity_total{meter_id, mode}` rises (`mode` is
+The earliest sign is at ingest: the answer that wrote the event carries
+`billing_status: "no_price"` (a `no_price` count on a batch, a LiteLLM
+delivery or a held-usage release), and
+`velox_usage_unbilled_total{reason="no_price"}` rises. Usage of a meter the
+plan has no price for at all is answered `not_on_plan` instead. These are
+what Velox found when the event arrived. Ingest does not check every event,
+and an event with no status is not promised to be billed: the invoice signs
+below are the final answer.
+
+At the invoice, `velox_usage_unpriced_quantity_total{meter_id, mode}` rises (`mode` is
 `live` or `test`; test-clock simulations are not counted). Or the server
 logs a WARN with `meter`, `quantity` and `subscription_id`:
 

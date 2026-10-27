@@ -184,7 +184,6 @@ import type {
   PostV1SubscriptionsIdRetryBilling200,
   PostV1TestClocksBody,
   PostV1TestClocksIdAdvanceBody,
-  PostV1UsageEventsBatch201,
   PostV1UsageEventsBatchBodyItem,
   PostV1UsageEventsBody,
   PostV1WebhookEndpointsEndpointsBody,
@@ -231,6 +230,7 @@ import type {
   UpdateSubscriptionItemBody,
   UsageAggregate,
   UsageEvent,
+  UsageEventBatchResult,
   WebhookDeliveryReplayResult,
   WebhookEndpoint,
   WebhookEndpointCreated,
@@ -7326,9 +7326,9 @@ export const getPostV1UsageEventsBatchUrl = () => {
  * were not stored.
  * @summary Batch ingest usage events (max 1000, all-or-nothing)
  */
-export const postV1UsageEventsBatch = async (postV1UsageEventsBatchBodyItem: PostV1UsageEventsBatchBodyItem[], options?: RequestInit): Promise<PostV1UsageEventsBatch201> => {
+export const postV1UsageEventsBatch = async (postV1UsageEventsBatchBodyItem: PostV1UsageEventsBatchBodyItem[], options?: RequestInit): Promise<UsageEventBatchResult> => {
 
-  return orvalClient<PostV1UsageEventsBatch201>(getPostV1UsageEventsBatchUrl(),
+  return orvalClient<UsageEventBatchResult>(getPostV1UsageEventsBatchUrl(),
   {
     ...options,
     method: 'POST',
@@ -7403,9 +7403,13 @@ export const getBackfillUsageEventUrl = () => {
  *
  * The event counts toward the billing period its timestamp falls in
  * only if that period's invoice has not been built yet. An event for
- * an already-invoiced period is stored but never billed, and its 201
- * says so with `billing_status: after_close`; bill it with a one-off
- * invoice.
+ * an already-invoiced period is stored, but that invoice does not
+ * bill it; bill it with a one-off invoice if needed. Its 201 carries
+ * the `billing_status` Velox found (see `UsageBillingStatus`):
+ * `after_close` while the subscription that invoiced the period is
+ * active or trialing, `outside_subscription` once it has ended. A
+ * billing period of another subscription that is not invoiced yet and
+ * holds the event's time decides the status instead.
  *
  * Shares idempotency keys with live ingest: a repeated
  * `idempotency_key` returns 200 with the original event and an

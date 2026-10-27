@@ -82,7 +82,7 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 			if len(errs) > 0 {
 				return 0, 2, errs[0]
 			}
-			return res.AfterClose, 2, nil
+			return res.Unbilled.AfterClose, 2, nil
 		}},
 		{"backfill", func(ctx context.Context) (int, int, error) {
 			ev, err := usageSvc.Backfill(ctx, tenantID, in("one-conn-backfill"))
@@ -97,7 +97,7 @@ func TestIngest_ReadsTheAggregationOnItsOwnConnection(t *testing.T) {
 				{Quantity: decimal.NewFromInt(5), IdempotencyKey: "one-conn-call:input", Timestamp: &at},
 				{Quantity: decimal.NewFromInt(7), IdempotencyKey: "one-conn-call:output", Timestamp: &at},
 			}})
-			return res.AfterClose, 2, err
+			return res.Unbilled.AfterClose, 2, err
 		}},
 	} {
 		t.Run(door.name, func(t *testing.T) {

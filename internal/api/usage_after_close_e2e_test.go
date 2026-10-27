@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/sagarsuperuser/velox/internal/domain"
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
 )
@@ -22,7 +20,7 @@ import (
 // no invoice. What changed is that the caller and the operator are told:
 // the single-ingest and backfill 201 carry billing_status "after_close", the
 // batch and LiteLLM answers count after_close rows, and
-// velox_usage_after_close_total{origin} counts them.
+// velox_usage_unbilled_total{reason="after_close", origin} counts them.
 //
 // The flag must never be false: a flagged event must really be billed on no
 // invoice. Each test that flags an event checks the invoices too, and each
@@ -32,28 +30,12 @@ import (
 // The rig is the close-lag rig: the real server over HTTP. April is
 // P0 = [Apr 1, May 1) and B = May 1.
 
-const afterCloseMetric = "velox_usage_after_close_total"
+const afterCloseMetric = unbilledMetric + `{reason="after_close"}`
 
-// afterCloseCount reads velox_usage_after_close_total{origin}.
+// afterCloseCount reads velox_usage_unbilled_total{reason="after_close", origin}.
 func afterCloseCount(t *testing.T, origin string) float64 {
 	t.Helper()
-	mfs, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		t.Fatalf("gather metrics: %v", err)
-	}
-	for _, mf := range mfs {
-		if mf.GetName() != afterCloseMetric {
-			continue
-		}
-		for _, m := range mf.GetMetric() {
-			for _, lp := range m.GetLabel() {
-				if lp.GetName() == "origin" && lp.GetValue() == origin {
-					return m.GetCounter().GetValue()
-				}
-			}
-		}
-	}
-	return 0
+	return unbilledCount(t, "after_close", origin)
 }
 
 // doH is do with the response headers.
@@ -325,24 +307,27 @@ func TestUsageAfterClose_GraceIsNotFlagged(t *testing.T) {
 }
 
 // TestUsageAfterClose_TrialUsageIsNotFlagged: usage stamped in a trial, before
-// the first paid period starts, is free, not missed: it is not flagged. The
-// control: after that period's invoice, an event stamped in it is flagged.
+// the first paid period starts, is free, not missed: it is never after_close.
+// It is answered outside_subscription, because no billing period holds it
+// (D07). The control: after that period's invoice, an event stamped in it is
+// after_close.
 //
 // Mutation check: take the floor from the subscription's start instead of
-// the trial end → the trial event is flagged.
+// the trial end → the trial event after the first paid invoice is
+// after_close.
 func TestUsageAfterClose_TrialUsageIsNotFlagged(t *testing.T) {
 	skipShort(t)
 	r := newLagRigBare(t, "in_arrears", 0)
 	r.newTrialEndingAt(uwDay)
 	out := r.postEvent("/v1/usage-events", "calls", "trial-1", uwDay.Add(-14*time.Hour), uwDay.Add(-14*time.Hour+time.Minute), 5, http.StatusCreated)
-	wantStatus(t, "trial event", out, "")
+	wantStatus(t, "trial event", out, "outside_subscription")
 
 	r.expireTrials(dayAt(0, 30))
 	r.closePeriod(uwDay)
 	out = r.postEvent("/v1/usage-events", "calls", "paid-late", dayAt(1, 0), r.sub().CurrentBillingPeriodStart.Add(2*time.Hour), 9, http.StatusCreated)
 	wantStatus(t, "paid-period event after its invoice", out, "after_close")
 	out = r.postEvent("/v1/usage-events", "calls", "trial-late", uwDay.Add(-13*time.Hour), r.sub().CurrentBillingPeriodStart.Add(2*time.Hour), 5, http.StatusCreated)
-	wantStatus(t, "trial event after the first paid invoice", out, "")
+	wantStatus(t, "trial event after the first paid invoice", out, "outside_subscription")
 }
 
 // TestUsageAfterClose_LastMeterIsFlagged: a last meter bills the latest
@@ -587,8 +572,8 @@ func TestUsageAfterClose_HeldReleaseInTheGrace_PendingPlan(t *testing.T) {
 // watermark included. A threshold (no reset) fires on April 20 and bills
 // April 1 to 20. Rows stamped April 15 released while that invoice is
 // unpaid count as pending_threshold_invoice: April's invoice bills them only
-// if the threshold invoice is voided or written off. Once it is paid, rows
-// stamped April 16 count as outside_open_period: no invoice bills them.
+// if the threshold invoice is voided before April closes. Once it is paid,
+// rows stamped April 16 count as outside_open_period: no invoice bills them.
 // Rows stamped April 25 are in_open_period.
 //
 // Mutation checks: classify the release with no watermark → the April 15

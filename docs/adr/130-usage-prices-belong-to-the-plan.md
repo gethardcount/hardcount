@@ -1,7 +1,7 @@
 # ADR-130: Usage prices belong to the plan, and a price edit applies from each subscriber's next period
 
 **Date:** 2026-10-23
-**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. Not built yet: the base fee next-period rule (PR-7), ingest's `no_price` answer (PR-6) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
+**Status:** Accepted (product owner, 2026-10-23). PR-0b (#1367) shipped the plan step of the lock order (section 8). PR-1 (#1373) shipped the one rater. PR-2 (#1376) shipped section 2, one aggregation per meter; #1379 amended it on 2026-10-24 (held rows do not fix the aggregation). PR-3 (#1381) shipped section 3, price shapes and units. PR-4 (#1386) shipped sections 1, 4 to 11 and 14 to 16: prices on the plan, the edit rule for usage prices, overrides, test clocks, the rest of the lock order, windows, customer usage, currency, `base_bill_timing` and the API; recipes installed through a parser that turned the old YAML into plan prices. PR-4b (#1388) amended section 4 step 3 on 2026-10-26: each plan of a period is priced where the subscription first joined it in the period. PR-5 (#1389) shipped the recipe part of section 15: a recipe file holds only meters and plans with their prices, and an install creates no dunning policy or webhook endpoint. PR-6 (#1390) shipped section 12, with D07 folded in: the answer that writes an event carries a `billing_status` when Velox finds a reason the event is not billed, what Velox found then and not a promise (ADR-120 amendment 2026-10-27), and one unbilled counter. Not built yet: the base fee next-period rule (PR-7) and the polish of PR-8, before the v0.9.0 tag. Each rule below names the PR that brings it.
 
 ## Summary
 
@@ -538,6 +538,42 @@ pin), G5 to G8 and ADR-129 stay.
 
 ### 12. Ingest says when an event matched no price (PR-6)
 
+Built in #1390 (notes of 2026-10-27, from the code):
+
+- **The contract changed** (main session, 2026-10-27). `billing_status` is
+  what Velox found when the event arrived. A status that is present was
+  true then; no status is not a promise that the event will be billed.
+  This replaces "omitted when an open period will bill the event" below.
+- `not_on_plan` and `outside_subscription` shipped with it (D07). The
+  contract and why, the rule, the precedence and where a present status
+  can be wrong are in the
+  [ADR-120 amendment of 2026-10-27](120-invoice-grace-period-for-late-usage.md#amendment-2026-10-27-an-events-answer-says-what-velox-found-adr-130-pr-6-d07).
+- An open-period event is checked against the plan stretches the close
+  bills by, not only the current items' plans: a plan swapped away from
+  and an item removed in the period keep their stretches. So ingest reads
+  every active subscription's billing intervals.
+- The prices are not read lazily: every event in an open period needs its
+  price set to tell billed from `no_price`, so they come in the one
+  statement that read the plans' meters at their pins, before the write.
+- The straddle exception below can make a `not_on_plan` flag wrong too: a
+  price write that adds a meter's first price to the plan.
+- Inside a stretch an event is checked against the close's own usage
+  windows (trial end, other subscriptions' coverage ends, one window per
+  instant), and a price set whose pin had not passed when read draws no
+  flag: a price saved now is in force there (review round 1).
+- An event before the current period, past the billing start, is
+  `after_close` whatever the current plans price: they are not the plans
+  that held that period.
+- The floor of `after_close` is where the close began to bill (the first
+  billing interval's start, at midnight of the first day), not the start
+  instant. An event at or after the current period's end is not checked:
+  its own period's prices are not known while the close has not run, which
+  can be more than one period late (review round 3).
+- An event at or after a trial's end while the subscription is still
+  trialing is not checked (review round 4). One subscription's unchecked
+  time wins over another's flag.
+- `/batch` returns `results[i]` per event and a count per status.
+
 - The ingest answer's `billing_status` is omitted when an open period will
   bill the event. Otherwise it is one of:
   - `after_close`: shipped ([ADR-120](120-invoice-grace-period-for-late-usage.md));
@@ -555,9 +591,10 @@ pin), G5 to G8 and ADR-129 stay.
   period is checked against each current plan at its pin of the period.)
 - Matching runs in Go. With string values, per-key equality is the same as
   Postgres `@>`; a real-Postgres test checks the two agree.
-- **One stated exception to "a flag is never false"** (ADR-120): a price
+- **A stated exception to "a flag is never false"** (ADR-120): a price
   write whose transaction spans a period start, and commits after an
-  ingest read, can make one `no_price` flag wrong. Closing it needs a lock
+  ingest read, can make one `no_price` flag wrong. ADR-120 states one more:
+  a subscription change that commits between the read and the write. Closing it needs a lock
   on the plan per ingested event, at the 1,000 to 12,000 events per second
   measured in [scale](../scale.md). Rejected.
 
@@ -845,7 +882,7 @@ it.
 | [085](085-recipe-idempotent-apply.md) | Rule adoption, the rule conformance check, the currency taken from adopted rules and the 2026-10-23 amendment go (PR-4); recipes no longer create a dunning policy or webhook endpoint (PR-5). |
 | [096](096-unpriced-meter-plan-attach-guard.md) | The plan-attach guard and the meter-in-use guard that replaced the last-price guard go: a plan's meters are its prices' meters (PR-4). The WARN and counter stay; ingest adds `no_price` (PR-6). |
 | [100](100-currency-coherence-guard-ring.md) | G1, G2, G2b, the override currency clause and G4's recipe probe go; prices take the plan's currency (PR-4). |
-| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4). `no_price` adds one stated exception to "a flag is never false" (PR-6). The after_close counter becomes `velox_usage_unbilled_total{reason="after_close"}` (PR-6). |
+| [120](120-invoice-grace-period-for-late-usage.md) | The after_close rule reads the meter's aggregation instead of rule buckets and drops the `last_ever` case (PR-2, PR-4). `no_price` adds a stated exception to "a flag is never false" (PR-6). The after_close counter becomes `velox_usage_unbilled_total{reason="after_close"}` (PR-6). |
 | [123](123-new-accounts-start-with-a-default-dunning-policy.md) | A recipe no longer creates a dunning policy, so only an operator's first enabled policy takes over the seeded default (PR-5). |
 
 ## References

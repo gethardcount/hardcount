@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -14,22 +15,26 @@ import (
 )
 
 // A released row is "in an open period" only inside an active or trialing
-// subscription's CURRENT period. Before the subscription started, or in an
-// earlier period whose invoice is built, it is outside: Velox never re-times
-// usage onto a later invoice (ADR-120). Inside the period it is invoiced
-// only when a plan on the subscription prices its meter; otherwise it is
-// not_on_plan, and no invoice charges it. A row at or after the period end,
-// released before that period's invoice (the grace), belongs to the next
-// period when the subscription continues; it is outside when the
+// subscription's CURRENT period. Before the subscription started it is
+// outside; in an earlier period whose invoice is built it is outside too
+// (after_close), whatever its plan prices now: Velox never re-times usage
+// onto a later invoice (ADR-120). Inside the
+// period it is invoiced only when a price of the plan takes it; it is
+// no_price when the plan prices its meter but no price takes its labels, and
+// not_on_plan when the plan does not price its meter. A row at or after the
+// period end, released before that period's invoice (the grace), is in a
+// period not invoiced yet when the subscription continues, and is not
+// checked against prices (review round 3 on #1390); it is outside when the
 // subscription ends at the period end. A sum row before a paid threshold
 // invoice's end is outside; before an unpaid one's, pending.
 func TestCountReleased(t *testing.T) {
 	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	fire := start.AddDate(0, 0, 19)
-	plans := map[string][]string{
-		"pln_tokens": {"mtr_tokens"},
-		"pln_seats":  {"mtr_seats"},
+	plans := map[string]PriceSet{
+		"pln_tokens":   everyEvent("mtr_tokens"),
+		"pln_seats":    everyEvent("mtr_seats"),
+		"pln_labelled": {ByMeter: map[string][]map[string]string{"mtr_tokens": {{"model": "a"}}}},
 	}
 	started := start.AddDate(0, -1, 0)
 	active := domain.Subscription{
@@ -38,6 +43,8 @@ func TestCountReleased(t *testing.T) {
 	}
 	seatsOnly := active
 	seatsOnly.Items = []domain.SubscriptionItem{{PlanID: "pln_seats"}}
+	labelled := active
+	labelled.Items = []domain.SubscriptionItem{{PlanID: "pln_labelled"}}
 	canceled := active
 	canceled.Status = domain.SubscriptionCanceled
 	ending := active
@@ -57,39 +64,60 @@ func TestCountReleased(t *testing.T) {
 		wm ThresholdWatermark
 	}
 	cases := []struct {
-		name                         string
-		subs                         []sub
-		wantIn, wantNot, wPend, wOut int
+		name string
+		subs []sub
+		rows []ReleasedUsage
+		want ReleaseResult
 	}{
-		{"active, plan prices the meter", []sub{{s: active}}, 4, 0, 0, 1},
+		{"active, plan prices the meter", []sub{{s: active}}, rows, ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
 		// Review finding (#1151): a plan without the meter used to count
 		// these as "will be invoiced".
-		{"active, plan does not price the meter", []sub{{s: seatsOnly}}, 0, 4, 0, 1},
-		{"two subscriptions, one prices it", []sub{{s: seatsOnly}, {s: active}}, 4, 0, 0, 1},
-		{"active, cancels at the period end", []sub{{s: ending}}, 3, 0, 0, 2},
+		{"active, plan does not price the meter", []sub{{s: seatsOnly}}, rows, ReleaseResult{NotOnPlan: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}},
+		{"two subscriptions, one prices it", []sub{{s: seatsOnly}, {s: active}}, rows, ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
+		{"active, cancels at the period end", []sub{{s: ending}}, rows, ReleaseResult{InOpenPeriod: 3, OutsideOpenPeriod: 2}},
 		// Review finding 3 on #1350: the release ignored the watermark.
-		{"threshold invoice unpaid", []sub{{active, ThresholdWatermark{BilledThrough: &fire}}}, 2, 0, 2, 1},
-		{"threshold invoice paid", []sub{{active, ThresholdWatermark{BilledThrough: &fire, PaidThrough: &fire}}}, 2, 0, 0, 3},
-		{"no subscription", nil, 0, 0, 0, 5},
-		{"canceled only", []sub{{s: canceled}}, 0, 0, 0, 5},
-		{"no period", []sub{{s: domain.Subscription{Status: domain.SubscriptionActive, Items: active.Items}}}, 0, 0, 0, 5},
+		{"threshold invoice unpaid", []sub{{active, ThresholdWatermark{BilledThrough: &fire}}}, rows, ReleaseResult{InOpenPeriod: 2, PendingThresholdInvoice: 2, OutsideOpenPeriod: 1}},
+		{"threshold invoice paid", []sub{{active, ThresholdWatermark{BilledThrough: &fire, PaidThrough: &fire}}}, rows, ReleaseResult{InOpenPeriod: 2, OutsideOpenPeriod: 3}},
+		// Design G9: released rows no price takes were in_open_period.
+		{"no price takes the rows", []sub{{s: labelled}}, rows, ReleaseResult{NoPrice: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}},
+		{"a price takes the rows", []sub{{s: labelled}}, func() []ReleasedUsage {
+			out := slices.Clone(rows)
+			for i := range out {
+				out[i].Labels = map[string]any{"model": "a"}
+			}
+			return out
+		}(), ReleaseResult{InOpenPeriod: 4, OutsideOpenPeriod: 1}},
+		{"no subscription", nil, rows, ReleaseResult{OutsideOpenPeriod: 5}},
+		{"canceled only", []sub{{s: canceled}}, rows, ReleaseResult{OutsideOpenPeriod: 5}},
+		{"no period", []sub{{s: domain.Subscription{Status: domain.SubscriptionActive, Items: active.Items}}}, rows, ReleaseResult{OutsideOpenPeriod: 5}},
 	}
 	for _, tc := range cases {
 		var periods []OpenPeriod
 		for _, s := range tc.subs {
-			if p, ok := OpenPeriodOf(s.s, plans, plans, s.wm); ok {
+			var stretches []Stretch
+			windows := map[string][]Window{}
+			for _, it := range s.s.Items {
+				stretches = append(stretches, Stretch{PlanID: it.PlanID, From: start, To: end})
+				for m := range plans[it.PlanID].ByMeter {
+					windows[m] = append(windows[m], Window{PlanID: it.PlanID, From: start, To: end})
+				}
+			}
+			if p, ok := OpenPeriodOf(s.s, stretches, windows, plans, &started, s.wm); ok {
 				periods = append(periods, p)
 			}
 		}
-		in, not, pend, out := countReleased(rows, periods, sum)
-		if in != tc.wantIn || not != tc.wantNot || pend != tc.wPend || out != tc.wOut {
-			t.Errorf("%s: in=%d not_on_plan=%d pending=%d out=%d, want %d/%d/%d/%d", tc.name, in, not, pend, out, tc.wantIn, tc.wantNot, tc.wPend, tc.wOut)
+		var got ReleaseResult
+		countReleased(&got, tc.rows, periods, sum)
+		if got != tc.want {
+			t.Errorf("%s: %+v, want %+v", tc.name, got, tc.want)
 		}
 	}
 	// A plan the caller could not supply prices nothing.
-	p, _ := OpenPeriodOf(active, nil, nil, ThresholdWatermark{})
-	if in, not, _, _ := countReleased(rows, []OpenPeriod{p}, sum); in != 0 || not != 4 {
-		t.Errorf("no plans: in=%d not_on_plan=%d, want 0/4", in, not)
+	p, _ := OpenPeriodOf(active, []Stretch{{PlanID: "pln_tokens", From: start, To: end}}, nil, nil, &started, ThresholdWatermark{})
+	var got ReleaseResult
+	countReleased(&got, rows, []OpenPeriod{p}, sum)
+	if got != (ReleaseResult{NotOnPlan: 3, InOpenPeriod: 1, OutsideOpenPeriod: 1}) {
+		t.Errorf("no plans: %+v, want not_on_plan 3, the row after the end not checked, the invoiced row outside", got)
 	}
 }
 

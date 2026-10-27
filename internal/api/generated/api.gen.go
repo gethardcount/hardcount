@@ -1937,15 +1937,24 @@ func (e TestClockStatus) Valid() bool {
 	}
 }
 
-// Defines values for UsageEventBillingStatus.
+// Defines values for UsageBillingStatus.
 const (
-	AfterClose UsageEventBillingStatus = "after_close"
+	AfterClose          UsageBillingStatus = "after_close"
+	NoPrice             UsageBillingStatus = "no_price"
+	NotOnPlan           UsageBillingStatus = "not_on_plan"
+	OutsideSubscription UsageBillingStatus = "outside_subscription"
 )
 
-// Valid indicates whether the value is a known member of the UsageEventBillingStatus enum.
-func (e UsageEventBillingStatus) Valid() bool {
+// Valid indicates whether the value is a known member of the UsageBillingStatus enum.
+func (e UsageBillingStatus) Valid() bool {
 	switch e {
 	case AfterClose:
+		return true
+	case NoPrice:
+		return true
+	case NotOnPlan:
+		return true
+	case OutsideSubscription:
 		return true
 	default:
 		return false
@@ -1985,6 +1994,24 @@ func (e UsageEventProviderCostSource) Valid() bool {
 	case Observed:
 		return true
 	case Table:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UsageEventBatchEventResultStatus.
+const (
+	Deduplicated UsageEventBatchEventResultStatus = "deduplicated"
+	Ingested     UsageEventBatchEventResultStatus = "ingested"
+)
+
+// Valid indicates whether the value is a known member of the UsageEventBatchEventResultStatus enum.
+func (e UsageEventBatchEventResultStatus) Valid() bool {
+	switch e {
+	case Deduplicated:
+		return true
+	case Ingested:
 		return true
 	default:
 		return false
@@ -4546,7 +4573,9 @@ type HeldUsageGroup struct {
 // HeldUsageGroupReason What was missing when the rows arrived.
 type HeldUsageGroupReason string
 
-// HeldUsageReleaseResult defines model for HeldUsageReleaseResult.
+// HeldUsageReleaseResult The counts are what Velox found when the release wrote the rows, as
+// for `billing_status` (see `UsageBillingStatus`). The invoice is the
+// final answer.
 type HeldUsageReleaseResult struct {
 	// CustomerId The customer the rows were ingested for.
 	CustomerId string `json:"customer_id"`
@@ -4557,38 +4586,42 @@ type HeldUsageReleaseResult struct {
 	// writes inside its input row. Marked released, not written again.
 	Deduplicated int `json:"deduplicated"`
 
-	// InOpenPeriod Released rows inside an active subscription's current billing
-	// period whose meter the subscription's plan prices. That period's
-	// invoice counts them. A row after the period end, released before
-	// that period's invoice is built, counts here when the subscription
-	// continues and its plan from then on prices the meter. Rows of a
-	// sum or count meter stamped before the end of this period's
-	// spend-threshold invoice are not counted here: see
-	// `pending_threshold_invoice` and `outside_open_period`.
+	// InOpenPeriod Released rows in a billing period not invoiced yet that a price
+	// of its plan takes. Rows Velox does not check count here too:
+	// rows after the current period's end, while the subscription
+	// continues, and rows after a trial's end while the subscription
+	// still trials. Rows of a sum or count meter stamped before the end
+	// of this period's spend-threshold invoice are not counted here:
+	// see `pending_threshold_invoice` and `outside_open_period`.
 	InOpenPeriod int `json:"in_open_period"`
 
 	// MoreToRelease Rows for this external ID still held only because one release
 	// takes at most 5,000 rows. Release again to take them.
 	MoreToRelease int `json:"more_to_release"`
 
-	// NotOnPlan Released rows inside an active subscription's current billing
-	// period whose meter no plan on that subscription prices. No
-	// invoice charges them.
+	// NoPrice Released rows in a billing period not invoiced yet whose plan
+	// prices the meter, but no price of that plan takes them (their
+	// dimensions do not include any price's `dimension_match`).
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Released rows in a billing period not invoiced yet whose plan
+	// does not price the meter.
 	NotOnPlan int `json:"not_on_plan"`
 
-	// OutsideOpenPeriod Released rows outside every current billing period: before the
-	// subscription started, or in an earlier period. Also rows of a
-	// sum or count meter stamped before the end of this period's paid
-	// spend-threshold invoice. A subscription invoice does not count
-	// them unless that period's invoice has not been built yet. Bill
-	// them with a one-off invoice if they should be charged.
+	// OutsideOpenPeriod Released rows outside every subscription's time (before it
+	// started, in a free trial, after it ended or after its scheduled
+	// cancel, or in another, ended subscription's time), and rows in a
+	// period already invoiced. Also rows of a sum or count meter
+	// stamped before the end of this period's paid spend-threshold
+	// invoice. Bill them with a one-off invoice if they should be
+	// charged.
 	OutsideOpenPeriod int `json:"outside_open_period"`
 
 	// PendingThresholdInvoice Released rows of a sum or count meter stamped before the end of
 	// this period's spend-threshold invoice, while that invoice is not
-	// paid. If it is paid or written off, no invoice counts them. If
-	// it is voided before the period closes, the period's invoice
-	// counts them.
+	// paid. The period's invoice counts them only if that invoice is
+	// voided before the period closes. A written-off invoice can still
+	// be voided.
 	PendingThresholdInvoice int `json:"pending_threshold_invoice"`
 
 	// Released Rows newly written as usage events.
@@ -5369,9 +5402,9 @@ type LitellmSpendResult struct {
 	// Accepted Usage events newly recorded.
 	Accepted int `json:"accepted"`
 
-	// AfterClose Of `accepted`, the events whose period a subscription already
-	// invoiced: stored, billed on no invoice. A replay never counts
-	// here.
+	// AfterClose Of `accepted`, the events answered `billing_status:
+	// after_close`: their time was already invoiced. A replay never
+	// counts here.
 	AfterClose int `json:"after_close"`
 
 	// CacheHits The LiteLLM response-cache hits among `skipped`. LiteLLM's own spend counts them as $0.
@@ -5392,6 +5425,21 @@ type LitellmSpendResult struct {
 	// exist yet. Not billed until released with
 	// `POST /v1/usage-events/held/release`.
 	Held int `json:"held"`
+
+	// NoPrice Of `accepted`, the events no price of the subscription's plan
+	// takes (`billing_status: no_price`), such as a model no price
+	// names. A replay never counts here.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `accepted`, the events whose meter the subscription's plan
+	// does not price (`billing_status: not_on_plan`). A replay never
+	// counts here.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `accepted`, the events whose time no subscription of the
+	// customer bills (`billing_status: outside_subscription`). A replay
+	// never counts here.
+	OutsideSubscription int `json:"outside_subscription"`
 
 	// Skipped Records that bill nothing - a call type with no tokens, zero tokens, a failed call (`status` `failure`) or a LiteLLM response-cache hit.
 	Skipped int `json:"skipped"`
@@ -6608,18 +6656,82 @@ type UsageAggregate struct {
 	TotalUnits string `json:"total_units"`
 }
 
+// UsageBillingStatus What Velox found when the event arrived. It checked the event
+// against the customer's subscriptions, the plans and prices in force,
+// and the invoices already built at that moment. Sent only on the
+// answer that wrote the event; the event is stored all the same.
+//
+// A status that is present was true at that moment:
+//
+//   - `after_close`: the event's time is already invoiced. A
+//     spend-threshold invoice counts only once it is paid. Bill the
+//     event with a one-off invoice if it should be charged.
+//   - `not_on_plan`: a billing period not invoiced yet holds the event's
+//     time, but its plan has no price for this meter.
+//   - `outside_subscription`: no active or trialing subscription of the
+//     customer bills the event's time. For example, it has none, or the
+//     time is before one starts, in a free trial, or after one ends or
+//     its scheduled cancel.
+//   - `no_price`: the plan that bills the event's time prices this
+//     meter, but no price of that plan takes the event's `dimensions`.
+//     A price takes an event whose dimensions include all of its
+//     `dimension_match`, compared as strings: the number `1` is not the
+//     string `"1"`.
+//
+// No `billing_status` means Velox found no reason then. It is not a
+// promise that the event will be billed. Velox checks only the
+// customer's current billing periods: time after a period end whose
+// invoice is not built yet is not checked, nor is time after a trial's
+// end before Velox ends the trial. A later change can change the
+// outcome either way: a subscription created, activated or changed, a
+// trial extended, a scheduled cancel undone, or a price added. The
+// invoice is the final answer.
+//
+// Two cases can make a present status wrong: a price change whose
+// save began before a billing period started and finished after the
+// request read the prices, and a subscription change saved while the
+// request is in flight. Absent on a replay and on a read.
+type UsageBillingStatus string
+
 // UsageEvent defines model for UsageEvent.
 type UsageEvent struct {
-	// BillingStatus Sent only on the 201 that wrote the event. `after_close`: a
-	// subscription that prices this meter already invoiced the
-	// event's time, so the event is stored but billed on no invoice,
-	// now or later. Bill it with a one-off invoice if it should be
-	// charged. A spend-threshold invoice counts only once it is
-	// paid: until then it can be voided, and then the period's
-	// invoice bills the event. Absent otherwise, which is not a promise that the event
-	// will be billed. Never sent on a replay or a read.
-	BillingStatus UsageEventBillingStatus `json:"billing_status,omitempty"`
-	CustomerId    string                  `json:"customer_id"`
+	// BillingStatus What Velox found when the event arrived. It checked the event
+	// against the customer's subscriptions, the plans and prices in force,
+	// and the invoices already built at that moment. Sent only on the
+	// answer that wrote the event; the event is stored all the same.
+	//
+	// A status that is present was true at that moment:
+	//
+	// - `after_close`: the event's time is already invoiced. A
+	//   spend-threshold invoice counts only once it is paid. Bill the
+	//   event with a one-off invoice if it should be charged.
+	// - `not_on_plan`: a billing period not invoiced yet holds the event's
+	//   time, but its plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer bills the event's time. For example, it has none, or the
+	//   time is before one starts, in a free trial, or after one ends or
+	//   its scheduled cancel.
+	// - `no_price`: the plan that bills the event's time prices this
+	//   meter, but no price of that plan takes the event's `dimensions`.
+	//   A price takes an event whose dimensions include all of its
+	//   `dimension_match`, compared as strings: the number `1` is not the
+	//   string `"1"`.
+	//
+	// No `billing_status` means Velox found no reason then. It is not a
+	// promise that the event will be billed. Velox checks only the
+	// customer's current billing periods: time after a period end whose
+	// invoice is not built yet is not checked, nor is time after a trial's
+	// end before Velox ends the trial. A later change can change the
+	// outcome either way: a subscription created, activated or changed, a
+	// trial extended, a scheduled cancel undone, or a price added. The
+	// invoice is the final answer.
+	//
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
+	CustomerId    string             `json:"customer_id"`
 
 	// Dimensions The dimension values sent with the event. Absent when none were sent.
 	Dimensions     map[string]interface{} `json:"dimensions,omitempty"`
@@ -6649,16 +6761,6 @@ type UsageEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// UsageEventBillingStatus Sent only on the 201 that wrote the event. `after_close`: a
-// subscription that prices this meter already invoiced the
-// event's time, so the event is stored but billed on no invoice,
-// now or later. Bill it with a one-off invoice if it should be
-// charged. A spend-threshold invoice counts only once it is
-// paid: until then it can be voided, and then the period's
-// invoice bills the event. Absent otherwise, which is not a promise that the event
-// will be billed. Never sent on a replay or a read.
-type UsageEventBillingStatus string
-
 // UsageEventOrigin How the event arrived. `backfill` means `POST /v1/usage-events/backfill`.
 type UsageEventOrigin string
 
@@ -6667,6 +6769,84 @@ type UsageEventOrigin string
 // `not_applicable` (the meter has no costed dimensions). Absent when
 // the cost is unknown.
 type UsageEventProviderCostSource string
+
+// UsageEventBatchEventResult defines model for UsageEventBatchEventResult.
+type UsageEventBatchEventResult struct {
+	// BillingStatus What Velox found when the event arrived. It checked the event
+	// against the customer's subscriptions, the plans and prices in force,
+	// and the invoices already built at that moment. Sent only on the
+	// answer that wrote the event; the event is stored all the same.
+	//
+	// A status that is present was true at that moment:
+	//
+	// - `after_close`: the event's time is already invoiced. A
+	//   spend-threshold invoice counts only once it is paid. Bill the
+	//   event with a one-off invoice if it should be charged.
+	// - `not_on_plan`: a billing period not invoiced yet holds the event's
+	//   time, but its plan has no price for this meter.
+	// - `outside_subscription`: no active or trialing subscription of the
+	//   customer bills the event's time. For example, it has none, or the
+	//   time is before one starts, in a free trial, or after one ends or
+	//   its scheduled cancel.
+	// - `no_price`: the plan that bills the event's time prices this
+	//   meter, but no price of that plan takes the event's `dimensions`.
+	//   A price takes an event whose dimensions include all of its
+	//   `dimension_match`, compared as strings: the number `1` is not the
+	//   string `"1"`.
+	//
+	// No `billing_status` means Velox found no reason then. It is not a
+	// promise that the event will be billed. Velox checks only the
+	// customer's current billing periods: time after a period end whose
+	// invoice is not built yet is not checked, nor is time after a trial's
+	// end before Velox ends the trial. A later change can change the
+	// outcome either way: a subscription created, activated or changed, a
+	// trial extended, a scheduled cancel undone, or a price added. The
+	// invoice is the final answer.
+	//
+	// Two cases can make a present status wrong: a price change whose
+	// save began before a billing period started and finished after the
+	// request read the prices, and a subscription change saved while the
+	// request is in flight. Absent on a replay and on a read.
+	BillingStatus UsageBillingStatus `json:"billing_status,omitempty"`
+
+	// Status `ingested`: the batch wrote the event. `deduplicated`: an event
+	// with its `idempotency_key` was already stored, earlier or in
+	// this batch, so it was not stored again.
+	Status UsageEventBatchEventResultStatus `json:"status"`
+}
+
+// UsageEventBatchEventResultStatus `ingested`: the batch wrote the event. `deduplicated`: an event
+// with its `idempotency_key` was already stored, earlier or in
+// this batch, so it was not stored again.
+type UsageEventBatchEventResultStatus string
+
+// UsageEventBatchResult defines model for UsageEventBatchResult.
+type UsageEventBatchResult struct {
+	// AfterClose Of `ingested`, the events answered `billing_status` `after_close`.
+	AfterClose int `json:"after_close"`
+
+	// Deduplicated Idempotency replays — already ingested, counted as success.
+	Deduplicated int `json:"deduplicated"`
+
+	// Ingested Newly written events.
+	Ingested int `json:"ingested"`
+
+	// NoPrice Of `ingested`, the events answered `billing_status` `no_price`.
+	NoPrice int `json:"no_price"`
+
+	// NotOnPlan Of `ingested`, the events answered `billing_status` `not_on_plan`.
+	NotOnPlan int `json:"not_on_plan"`
+
+	// OutsideSubscription Of `ingested`, the events answered `billing_status` `outside_subscription`.
+	OutsideSubscription int `json:"outside_subscription"`
+
+	// Results One entry per event, in the order sent: `results[i]` is the
+	// request's event `i`.
+	Results []UsageEventBatchEventResult `json:"results"`
+
+	// Total Events in the request.
+	Total int `json:"total"`
+}
 
 // WebhookDeliveryReplayResult defines model for WebhookDeliveryReplayResult.
 type WebhookDeliveryReplayResult struct {

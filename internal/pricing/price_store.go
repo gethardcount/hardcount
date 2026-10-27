@@ -174,11 +174,38 @@ type PlanPin struct {
 	ClockID string
 }
 
-// MetersPricedAt returns, for each pin, the meters its plan prices then (the
-// meters of PlanPricesAt), in one transaction and one statement. Ingest reads
-// every open period's pins on each event.
-func (s *PostgresStore) MetersPricedAt(ctx context.Context, tenantID string, pins []PlanPin) ([][]string, error) {
-	out := make([][]string, len(pins))
+// PriceMatch is one price as usage ingest reads it: its meter and the labels
+// it takes (dimension_match; {} takes every event of the meter).
+type PriceMatch struct {
+	MeterID string
+	Match   map[string]string
+}
+
+// PinPrices is one pin's answer to PriceMatchesAt.
+type PinPrices struct {
+	// Matches is the meter and dimension_match of every price the plan has
+	// taking part at the pin (the prices of PlanPricesAt).
+	Matches []PriceMatch
+	// Passed: the pin had passed in its time domain when the prices were
+	// read, so a price saved after the read is not in force at it (a used
+	// plan's version takes effect from its write, ADR-130 §7). At a pin still
+	// ahead (the next period's start, a trial end) a price saved now is.
+	Passed bool
+}
+
+// PriceMatchesAt returns, for each pin, the meter and dimension_match of
+// every price its plan has taking part then (the prices of PlanPricesAt),
+// and whether the pin had passed, in one transaction. Ingest reads every
+// open period's pins once per customer per request, before it writes, and
+// matches each event's labels against them in Go (usage.takes).
+//
+// A wall-time pin has passed when it is before the transaction's start. A
+// pin on test clock C has passed when it is at or before C's time, read
+// first: a price write stamps C with C's time plus 1 microsecond, read FOR
+// SHARE, so an advance that this read saw waited for every write that read
+// the clock before it, and the prices read next see those writes.
+func (s *PostgresStore) PriceMatchesAt(ctx context.Context, tenantID string, pins []PlanPin) ([]PinPrices, error) {
+	out := make([]PinPrices, len(pins))
 	if len(pins) == 0 {
 		return out, nil
 	}
@@ -191,30 +218,59 @@ func (s *PostgresStore) MetersPricedAt(ctx context.Context, tenantID string, pin
 		ats[i] = p.At.UTC().Format("2006-01-02T15:04:05.999999Z07:00")
 		clockIDs[i] = p.ClockID
 	}
+	args := []any{postgres.StringArray(planIDs), postgres.StringArray(ats), postgres.StringArray(clockIDs)}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
+	passed, err := tx.QueryContext(ctx, `
+		SELECT r.ord, CASE WHEN r.clock_id = '' THEN r.at < now()
+		       ELSE COALESCE(r.at <= (SELECT c.frozen_time FROM test_clocks c WHERE c.id = r.clock_id), false) END
+		FROM unnest($1::text[], $2::text[]::timestamptz[], $3::text[]) WITH ORDINALITY AS r(plan_id, at, clock_id, ord)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read whether the pins have passed: %w", err)
+	}
+	for passed.Next() {
+		var ord int
+		var ok bool
+		if err := passed.Scan(&ord, &ok); err != nil {
+			_ = passed.Close()
+			return nil, err
+		}
+		out[ord-1].Passed = ok
+	}
+	if err := passed.Close(); err != nil {
+		return nil, err
+	}
+	if err := passed.Err(); err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT DISTINCT r.ord, p.meter_id
+		SELECT r.ord, p.meter_id, p.dimension_match
 		FROM unnest($1::text[], $2::text[]::timestamptz[], $3::text[]) WITH ORDINALITY AS r(plan_id, at, clock_id, ord)
 		JOIN plan_prices p ON p.plan_id = r.plan_id
 		CROSS JOIN LATERAL (`+versionInForceAt("r.at", "r.clock_id")+`) v
 		WHERE NOT v.removed
-		ORDER BY r.ord, p.meter_id`,
-		postgres.StringArray(planIDs), postgres.StringArray(ats), postgres.StringArray(clockIDs))
+		ORDER BY r.ord, p.meter_id, p.id`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("read the meters of plans: %w", err)
+		return nil, fmt.Errorf("read the prices of plans: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var ord int
-		var meterID string
-		if err := rows.Scan(&ord, &meterID); err != nil {
+		var pm PriceMatch
+		var match []byte
+		if err := rows.Scan(&ord, &pm.MeterID, &match); err != nil {
 			return nil, err
 		}
-		out[ord-1] = append(out[ord-1], meterID)
+		if err := json.Unmarshal(match, &pm.Match); err != nil {
+			return nil, fmt.Errorf("decode dimension_match: %w", err)
+		}
+		if pm.Match == nil {
+			pm.Match = map[string]string{}
+		}
+		out[ord-1].Matches = append(out[ord-1].Matches, pm)
 	}
 	return out, rows.Err()
 }

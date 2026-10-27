@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -1678,11 +1680,11 @@ func (a costDashboardCredits) CreditSummary(ctx context.Context, tenantID, custo
 }
 
 // usageOpenPeriods implements usage.OpenPeriodReader: what usage ingest and
-// the held-usage release read to tell whether an event's period was already
-// invoiced (billing_status "after_close", ADR-120): the open periods before
-// the write, the meter's aggregation on the write's transaction after it.
-// The rule itself lives in usage (usage.OpenPeriodOf, usage.BucketsOf); this
-// only reads.
+// the held-usage release read to answer an event with its billing_status
+// (ADR-120, ADR-130): the open periods with their plans'
+// prices before the write, the meter's aggregation on the write's
+// transaction after it. The rule itself lives in usage (usage.OpenPeriodOf,
+// usage.BucketsOf); this only reads.
 type usageOpenPeriods struct {
 	subs       usageLiveSubscriptions
 	pricing    usageMeterReader
@@ -1692,11 +1694,12 @@ type usageOpenPeriods struct {
 type usageLiveSubscriptions interface {
 	ListLiveByCustomer(ctx context.Context, tenantID, customerID string) ([]domain.Subscription, error)
 	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
+	ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error)
 }
 
 type usageMeterReader interface {
 	GetMeterTx(ctx context.Context, tx *sql.Tx, id string) (domain.Meter, error)
-	MetersPricedAt(ctx context.Context, tenantID string, pins []pricing.PlanPin) ([][]string, error)
+	PriceMatchesAt(ctx context.Context, tenantID string, pins []pricing.PlanPin) ([]pricing.PinPrices, error)
 }
 
 type usageThresholdReader interface {
@@ -1704,26 +1707,28 @@ type usageThresholdReader interface {
 }
 
 // OpenPeriods reads every active and trialing subscription of the customer
-// (one transaction), the threshold watermarks of each one's current period,
-// and in one more transaction the meters each current plan prices at its
-// pin of the period and, for the plans that continue, at the period end (the
-// next period's pin), in the subscription's own time domain (ADR-130 §4). A
-// plan's pin is the one the close prices it at (billing.PlanPins): the period
-// start, or the first instant in the period the subscription had an item on
-// the plan. It reads a subscription's billing intervals only when one of its
-// items joined its plan in the period. The watermarks are read whether or
-// not the subscription still has thresholds: the close keys them on the
-// period's threshold invoices, not on the setting.
+// (one transaction); for each, the threshold watermarks of its current
+// period, how the close bills the period (billing.PeriodPlans: the plan
+// stretches, from its billing intervals when it is active, and each plan's
+// pin), and where the customer's other subscriptions stopped covering a
+// meter in the period; then, in one more transaction, the prices of each
+// plan of the period at its pin of the period, in the subscription's own
+// time domain (ADR-130 §4), each with whether its pin had passed. From the meters the plans price at their pins it builds the
+// period's usage windows, the close's own (billing.PeriodPlan.UsageWindows).
+// The watermarks are read whether or not the subscription still has
+// thresholds: the close keys them on the period's threshold invoices, not
+// on the setting.
 func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID string) ([]usage.OpenPeriod, error) {
 	subs, err := a.subs.ListLiveByCustomer(ctx, tenantID, customerID)
 	if err != nil {
 		return nil, fmt.Errorf("list live subscriptions: %w", err)
 	}
 	type subPins struct {
-		sub   domain.Subscription
-		wm    usage.ThresholdWatermark
-		atPin map[string]int // plan id → index in pins, at its pin of the period
-		atEnd map[string]int // plan id → index in pins
+		sub      domain.Subscription
+		wm       usage.ThresholdWatermark
+		period   billing.PeriodPlan
+		coverage []domain.MeterCoverageEnd
+		atPin    map[string]int // plan id → index in pins, at its pin of the period
 	}
 	var (
 		pins []pricing.PlanPin
@@ -1734,32 +1739,24 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 			continue
 		}
 		start, end := *sub.CurrentBillingPeriodStart, *sub.CurrentBillingPeriodEnd
-		sp := subPins{sub: sub, atPin: map[string]int{}, atEnd: map[string]int{}}
+		sp := subPins{sub: sub, atPin: map[string]int{}}
 		sp.wm.BilledThrough, sp.wm.PaidThrough, err = a.thresholds.ThresholdWatermarks(ctx, tenantID, sub.ID, start, end)
 		if err != nil {
 			return nil, fmt.Errorf("threshold watermarks of %s: %w", sub.ID, err)
 		}
-		planPins, err := billing.PlanPins(sub, start, end, func() ([]domain.ItemInterval, error) {
+		sp.period, err = billing.PeriodPlans(sub, start, end, func() ([]domain.ItemInterval, error) {
 			return a.subs.ListItemIntervals(ctx, tenantID, sub.ID)
 		})
 		if err != nil {
 			return nil, err
 		}
-		for _, it := range sub.Items {
-			if _, done := sp.atPin[it.PlanID]; it.PlanID != "" && !done {
-				sp.atPin[it.PlanID] = len(pins)
-				pins = append(pins, pricing.PlanPin{PlanID: it.PlanID, At: planPins[it.PlanID], ClockID: sub.TestClockID})
-			}
-			for _, planID := range []string{it.PlanID, it.PendingPlanID} {
-				if planID == "" {
-					continue
-				}
-				if _, done := sp.atEnd[planID]; done {
-					continue
-				}
-				sp.atEnd[planID] = len(pins)
-				pins = append(pins, pricing.PlanPin{PlanID: planID, At: end, ClockID: sub.TestClockID})
-			}
+		sp.coverage, err = a.subs.ListCustomerMeterCoverageEnds(ctx, tenantID, sub.CustomerID, sub.ID, start, end)
+		if err != nil {
+			return nil, fmt.Errorf("other subscriptions' meter coverage of %s: %w", sub.ID, err)
+		}
+		for _, planID := range slices.Sorted(maps.Keys(sp.period.Pins)) {
+			sp.atPin[planID] = len(pins)
+			pins = append(pins, pricing.PlanPin{PlanID: planID, At: sp.period.Pins[planID], ClockID: sub.TestClockID})
 		}
 		read = append(read, sp)
 	}
@@ -1767,19 +1764,35 @@ func (a usageOpenPeriods) OpenPeriods(ctx context.Context, tenantID, customerID 
 	if len(read) == 0 {
 		return out, nil
 	}
-	meters, err := a.pricing.MetersPricedAt(ctx, tenantID, pins)
+	prices, err := a.pricing.PriceMatchesAt(ctx, tenantID, pins)
 	if err != nil {
-		return nil, fmt.Errorf("meters of the plans: %w", err)
+		return nil, fmt.Errorf("prices of the plans: %w", err)
+	}
+	priceSet := func(i int) usage.PriceSet {
+		ps := usage.PriceSet{Ahead: !prices[i].Passed, ByMeter: map[string][]map[string]string{}}
+		for _, pm := range prices[i].Matches {
+			ps.ByMeter[pm.MeterID] = append(ps.ByMeter[pm.MeterID], pm.Match)
+		}
+		return ps
 	}
 	for _, sp := range read {
-		atPin, atEnd := map[string][]string{}, map[string][]string{}
+		atPin := map[string]usage.PriceSet{}
+		planMeters := map[string][]string{}
 		for planID, i := range sp.atPin {
-			atPin[planID] = meters[i]
+			atPin[planID] = priceSet(i)
+			planMeters[planID] = slices.Sorted(maps.Keys(atPin[planID].ByMeter))
 		}
-		for planID, i := range sp.atEnd {
-			atEnd[planID] = meters[i]
+		var stretches []usage.Stretch
+		for _, st := range sp.period.Stretches() {
+			stretches = append(stretches, usage.Stretch{PlanID: st.PlanID, From: st.From, To: st.To})
 		}
-		if p, ok := usage.OpenPeriodOf(sp.sub, atPin, atEnd, sp.wm); ok {
+		windows := map[string][]usage.Window{}
+		for meterID, ws := range sp.period.UsageWindows(planMeters, sp.coverage) {
+			for _, w := range ws {
+				windows[meterID] = append(windows[meterID], usage.Window{PlanID: w.PlanID, From: w.From, To: w.To})
+			}
+		}
+		if p, ok := usage.OpenPeriodOf(sp.sub, stretches, windows, atPin, sp.period.BilledFrom, sp.wm); ok {
 			out = append(out, p)
 		}
 	}
