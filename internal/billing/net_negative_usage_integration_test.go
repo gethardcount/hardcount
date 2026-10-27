@@ -35,7 +35,7 @@ func netNegativeNotes(t *testing.T, ctx context.Context, logger *audit.Logger, t
 	return entries
 }
 
-// noteQuantities maps meter_key → quantity from one row's metadata, as it
+// noteQuantities maps event_name → quantity from one row's metadata, as it
 // comes back from JSON.
 func noteQuantities(t *testing.T, e domain.AuditEntry) map[string]string {
 	t.Helper()
@@ -46,7 +46,7 @@ func noteQuantities(t *testing.T, e domain.AuditEntry) map[string]string {
 	out := map[string]string{}
 	for _, m := range ms {
 		mm, _ := m.(map[string]any)
-		key, _ := mm["meter_key"].(string)
+		key, _ := mm["event_name"].(string)
 		qty, _ := mm["quantity"].(string)
 		out[key] = qty
 	}
@@ -60,7 +60,7 @@ func noteFrom(t *testing.T, e domain.AuditEntry, meterKey string) string {
 	ms, _ := e.Metadata["meters"].([]any)
 	for _, m := range ms {
 		mm, _ := m.(map[string]any)
-		if mm["meter_key"] == meterKey {
+		if mm["event_name"] == meterKey {
 			from, _ := mm["from"].(string)
 			return from
 		}
