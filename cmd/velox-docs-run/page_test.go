@@ -316,6 +316,9 @@ func TestParseRefusesCodeTheRunnerCannotSee(t *testing.T) {
 		// does not, so the second command shows as text of the first block.
 		"closing fence indented too far": "1. **Do it.**\n\n   <!-- docs-run: command -->\n   ```bash\n   true\n       ```\n   <!-- docs-run: command -->\n   ```bash\n   export SETUP=1\n   ```\n",
 	}
+	// A line at the left margin ends the list item, and the code block
+	// with it: GitHub shows the export as prose, the runner runs it.
+	hidden["line outside the list inside the fence"] = "1. **Do it.**\n\n   <!-- docs-run: command -->\n   ```bash\n   true\nexport SETUP=1\n   ```\n"
 	for name, page := range hidden {
 		t.Run(name, func(t *testing.T) {
 			_, err := parse(page)

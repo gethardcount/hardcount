@@ -338,11 +338,11 @@ That is expected: open the customer from **Customers** instead.
 | What you see | What to do |
 |---|---|
 | A step prints `null` | The request failed. Run the same command without the last `jq` part to see the error message. |
-| `external_customer_id is required` | `CUSTOMER_REF` is not set. A variable lasts only as long as its terminal. Run the page again from the top in one terminal, with `acme-2` in place of `acme-1` in step 3. |
+| `external_customer_id is required` in step 5a, or `payload.user is required` in step 5b | `CUSTOMER_REF` is not set. A variable lasts only as long as its terminal. Run the page again from the top in one terminal, with `acme-2` in place of `acme-1` in step 3. |
 | `customer "acme-1" not found`, or `"held":2` in step 5b | Step 3 did not run. Step 5a refuses usage for a customer Velox does not know. Step 5b holds it instead: create the customer, then release it from the notice on the **Usage** page. |
 | `customer with external_id "acme-1" already exists` | You ran this page before. In step 3, change `acme-1` to `acme-2`, then run steps 2 to 8 again. |
 | `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the clock moved. Run steps 2 to 8 again with a new name in step 3. |
-| A count other than `accepted` or `deduplicated` is not 0 in step 5b | Velox stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 5a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
+| `after_close`, `no_price`, `not_on_plan` or `outside_subscription` is not 0 in step 5b | Velox stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 5a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
 
 **Next:** price your own models, sell prepaid credit and see your margin:
 [AI pricing](ai-pricing.md).

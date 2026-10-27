@@ -151,7 +151,10 @@ The [first-invoice tutorial](first-invoice.md) runs in the same CI job.
 marked `<!-- docs-run: output -->` below it. Every code block on the page
 needs one of the two markers, and every command needs an output block. A
 code block the runner cannot read, such as one in a blockquote, is an
-error. To run the page yourself, start Velox on
+error. So is a marked block that GitHub does not show as a code block, such
+as one inside `<details>` with no blank line before it. A unit test checks
+that each command runs in at least one of the job's passes. To run the page
+yourself, start Velox on
 port 8080 and save your test key in a file such as `~/velox-key.json`, as
 `{"secret_key_test": "vlx_secret_test_…"}`. Then run:
 

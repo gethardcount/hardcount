@@ -32,6 +32,9 @@ import (
 //   - Any other code block GitHub shows (a fence in a blockquote, an
 //     indented code block, <pre>) is an error, found with a CommonMark
 //     parser. Write it as a fence at the start of a line.
+//   - So is a fence GitHub does not show as a code block of its own (one
+//     inside an HTML block such as <details> with no blank line before
+//     it): CI must not run a line a reader cannot see as code.
 //   - Every "You see:" must be followed by an output block, and must not
 //     state a value in backticks. Describe a screen without "You see:".
 //   - Every command that runs must have an output block (see makePlan).
@@ -75,8 +78,9 @@ var (
 	headingRE = regexp.MustCompile(`^#{1,6} (.+)$`)
 	youSeeRE  = regexp.MustCompile(`(?i)you see:`)
 	// export, local and the like return their own status, not that of a
-	// $(...) or `...` in their value.
-	hidingRE = regexp.MustCompile("^\\s*(?:export|local|declare|typeset|readonly)\\b[^#]*?\\b\\w+=\\S*?(?:\\$\\(|`)")
+	// $(...) or `...` in their value. Any substitution later on such a
+	// line is refused, quoted or not.
+	hidingRE = regexp.MustCompile("(?:^|[;&|({]|\\b(?:then|do|else))\\s*(?:export|local|declare|typeset|readonly)\\s.*(?:\\$\\(|`)")
 )
 
 // parse reads a page into its blocks and checks the marker rules.
@@ -270,9 +274,11 @@ func checkYouSee(lines []string, blocks []block) []string {
 	return errs
 }
 
-// checkCodeBlocks finds every code block a CommonMark parser sees, as
-// GitHub shows the page, and refuses any that is not one of the fenced
-// blocks parse found. (A fenced block without a marker has its own error.)
+// checkCodeBlocks compares the code blocks a CommonMark parser sees, as
+// GitHub shows the page, with the fenced blocks parse found. It refuses a
+// code block that is not one of them (a fenced block without a marker has
+// its own error), and a fenced block that is not a code block of its own,
+// from its opening fence to its closing one.
 func checkCodeBlocks(src string, fences []span) []string {
 	source := []byte(src)
 	lineAt := func(offset int) int { return bytes.Count(source[:offset], []byte("\n")) + 1 }
@@ -285,23 +291,24 @@ func checkCodeBlocks(src string, fences []span) []string {
 		return false
 	}
 	var errs []string
+	shown := map[span]bool{} // the fenced code blocks GitHub shows
 	doc := goldmark.New().Parser().Parse(text.NewReader(source))
 	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering {
 			return ast.WalkContinue, nil
 		}
-		line := 0
+		var line int // the block's first line
 		switch n := n.(type) {
 		case *ast.FencedCodeBlock:
-			// An empty block with no info string has no line to name, and
-			// nothing to run.
-			if n.Info != nil {
-				line = lineAt(n.Info.Segment.Start)
-			} else if n.Lines().Len() > 0 {
-				line = lineAt(n.Lines().At(0).Start)
+			line = lineAt(n.Pos())
+			// The closing fence is the line after the last one inside.
+			end := line + 1
+			if k := n.Lines().Len(); k > 0 {
+				end = lineAt(n.Lines().At(k-1).Start) + 1
 			}
+			shown[span{line, end}] = true
 		case *ast.CodeBlock:
-			line = lineAt(n.Lines().At(0).Start)
+			line = lineAt(n.Pos())
 		case *ast.HTMLBlock:
 			var raw []byte
 			for k := 0; k < n.Lines().Len(); k++ {
@@ -311,15 +318,20 @@ func checkCodeBlocks(src string, fences []span) []string {
 			if !bytes.Contains(bytes.ToLower(raw), []byte("<pre")) {
 				return ast.WalkContinue, nil
 			}
-			line = lineAt(n.Lines().At(0).Start)
+			line = lineAt(n.Pos())
 		default:
 			return ast.WalkContinue, nil
 		}
-		if line > 0 && !read(line) {
+		if !read(line) {
 			errs = append(errs, fmt.Sprintf("line %d: a code block the runner does not read; write it as a fenced block (```) at the start of the line, after a docs-run marker", line))
 		}
 		return ast.WalkSkipChildren, nil
 	})
+	for _, f := range fences {
+		if !shown[f] {
+			errs = append(errs, fmt.Sprintf("line %d: the runner reads a fenced block here that GitHub shows as not a code block of its own (it is inside HTML such as <details>, indented 4 spaces, or its closing fence is indented too far); a reader would not run it", f.start))
+		}
+	}
 	return errs
 }
 
