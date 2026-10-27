@@ -35,10 +35,12 @@ import (
 	"github.com/sagarsuperuser/velox/internal/webhook"
 )
 
-// responseTypes maps a components.schemas name to the Go type the server
-// encodes for it. The check walks each type's fields into the schemas its
-// properties reference, so a schema reached that way needs no entry of its
-// own. A schema only a map literal or a list envelope reaches needs one.
+// responseTypes maps a components.schemas name to the Go types the server
+// encodes for it. When operations that share a schema encode different types,
+// such as a list and a get, list every one. The check walks each type's
+// fields into the schemas its properties reference, so a schema reached that
+// way needs no entry of its own. A schema only a map literal or a list
+// envelope reaches needs one.
 var responseTypes = map[string][]any{
 	"APIKey":                       {domain.APIKey{}},
 	"APIKeyCreated":                {auth.CreateKeyResult{}},
@@ -77,7 +79,7 @@ var responseTypes = map[string][]any{
 	"LitellmSpendResult":           {litellm.SpendResponse{}},
 	"MarginReport":                 {usage.MarginReport{}},
 	"MemberInvitation":             {dashmembers.InvitationView{}},
-	"Meter":                        {pricing.MeterResponse{}},
+	"Meter":                        {pricing.MeterResponse{}, domain.Meter{}},
 	"PaymentMethod":                {domain.PaymentMethodView{}},
 	"Plan":                         {pricing.PlanResponse{}},
 	"PlanDetail":                   {pricing.PlanDetailResponse{}},
@@ -291,9 +293,7 @@ func TestOpenAPISpec_ResponseRequired(t *testing.T) {
 		if !objects[name] {
 			stale = append(stale, name+": responseTypes names it, but no 2xx response reaches it")
 		}
-		for _, v := range types {
-			c.compare(name, reflect.TypeOf(v), map[string]any{"$ref": "#/components/schemas/" + name})
-		}
+		c.compareComponent(name, types)
 	}
 	for name, reason := range responsesNotChecked {
 		if strings.TrimSpace(reason) == "" {
@@ -384,6 +384,14 @@ type respComparer struct {
 	// done holds "schema|type" pairs already compared.
 	done  map[string]bool
 	diffs []string
+}
+
+// compareComponent compares the component schema name with the Go types
+// the server encodes for it.
+func (c *respComparer) compareComponent(name string, types []any) {
+	for _, v := range types {
+		c.compare(name, reflect.TypeOf(v), map[string]any{"$ref": "#/components/schemas/" + name})
+	}
 }
 
 // resolve follows $ref and merges allOf. It returns the schema's properties,
@@ -613,5 +621,107 @@ func (c *respComparer) compare(at string, t reflect.Type, schema map[string]any)
 		}
 		sm, _ := ps.(map[string]any)
 		c.compare(label+"."+k, et, itemSchema(sm))
+	}
+}
+
+// Types for TestRespComparer_SharedSchema: a list encodes sharedRow, a get
+// encodes sharedDetail, and both share one schema.
+type sharedRow struct {
+	ID string `json:"id"`
+}
+
+type sharedDetail struct {
+	sharedRow
+	HasUsage *bool `json:"has_usage,omitempty"`
+}
+
+type sharedProbe struct {
+	sharedRow
+	Probe bool `json:"probe"`
+}
+
+// TestRespComparer_SharedSchema: when operations encode different Go types
+// for one schema, a key is required only if every type always sends it, and
+// a property only needs some type to send it.
+func TestRespComparer_SharedSchema(t *testing.T) {
+	schema := func(required []any, props ...string) map[string]any {
+		p := map[string]any{}
+		for _, k := range props {
+			p[k] = map[string]any{"type": "string"}
+		}
+		return map[string]any{"type": "object", "properties": p, "required": required}
+	}
+	cases := []struct {
+		name   string
+		types  []any
+		schema map[string]any
+		want   []string
+	}{
+		{
+			name:   "a key only the get sends, not required",
+			types:  []any{sharedDetail{}, sharedRow{}},
+			schema: schema([]any{"id"}, "id", "has_usage"),
+		},
+		{
+			name:   "a key the get always sends but the list never does is not required",
+			types:  []any{sharedProbe{}, sharedRow{}},
+			schema: schema([]any{"id"}, "id", "probe"),
+		},
+		{
+			name:   "required, but the list never sends it",
+			types:  []any{sharedProbe{}, sharedRow{}},
+			schema: schema([]any{"id", "probe"}, "id", "probe"),
+			want:   []string{"S.probe: required, but never sent by api.sharedRow"},
+		},
+		{
+			name:   "every type always sends it, not required",
+			types:  []any{sharedProbe{}, sharedRow{}},
+			schema: schema([]any{}, "id", "probe"),
+			want:   []string{"S.id: always sent by api.sharedProbe and api.sharedRow, not required"},
+		},
+		{
+			name:   "no type sends a property",
+			types:  []any{sharedDetail{}, sharedRow{}},
+			schema: schema([]any{"id"}, "id", "has_usage", "gone"),
+			want:   []string{"S.gone: in spec, never sent by api.sharedDetail and api.sharedRow"},
+		},
+		{
+			name:   "one type sends a key the spec lacks",
+			types:  []any{sharedProbe{}, sharedRow{}},
+			schema: schema([]any{"id"}, "id"),
+			want:   []string{"S.probe: always sent by api.sharedProbe, not in spec"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &respComparer{components: map[string]any{"S": tc.schema}, checked: map[string]bool{}, done: map[string]bool{}}
+			c.compareComponent("S", tc.types)
+			sort.Strings(c.diffs)
+			if len(c.diffs) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(c.diffs, tc.want) {
+				t.Errorf("diffs = %q, want %q", c.diffs, tc.want)
+			}
+		})
+	}
+}
+
+// TestOpenAPISpec_BillingRunPartialIsDocumented: POST /v1/billing/run answers
+// 206 when its errors list is not empty (internal/billing/handler.go). The
+// spec must list that status with the same body as the 200, or a generated
+// client treats a partial run as an unexpected response.
+func TestOpenAPISpec_BillingRunPartialIsDocumented(t *testing.T) {
+	_, _, inline := specResponses(t)
+	ok, okFound := inline["POST /v1/billing/run 200"]
+	partial, partialFound := inline["POST /v1/billing/run 206"]
+	if !okFound {
+		t.Fatal("POST /v1/billing/run documents no 200 object body")
+	}
+	if !partialFound {
+		t.Fatal("POST /v1/billing/run answers 206 when its errors list is not empty, but the spec documents no 206 body")
+	}
+	if !reflect.DeepEqual(ok, partial) {
+		t.Errorf("POST /v1/billing/run: the 206 body differs from the 200 body; the handler writes the same keys in both")
 	}
 }
