@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -24,7 +27,7 @@ func cmdBlock(script string) string {
 func outBlock(text string) string { return "<!-- docs-run: output -->\n```text\n" + text + "\n```\n\n" }
 
 func TestExecuteKeepsShellStateAndChecksOutput(t *testing.T) {
-	page := cmdBlock("X=hello\nsay() { echo \"$1 $X\"; }") +
+	page := cmdBlock("X=hello\nsay() { echo \"$1 $X\"; }") + outBlock("") +
 		cmdBlock("say hi") + outBlock("hi hello")
 	if err := runPage(t, page, nil, nil); err != nil {
 		t.Fatalf("want a pass, got %v", err)
@@ -37,16 +40,19 @@ func TestExecuteKeepsShellStateAndChecksOutput(t *testing.T) {
 }
 
 func TestExecuteStopsOnAFailure(t *testing.T) {
-	cases := map[string]string{
-		"failing command":      "false\necho after",
-		"failing part of pipe": "false | cat",
-		"unset variable":       "echo \"$DOCS_RUN_NOT_SET\"",
-		"failing substitution": "X=$(false)",
+	// Each output block shows what the command prints if it does not stop,
+	// so the run must stop on the failure, not on the output.
+	cases := map[string][2]string{
+		"failing command":      {"false\necho after", "after"},
+		"failing part of pipe": {"false | cat", ""},
+		"unset variable":       {"echo \"$DOCS_RUN_NOT_SET\"", ""},
+		"failing substitution": {"X=$(false)", ""},
 	}
-	for name, script := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			if err := runPage(t, cmdBlock(script)+cmdBlock("echo next"), nil, nil); err == nil {
-				t.Fatal("want the run to stop")
+			err := runPage(t, cmdBlock(c[0])+outBlock(c[1])+cmdBlock("echo next")+outBlock("next"), nil, nil)
+			if err == nil || strings.Contains(err.Error(), "is not what") {
+				t.Fatalf("want the run to stop on the failure, got %v", err)
 			}
 		})
 	}
@@ -54,7 +60,7 @@ func TestExecuteStopsOnAFailure(t *testing.T) {
 
 // A command that reads stdin gets nothing, and the next block still runs.
 func TestExecuteBlockStdinIsEmpty(t *testing.T) {
-	page := cmdBlock("cat") + cmdBlock("echo next") + outBlock("next")
+	page := cmdBlock("cat") + outBlock("") + cmdBlock("echo next") + outBlock("next")
 	if err := runPage(t, page, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -82,18 +88,59 @@ func TestExecuteCurlFailsOnNon2xx(t *testing.T) {
 		t.Fatalf("200: %v", err)
 	}
 	for _, path := range []string{"conflict", "moved"} {
-		page := cmdBlock(`ID=$(curl -s "BASE/`+path+`")`) + cmdBlock("echo next")
+		page := cmdBlock(`ID=$(curl -s "BASE/`+path+`")`) + outBlock("") + cmdBlock("echo next") + outBlock("next")
 		if err := runPage(t, page, nil, []string{"BASE=" + srv.URL}); err == nil {
 			t.Fatalf("%s: want the run to stop", path)
 		}
 	}
+
+	// Most of the page pipes curl into jq. The answer's body still reaches
+	// the log, so a failure says why.
+	piped := cmdBlock(`ID=$(curl -s "BASE/conflict" | jq -r .id)`) + outBlock("")
+	stderr := captureStderr(t, func() {
+		if err := runPage(t, piped, nil, []string{"BASE=" + srv.URL}); err == nil {
+			t.Fatal("piped: want the run to stop")
+		}
+	})
+	if !strings.Contains(stderr, `{"error":"already exists"}`) {
+		t.Fatalf("piped: the answer's body is not in the log:\n%s", stderr)
+	}
+}
+
+// captureStderr returns what fn, and the shells it starts, write to stderr.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	var buf bytes.Buffer
+	read := make(chan struct{})
+	go func() { _, _ = io.Copy(&buf, r); close(read) }()
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+		select {
+		case <-read:
+		case <-time.After(10 * time.Second):
+			t.Error("stderr was never closed")
+		}
+		_ = r.Close()
+	}()
+	fn()
+	os.Stderr = old
+	_ = w.Close()
+	<-read
+	return buf.String()
 }
 
 func TestExecuteJqFailsOnNull(t *testing.T) {
 	if _, err := exec.LookPath("jq"); err != nil {
 		t.Skip("jq is not installed")
 	}
-	page := cmdBlock(`ID=$(echo '{"id":"x"}' | jq -r .nope)`) + cmdBlock("echo next")
+	page := cmdBlock(`ID=$(echo '{"id":"x"}' | jq -r .nope)`) + outBlock("") + cmdBlock("echo next") + outBlock("next")
 	if err := runPage(t, page, nil, nil); err == nil {
 		t.Fatal("want the run to stop on a jq lookup that finds nothing")
 	}
