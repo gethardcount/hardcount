@@ -24,6 +24,10 @@ You need:
 - `curl` and `jq` (a tool that reads JSON). On macOS: `brew install jq`.
   On Debian or Ubuntu: `sudo apt install jq`.
 
+This page matches the newest code on `main`. The quick start starts the
+newest release, v0.8.2, which can answer some steps differently. On v0.8.2,
+follow [this page as of v0.8.2](https://github.com/getvelox/velox/blob/v0.8.2/docs/first-invoice.md).
+
 Open a terminal in the `velox` folder that the quick start downloaded. Save
 the address and your test API key in two variables. Every command below
 uses them.
@@ -31,7 +35,8 @@ uses them.
 <!-- docs-run: command -->
 ```bash
 export VELOX=http://localhost:8080
-export VELOX_KEY=$(jq -r .secret_key_test deploy/compose/quickstart-credentials.json)
+VELOX_KEY=$(jq -r .secret_key_test deploy/compose/quickstart-credentials.json)
+export VELOX_KEY
 curl -s "$VELOX/health"
 ```
 

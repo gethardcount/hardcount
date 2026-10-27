@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 )
 
 // A page is a Markdown file whose fenced blocks are all marked with an HTML
@@ -20,10 +25,19 @@ import (
 // An output block belongs to the nearest command block above it. In an
 // output block, … stands for any text within one line.
 //
-// A fence with no marker is an error, so a block cannot drop out of the run
-// by losing its marker: the runner has no "skip this block" marker at all.
-// A "You see:" with a value in backticks is an error too, so every result
-// the page states with a value is in an output block and checked.
+// A block cannot drop out of the run:
+//
+//   - A fence with no marker is an error. The runner has no "skip this
+//     block" marker at all.
+//   - Any other code block GitHub shows (a fence in a blockquote, an
+//     indented code block, <pre>) is an error, found with a CommonMark
+//     parser. Write it as a fence at the start of a line.
+//   - Every "You see:" must be followed by an output block, and must not
+//     state a value in backticks. Describe a screen without "You see:".
+//   - Every command that runs must have an output block (see makePlan).
+//
+// "export X=$(cmd)" is an error too: bash returns export's status, so a
+// failing cmd would not stop the run.
 
 type kind int
 
@@ -31,6 +45,10 @@ const (
 	kindCommand kind = iota + 1
 	kindOutput
 )
+
+// span is the lines of a fenced block, from its opening fence to its
+// closing one, 1-based.
+type span struct{ start, end int }
 
 type block struct {
 	line  int    // 1-based line of the opening fence
@@ -56,6 +74,9 @@ var (
 	// The heading that starts the numbered steps ends "before you start".
 	headingRE = regexp.MustCompile(`^#{1,6} (.+)$`)
 	youSeeRE  = regexp.MustCompile(`(?i)you see:`)
+	// export, local and the like return their own status, not that of a
+	// $(...) or `...` in their value.
+	hidingRE = regexp.MustCompile("^\\s*(?:export|local|declare|typeset|readonly)\\b[^#]*?\\b\\w+=\\S*?(?:\\$\\(|`)")
 )
 
 // parse reads a page into its blocks and checks the marker rules.
@@ -63,6 +84,7 @@ func parse(src string) ([]block, error) {
 	lines := strings.Split(strings.ReplaceAll(src, "\r\n", "\n"), "\n")
 	var (
 		blocks  []block
+		fences  []span // every fenced block found, marked or not
 		errs    []string
 		label   = "start of page"
 		pending string // the marker waiting for its fence
@@ -114,6 +136,7 @@ func parse(src string) ([]block, error) {
 			}
 			body = append(body, dedent(lines[i], indent))
 		}
+		fences = append(fences, span{start, i + 1})
 		if !closed {
 			fail(start, "fenced block is never closed")
 			break
@@ -147,6 +170,11 @@ func parse(src string) ([]block, error) {
 			if b.name != "" {
 				names[b.name] = len(blocks)
 			}
+			for k, ln := range strings.Split(b.text, "\n") {
+				if hidingRE.MatchString(ln) {
+					fail(start+1+k, "%q hides a failure of the command inside; write X=$(...) on its own line, then export X", strings.TrimSpace(ln))
+				}
+			}
 			lastCmd = len(blocks)
 		case "output":
 			b.kind = kindOutput
@@ -179,6 +207,7 @@ func parse(src string) ([]block, error) {
 		}
 	}
 	errs = append(errs, checkYouSee(lines, blocks)...)
+	errs = append(errs, checkCodeBlocks(strings.Join(lines, "\n"), fences)...)
 
 	if len(errs) > 0 {
 		return nil, fmt.Errorf("%s", strings.Join(errs, "\n"))
@@ -186,11 +215,10 @@ func parse(src string) ([]block, error) {
 	return blocks, nil
 }
 
-// checkYouSee holds every stated result to an output block. A "You see:"
-// whose paragraph names a value in backticks is refused: the value must be
-// in an output block. A "You see:" whose paragraph ends with ":" must be
-// followed by an output block. A "You see:" in plain words (a screen in the
-// dashboard) is left alone.
+// checkYouSee holds every stated result to an output block. Every "You
+// see:" must be followed by an output block, after the rest of its
+// paragraph. A "You see:" whose paragraph names a value in backticks is
+// refused: the value must be in the output block.
 func checkYouSee(lines []string, blocks []block) []string {
 	outputAt := map[int]bool{} // fence line -> is an output block
 	for _, b := range blocks {
@@ -228,9 +256,6 @@ func checkYouSee(lines []string, blocks []block) []string {
 			errs = append(errs, fmt.Sprintf("line %d: \"You see:\" states a value in backticks; put the result in a <!-- docs-run: output --> block so it is checked", i+1))
 			continue
 		}
-		if para != "" && !strings.HasSuffix(para, ":") {
-			continue // a screen described in words
-		}
 		// The next non-blank, non-marker line must open an output block.
 		for ; j < len(lines); j++ {
 			if strings.TrimSpace(lines[j]) == "" || markerRE.MatchString(lines[j]) {
@@ -242,6 +267,59 @@ func checkYouSee(lines []string, blocks []block) []string {
 			errs = append(errs, fmt.Sprintf("line %d: \"You see:\" is not followed by a <!-- docs-run: output --> block", i+1))
 		}
 	}
+	return errs
+}
+
+// checkCodeBlocks finds every code block a CommonMark parser sees, as
+// GitHub shows the page, and refuses any that is not one of the fenced
+// blocks parse found. (A fenced block without a marker has its own error.)
+func checkCodeBlocks(src string, fences []span) []string {
+	source := []byte(src)
+	lineAt := func(offset int) int { return bytes.Count(source[:offset], []byte("\n")) + 1 }
+	read := func(line int) bool {
+		for _, f := range fences {
+			if line >= f.start && line <= f.end {
+				return true
+			}
+		}
+		return false
+	}
+	var errs []string
+	doc := goldmark.New().Parser().Parse(text.NewReader(source))
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		line := 0
+		switch n := n.(type) {
+		case *ast.FencedCodeBlock:
+			// An empty block with no info string has no line to name, and
+			// nothing to run.
+			if n.Info != nil {
+				line = lineAt(n.Info.Segment.Start)
+			} else if n.Lines().Len() > 0 {
+				line = lineAt(n.Lines().At(0).Start)
+			}
+		case *ast.CodeBlock:
+			line = lineAt(n.Lines().At(0).Start)
+		case *ast.HTMLBlock:
+			var raw []byte
+			for k := 0; k < n.Lines().Len(); k++ {
+				seg := n.Lines().At(k)
+				raw = append(raw, seg.Value(source)...)
+			}
+			if !bytes.Contains(bytes.ToLower(raw), []byte("<pre")) {
+				return ast.WalkContinue, nil
+			}
+			line = lineAt(n.Lines().At(0).Start)
+		default:
+			return ast.WalkContinue, nil
+		}
+		if line > 0 && !read(line) {
+			errs = append(errs, fmt.Sprintf("line %d: a code block the runner does not read; write it as a fenced block (```) at the start of the line, after a docs-run marker", line))
+		}
+		return ast.WalkSkipChildren, nil
+	})
 	return errs
 }
 

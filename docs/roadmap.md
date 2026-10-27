@@ -35,8 +35,8 @@ first. Every shipped change, with its date, is in the
   Publishable keys are removed. Code that calls the API or checks webhook
   signatures must change.
 - **Done:** the commands in the [first-invoice guide](first-invoice.md)
-  run in CI on every pull request, and each output is checked against the
-  page, so a change that breaks them fails.
+  run in CI on every pull request, on that pull request's build, and each
+  output is checked against the page, so a change that breaks them fails.
 - **Done: usage prices are set per plan.** A price belongs to a plan, so
   two plans can charge different rates for one meter. A price change applies
   at once on a plan no one has subscribed to, and from each subscriber's next

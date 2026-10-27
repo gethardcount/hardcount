@@ -121,7 +121,14 @@ func makePlan(src string, skips, replaces []string) (*plan, error) {
 		p.outputs[b.of] = append(p.outputs[b.of], k)
 	}
 	for k, b := range blocks {
-		if b.kind == kindCommand && b.repeat && !p.skipped[b.name] && len(p.outputs[k]) != 1 {
+		if b.kind != kindCommand || p.skipped[b.name] {
+			continue
+		}
+		// Every command that runs is checked, so an output block cannot be
+		// deleted, marker and all, without the run failing.
+		if len(p.outputs[k]) == 0 {
+			errs = append(errs, fmt.Sprintf("line %d: the command has no output block in this pass; add a <!-- docs-run: output --> block under it (an empty one if it prints nothing)", b.line))
+		} else if b.repeat && len(p.outputs[k]) != 1 {
 			errs = append(errs, fmt.Sprintf("line %d: a repeat-until-output command needs exactly one output block to check, has %d", b.line, len(p.outputs[k])))
 		}
 	}

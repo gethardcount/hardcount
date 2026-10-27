@@ -88,6 +88,11 @@ func TestFirstInvoicePageNamesTheQuickStartRelease(t *testing.T) {
 	if !strings.Contains(string(src), link) {
 		t.Fatalf("docs/first-invoice.md does not link the page as of the quick start's release %s (%s)", release, link)
 	}
+	for _, v := range regexp.MustCompile(`\bv\d+\.\d+\.\d+\b`).FindAllString(string(src), -1) {
+		if v != release {
+			t.Errorf("docs/first-invoice.md names %s; the quick start starts %s", v, release)
+		}
+	}
 }
 
 // Step 8 prints a dashboard link. CI only echoes it, so check here that the

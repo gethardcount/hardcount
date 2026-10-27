@@ -19,8 +19,8 @@ import (
 //
 //   - set -euo pipefail: a failing command, a failing part of a pipe or an
 //     unset variable stops the run.
-//   - curl: a 4xx or 5xx answer (any answer other than 2xx) fails the
-//     command. The body is still printed, as a reader would see it.
+//   - curl: an answer other than 2xx fails the command. Its body goes to
+//     stderr, into the log, since stdout is often piped into jq.
 //   - jq --exit-status: a lookup that finds nothing (null or false) fails.
 const preamble = `set -euo pipefail
 shopt -s inherit_errexit 2>/dev/null || true
@@ -28,16 +28,21 @@ curl() {
   local __body __code __rc=0
   __body=$(mktemp)
   __code=$(command curl "$@" --output "$__body" --write-out '%{http_code}') || __rc=$?
-  cat "$__body"
-  rm -f "$__body"
-  if [ "$__rc" -ne 0 ]; then
-    echo "docs-run: curl failed (exit $__rc)" >&2
-    return "$__rc"
+  if [ "$__rc" -eq 0 ] && [[ "$__code" == 2?? ]]; then
+    cat "$__body"
+    rm -f "$__body"
+    return 0
   fi
-  case "$__code" in
-    2??) ;;
-    *) echo "docs-run: the answer was HTTP $__code, not 2xx" >&2; return 22 ;;
-  esac
+  if [ "$__rc" -ne 0 ]; then
+    echo "docs-run: curl failed (exit $__rc). The body:" >&2
+  else
+    echo "docs-run: the answer was HTTP $__code, not 2xx. The body:" >&2
+    __rc=22
+  fi
+  cat "$__body" >&2
+  echo >&2
+  rm -f "$__body"
+  return "$__rc"
 }
 jq() { command jq --exit-status "$@"; }
 `
