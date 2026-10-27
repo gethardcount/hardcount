@@ -145,4 +145,31 @@ The golden-path demo (`scripts/demo.sh`) and the `velox-doctor` sweep also
 run in CI on every PR. The doctor checks the money invariants over the rows
 the golden path left behind.
 
+The [first-invoice tutorial](first-invoice.md) runs in the same CI job.
+`cmd/velox-docs-run` runs each code block the page marks
+`<!-- docs-run: command -->` in one shell, in order, and checks the block
+marked `<!-- docs-run: output -->` below it. Every code block on the page
+needs one of the two markers, and every command needs an output block. A
+code block the runner cannot read, such as one in a blockquote, is an
+error. So is a marked block that GitHub does not show as a code block, such
+as one inside `<details>` with no blank line before it. A unit test checks
+that each command runs in at least one of the job's passes. To run the page
+yourself, start Velox on
+port 8080 and save your test key in a file such as `~/velox-key.json`, as
+`{"secret_key_test": "vlx_secret_test_…"}`. Then run:
+
+```bash
+go run ./cmd/velox-docs-run \
+  -replace deploy/compose/quickstart-credentials.json=$HOME/velox-key.json \
+  -replace acme-1=acme-$RANDOM docs/first-invoice.md
+```
+
+The second `-replace` gives the customer a new external ID, so the page can
+run again on the same database.
+
+Step 8 only prints the invoice's dashboard link. The link opens on the
+quick-start stack, which serves the dashboard and the API on one address.
+When the API runs on its own, as in CI, the dashboard is elsewhere: the
+dashboard's dev server (`npm run dev` in `web-v2`) is on port 5173.
+
 **Next:** set up your machine: [CONTRIBUTING](../CONTRIBUTING.md#development-setup).
