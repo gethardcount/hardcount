@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sagarsuperuser/velox/internal/platform/clock"
+	"github.com/sagarsuperuser/velox/internal/platform/postgres"
 	"github.com/sagarsuperuser/velox/internal/testutil"
 )
 
@@ -93,8 +95,6 @@ var listRoutesNotSeeded = map[string]string{
 	"/v1/invoices/{id}/disputes":                      "a dispute comes from Stripe",
 	"/v1/webhook-endpoints/endpoints/{id}/deliveries": "a delivery is made by the dispatcher, which this server does not run",
 	"/v1/customers/{id}/sent-emails":                  "an email row is written by the email worker's flow, not by these requests",
-	"/v1/webhook-endpoints/events":                    "events are written by the outbox, which this server does not run",
-	"/v1/webhook-endpoints/endpoints/stats":           "a stats row needs a delivery",
 }
 
 func TestListRoutes_OnePagingStyle(t *testing.T) {
@@ -200,6 +200,12 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 	for _, u := range []string{"https://example.com/paging-1", "https://example.com/paging-2"} {
 		ep := call("POST", "/v1/webhook-endpoints/endpoints", map[string]any{"url": u}).want(t, 201, "webhook endpoint").body
 		endpoint = flowStr(flowObj(ep, "endpoint"), "id")
+		// One delivery per endpoint gives the stats list a row for each. The
+		// dispatcher writes deliveries, and this server does not run it.
+		seedBypass(t, db, `WITH e AS (
+				INSERT INTO webhook_events (tenant_id, event_type, payload) VALUES ($1, 'invoice.created', '{}') RETURNING id)
+			INSERT INTO webhook_deliveries (tenant_id, webhook_endpoint_id, webhook_event_id, status)
+			SELECT $1, $2, e.id, 'succeeded' FROM e`, tenantID, endpoint)
 	}
 	for _, model := range []string{"paging-1", "paging-2"} {
 		call("PUT", "/v1/provider-costs", map[string]any{
@@ -335,6 +341,9 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 			for _, bad := range []struct{ query, param string }{
 				{"limit=0", "limit"}, {"limit=101", "limit"}, {"limit=-1", "limit"}, {"limit=ten", "limit"},
 				{"limit=1.5", "limit"}, {"offset=-1", "offset"}, {"offset=x", "offset"},
+				// The removed cursor is refused, not ignored: a client that
+				// still sends it would read page 1 again as if it were page 2.
+				{"after=abc", "after"},
 			} {
 				got := call("GET", with(path, bad.query), nil)
 				if got.status != 422 || flowStr(got.body, "error", "param") != bad.param ||
@@ -448,6 +457,103 @@ func TestPlans_ListPagesPastFiveHundred(t *testing.T) {
 	}
 	if got := call("GET", "/v1/plans?limit=500", nil); got.status != 422 || flowStr(got.body, "error", "param") != "limit" {
 		t.Errorf("GET /v1/plans?limit=500 = %d %s, want 422 naming limit", got.status, clip(got.raw))
+	}
+}
+
+// TestLists_ReachRowsPastOldReadCaps covers the lists whose store read stopped
+// at a fixed row count while total counted only what was read: a customer's
+// payment methods (100) and a test clock's customers and subscriptions
+// (1000). Paging at 100 must find every row, total must count them all, and
+// the rows past the old cap must be on the last page. The rows are inserted
+// in one statement, so they share created_at and only the id keeps the order
+// stable from page to page.
+func TestLists_ReachRowsPastOldReadCaps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs Postgres")
+	}
+	db := testutil.SetupTestDB(t)
+	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	defer ts.Close()
+
+	tenantID := testutil.CreateTestTenant(t, db, "Past The Caps Co")
+	key := createAPIKeyWithMode(t, db, tenantID, false)
+	call := func(method, path string, body any) flowResp {
+		t.Helper()
+		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
+	}
+	owner := flowStr(call("POST", "/v1/customers", map[string]any{
+		"external_id": "cards-owner", "display_name": "Cards Owner",
+	}).want(t, 201, "customer").body, "id")
+	clk := flowStr(call("POST", "/v1/test-clocks", map[string]any{
+		"name": "past the caps", "frozen_time": time.Now().UTC().Format(time.RFC3339),
+	}).want(t, 201, "clock").body, "id")
+
+	const cards, onClock = 105, 1005
+	seedBypass(t, db, `INSERT INTO payment_methods (id, tenant_id, customer_id, stripe_payment_method_id, card_brand, card_last4)
+		SELECT 'vlx_pm_cap' || g, $1, $2, 'pm_cap' || g, 'visa', '4242' FROM generate_series(1, $3) g`,
+		tenantID, owner, cards)
+	seedBypass(t, db, `INSERT INTO customers (id, tenant_id, external_id, display_name, status, test_clock_id)
+		SELECT 'vlx_cus_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'active', $2 FROM generate_series(1, $3) g`,
+		tenantID, clk, onClock)
+	seedBypass(t, db, `INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status, billing_time,
+			current_billing_period_start, current_billing_period_end, next_billing_at, test_clock_id)
+		SELECT 'vlx_sub_cap' || g, $1, 'clock-cap-' || g, 'Clock cap ' || g, 'vlx_cus_cap' || g, 'active', 'calendar',
+			now(), now() + interval '1 month', now() + interval '1 month', $2
+		FROM generate_series(1, $3) g`,
+		tenantID, clk, onClock)
+
+	for _, c := range []struct {
+		path string
+		want int
+	}{
+		{"/v1/customers/" + owner + "/payment-methods", cards},
+		{"/v1/test-clocks/" + clk + "/customers", onClock},
+		{"/v1/test-clocks/" + clk + "/subscriptions", onClock},
+	} {
+		t.Run(c.path, func(t *testing.T) {
+			seen := map[string]bool{}
+			for offset := 0; offset < c.want+100; offset += 100 {
+				got := call("GET", fmt.Sprintf("%s?limit=100&offset=%d", c.path, offset), nil).want(t, 200, "list")
+				if total := int(flowInt(got.body, "total")); total != c.want {
+					t.Fatalf("offset %d: total = %d, want %d", offset, total, c.want)
+				}
+				for _, row := range flowList(got.body, "data") {
+					id := flowStr(row, "id")
+					if seen[id] {
+						t.Errorf("offset %d: row %s was already on an earlier page", offset, id)
+					}
+					seen[id] = true
+				}
+			}
+			if len(seen) != c.want {
+				t.Errorf("paging found %d rows, want %d", len(seen), c.want)
+			}
+			last := call("GET", fmt.Sprintf("%s?limit=100&offset=%d", c.path, c.want-1), nil).want(t, 200, "last row")
+			if rows := flowList(last.body, "data"); len(rows) != 1 {
+				t.Errorf("offset %d holds %d rows, want the last one", c.want-1, len(rows))
+			}
+		})
+	}
+}
+
+// seedBypass runs one test-mode insert with RLS off, for rows no route of
+// this server writes.
+func seedBypass(t *testing.T, db *postgres.DB, q string, args ...any) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'off', true)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+		t.Fatalf("seed: %v\n%s", err, q)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }
 

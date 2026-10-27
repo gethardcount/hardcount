@@ -1042,3 +1042,28 @@ test('held usage released into a plan with no matching price says so', async ({ 
   await expect(page.getByText("2 fall in a billing period not invoiced yet, but no price on the subscription's plan matches them.")).toBeVisible()
   await expect(page.getByText('will be invoiced')).toHaveCount(0)
 })
+
+// The endpoint page reads the endpoint on its own, apart from its deliveries.
+// Resume must refresh that read: the badge, the notice and Replay change at
+// once, not after a reload.
+test('resuming a paused endpoint on its page shows it active', async ({ page }) => {
+  const created = await api<{ endpoint: { id: string } }>('POST', '/webhook-endpoints/endpoints', {
+    url: `https://example.com/e2e-resume-${uniq()}`,
+  })
+  const id = created.endpoint.id
+  await api('PATCH', `/webhook-endpoints/endpoints/${id}`, { active: false })
+
+  await page.goto(`/webhooks/endpoints/${id}`)
+  const main = page.getByRole('main')
+  await expect(main.getByText('paused', { exact: true })).toBeVisible()
+  await expect(main.getByText('Endpoint paused', { exact: true })).toBeVisible()
+
+  await main.getByRole('button', { name: 'Resume', exact: true }).click()
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Resume', exact: true }).click()
+
+  await expect(main.getByText('active', { exact: true })).toBeVisible()
+  await expect(main.getByText('Endpoint paused', { exact: true })).toHaveCount(0)
+  await expect(main.getByRole('button', { name: 'Resume', exact: true })).toHaveCount(0)
+  const endpoint = await api<{ active: boolean }>('GET', `/webhook-endpoints/endpoints/${id}`)
+  expect(endpoint.active).toBe(true)
+})

@@ -26,6 +26,9 @@ func TestParsePage(t *testing.T) {
 		{"limit=10&limit=20", Page{}, "limit"},
 		{"offset=-1", Page{}, "offset"},
 		{"offset=x", Page{}, "offset"},
+		// The cursor was removed; sending it is refused, not ignored.
+		{"after=abc", Page{}, "after"},
+		{"limit=10&after=", Page{}, "after"},
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
